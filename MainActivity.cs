@@ -304,19 +304,6 @@ namespace PenguinCounting
             }
         }
 
-        private bool IsBoxEmpty(int boxNumber)
-        {
-            if (!_boxDataStorage.ContainsKey(boxNumber))
-                return true;
-
-            var boxData = _boxDataStorage[boxNumber];
-            return boxData.Adults == 0 && 
-                   boxData.Eggs == 0 && 
-                   boxData.Chicks == 0 && 
-                   boxData.ScannedIds.Count == 0 && 
-                   string.IsNullOrWhiteSpace(boxData.Notes);
-        }
-
         private void OnPrevBoxClick(object? sender, EventArgs e)
         {
             if (_currentBox > 1)
