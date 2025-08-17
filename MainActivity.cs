@@ -329,9 +329,6 @@ namespace PenguinCounting
                         .SetPositiveButton("Confirm Empty", (s, e) =>
                         {
                             SaveCurrentBoxData();
-                            _currentBox--;
-                            LoadBoxData();
-                            UpdateUI();
                         })
                         .SetNegativeButton("Cancel", (s, e) => { })
                         .Create();
@@ -340,10 +337,10 @@ namespace PenguinCounting
                 else
                 {
                     SaveCurrentBoxData();
-                    _currentBox--;
-                    LoadBoxData();
-                    UpdateUI();
                 }
+                _currentBox--;
+                LoadBoxData();
+                UpdateUI();
             }
         }
 
@@ -359,9 +356,6 @@ namespace PenguinCounting
                         .SetPositiveButton("Confirm Empty", (s, e) =>
                         {
                             SaveCurrentBoxData();
-                            _currentBox++;
-                            LoadBoxData();
-                            UpdateUI();
                         })
                         .SetNegativeButton("Cancel", (s, e) => { })
                         .Create();
@@ -370,10 +364,10 @@ namespace PenguinCounting
                 else
                 {
                     SaveCurrentBoxData();
-                    _currentBox++;
-                    LoadBoxData();
-                    UpdateUI();
                 }
+                _currentBox++;
+                LoadBoxData();
+                UpdateUI();
             }
         }
 
