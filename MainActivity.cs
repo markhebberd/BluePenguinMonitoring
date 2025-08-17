@@ -15,7 +15,7 @@ using Android;
 using Android.Text;
 using System.Text.Json;
 
-namespace PenguinCounting
+namespace BluePenguinMonitoring
 {
     [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar.Fullscreen")]
     public class MainActivity : Activity, ILocationListener
@@ -185,14 +185,14 @@ namespace PenguinCounting
 
             _clearBoxButton = new Button(this)
             {
-                Text = "Clear Box Data",
+                Text = "Clear all box data",
                 LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
             };
             _clearBoxButton.Click += OnClearBoxClick;
 
             var saveDataButton = new Button(this)
             {
-                Text = "Save Data",
+                Text = "Save all data to file",
                 LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
             };
             saveDataButton.Click += OnSaveDataClick;
@@ -309,7 +309,8 @@ namespace PenguinCounting
             _notesEditText = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences,
-                Hint = "Enter any additional notes..."
+                Hint = "Enter any additional notes...",
+                Gravity = Android.Views.GravityFlags.Top | Android.Views.GravityFlags.Start
             };
             _notesEditText.SetLines(3);
             _notesEditText.TextChanged += OnDataChanged;
@@ -347,14 +348,12 @@ namespace PenguinCounting
                             _currentBox--;
                             LoadBoxData();
                             UpdateUI();
-                            SaveDataToInternalStorage(); // Auto-save after navigation
                         })
                         .SetNegativeButton("Skip", (s, e) => 
                         {
                             _currentBox--;
                             LoadBoxData();
                             UpdateUI();
-                            SaveDataToInternalStorage(); // Auto-save after navigation
                         })
                         .Create();
                     alertDialog?.Show();
@@ -385,14 +384,12 @@ namespace PenguinCounting
                             _currentBox++;
                             LoadBoxData();
                             UpdateUI();
-                            SaveDataToInternalStorage(); // Auto-save after navigation
                         })
                         .SetNegativeButton("Skip", (s, e) => 
                         {
                             _currentBox++;
                             LoadBoxData();
                             UpdateUI();
-                            SaveDataToInternalStorage(); // Auto-save after navigation
                         })
                         .Create();
                     alertDialog?.Show();
@@ -437,7 +434,6 @@ namespace PenguinCounting
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
             SaveCurrentBoxData();
-            SaveDataToInternalStorage(); // Auto-save whenever data changes
         }
 
         private void SaveCurrentBoxData()
@@ -456,6 +452,9 @@ namespace PenguinCounting
             boxData.Eggs = eggs;
             boxData.Chicks = chicks;
             boxData.Notes = _notesEditText?.Text ?? "";
+
+            // Auto-save to disk whenever data is saved to memory
+            SaveDataToInternalStorage();
         }
 
         private void LoadBoxData()
@@ -548,7 +547,7 @@ namespace PenguinCounting
 
                 boxData.ScannedIds.Add(scanRecord);
 
-                // Auto-save after adding scanned ID
+                // Auto-save to disk after modifying data in memory
                 SaveDataToInternalStorage();
 
                 RunOnUiThread(() =>
@@ -741,17 +740,15 @@ namespace PenguinCounting
                     .SetPositiveButton("Confirm Empty", (s, e) =>
                     {
                         SaveCurrentBoxData();
-                        SaveDataToInternalStorage(); // Auto-save before export
                         ShowSaveConfirmation();
                     })
-                    .SetNegativeButton("Cancel", (s, e) => { })
+                    .SetNegativeButton("Skip", (s, e) => { })
                     .Create();
                 alertDialog?.Show();
             }
             else
             {
                 SaveCurrentBoxData();
-                SaveDataToInternalStorage(); // Auto-save before export
                 ShowSaveConfirmation();
             }
         }
