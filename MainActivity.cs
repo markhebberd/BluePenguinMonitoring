@@ -77,6 +77,10 @@ namespace BluePenguinMonitoring
             LoadDataFromInternalStorage();
             
             CreateDataRecordingUI();
+            
+            // Load the current box data into the UI after it's created
+            LoadBoxData();
+            
             RequestPermissions();
         }
 
@@ -190,27 +194,10 @@ namespace BluePenguinMonitoring
             layout.AddView(_statusText);
 
             // Button section (Clear Box and Save Data)
-            var topButtonLayout = new LinearLayout(this)
-            {
-                Orientation = Orientation.Horizontal
-            };
-
-            _clearBoxButton = new Button(this)
-            {
-                Text = "Clear all box data",
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            _clearBoxButton.Click += OnClearBoxClick;
-
-            var saveDataButton = new Button(this)
-            {
-                Text = "Save all data to file",
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            saveDataButton.Click += OnSaveDataClick;
-
-            topButtonLayout.AddView(_clearBoxButton);
-            topButtonLayout.AddView(saveDataButton);
+            var topButtonLayout = CreateHorizontalButtonLayout(
+                ("Clear all box data", OnClearBoxClick),
+                ("Save all data to file", OnSaveDataClick)
+            );
             layout.AddView(topButtonLayout);
 
             // Box navigation section
@@ -219,28 +206,20 @@ namespace BluePenguinMonitoring
                 Orientation = Orientation.Horizontal
             };
 
-            _prevBoxButton = new Button(this)
-            {
-                Text = "← Prev",
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            _prevBoxButton.Click += OnPrevBoxClick;
-
+            _prevBoxButton = CreateNavigationButton("← Prev", OnPrevBoxClick);
             _boxNumberText = new TextView(this)
             {
                 Text = "Box 1",
                 TextSize = 32,
                 Gravity = Android.Views.GravityFlags.Center,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2)
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2),
+                Clickable = true,
+                Focusable = true
             };
             _boxNumberText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-
-            _nextBoxButton = new Button(this)
-            {
-                Text = "Next →",
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            _nextBoxButton.Click += OnNextBoxClick;
+            _boxNumberText.SetBackgroundResource(Android.Resource.Drawable.ButtonDefault);
+            _boxNumberText.Click += OnBoxNumberClick;
+            _nextBoxButton = CreateNavigationButton("Next →", OnNextBoxClick);
 
             boxNavLayout.AddView(_prevBoxButton);
             boxNavLayout.AddView(_boxNumberText);
@@ -274,48 +253,97 @@ namespace BluePenguinMonitoring
             UpdateUI();
         }
 
+        private LinearLayout CreateHorizontalButtonLayout(params (string text, EventHandler handler)[] buttons)
+        {
+            var layout = new LinearLayout(this)
+            {
+                Orientation = Orientation.Horizontal
+            };
+
+            foreach (var (text, handler) in buttons)
+            {
+                var button = new Button(this)
+                {
+                    Text = text,
+                    LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+                };
+                button.Click += handler;
+                layout.AddView(button);
+                
+                if (text.Contains("Clear"))
+                    _clearBoxButton = button;
+            }
+
+            return layout;
+        }
+
+        private Button CreateNavigationButton(string text, EventHandler handler)
+        {
+            var button = new Button(this)
+            {
+                Text = text,
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            button.Click += handler;
+            return button;
+        }
+
         private void CreateDataEntryFields(LinearLayout layout)
         {
-            // Adults field
-            var adultsLabel = new TextView(this) { Text = "Number of Adults:", TextSize = 16 };
-            layout.AddView(adultsLabel);
-            _adultsEditText = new EditText(this)
+            // Create headings row
+            var headingsLayout = new LinearLayout(this)
             {
-                InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "0"
+                Orientation = Orientation.Horizontal
             };
-            _adultsEditText.TextChanged += OnDataChanged;
-            _adultsEditText.Click += OnNumberFieldClick;
-            _adultsEditText.FocusChange += OnNumberFieldFocus;
-            layout.AddView(_adultsEditText);
-
-            // Eggs field
-            var eggsLabel = new TextView(this) { Text = "Number of Eggs:", TextSize = 16 };
-            layout.AddView(eggsLabel);
-            _eggsEditText = new EditText(this)
+            
+            var adultsLabel = new TextView(this) 
+            { 
+                Text = "Adults", 
+                TextSize = 16,
+                Gravity = GravityFlags.Center,
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            adultsLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            
+            var eggsLabel = new TextView(this) 
+            { 
+                Text = "Eggs", 
+                TextSize = 16,
+                Gravity = GravityFlags.Center,
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            eggsLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            
+            var chicksLabel = new TextView(this) 
+            { 
+                Text = "Chicks", 
+                TextSize = 16,
+                Gravity = GravityFlags.Center,
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            chicksLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            
+            headingsLayout.AddView(adultsLabel);
+            headingsLayout.AddView(eggsLabel);
+            headingsLayout.AddView(chicksLabel);
+            layout.AddView(headingsLayout);
+            
+            // Create input fields row
+            var inputFieldsLayout = new LinearLayout(this)
             {
-                InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "0"
+                Orientation = Orientation.Horizontal
             };
-            _eggsEditText.TextChanged += OnDataChanged;
-            _eggsEditText.Click += OnNumberFieldClick;
-            _eggsEditText.FocusChange += OnNumberFieldFocus;
-            layout.AddView(_eggsEditText);
-
-            // Chicks field
-            var chicksLabel = new TextView(this) { Text = "Number of Chicks:", TextSize = 16 };
-            layout.AddView(chicksLabel);
-            _chicksEditText = new EditText(this)
-            {
-                InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "0"
-            };
-            _chicksEditText.TextChanged += OnDataChanged;
-            _chicksEditText.Click += OnNumberFieldClick;
-            _chicksEditText.FocusChange += OnNumberFieldFocus;
-            layout.AddView(_chicksEditText);
-
-            // Notes field
+            
+            _adultsEditText = CreateInlineNumberField();
+            _eggsEditText = CreateInlineNumberField();
+            _chicksEditText = CreateInlineNumberField();
+            
+            inputFieldsLayout.AddView(_adultsEditText);
+            inputFieldsLayout.AddView(_eggsEditText);
+            inputFieldsLayout.AddView(_chicksEditText);
+            layout.AddView(inputFieldsLayout);
+            
+            // Notes field (unchanged)
             var notesLabel = new TextView(this) { Text = "Notes:", TextSize = 16 };
             layout.AddView(notesLabel);
             _notesEditText = new EditText(this)
@@ -327,6 +355,26 @@ namespace BluePenguinMonitoring
             _notesEditText.SetLines(3);
             _notesEditText.TextChanged += OnDataChanged;
             layout.AddView(_notesEditText);
+        }
+
+        private EditText CreateInlineNumberField()
+        {
+            var editText = new EditText(this)
+            {
+                InputType = Android.Text.InputTypes.ClassNumber,
+                Text = "0",
+                Gravity = GravityFlags.Center,
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            editText.TextChanged += OnDataChanged;
+            editText.Click += OnNumberFieldClick;
+            editText.FocusChange += OnNumberFieldFocus;
+            
+            // Add some margin between fields for better spacing
+            var layoutParams = (LinearLayout.LayoutParams)editText.LayoutParameters;
+            layoutParams.SetMargins(5, 0, 5, 0);
+            
+            return editText;
         }
 
         private void OnNumberFieldClick(object? sender, EventArgs e)
@@ -347,96 +395,112 @@ namespace BluePenguinMonitoring
 
         private void OnPrevBoxClick(object? sender, EventArgs e)
         {
-            if (_currentBox > 1)
-            {
-                if (!_boxDataStorage.ContainsKey(_currentBox))
-                {
-                    var alertDialog = new AlertDialog.Builder(this)
-                        .SetTitle("Empty Box Confirmation")
-                        .SetMessage("Please confirm this box has been inspected and is empty")
-                        .SetPositiveButton("Confirm Empty", (s, e) =>
-                        {
-                            SaveCurrentBoxData();
-                            _currentBox--;
-                            LoadBoxData();
-                            UpdateUI();
-                        })
-                        .SetNegativeButton("Skip", (s, e) => 
-                        {
-                            _currentBox--;
-                            LoadBoxData();
-                            UpdateUI();
-                        })
-                        .Create();
-                    alertDialog?.Show();
-                }
-                else
-                {
-                    SaveCurrentBoxData();
-                    _currentBox--;
-                    LoadBoxData();
-                    UpdateUI();
-                }
-            }
+            NavigateToBox(_currentBox - 1, () => _currentBox > 1);
         }
 
         private void OnNextBoxClick(object? sender, EventArgs e)
         {
-            if (_currentBox < 150)
+            NavigateToBox(_currentBox + 1, () => _currentBox < 150);
+        }
+
+        private void NavigateToBox(int targetBox, Func<bool> canNavigate)
+        {
+            if (!canNavigate())
+                return;
+
+            if (!_boxDataStorage.ContainsKey(_currentBox))
             {
-                if (!_boxDataStorage.ContainsKey(_currentBox))
-                {
-                    var alertDialog = new AlertDialog.Builder(this)
-                        .SetTitle("Empty Box Confirmation")
-                        .SetMessage("Please confirm this box has been inspected and is empty")
-                        .SetPositiveButton("Confirm Empty", (s, e) =>
-                        {
-                            SaveCurrentBoxData();
-                            _currentBox++;
-                            LoadBoxData();
-                            UpdateUI();
-                        })
-                        .SetNegativeButton("Skip", (s, e) => 
-                        {
-                            _currentBox++;
-                            LoadBoxData();
-                            UpdateUI();
-                        })
-                        .Create();
-                    alertDialog?.Show();
-                }
-                else
+                ShowEmptyBoxDialog(() =>
                 {
                     SaveCurrentBoxData();
-                    _currentBox++;
-                    LoadBoxData();
-                    UpdateUI();
-                }
+                    _currentBox = targetBox;
+                    CompleteNavigation();
+                }, () =>
+                {
+                    _currentBox = targetBox;
+                    CompleteNavigation();
+                });
             }
+            else
+            {
+                SaveCurrentBoxData();
+                _currentBox = targetBox;
+                CompleteNavigation();
+            }
+        }
+
+        private void CompleteNavigation()
+        {
+            LoadBoxData();
+            UpdateUI();
+        }
+
+        private void ShowEmptyBoxDialog(Action onConfirm, Action onSkip)
+        {
+            ShowConfirmationDialog(
+                "Empty Box Confirmation",
+                "Please confirm this box has been inspected and is empty",
+                ("Confirm Empty", onConfirm),
+                ("Skip", onSkip)
+            );
         }
 
         private void OnClearBoxClick(object? sender, EventArgs e)
         {
-            var alertDialog = new AlertDialog.Builder(this)
-                .SetTitle("Clear Box Data")
-                .SetMessage($"Are you sure you want to clear data for all boxes!?")
-                .SetPositiveButton("Yes", (s, e) =>
+            ShowConfirmationDialog(
+                "Clear Box Data",
+                "Are you sure you want to clear data for all boxes!?",
+                ("Yes", () =>
                 {
-                    // Clear all box data from memory
                     _boxDataStorage.Clear();
-                    
-                    // Reset to box 1
                     _currentBox = 1;
-                    
-                    // Load empty data for current box (which will clear UI fields)
                     LoadBoxData();
-
-                    // Clear auto-save file as well
                     ClearInternalStorageData();
+                    UpdateUI();
+                }),
+                ("Nope", () => { })
+            );
+        }
 
-                    UpdateUI();                    
-                })
-                .SetNegativeButton("Nope", (s, e) => { })
+        private void OnSaveDataClick(object? sender, EventArgs e)
+        {
+            if (!_boxDataStorage.ContainsKey(_currentBox))
+            {
+                ShowConfirmationDialog(
+                    "Empty Box Confirmation",
+                    "Confirm this box has been inspected, and is empty",
+                    ("Confirm Empty", () =>
+                    {
+                        SaveCurrentBoxData();
+                        ShowSaveConfirmation();
+                    }),
+                    ("Skip", () => { })
+                );
+            }
+            else
+            {
+                SaveCurrentBoxData();
+                ShowSaveConfirmation();
+            }
+        }
+
+        private void ShowSaveConfirmation()
+        {
+            ShowConfirmationDialog(
+                "Save All Data",
+                $"Are you sure you want to save all collected data? This includes data from {_boxDataStorage.Count} boxes.",
+                ("Save", SaveAllData),
+                ("Cancel", () => { })
+            );
+        }
+
+        private void ShowConfirmationDialog(string title, string message, (string text, Action action) positiveButton, (string text, Action action) negativeButton)
+        {
+            var alertDialog = new AlertDialog.Builder(this)
+                .SetTitle(title)
+                .SetMessage(message)
+                .SetPositiveButton(positiveButton.text, (s, e) => positiveButton.action())
+                .SetNegativeButton(negativeButton.text, (s, e) => negativeButton.action())
                 .Create();
             alertDialog?.Show();
         }
@@ -469,11 +533,13 @@ namespace BluePenguinMonitoring
 
         private void LoadBoxData()
         {
-            // Temporarily remove event handlers to prevent unwanted saves during loading
-            if (_adultsEditText != null) _adultsEditText.TextChanged -= OnDataChanged;
-            if (_eggsEditText != null) _eggsEditText.TextChanged -= OnDataChanged;
-            if (_chicksEditText != null) _chicksEditText.TextChanged -= OnDataChanged;
-            if (_notesEditText != null) _notesEditText.TextChanged -= OnDataChanged;
+            var editTexts = new[] { _adultsEditText, _eggsEditText, _chicksEditText, _notesEditText };
+            
+            // Temporarily remove event handlers
+            foreach (var editText in editTexts)
+            {
+                if (editText != null) editText.TextChanged -= OnDataChanged;
+            }
 
             if (_boxDataStorage.ContainsKey(_currentBox))
             {
@@ -493,11 +559,11 @@ namespace BluePenguinMonitoring
                 UpdateScannedIdsDisplay(new List<ScanRecord>());
             }
 
-            // Re-attach event handlers after loading is complete
-            if (_adultsEditText != null) _adultsEditText.TextChanged += OnDataChanged;
-            if (_eggsEditText != null) _eggsEditText.TextChanged += OnDataChanged;
-            if (_chicksEditText != null) _chicksEditText.TextChanged += OnDataChanged;
-            if (_notesEditText != null) _notesEditText.TextChanged += OnDataChanged;
+            // Re-attach event handlers
+            foreach (var editText in editTexts)
+            {
+                if (editText != null) editText.TextChanged += OnDataChanged;
+            }
         }
 
         private void ClearCurrentBoxData()
@@ -526,7 +592,7 @@ namespace BluePenguinMonitoring
                 var displayText = $"Scanned IDs ({scans.Count}):\n";
                 foreach (var scan in scans)
                 {
-                    var timeStr = scan.Timestamp.ToString("HH:mm:ss");
+                    var timeStr = scan.Timestamp.ToString("f");
                     displayText += $"{scan.BirdId} at {timeStr}\n";
                 }
                 _scannedIdsText.Text = displayText.TrimEnd('\n');
@@ -648,44 +714,6 @@ namespace BluePenguinMonitoring
             }
         }
 
-        private void OnSaveDataClick(object? sender, EventArgs e)
-        {
-            // Check if current box has been processed before saving
-            if (!_boxDataStorage.ContainsKey(_currentBox))
-            {
-                var alertDialog = new AlertDialog.Builder(this)
-                    .SetTitle("Empty Box Confirmation")
-                    .SetMessage("Confirm this box has been inspected, and is empty")
-                    .SetPositiveButton("Confirm Empty", (s, e) =>
-                    {
-                        SaveCurrentBoxData();
-                        ShowSaveConfirmation();
-                    })
-                    .SetNegativeButton("Skip", (s, e) => { })
-                    .Create();
-                alertDialog?.Show();
-            }
-            else
-            {
-                SaveCurrentBoxData();
-                ShowSaveConfirmation();
-            }
-        }
-
-        private void ShowSaveConfirmation()
-        {
-            var alertDialog = new AlertDialog.Builder(this)
-                .SetTitle("Save All Data")
-                .SetMessage($"Are you sure you want to save all collected data? This includes data from {_boxDataStorage.Count} boxes.")
-                .SetPositiveButton("Save", (s, e) =>
-                {
-                    SaveAllData();
-                })
-                .SetNegativeButton("Cancel", (s, e) => { })
-                .Create();
-            alertDialog?.Show();
-        }
-
         private void SaveAllData()
         {
             try
@@ -756,38 +784,127 @@ namespace BluePenguinMonitoring
             }
         }
 
+        private void OnBoxNumberClick(object? sender, EventArgs e)
+        {
+            ShowBoxJumpDialog();
+        }
+
+        private void ShowBoxJumpDialog()
+        {
+            // Create a custom view for the dialog
+            var dialogView = new LinearLayout(this)
+            {
+                Orientation = Orientation.Vertical
+            };
+            dialogView.SetPadding(20, 20, 20, 20);
+
+            // Add instruction text
+            var instructionText = new TextView(this)
+            {
+                Text = "Enter box number (1-150):",
+                TextSize = 16
+            };
+            dialogView.AddView(instructionText);
+
+            // Add input field
+            var boxNumberInput = new EditText(this)
+            {
+                InputType = Android.Text.InputTypes.ClassNumber,
+                Text = _currentBox.ToString(),
+                Hint = "Box number"
+            };
+            dialogView.AddView(boxNumberInput);
+
+            // Create and show dialog using an explicit light theme
+            var alertDialog = new AlertDialog.Builder(this, Android.Resource.Style.ThemeDeviceDefaultLightDialogAlert)
+                .SetTitle("Jump to Box")
+                .SetView(dialogView)
+                .SetPositiveButton("Go", (s, e) =>
+                {
+                    if (int.TryParse(boxNumberInput.Text, out int targetBox))
+                    {
+                        if (targetBox >= 1 && targetBox <= 150)
+                        {
+                            JumpToBox(targetBox);
+                        }
+                        else
+                        {
+                            Toast.MakeText(this, "Box number must be between 1 and 150", ToastLength.Short)?.Show();
+                        }
+                    }
+                    else
+                    {
+                        Toast.MakeText(this, "Please enter a valid box number", ToastLength.Short)?.Show();
+                    }
+                })
+                .SetNegativeButton("Stay", (s, e) => { })
+                .Create();
+
+            // Use the ShowEvent to handle actions after the dialog is displayed
+            alertDialog.ShowEvent += (sender, args) =>
+            {
+                // Request focus on the input field
+                boxNumberInput.RequestFocus();
+                
+                // Select all text for easy replacement
+                boxNumberInput.SelectAll();
+
+                // Force the soft keyboard to appear
+                var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                inputMethodManager?.ShowSoftInput(boxNumberInput, Android.Views.InputMethods.ShowFlags.Implicit);
+            };
+
+            // Show the dialog
+            alertDialog.Show();
+        }
+
+        private void JumpToBox(int targetBox)
+        {
+            if (targetBox == _currentBox)
+            {
+                Toast.MakeText(this, $"Already at Box {_currentBox}", ToastLength.Short)?.Show();
+                return;
+            }
+
+            // Save current box data before jumping
+            SaveCurrentBoxData();
+            
+            _currentBox = targetBox;
+            LoadBoxData();
+            UpdateUI();
+            
+            Toast.MakeText(this, $"Jumped to Box {_currentBox}", ToastLength.Short)?.Show();
+        }
+
         protected override void OnDestroy()
         {
             // Dispose Bluetooth manager
             _bluetoothManager?.Dispose();
-    
+
             // Unsubscribe from event handlers to prevent memory leaks
-            if (_adultsEditText != null) 
+            var editTexts = new[] 
+            { 
+                (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false) 
+            };
+            
+            foreach (var (editText, hasNumberEvents) in editTexts)
             {
-                _adultsEditText.TextChanged -= OnDataChanged;
-                _adultsEditText.Click -= OnNumberFieldClick;
-                _adultsEditText.FocusChange -= OnNumberFieldFocus;
+                if (editText != null)
+                {
+                    editText.TextChanged -= OnDataChanged;
+                    if (hasNumberEvents)
+                    {
+                        editText.Click -= OnNumberFieldClick;
+                        editText.FocusChange -= OnNumberFieldFocus;
+                    }
+                }
             }
-            if (_eggsEditText != null) 
-            {
-                _eggsEditText.TextChanged -= OnDataChanged;
-                _eggsEditText.Click -= OnNumberFieldClick;
-                _eggsEditText.FocusChange -= OnNumberFieldFocus;
-            }
-            if (_chicksEditText != null) 
-            {
-                _chicksEditText.TextChanged -= OnDataChanged;
-                _chicksEditText.Click -= OnNumberFieldClick;
-                _chicksEditText.FocusChange -= OnNumberFieldFocus;
-            }
-            if (_notesEditText != null) 
-            {
-                _notesEditText.TextChanged -= OnDataChanged;
-            }
+            
             if (_prevBoxButton != null) _prevBoxButton.Click -= OnPrevBoxClick;
             if (_nextBoxButton != null) _nextBoxButton.Click -= OnNextBoxClick;
             if (_clearBoxButton != null) _clearBoxButton.Click -= OnClearBoxClick;
-            
+            if (_boxNumberText != null) _boxNumberText.Click -= OnBoxNumberClick; // Add this line
+    
             _locationManager?.RemoveUpdates(this);
             
             base.OnDestroy();
