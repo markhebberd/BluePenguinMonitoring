@@ -195,8 +195,9 @@ namespace BluePenguinMonitoring
 
             // Button section (Clear Box and Save Data)
             var topButtonLayout = CreateHorizontalButtonLayout(
-                ("Clear all box data", OnClearBoxClick),
-                ("Save all data to file", OnSaveDataClick)
+                ("Clear all boxes", OnClearBoxesClick),
+                ("Clear box", OnClearBoxClick),
+                ("Save to json", OnSaveDataClick)
             );
             layout.AddView(topButtonLayout);
 
@@ -451,6 +452,23 @@ namespace BluePenguinMonitoring
         }
 
         private void OnClearBoxClick(object? sender, EventArgs e)
+        {
+            ShowConfirmationDialog(
+                "Clear Box Data",
+                "Are you sure you want to clear data for box " + _currentBox + "!?",
+                ("Yes", () =>
+                {
+                    _boxDataStorage.Remove(_currentBox);
+                    SaveAllData();
+                    LoadBoxData();
+                    UpdateUI();
+                }
+            ),
+                ("Nope", () => { }
+            )
+            );
+        }
+        private void OnClearBoxesClick(object? sender, EventArgs e)
         {
             ShowConfirmationDialog(
                 "Clear Box Data",
@@ -904,7 +922,7 @@ namespace BluePenguinMonitoring
             
             if (_prevBoxButton != null) _prevBoxButton.Click -= OnPrevBoxClick;
             if (_nextBoxButton != null) _nextBoxButton.Click -= OnNextBoxClick;
-            if (_clearBoxButton != null) _clearBoxButton.Click -= OnClearBoxClick;
+            if (_clearBoxButton != null) _clearBoxButton.Click -= OnClearBoxesClick;
             if (_boxNumberText != null) _boxNumberText.Click -= OnBoxNumberClick; // Add this line
     
             _locationManager?.RemoveUpdates(this);
