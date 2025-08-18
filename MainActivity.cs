@@ -247,8 +247,8 @@ namespace BluePenguinMonitoring
 
             // Navigation card
             var navCard = CreateCard();
-            var navTitle = CreateSectionTitle("Box Navigation");
-            navCard.AddView(navTitle);
+            //var navTitle = CreateSectionTitle("Box Navigation");
+            //navCard.AddView(navTitle);
             
             var boxNavLayout = CreateNavigationLayout();
             navCard.AddView(boxNavLayout);
@@ -369,7 +369,7 @@ namespace BluePenguinMonitoring
                 Orientation = Orientation.Horizontal
             };
 
-            _prevBoxButton = CreateStyledButton("← Prev", PRIMARY_COLOR);
+            _prevBoxButton = CreateStyledButton("← Prev box", PRIMARY_COLOR);
             _prevBoxButton.Click += OnPrevBoxClick;
             var prevParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             _prevBoxButton.LayoutParameters = prevParams;
@@ -391,7 +391,7 @@ namespace BluePenguinMonitoring
             boxParams.SetMargins(8, 0, 8, 0);
             _boxNumberText.LayoutParameters = boxParams;
 
-            _nextBoxButton = CreateStyledButton("Next →", PRIMARY_COLOR);
+            _nextBoxButton = CreateStyledButton("Next box →", PRIMARY_COLOR);
             _nextBoxButton.Click += OnNextBoxClick;
             var nextParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             _nextBoxButton.LayoutParameters = nextParams;

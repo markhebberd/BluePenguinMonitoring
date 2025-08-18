@@ -1,0 +1,59 @@
+<svg width="144" height="144" viewBox="0 0 144 144" xmlns="http://www.w3.org/2000/svg">
+    <!-- 
+      New Zealand Blue Penguin (Kororā) App Icon - 144x144 version
+      - Using pale blue background like the original design
+      - Proportionally scaled from 192x192 version
+      - Clean, modern styling with subtle depth
+    -->
+
+    <!-- Background Circle - Using pale blue like original -->
+    <circle cx="72" cy="72" r="72" fill="#B3E5FC" />
+
+    <!-- Penguin Shadow -->
+    <ellipse cx="73" cy="126" rx="32" ry="11" fill="#000000" fill-opacity="0.15"/>
+
+    <!-- Feet -->
+    <path d="M 49,116 A 12,8 0 0,0 61,116 L 60,128 L 51,128 Z" fill="#FF8A65"/>
+    <path d="M 95,116 A 12,8 0 0,1 83,116 L 84,128 L 93,128 Z" fill="#FF8A65"/>
+
+    <!-- Main Body - Scaled -->
+    <path d="M 105,81 C 105,107 92,126 72,126 C 52,126 39,107 39,81 C 39,55 52,32 72,32 C 92,32 105,55 105,81 Z" fill="#546E7A"/>
+
+    <!-- Flippers/Wings - Scaled -->
+    <path d="M 39,81 C 39,66 30,69 30,84 C 30,99 39,96 39,81 Z" fill="#546E7A"/>
+    <path d="M 105,81 C 105,66 114,69 114,84 C 114,99 105,96 105,81 Z" fill="#546E7A"/>
+
+    <!-- White Belly - Scaled -->
+    <path d="M 93,81 C 93,99 84,114 72,114 C 60,114 51,99 51,81 C 51,63 60,48 72,48 C 84,48 93,63 93,81 Z" fill="#FFFFFF"/>
+
+    <!-- Body Shading for Depth -->
+    <path d="M 105,81 C 105,107 92,126 72,126 C 78,126 87,117 93,104 C 99,90 104,77 105,81 Z" fill="#37474F" fill-opacity="0.4"/>
+
+    <!-- Flipper Shading -->
+    <path d="M 39,81 C 39,66 30,69 30,84 C 33,87 38,84 39,81 Z" fill="#37474F" fill-opacity="0.3"/>
+    <path d="M 105,81 C 105,66 114,69 114,84 C 111,87 106,84 105,81 Z" fill="#37474F" fill-opacity="0.3"/>
+
+    <!-- Beak - Scaled -->
+    <path d="M 63,65 L 81,65 L 72,77 Z" fill="#263238"/>
+
+    <!-- Eyes - Scaled -->
+    <g id="left-eye">
+        <circle cx="59" cy="59" r="9" fill="#FFFFFF"/>
+        <circle cx="60" cy="60" r="5" fill="#1A237E"/>
+        <circle cx="62" cy="57" r="2" fill="#FFFFFF"/>
+        <circle cx="59" cy="59" r="9" fill="none" stroke="#37474F" stroke-width="1" opacity="0.3"/>
+    </g>
+    <g id="right-eye">
+        <circle cx="85" cy="59" r="9" fill="#FFFFFF"/>
+        <circle cx="84" cy="60" r="5" fill="#1A237E"/>
+        <circle cx="82" cy="57" r="2" fill="#FFFFFF"/>
+        <circle cx="85" cy="59" r="9" fill="none" stroke="#37474F" stroke-width="1" opacity="0.3"/>
+    </g>
+
+    <!-- Optional: Small accent details -->
+    <!-- Chest marking - Scaled -->
+    <path d="M 72,51 C 77,56 77,62 72,66 C 67,62 67,56 72,51 Z" fill="#E8EAF6" opacity="0.6"/>
+    
+    <!-- Subtle highlight on head - Scaled -->
+    <path d="M 62,39 C 68,36 76,36 82,39 C 76,44 68,44 62,39 Z" fill="#FFFFFF" opacity="0.3"/>
+</svg>
