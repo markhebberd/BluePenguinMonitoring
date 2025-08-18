@@ -15,7 +15,7 @@ using System.Text.Json;
 
 namespace BluePenguinMonitoring
 {
-    [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar.Fullscreen")]
+    [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar.Fullscreen", ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait)]
     public class MainActivity : Activity, ILocationListener
     {
         // Bluetooth manager
@@ -166,7 +166,7 @@ namespace BluePenguinMonitoring
 
         private void UpdateStatusText(string? bluetoothStatus = null)
         {
-            var btStatus = bluetoothStatus ?? (_bluetoothManager?.IsConnected == true ? "HR5 Connected - Ready to scan" : "Connecting to HR5...");
+            var btStatus = bluetoothStatus ?? (_bluetoothManager?.IsConnected == true ? "HR5 Connected" : "Connecting to HR5...");
             var gpsStatus = _gpsAccuracy > 0 ? $" | GPS: ±{_gpsAccuracy:F1}m" : " | GPS: No signal";
 
             RunOnUiThread(() =>
@@ -193,50 +193,53 @@ namespace BluePenguinMonitoring
             };
             layout.AddView(_statusText);
 
-            // Button section (Clear Box and Save Data)
+            // Button section (Clear Box and Save Data) - Add bottom margin
             var topButtonLayout = CreateHorizontalButtonLayout(
                 ("Clear all boxes", OnClearBoxesClick),
                 ("Clear box", OnClearBoxClick),
                 ("Save to json", OnSaveDataClick)
             );
+            var topButtonParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            topButtonParams.SetMargins(0, 20, 0, 20); // Add top and bottom margins
+            topButtonLayout.LayoutParameters = topButtonParams;
             layout.AddView(topButtonLayout);
 
-            // Box navigation section - all consistently styled
-            var boxNavLayout = new LinearLayout(this)
-            {
-                Orientation = Orientation.Horizontal
-            };
-
-            _prevBoxButton = CreateUniformNavigationButton("← Prev", OnPrevBoxClick);
-            _nextBoxButton = CreateUniformNavigationButton("Next →", OnNextBoxClick);
-            
-            // Create box number as a button-styled TextView to match others
-            _boxNumberText = new TextView(this)
-            {
-                Text = "Box 1",
-                TextSize = 18, // Reduced from 32 to match button text size
-                Gravity = Android.Views.GravityFlags.Center,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2),
-                Clickable = true,
-                Focusable = true
-            };
-            _boxNumberText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            _boxNumberText.SetBackgroundResource(Android.Resource.Drawable.ButtonDefault);
-            _boxNumberText.SetPadding(20, 20, 20, 20); // Add padding to match button appearance
-            _boxNumberText.Click += OnBoxNumberClick;
-
-            boxNavLayout.AddView(_prevBoxButton);
-            boxNavLayout.AddView(_boxNumberText);
-            boxNavLayout.AddView(_nextBoxButton);
+            // Box navigation section - Add bottom margin
+            var boxNavLayout = CreateHorizontalButtonLayout(
+                ("← Prev", OnPrevBoxClick),
+                ("Box 1", OnBoxNumberClick),
+                ("Next →", OnNextBoxClick)
+            );
+            var boxNavParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            boxNavParams.SetMargins(0, 0, 0, 20); // Add bottom margin
+            boxNavLayout.LayoutParameters = boxNavParams;
             layout.AddView(boxNavLayout);
 
-            // Scanned IDs section
+            // Store references to the navigation buttons for later updates
+            var navButtons = boxNavLayout.ChildCount; 
+            if (navButtons >= 3)
+            {
+                _prevBoxButton = (Button)boxNavLayout.GetChildAt(0);
+                _boxNumberText = (TextView)boxNavLayout.GetChildAt(1); // This will be a Button now, but we'll cast it
+                _nextBoxButton = (Button)boxNavLayout.GetChildAt(2);
+            }
+
+            // Scanned IDs section - Add margins
             var idsLabel = new TextView(this)
             {
                 Text = "Scanned Bird IDs:",
                 TextSize = 16
             };
             idsLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var idsLabelParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            idsLabelParams.SetMargins(0, 20, 0, 10); // Add top margin
+            idsLabel.LayoutParameters = idsLabelParams;
             layout.AddView(idsLabel);
 
             _scannedIdsText = new TextView(this)
@@ -246,6 +249,11 @@ namespace BluePenguinMonitoring
             };
             _scannedIdsText.SetBackgroundColor(Android.Graphics.Color.LightGray);
             _scannedIdsText.SetPadding(10, 10, 10, 10);
+            var scannedIdsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            scannedIdsParams.SetMargins(0, 0, 0, 20); // Add bottom margin
+            _scannedIdsText.LayoutParameters = scannedIdsParams;
             layout.AddView(_scannedIdsText);
 
             // Data entry fields
@@ -284,6 +292,13 @@ namespace BluePenguinMonitoring
                     Text = text,
                     LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
                 };
+                
+                // Style the box number button differently if needed
+                if (text.StartsWith("Box "))
+                {
+                    button.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                }
+                
                 button.Click += handler;
                 layout.AddView(button);
                 
@@ -296,11 +311,16 @@ namespace BluePenguinMonitoring
 
         private void CreateDataEntryFields(LinearLayout layout)
         {
-            // Create headings row
+            // Create headings row - Add top margin
             var headingsLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
             };
+            var headingsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            headingsParams.SetMargins(0, 20, 0, 5); // Add top margin
+            headingsLayout.LayoutParameters = headingsParams;
             
             var adultsLabel = new TextView(this) 
             { 
@@ -334,11 +354,16 @@ namespace BluePenguinMonitoring
             headingsLayout.AddView(chicksLabel);
             layout.AddView(headingsLayout);
             
-            // Create input fields row
+            // Create input fields row - Add bottom margin
             var inputFieldsLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
             };
+            var inputFieldsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            inputFieldsParams.SetMargins(0, 0, 0, 20); // Add bottom margin
+            inputFieldsLayout.LayoutParameters = inputFieldsParams;
             
             _adultsEditText = CreateInlineNumberField();
             _eggsEditText = CreateInlineNumberField();
@@ -349,9 +374,15 @@ namespace BluePenguinMonitoring
             inputFieldsLayout.AddView(_chicksEditText);
             layout.AddView(inputFieldsLayout);
             
-            // Notes field (unchanged)
+            // Notes field - Add margins
             var notesLabel = new TextView(this) { Text = "Notes:", TextSize = 16 };
+            var notesLabelParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, 
+                ViewGroup.LayoutParams.WrapContent);
+            notesLabelParams.SetMargins(0, 10, 0, 5); // Add top margin
+            notesLabel.LayoutParameters = notesLabelParams;
             layout.AddView(notesLabel);
+            
             _notesEditText = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences,
@@ -468,6 +499,7 @@ namespace BluePenguinMonitoring
             )
             );
         }
+        
         private void OnClearBoxesClick(object? sender, EventArgs e)
         {
             ShowConfirmationDialog(
@@ -615,7 +647,7 @@ namespace BluePenguinMonitoring
                 var displayText = $"Scanned IDs ({scans.Count}):\n";
                 foreach (var scan in scans)
                 {
-                    var timeStr = scan.Timestamp.ToString("f");
+                    var timeStr = scan.Timestamp.ToString("yyyy/MM/dd ") + scan.Timestamp.ToString("t");
                     displayText += $"{scan.BirdId} at {timeStr}\n";
                 }
                 _scannedIdsText.Text = displayText.TrimEnd('\n');
