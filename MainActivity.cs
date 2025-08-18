@@ -200,17 +200,20 @@ namespace BluePenguinMonitoring
             );
             layout.AddView(topButtonLayout);
 
-            // Box navigation section
+            // Box navigation section - all consistently styled
             var boxNavLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
             };
 
-            _prevBoxButton = CreateNavigationButton("← Prev", OnPrevBoxClick);
+            _prevBoxButton = CreateUniformNavigationButton("← Prev", OnPrevBoxClick);
+            _nextBoxButton = CreateUniformNavigationButton("Next →", OnNextBoxClick);
+            
+            // Create box number as a button-styled TextView to match others
             _boxNumberText = new TextView(this)
             {
                 Text = "Box 1",
-                TextSize = 32,
+                TextSize = 18, // Reduced from 32 to match button text size
                 Gravity = Android.Views.GravityFlags.Center,
                 LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2),
                 Clickable = true,
@@ -218,8 +221,8 @@ namespace BluePenguinMonitoring
             };
             _boxNumberText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             _boxNumberText.SetBackgroundResource(Android.Resource.Drawable.ButtonDefault);
+            _boxNumberText.SetPadding(20, 20, 20, 20); // Add padding to match button appearance
             _boxNumberText.Click += OnBoxNumberClick;
-            _nextBoxButton = CreateNavigationButton("Next →", OnNextBoxClick);
 
             boxNavLayout.AddView(_prevBoxButton);
             boxNavLayout.AddView(_boxNumberText);
@@ -253,6 +256,19 @@ namespace BluePenguinMonitoring
             UpdateUI();
         }
 
+        private Button CreateUniformNavigationButton(string text, EventHandler handler)
+        {
+            var button = new Button(this)
+            {
+                Text = text,
+                TextSize = 18, // Consistent text size
+                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
+            };
+            button.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            button.Click += handler;
+            return button;
+        }
+
         private LinearLayout CreateHorizontalButtonLayout(params (string text, EventHandler handler)[] buttons)
         {
             var layout = new LinearLayout(this)
@@ -275,17 +291,6 @@ namespace BluePenguinMonitoring
             }
 
             return layout;
-        }
-
-        private Button CreateNavigationButton(string text, EventHandler handler)
-        {
-            var button = new Button(this)
-            {
-                Text = text,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            button.Click += handler;
-            return button;
         }
 
         private void CreateDataEntryFields(LinearLayout layout)
@@ -865,9 +870,6 @@ namespace BluePenguinMonitoring
                 Toast.MakeText(this, $"Already at Box {_currentBox}", ToastLength.Short)?.Show();
                 return;
             }
-
-            // Save current box data before jumping
-            SaveCurrentBoxData();
             
             _currentBox = targetBox;
             LoadBoxData();
