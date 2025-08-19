@@ -5,7 +5,7 @@
 ## Overview
 This project demonstrates how to:
 - Establish and maintain a Bluetooth connection with the Gallagher HR5.
-- Collate resulting data in order to monitor chipped birds at a penguin colony in New Zealand
+- Collate resulting data in order to monitor chipped birds at a penguin colony in New Zealand.
 - Provide a reference implementation for developers integrating Gallagher HR5 readers.
 
 ## Features
@@ -23,4 +23,4 @@ This project is intended as a **reference / documentation app** and is not produ
 Feel free to fork, extend, and adapt for your own projects.
 
 ## License
-MIT License
+[MIT License](LICENSE)
