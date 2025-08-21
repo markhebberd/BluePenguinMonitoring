@@ -274,7 +274,6 @@ namespace BluePenguinMonitoring
                     topInset = Math.Max(topInset, insets.DisplayCutout.SafeInsetTop);
                 }
 
-                // Set fixed padding, do NOT add to current padding
                 v.SetPadding(20, topInset + 20, 20, 20);
 
                 return insets;
