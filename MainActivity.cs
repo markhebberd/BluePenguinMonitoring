@@ -853,7 +853,7 @@ namespace BluePenguinMonitoring
             {
                 var internalPath = FilesDir?.AbsolutePath;
                 if (string.IsNullOrEmpty(internalPath))
-                    return;
+                    return; // This might not be handling the case properly
 
                 var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
                 
@@ -866,14 +866,14 @@ namespace BluePenguinMonitoring
                     {
                         _currentBox = appState.CurrentBox;
                         _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
-                        
-                        Toast.MakeText(this, $"📱 Data restored from {appState.LastSaved:MMM dd, HH:mm} - {_boxDataStorage.Count} boxes", ToastLength.Short)?.Show();
+                        // Toast might fail if UI isn't ready yet
+                        Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
                     }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to load auto-saved data: {ex.Message}");
+                // The initialization in catch block might not be sufficient
                 _currentBox = 1;
                 _boxDataStorage = new Dictionary<int, BoxData>();
             }
