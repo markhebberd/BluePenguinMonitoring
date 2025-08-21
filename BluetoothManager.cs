@@ -222,7 +222,7 @@ namespace BluePenguinMonitoring
                         break; // Exit listening loop on error
                     }
 
-                    await Task.Delay(50, _connectionCancellation?.Token ?? CancellationToken.None);
+                    await Task.Delay(100, _connectionCancellation?.Token ?? CancellationToken.None);
                 }
             }
             catch (OperationCanceledException)
