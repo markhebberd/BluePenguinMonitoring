@@ -15,7 +15,12 @@ using Android.Graphics;
 
 namespace BluePenguinMonitoring
 {
-    [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar", ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait)]
+    [Activity(
+            Label = "@string/app_name", 
+            MainLauncher = true, 
+            Theme = "@android:style/Theme.NoTitleBar", 
+            ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait
+        )]
     public class MainActivity : Activity, ILocationListener
     {
         // Modern color palette
@@ -196,32 +201,10 @@ namespace BluePenguinMonitoring
 
         private void CreateDataRecordingUI()
         {
-
-            // Calculate top padding to avoid notification/status bar and cutout overlap
-            int topPadding = 0;
-            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
-            {
-                var insets = Window?.DecorView?.RootWindowInsets;
-                if (insets != null)
-                {
-                    topPadding = insets.StableInsetTop;
-                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.P)
-                    {
-                        var cutout = insets.DisplayCutout;
-                        if (cutout != null)
-                        {
-                            topPadding = Math.Max(topPadding, cutout.SafeInsetTop);
-                        }
-                    }
-                }
-            }
-            int extraSpace = (int)(48 * (Resources?.DisplayMetrics?.Density ?? 1));
-            if (topPadding < extraSpace)
-                topPadding = extraSpace;
-
             var scrollView = new ScrollView(this);
             scrollView.SetBackgroundColor(BACKGROUND_COLOR);
-            scrollView.SetPadding(20, topPadding, 20, 20);
+            
+            scrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
 
             var layout = new LinearLayout(this)
             {
@@ -278,7 +261,29 @@ namespace BluePenguinMonitoring
             scrollView.AddView(layout);
             SetContentView(scrollView);
 
-            UpdateUI();
+            scrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
+        }
+
+        private class ViewInsetsListener : Java.Lang.Object, View.IOnApplyWindowInsetsListener
+        {
+            public WindowInsets OnApplyWindowInsets(View v, WindowInsets insets)
+            {
+                int topInset = insets.SystemWindowInsetTop;
+                if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.P && insets.DisplayCutout != null)
+                {
+
+                    topInset = Math.Max(topInset, insets.DisplayCutout.SafeInsetTop);
+                }
+
+                v.SetPadding(
+                    v.PaddingLeft + 20,
+                    topInset + 20,
+                    v.PaddingRight + 20,
+                    v.PaddingBottom + 20
+                );
+
+                return insets;
+            }
         }
 
         private LinearLayout CreateCard()
@@ -305,23 +310,6 @@ namespace BluePenguinMonitoring
             drawable.SetCornerRadius(12 * Resources?.DisplayMetrics?.Density ?? 12);
             drawable.SetStroke(1, Color.ParseColor("#E0E0E0"));
             return drawable;
-        }
-
-        private TextView CreateSectionTitle(string title)
-        {
-            var titleView = new TextView(this)
-            {
-                Text = title,
-                TextSize = 18
-            };
-            titleView.SetTextColor(TEXT_PRIMARY);
-            titleView.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            
-            var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            titleParams.SetMargins(0, 0, 0, 12);
-            titleView.LayoutParameters = titleParams;
-            
-            return titleView;
         }
 
         private GradientDrawable CreateRoundedBackground(Color color, int radiusDp)
@@ -415,37 +403,6 @@ namespace BluePenguinMonitoring
             return button;
         }
 
-        private LinearLayout CreateHorizontalButtonLayout(params (string text, EventHandler handler)[] buttons)
-        {
-            var layout = new LinearLayout(this)
-            {
-                Orientation = Orientation.Horizontal
-            };
-
-            foreach (var (text, handler) in buttons)
-            {
-                var button = new Button(this)
-                {
-                    Text = text,
-                    LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-                };
-                
-                if (text.StartsWith("Box "))
-                {
-                    button.SetTypeface(Android.Graphics.Typeface.DefaultBold, TypefaceStyle.Normal);
-                }
-                
-                button.Click += handler;
-                layout.AddView(button);
-                
-                if (text.Contains("Clear"))
-                    _clearBoxButton = button;
-            }
-
-            return layout;
-        }
-
-        // Updated CreateBoxDataCard to store the title reference and add vertical padding to each item
         private void CreateBoxDataCard(LinearLayout layout)
         {
             _dataCardTitle = new TextView(this)
