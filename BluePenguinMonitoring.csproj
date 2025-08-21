@@ -15,6 +15,11 @@
     <TrimMode>full</TrimMode>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove=".gitattributes" />
+    <None Remove=".gitignore" />
+    <None Remove="LICENSE" />
+  </ItemGroup>
+  <ItemGroup>
     <Folder Include="Resources\layout\" />
   </ItemGroup>
 </Project>

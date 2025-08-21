@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Text;
-using System.Threading.Tasks;
 using Android.App;
 using Android.OS;
 using Android.Widget;
@@ -17,20 +15,20 @@ using Android.Graphics;
 
 namespace BluePenguinMonitoring
 {
-    [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar.Fullscreen", ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait)]
+    [Activity(Label = "@string/app_name", MainLauncher = true, Theme = "@android:style/Theme.Light.NoTitleBar", ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait)]
     public class MainActivity : Activity, ILocationListener
     {
         // Modern color palette
-        private static readonly Color PRIMARY_COLOR = Color.ParseColor("#2196F3");
-        private static readonly Color PRIMARY_DARK = Color.ParseColor("#1976D2");
-        private static readonly Color ACCENT_COLOR = Color.ParseColor("#FF4081");
-        private static readonly Color SUCCESS_COLOR = Color.ParseColor("#4CAF50");
-        private static readonly Color WARNING_COLOR = Color.ParseColor("#FF9800");
-        private static readonly Color DANGER_COLOR = Color.ParseColor("#F44336");
-        private static readonly Color BACKGROUND_COLOR = Color.ParseColor("#F5F5F5");
-        private static readonly Color CARD_COLOR = Color.White;
-        private static readonly Color TEXT_PRIMARY = Color.ParseColor("#212121");
-        private static readonly Color TEXT_SECONDARY = Color.ParseColor("#757575");
+        private static readonly Color PRIMARY_COLOR =                   Color.ParseColor("#2196F3");
+        private static readonly Color PRIMARY_DARK =                    Color.ParseColor("#1976D2");
+        private static readonly Color SUCCESS_COLOR =                   Color.ParseColor("#4CAF50");
+        private static readonly Color WARNING_COLOR =                   Color.ParseColor("#FF9800");
+        private static readonly Color DANGER_COLOR =                    Color.ParseColor("#F44336");
+        private static readonly Color TEXT_FIELD_BACKGROUND_COLOR =     Color.ParseColor("#F0F0F0");
+        private static readonly Color BACKGROUND_COLOR =                Color.LightGray;
+        private static readonly Color CARD_COLOR =                      Color.White;
+        private static readonly Color TEXT_PRIMARY =                    Color.ParseColor("#212121");
+        private static readonly Color TEXT_SECONDARY =                  Color.ParseColor("#757575");
 
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
@@ -83,14 +81,17 @@ namespace BluePenguinMonitoring
             public Dictionary<int, BoxData> BoxData { get; set; } = new Dictionary<int, BoxData>();
         }
 
+        // Add a field for the data card title so it can be updated dynamically
+        private TextView? _dataCardTitle;
+
         protected override void OnCreate(Bundle? savedInstanceState)
         {
             base.OnCreate(savedInstanceState);
-            
+
+            RequestPermissions();
             LoadDataFromInternalStorage();
             CreateDataRecordingUI();
             LoadBoxData();
-            RequestPermissions();
         }
 
         private void RequestPermissions()
@@ -195,17 +196,37 @@ namespace BluePenguinMonitoring
 
         private void CreateDataRecordingUI()
         {
-            // Set status bar color
-            Window?.SetStatusBarColor(PRIMARY_DARK);
-            
+
+            // Calculate top padding to avoid notification/status bar and cutout overlap
+            int topPadding = 0;
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
+            {
+                var insets = Window?.DecorView?.RootWindowInsets;
+                if (insets != null)
+                {
+                    topPadding = insets.StableInsetTop;
+                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.P)
+                    {
+                        var cutout = insets.DisplayCutout;
+                        if (cutout != null)
+                        {
+                            topPadding = Math.Max(topPadding, cutout.SafeInsetTop);
+                        }
+                    }
+                }
+            }
+            int extraSpace = (int)(48 * (Resources?.DisplayMetrics?.Density ?? 1));
+            if (topPadding < extraSpace)
+                topPadding = extraSpace;
+
             var scrollView = new ScrollView(this);
             scrollView.SetBackgroundColor(BACKGROUND_COLOR);
-            
+            scrollView.SetPadding(20, topPadding, 20, 20);
+
             var layout = new LinearLayout(this)
             {
                 Orientation = Orientation.Vertical
             };
-            layout.SetPadding(20, 40, 20, 20);
 
             // App header
             var headerCard = CreateCard();
@@ -227,56 +248,31 @@ namespace BluePenguinMonitoring
             };
             _statusText.SetTextColor(TEXT_SECONDARY);
             var statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            statusParams.SetMargins(0, 8, 0, 0);
+            statusParams.SetMargins(0, 20, 0, 0);
             _statusText.LayoutParameters = statusParams;
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons card
-            var actionsCard = CreateCard();
-            var actionsTitle = CreateSectionTitle("Quick Actions");
-            actionsCard.AddView(actionsTitle);
-            
+            // Action buttons
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
                 ("Save Data", OnSaveDataClick, SUCCESS_COLOR)
             );
-            actionsCard.AddView(topButtonLayout);
-            layout.AddView(actionsCard);
+            topButtonLayout.LayoutParameters = statusParams;
+            headerCard.AddView(topButtonLayout);
 
             // Navigation card
-            var navCard = CreateCard();
-            //var navTitle = CreateSectionTitle("Box Navigation");
-            //navCard.AddView(navTitle);
-            
             var boxNavLayout = CreateNavigationLayout();
-            navCard.AddView(boxNavLayout);
-            layout.AddView(navCard);
+            boxNavLayout.LayoutParameters = statusParams;
+            headerCard.AddView(boxNavLayout);
 
-            // Scanned IDs card
-            var idsCard = CreateCard();
-            var idsTitle = CreateSectionTitle("Scanned Bird IDs");
-            idsCard.AddView(idsTitle);
-
-            _scannedIdsText = new TextView(this)
-            {
-                Text = "No birds scanned yet",
-                TextSize = 14
-            };
-            _scannedIdsText.SetTextColor(TEXT_SECONDARY);
-            _scannedIdsText.SetPadding(16, 16, 16, 16);
-            _scannedIdsText.Background = CreateRoundedBackground(BACKGROUND_COLOR, 8);
-            
-            var idsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            idsParams.SetMargins(0, 8, 0, 0);
-            _scannedIdsText.LayoutParameters = idsParams;
-            idsCard.AddView(_scannedIdsText);
-            layout.AddView(idsCard);
-
-            // Data entry card
+            // Data card
             var dataCard = CreateCard();
-            CreateDataEntryFields(dataCard);
+
+            // Data entry fields and scanned birds
+            CreateBoxDataCard(dataCard);
+
             layout.AddView(dataCard);
 
             scrollView.AddView(layout);
@@ -376,8 +372,7 @@ namespace BluePenguinMonitoring
 
             _boxNumberText = new TextView(this)
             {
-                Text = "Box 1",
-                TextSize = 20,
+                Text = "Select Box",
                 Gravity = GravityFlags.Center,
                 Clickable = true,
                 Focusable = true
@@ -437,7 +432,7 @@ namespace BluePenguinMonitoring
                 
                 if (text.StartsWith("Box "))
                 {
-                    button.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                    button.SetTypeface(Android.Graphics.Typeface.DefaultBold, TypefaceStyle.Normal);
                 }
                 
                 button.Click += handler;
@@ -450,11 +445,36 @@ namespace BluePenguinMonitoring
             return layout;
         }
 
-        private void CreateDataEntryFields(LinearLayout layout)
+        // Updated CreateBoxDataCard to store the title reference and add vertical padding to each item
+        private void CreateBoxDataCard(LinearLayout layout)
         {
-            var dataTitle = CreateSectionTitle("Box Data");
-            layout.AddView(dataTitle);
-            
+            _dataCardTitle = new TextView(this)
+            {
+                Text = $"Box {_currentBox}",
+                TextSize = 30, 
+                Gravity = GravityFlags.CenterHorizontal // Center horizontally
+            };
+            _dataCardTitle.SetTextColor(TEXT_PRIMARY);
+            _dataCardTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var dataTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            dataTitleParams.SetMargins(0, 0, 0, 16); // More space below title
+            _dataCardTitle.LayoutParameters = dataTitleParams;
+            layout.AddView(_dataCardTitle);
+
+            // Scanned birds at the top of the card
+            _scannedIdsText = new TextView(this)
+            {
+                Text = "No birds scanned yet",
+                TextSize = 14
+            };
+            _scannedIdsText.SetTextColor(TEXT_SECONDARY);
+            _scannedIdsText.SetPadding(16, 16, 16, 16);
+            _scannedIdsText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            var idsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            idsParams.SetMargins(0, 0, 0, 16); // More space below scanned birds
+            _scannedIdsText.LayoutParameters = idsParams;
+            layout.AddView(_scannedIdsText);
+
             var headingsLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
@@ -477,7 +497,7 @@ namespace BluePenguinMonitoring
                 Orientation = Orientation.Horizontal
             };
             var inputFieldsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            inputFieldsParams.SetMargins(0, 0, 0, 16);
+            inputFieldsParams.SetMargins(0, 0, 0, 16); // More space below number fields
             inputFieldsLayout.LayoutParameters = inputFieldsParams;
             
             _adultsEditText = CreateStyledNumberField();
@@ -497,7 +517,7 @@ namespace BluePenguinMonitoring
             notesLabel.SetTextColor(TEXT_PRIMARY);
             notesLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             var notesLabelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            notesLabelParams.SetMargins(0, 8, 0, 8);
+            notesLabelParams.SetMargins(0, 0, 0, 8); // More space below notes label
             notesLabel.LayoutParameters = notesLabelParams;
             layout.AddView(notesLabel);
             
@@ -511,7 +531,10 @@ namespace BluePenguinMonitoring
             _notesEditText.SetTextColor(TEXT_PRIMARY);
             _notesEditText.SetHintTextColor(TEXT_SECONDARY);
             _notesEditText.SetPadding(16, 16, 16, 16);
-            _notesEditText.Background = CreateRoundedBackground(BACKGROUND_COLOR, 8);
+            _notesEditText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            var notesEditParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            notesEditParams.SetMargins(0, 0, 0, 8); // More space below notes field
+            _notesEditText.LayoutParameters = notesEditParams;
             _notesEditText.TextChanged += OnDataChanged;
             layout.AddView(_notesEditText);
         }
@@ -543,7 +566,7 @@ namespace BluePenguinMonitoring
             editText.SetTextColor(TEXT_PRIMARY);
             editText.SetTextSize(Android.Util.ComplexUnitType.Sp, 16);
             editText.SetPadding(16, 20, 16, 20);
-            editText.Background = CreateRoundedBackground(BACKGROUND_COLOR, 8);
+            editText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8); // <-- updated
             editText.TextChanged += OnDataChanged;
             editText.Click += OnNumberFieldClick;
             editText.FocusChange += OnNumberFieldFocus;
@@ -777,9 +800,10 @@ namespace BluePenguinMonitoring
             }
         }
 
+        // Update the title when the box changes
         private void UpdateUI()
         {
-            if (_boxNumberText != null) _boxNumberText.Text = $"Box {_currentBox}";
+            if (_dataCardTitle != null) _dataCardTitle.Text = $"Box {_currentBox}";
             if (_prevBoxButton != null) 
             {
                 _prevBoxButton.Enabled = _currentBox > 1;
