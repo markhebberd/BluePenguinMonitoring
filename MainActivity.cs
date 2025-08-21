@@ -271,16 +271,11 @@ namespace BluePenguinMonitoring
                 int topInset = insets.SystemWindowInsetTop;
                 if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.P && insets.DisplayCutout != null)
                 {
-
                     topInset = Math.Max(topInset, insets.DisplayCutout.SafeInsetTop);
                 }
 
-                v.SetPadding(
-                    v.PaddingLeft + 20,
-                    topInset + 20,
-                    v.PaddingRight + 20,
-                    v.PaddingBottom + 20
-                );
+                // Set fixed padding, do NOT add to current padding
+                v.SetPadding(20, topInset + 20, 20, 20);
 
                 return insets;
             }
