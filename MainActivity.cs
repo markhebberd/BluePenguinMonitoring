@@ -82,6 +82,7 @@ namespace BluePenguinMonitoring
 
         private int _currentBox = 1;
         private const string AUTO_SAVE_FILENAME = "penguin_data_autosave.json";
+        private const string REMOTE_BIRD_DATA_FILENAME = "remotePenguinData.json";
 
         // High value confirmation tracking - reset on each entry
         private bool _isProcessingConfirmation = false;
@@ -352,14 +353,13 @@ namespace BluePenguinMonitoring
             // Return the CSV export URL
             return $"https://docs.google.com/spreadsheets/d/{spreadsheetId}/export?format=csv";
         }
-
         private async Task DownloadCsvDataAsync()
         {
             try
             {
                 var csvUrl = ConvertToGoogleSheetsCsvUrl(GOOGLE_SHEETS_URL);
-                
-                RunOnUiThread(() => 
+
+                RunOnUiThread(() =>
                 {
                     Toast.MakeText(this, "📥 Downloading CSV data...", ToastLength.Short)?.Show();
                 });
@@ -407,20 +407,22 @@ namespace BluePenguinMonitoring
                     }
                 }
 
-                RunOnUiThread(() => 
+                // Save the remote penguin data to internal storage
+                SaveRemotePenguinDataToInternalStorage();
+
+                RunOnUiThread(() =>
                 {
                     Toast.MakeText(this, $"✅ Downloaded {parsedData.Count} rows, {_remotePenguinData.Count} penguin records", ToastLength.Short)?.Show();
                 });
             }
             catch (Exception ex)
             {
-                RunOnUiThread(() => 
+                RunOnUiThread(() =>
                 {
                     Toast.MakeText(this, $"❌ Download failed: {ex.Message}", ToastLength.Long)?.Show();
                 });
             }
         }
-
         private List<CsvRowData> ParseCsvData(string csvContent)
         {
             var result = new List<CsvRowData>();
@@ -539,12 +541,36 @@ namespace BluePenguinMonitoring
             result.Add(currentField.ToString());
             return result;
         }
-
         private void OnDownloadCsvClick(object? sender, EventArgs e)
         {
             _ = Task.Run(async () => await DownloadCsvDataAsync());
         }
+        private void SaveRemotePenguinDataToInternalStorage()
+        {
+            try
+            {
+                var internalPath = FilesDir?.AbsolutePath;
+                if (string.IsNullOrEmpty(internalPath))
+                    return;
 
+                var json = JsonSerializer.Serialize(_remotePenguinData, new JsonSerializerOptions { WriteIndented = true });
+                var filePath = System.IO.Path.Combine(internalPath, REMOTE_BIRD_DATA_FILENAME);
+
+                File.WriteAllText(filePath, json);
+
+                RunOnUiThread(() =>
+                {
+                    Toast.MakeText(this, $"💾 Bird stats saved! ({_remotePenguinData.Count} records)", ToastLength.Short)?.Show();
+                });
+            }
+            catch (Exception ex)
+            {
+                RunOnUiThread(() =>
+                {
+                    Toast.MakeText(this, $"❌ Failed to save bird stats: {ex.Message}", ToastLength.Long)?.Show();
+                });
+            }
+        }
         private void CreateDataRecordingUI()
         {
             var scrollView = new ScrollView(this);
@@ -1058,62 +1084,15 @@ namespace BluePenguinMonitoring
 
         private void ShowConfirmationDialog(string title, string message, (string text, Action action) positiveButton, (string text, Action action) negativeButton)
         {
-            var dialogView = new LinearLayout(this)
-            {
-                Orientation = Android.Widget.Orientation.Vertical
-            };
-            dialogView.SetPadding(30, 30, 30, 30);
-
-            var titleText = new TextView(this)
-            {
-                Text = title,
-                TextSize = 24,
-                Gravity = GravityFlags.Center
-            };
-            titleText.SetTextColor(TEXT_PRIMARY);
-            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            titleParams.SetMargins(0, 0, 0, 24);
-            titleText.LayoutParameters = titleParams;
-            dialogView.AddView(titleText);
-
-            var messageText = new TextView(this)
-            {
-                Text = message,
-                TextSize = 21,
-                Gravity = GravityFlags.Start
-            };
-            messageText.SetTextColor(TEXT_PRIMARY);
-            var messageParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            messageParams.SetMargins(0, 0, 0, 24);
-            messageText.LayoutParameters = messageParams;
-            dialogView.AddView(messageText);
-
             var alertDialog = new AlertDialog.Builder(this)
-                .SetView(dialogView)
+                .SetTitle(title)
+                .SetMessage(message)
                 .SetPositiveButton(positiveButton.text, (s, e) => positiveButton.action())
                 .SetNegativeButton(negativeButton.text, (s, e) => negativeButton.action())
+                .SetCancelable(true)
                 .Create();
 
-            if (alertDialog != null)
-            {
-                alertDialog.ShowEvent += (sender, args) =>
-                {
-                    var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
-                    var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
-
-                    if (positiveBtn != null)
-                    {
-                        positiveBtn.TextSize = 21;
-                    }
-                    if (negativeBtn != null)
-                    {
-                        negativeBtn.TextSize = 21;
-                    }
-                };
-
-                alertDialog.Show();
-            }
+            alertDialog?.Show();
         }
 
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
@@ -1478,51 +1457,20 @@ namespace BluePenguinMonitoring
 
         private void ShowMoveDialog(ScanRecord scanToMove)
         {
-            var dialogView = new LinearLayout(this)
-            {
-                Orientation = Android.Widget.Orientation.Vertical
-            };
-            dialogView.SetPadding(30, 30, 30, 30);
-
-            var titleText = new TextView(this)
-            {
-                Text = $"Move Bird {scanToMove.BirdId}",
-                TextSize = 24,
-                Gravity = GravityFlags.Center
-            };
-            titleText.SetTextColor(TEXT_PRIMARY);
-            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            titleParams.SetMargins(0, 0, 0, 16);
-            titleText.LayoutParameters = titleParams;
-            dialogView.AddView(titleText);
-
-            var instructionText = new TextView(this)
-            {
-                Text = $"Move from Box {_currentBox} to:",
-                TextSize = 18
-            };
-            instructionText.SetTextColor(TEXT_PRIMARY);
-            var instructionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            instructionParams.SetMargins(0, 0, 0, 16);
-            instructionText.LayoutParameters = instructionParams;
-            dialogView.AddView(instructionText);
-
-            var boxNumberInput = new EditText(this)
+            var input = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "",
-                Hint = "Enter box number (1-150)",
-                TextSize = 21
+                Hint = "Enter box number (1-150)"
             };
-            boxNumberInput.SetTextColor(TEXT_PRIMARY);
-            boxNumberInput.SetPadding(16, 16, 16, 16);
-            dialogView.AddView(boxNumberInput);
+            input.SetTextColor(TEXT_PRIMARY);
 
-            var alertDialog = new AlertDialog.Builder(this, Android.Resource.Style.ThemeDeviceDefaultLightDialog)
-                .SetView(dialogView)
+            var alertDialog = new AlertDialog.Builder(this)
+                .SetTitle($"Move Bird {scanToMove.BirdId}")
+                .SetMessage($"Move from Box {_currentBox} to:")
+                .SetView(input)
                 .SetPositiveButton("Move", (s, e) =>
                 {
-                    if (int.TryParse(boxNumberInput.Text, out int targetBox))
+                    if (int.TryParse(input.Text, out int targetBox))
                     {
                         if (targetBox >= 1 && targetBox <= 150)
                         {
@@ -1548,27 +1496,11 @@ namespace BluePenguinMonitoring
                 .SetNegativeButton("Cancel", (s, e) => { })
                 .Create();
 
-            alertDialog.ShowEvent += (sender, args) =>
-            {
-                // Increase button text size by 50%
-                var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
-                var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
-
-                if (positiveBtn != null)
-                {
-                    positiveBtn.TextSize = 21;
-                }
-                if (negativeBtn != null)
-                {
-                    negativeBtn.TextSize = 21;
-                }
-
-                boxNumberInput.RequestFocus();
-                var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
-                inputMethodManager?.ShowSoftInput(boxNumberInput, Android.Views.InputMethods.ShowFlags.Implicit);
-            };
-
-            alertDialog.Show();
+            alertDialog?.Show();
+            
+            input.RequestFocus();
+            var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+            inputMethodManager?.ShowSoftInput(input, Android.Views.InputMethods.ShowFlags.Implicit);
         }
 
         private void MoveScanToBox(ScanRecord scanToMove, int targetBox)
@@ -1628,8 +1560,8 @@ namespace BluePenguinMonitoring
                 if (string.IsNullOrEmpty(internalPath))
                     return;
 
+                // Load main app data
                 var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
-
                 if (File.Exists(filePath))
                 {
                     var json = File.ReadAllText(filePath);
@@ -1642,11 +1574,26 @@ namespace BluePenguinMonitoring
                         Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
                     }
                 }
+
+                // Load remote penguin data
+                var remoteBirdDataPath = System.IO.Path.Combine(internalPath, REMOTE_BIRD_DATA_FILENAME);
+                if (File.Exists(remoteBirdDataPath))
+                {
+                    var remoteBirdJson = File.ReadAllText(remoteBirdDataPath);
+                    var remotePenguinData = JsonSerializer.Deserialize<Dictionary<string, PenguinData>>(remoteBirdJson);
+                    
+                    if (remotePenguinData != null)
+                    {
+                        _remotePenguinData = remotePenguinData;
+                        Toast.MakeText(this, $"🐧 {_remotePenguinData.Count} bird records loaded", ToastLength.Short)?.Show();
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _currentBox = 1;
                 _boxDataStorage = new Dictionary<int, BoxData>();
+                _remotePenguinData = new Dictionary<string, PenguinData>();
                 System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
             }
         }
@@ -1881,39 +1828,21 @@ namespace BluePenguinMonitoring
 
         private void ShowBoxJumpDialog()
         {
-            var dialogView = new LinearLayout(this)
-            {
-                Orientation = Android.Widget.Orientation.Vertical
-            };
-            dialogView.SetPadding(30, 30, 30, 30);
-
-            var instructionText = new TextView(this)
-            {
-                Text = "Enter box number (1-150):",
-                TextSize = 24
-            };
-            instructionText.SetTextColor(TEXT_PRIMARY);
-            var instructionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            instructionParams.SetMargins(0, 0, 0, 16);
-            instructionText.LayoutParameters = instructionParams;
-            dialogView.AddView(instructionText);
-
-            var boxNumberInput = new EditText(this)
+            var input = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassNumber,
                 Text = _currentBox.ToString(),
-                Hint = "Box number",
-                TextSize = 21
+                Hint = "Box number"
             };
-            boxNumberInput.SetTextColor(TEXT_PRIMARY);
-            boxNumberInput.SetPadding(16, 16, 16, 16);
-            dialogView.AddView(boxNumberInput);
+            input.SetTextColor(TEXT_PRIMARY);
 
-            var alertDialog = new AlertDialog.Builder(this, Android.Resource.Style.ThemeDeviceDefaultLightDialog)
-                .SetView(dialogView)
+            var alertDialog = new AlertDialog.Builder(this)
+                .SetTitle("Jump to Box")
+                .SetMessage("Enter box number (1-150):")
+                .SetView(input)
                 .SetPositiveButton("Go", (s, e) =>
                 {
-                    if (int.TryParse(boxNumberInput.Text, out int targetBox))
+                    if (int.TryParse(input.Text, out int targetBox))
                     {
                         if (targetBox >= 1 && targetBox <= 150)
                         {
@@ -1932,28 +1861,13 @@ namespace BluePenguinMonitoring
                 .SetNegativeButton("Cancel", (s, e) => { })
                 .Create();
 
-            alertDialog.ShowEvent += (sender, args) =>
-            {
-                var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
-                var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
+            alertDialog?.Show();
+            
+            input.RequestFocus();
+            input.SelectAll();
 
-                if (positiveBtn != null)
-                {
-                    positiveBtn.TextSize = 21;
-                }
-                if (negativeBtn != null)
-                {
-                    negativeBtn.TextSize = 21;
-                }
-
-                boxNumberInput.RequestFocus();
-                boxNumberInput.SelectAll();
-
-                var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
-                inputMethodManager?.ShowSoftInput(boxNumberInput, Android.Views.InputMethods.ShowFlags.Implicit);
-            };
-
-            alertDialog.Show();
+            var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+            inputMethodManager?.ShowSoftInput(input, Android.Views.InputMethods.ShowFlags.Implicit);
         }
 
         private void JumpToBox(int targetBox)
