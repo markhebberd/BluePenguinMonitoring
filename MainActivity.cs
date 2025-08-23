@@ -72,6 +72,10 @@ namespace BluePenguinMonitoring
         private Button? _clearBoxButton;
         private EditText? _manualScanEditText;
 
+        // Add gesture detection components
+        private GestureDetector? _gestureDetector;
+        private LinearLayout? _dataCard;
+
         // HTTP client for CSV downloads
         private static readonly HttpClient _httpClient = new HttpClient();
         private const string GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/edit?usp=sharing";
@@ -102,7 +106,46 @@ namespace BluePenguinMonitoring
             public string? GateStatus { get; set; } = null; 
             public string Notes { get; set; } = "";
         }
+        private class SwipeGestureDetector : GestureDetector.SimpleOnGestureListener
+        {
+            private readonly MainActivity _activity;
+            private const int SWIPE_THRESHOLD = 100;
+            private const int SWIPE_VELOCITY_THRESHOLD = 100;
 
+            public SwipeGestureDetector(MainActivity activity)
+            {
+                _activity = activity;
+            }
+
+            public override bool OnFling(MotionEvent? e1, MotionEvent e2, float velocityX, float velocityY)
+            {
+                if (e1 == null || e2 == null) return false;
+
+                float diffX = e2.GetX() - e1.GetX();
+                float diffY = e2.GetY() - e1.GetY();
+
+                // Check if it's a horizontal swipe (not vertical)
+                if (Math.Abs(diffX) > Math.Abs(diffY))
+                {
+                    // Check if swipe distance and velocity are sufficient
+                    if (Math.Abs(diffX) > SWIPE_THRESHOLD && Math.Abs(velocityX) > SWIPE_VELOCITY_THRESHOLD)
+                    {
+                        if (diffX > 0)
+                        {
+                            // Swipe right → Previous box
+                            _activity.OnSwipePrevious();
+                        }
+                        else
+                        {
+                            // Swipe left → Next box
+                            _activity.OnSwipeNext();
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
         public class ScanRecord
         {
             public string BirdId { get; set; } = "";
@@ -178,7 +221,29 @@ namespace BluePenguinMonitoring
 
         // Add a field for the data card title so it can be updated dynamically
         private TextView? _dataCardTitle;
+        private void OnSwipePrevious()
+        {
+            if (_currentBox > 1)
+            {
+                NavigateToBox(_currentBox - 1, () => _currentBox > 1);
+            }
+            else
+            {
+                Toast.MakeText(this, "Already at first box", ToastLength.Short)?.Show();
+            }
+        }
 
+        private void OnSwipeNext()
+        {
+            if (_currentBox < 150)
+            {
+                NavigateToBox(_currentBox + 1, () => _currentBox < 150);
+            }
+            else
+            {
+                Toast.MakeText(this, "Already at last box", ToastLength.Short)?.Show();
+            }
+        }
         protected override void OnCreate(Bundle? savedInstanceState)
         {
             base.OnCreate(savedInstanceState);
@@ -761,7 +826,9 @@ namespace BluePenguinMonitoring
             var scrollView = new ScrollView(this);
             scrollView.SetBackgroundColor(BACKGROUND_COLOR);
 
-            scrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
+            // Initialize gesture detector and apply to ScrollView
+            _gestureDetector = new GestureDetector(this, new SwipeGestureDetector(this));
+            scrollView.Touch += OnScrollViewTouch;
 
             var layout = new LinearLayout(this)
             {
@@ -793,7 +860,7 @@ namespace BluePenguinMonitoring
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons - Updated to include Load Data button
+            // Action buttons
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
@@ -818,20 +885,24 @@ namespace BluePenguinMonitoring
             boxNavLayout.LayoutParameters = statusParams;
             headerCard.AddView(boxNavLayout);
 
-            // Data card
-            var dataCard = CreateCard();
+            // Data card (remove gesture detection from here)
+            _dataCard = CreateCard();
+            CreateBoxDataCard(_dataCard);
 
-            // Data entry fields and scanned birds
-            CreateBoxDataCard(dataCard);
-
-            layout.AddView(dataCard);
-
+            layout.AddView(_dataCard);
             scrollView.AddView(layout);
             SetContentView(scrollView);
 
             scrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
         }
-
+        private void OnScrollViewTouch(object? sender, View.TouchEventArgs e)
+        {
+            if (_gestureDetector != null && e.Event != null)
+            {
+                _gestureDetector.OnTouchEvent(e.Event);
+            }
+            e.Handled = false; // Allow scrolling to continue
+        }
         private class ViewInsetsListener : Java.Lang.Object, View.IOnApplyWindowInsetsListener
         {
             public WindowInsets OnApplyWindowInsets(View v, WindowInsets insets)
@@ -2162,12 +2233,17 @@ namespace BluePenguinMonitoring
 
             Toast.MakeText(this, $"📦 Jumped to Box {_currentBox}", ToastLength.Short)?.Show();
         }
-
         protected override void OnDestroy()
         {
             _bluetoothManager?.Dispose();
 
-            var editTexts = new []
+            // Clean up gesture detector
+            if (_dataCard != null)
+            {
+                _dataCard.Touch -= OnScrollViewTouch;
+            }
+
+            var editTexts = new[]
             {
                 (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false), (_manualScanEditText, false)
             };
@@ -2197,7 +2273,6 @@ namespace BluePenguinMonitoring
 
             base.OnDestroy();
         }
-
         private void OnManualAddClick(object? sender, EventArgs e)
         {
             if (_manualScanEditText == null) return;
