@@ -1955,6 +1955,66 @@ namespace BluePenguinMonitoring
 
         private void SaveAllData()
         {
+            ShowSaveFilenameDialog();
+        }
+
+        private void ShowSaveFilenameDialog()
+        {
+            var now = DateTime.Now;
+            var defaultFileName = $"PenguinMonitoring {now:yyMMdd HHmmss}";
+
+            var input = new EditText(this)
+            {
+                InputType = Android.Text.InputTypes.ClassText,
+                Text = defaultFileName,
+                Hint = "Enter filename (without .json extension)"
+            };
+            input.SetTextColor(TEXT_PRIMARY);
+            input.SetPadding(16, 16, 16, 16);
+            input.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+
+            var alertDialog = new AlertDialog.Builder(this)
+                .SetTitle("Save Data File")
+                .SetMessage("Enter a filename for your data export:")
+                .SetView(input)
+                .SetPositiveButton("Save", (s, e) =>
+                {
+                    var fileName = input.Text?.Trim();
+                    if (string.IsNullOrEmpty(fileName))
+                    {
+                        Toast.MakeText(this, "Please enter a filename", ToastLength.Short)?.Show();
+                        return;
+                    }
+
+                    // Clean filename - remove invalid characters
+                    var invalidChars = System.IO.Path.GetInvalidFileNameChars();
+                    foreach (var invalidChar in invalidChars)
+                    {
+                        fileName = fileName.Replace(invalidChar, '_');
+                    }
+
+                    // Ensure .json extension
+                    if (!fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fileName += ".json";
+                    }
+
+                    SaveDataWithFilename(fileName);
+                })
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Create();
+
+            alertDialog?.Show();
+            
+            input.RequestFocus();
+            input.SelectAll();
+
+            var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+            inputMethodManager?.ShowSoftInput(input, Android.Views.InputMethods.ShowFlags.Implicit);
+        }
+
+        private void SaveDataWithFilename(string fileName)
+        {
             try
             {
                 var exportData = new
@@ -1979,10 +2039,33 @@ namespace BluePenguinMonitoring
                     return;
                 }
 
-                var now = DateTime.Now;
-                var fileName = $"PenguinMonitoring {now:yyMMdd HHmmss}.json";
                 var filePath = System.IO.Path.Combine(downloadsPath, fileName);
 
+                // Check if file already exists
+                if (File.Exists(filePath))
+                {
+                    ShowConfirmationDialog(
+                        "File Exists",
+                        $"A file named '{fileName}' already exists. Do you want to overwrite it?",
+                        ("Overwrite", () => SaveFileToPath(filePath, json, fileName)),
+                        ("Cancel", () => ShowSaveFilenameDialog()) // Go back to filename dialog
+                    );
+                }
+                else
+                {
+                    SaveFileToPath(filePath, json, fileName);
+                }
+            }
+            catch (Exception ex)
+            {
+                Toast.MakeText(this, $"❌ Export failed: {ex.Message}", ToastLength.Long)?.Show();
+            }
+        }
+
+        private void SaveFileToPath(string filePath, string json, string fileName)
+        {
+            try
+            {
                 File.WriteAllText(filePath, json);
 
                 var totalBoxes = _boxDataStorage.Count;
@@ -1992,7 +2075,7 @@ namespace BluePenguinMonitoring
             }
             catch (Exception ex)
             {
-                Toast.MakeText(this, $"❌ Export failed: {ex.Message}", ToastLength.Long)?.Show();
+                Toast.MakeText(this, $"❌ Failed to save file: {ex.Message}", ToastLength.Long)?.Show();
             }
         }
 
