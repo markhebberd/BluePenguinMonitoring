@@ -17,11 +17,12 @@ using System.Text.Json;
 namespace BluePenguinMonitoring
 {
     [Activity(
-            Label = "@string/app_name",
-            MainLauncher = true,
-            Theme = "@android:style/Theme.NoTitleBar",
-            ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait
-        )]
+        Label = "@string/app_name",
+        MainLauncher = true,
+        Theme = "@android:style/Theme.NoTitleBar",
+        ScreenOrientation = Android.Content.PM.ScreenOrientation.Portrait,
+        WindowSoftInputMode = SoftInput.AdjustResize
+    )]
     public class MainActivity : Activity, ILocationListener
     {
         // Modern color palette
@@ -35,6 +36,10 @@ namespace BluePenguinMonitoring
         private static readonly Color CARD_COLOR = Color.White;
         private static readonly Color TEXT_PRIMARY = Color.ParseColor("#212121");
         private static readonly Color TEXT_SECONDARY = Color.ParseColor("#757575");
+        
+        // Add alternating row colors for bird scans
+        private static readonly Color SCAN_ROW_EVEN = Color.ParseColor("#FAFAFA");
+        private static readonly Color SCAN_ROW_ODD = Color.ParseColor("#F5F5F5");
 
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
@@ -240,7 +245,7 @@ namespace BluePenguinMonitoring
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons
+            // Action buttons   
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
@@ -273,12 +278,15 @@ namespace BluePenguinMonitoring
             public WindowInsets OnApplyWindowInsets(View v, WindowInsets insets)
             {
                 int topInset = insets.SystemWindowInsetTop;
+                int bottomInset = insets.SystemWindowInsetBottom;
+                
                 if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.P && insets.DisplayCutout != null)
                 {
                     topInset = Math.Max(topInset, insets.DisplayCutout.SafeInsetTop);
                 }
 
-                v.SetPadding(20, topInset + 20, 20, 20);
+                // Apply padding to avoid content being hidden behind system UI
+                v.SetPadding(20, topInset + 20, 20, bottomInset + 20);
 
                 return insets;
             }
@@ -416,7 +424,7 @@ namespace BluePenguinMonitoring
             _dataCardTitle.LayoutParameters = dataTitleParams;
             layout.AddView(_dataCardTitle);
 
-            // Scanned birds container - changed from TextView to LinearLayout
+            // Scanned birds container - no nested ScrollView needed
             _scannedIdsContainer = new LinearLayout(this)
             {
                 Orientation = Orientation.Vertical
@@ -929,8 +937,13 @@ namespace BluePenguinMonitoring
             };
 
             var layoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            layoutParams.SetMargins(0, 4, 0, 4);
+            layoutParams.SetMargins(0, 2, 0, 2);
             scanLayout.LayoutParameters = layoutParams;
+
+            // Add alternating background colors and padding for better visual separation
+            var backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+            scanLayout.Background = CreateRoundedBackground(backgroundColor, 4);
+            scanLayout.SetPadding(12, 8, 12, 8);
 
             // Scan info text
             var timeStr = scan.Timestamp.ToString("MMM dd, HH:mm");
@@ -944,6 +957,27 @@ namespace BluePenguinMonitoring
             scanText.LayoutParameters = textParams;
             scanLayout.AddView(scanText);
 
+            // Move button
+            var moveButton = new Button(this)
+            {
+                Text = "Move",
+                TextSize = 12
+            };
+            moveButton.SetTextColor(Color.White);
+            moveButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            moveButton.SetPadding(12, 8, 12, 8);
+            moveButton.Background = CreateRoundedBackground(PRIMARY_COLOR, 6);
+            moveButton.SetAllCaps(false);
+
+            var moveButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            moveButtonParams.SetMargins(8, 0, 4, 0);
+            moveButton.LayoutParameters = moveButtonParams;
+
+            // Set up move functionality
+            moveButton.Click += (sender, e) => OnMoveScanClick(scan);
+
+            scanLayout.AddView(moveButton);
+
             // Delete button
             var deleteButton = new Button(this)
             {
@@ -956,9 +990,9 @@ namespace BluePenguinMonitoring
             deleteButton.Background = CreateRoundedBackground(DANGER_COLOR, 6);
             deleteButton.SetAllCaps(false);
 
-            var buttonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            buttonParams.SetMargins(8, 0, 0, 0);
-            deleteButton.LayoutParameters = buttonParams;
+            var deleteButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            deleteButtonParams.SetMargins(4, 0, 0, 0);
+            deleteButton.LayoutParameters = deleteButtonParams;
 
             // Set up delete functionality
             deleteButton.Click += (sender, e) => OnDeleteScanClick(scan);
@@ -998,35 +1032,183 @@ namespace BluePenguinMonitoring
             );
         }
 
-        private void AddScannedId(string fullEid)
+        private void OnMoveScanClick(ScanRecord scanToMove)
         {
-            var cleanEid = new string(fullEid.Where(char.IsLetterOrDigit).ToArray());
-            var shortId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
+            ShowMoveDialog(scanToMove);
+        }
 
-            if (!_boxDataStorage.ContainsKey(_currentBox))
-                _boxDataStorage[_currentBox] = new BoxData();
-
-            var boxData = _boxDataStorage[_currentBox];
-
-            if (!boxData.ScannedIds.Any(s => s.BirdId == shortId))
+        private void ShowMoveDialog(ScanRecord scanToMove)
+        {
+            var dialogView = new LinearLayout(this)
             {
-                var scanRecord = new ScanRecord
-                {
-                    BirdId = shortId,
-                    Timestamp = DateTime.Now,
-                    Latitude = _currentLocation?.Latitude ?? 0,
-                    Longitude = _currentLocation?.Longitude ?? 0,
-                    Accuracy = _currentLocation?.Accuracy ?? -1
-                };
+                Orientation = Orientation.Vertical
+            };
+            dialogView.SetPadding(30, 30, 30, 30);
 
-                boxData.ScannedIds.Add(scanRecord);
-                SaveDataToInternalStorage();
+            var titleText = new TextView(this)
+            {
+                Text = $"Move Bird {scanToMove.BirdId}",
+                TextSize = 24,
+                Gravity = GravityFlags.Center
+            };
+            titleText.SetTextColor(TEXT_PRIMARY);
+            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            titleParams.SetMargins(0, 0, 0, 16);
+            titleText.LayoutParameters = titleParams;
+            dialogView.AddView(titleText);
 
-                RunOnUiThread(() =>
+            var instructionText = new TextView(this)
+            {
+                Text = $"Move from Box {_currentBox} to:",
+                TextSize = 18
+            };
+            instructionText.SetTextColor(TEXT_PRIMARY);
+            var instructionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            instructionParams.SetMargins(0, 0, 0, 16);
+            instructionText.LayoutParameters = instructionParams;
+            dialogView.AddView(instructionText);
+
+            var boxNumberInput = new EditText(this)
+            {
+                InputType = Android.Text.InputTypes.ClassNumber,
+                Text = "",
+                Hint = "Enter box number (1-150)",
+                TextSize = 21
+            };
+            boxNumberInput.SetTextColor(TEXT_PRIMARY);
+            boxNumberInput.SetPadding(16, 16, 16, 16);
+            dialogView.AddView(boxNumberInput);
+
+            var alertDialog = new AlertDialog.Builder(this, Android.Resource.Style.ThemeDeviceDefaultLightDialog)
+                .SetView(dialogView)
+                .SetPositiveButton("Move", (s, e) =>
                 {
-                    UpdateScannedIdsDisplay(boxData.ScannedIds);
-                    Toast.MakeText(this, $"🐧 Bird {shortId} added to Box {_currentBox}", ToastLength.Short)?.Show();
-                });
+                    if (int.TryParse(boxNumberInput.Text, out int targetBox))
+                    {
+                        if (targetBox >= 1 && targetBox <= 150)
+                        {
+                            if (targetBox == _currentBox)
+                            {
+                                Toast.MakeText(this, "Bird is already in this box", ToastLength.Short)?.Show();
+                            }
+                            else
+                            {
+                                MoveScanToBox(scanToMove, targetBox);
+                            }
+                        }
+                        else
+                        {
+                            Toast.MakeText(this, "Box number must be between 1 and 150", ToastLength.Short)?.Show();
+                        }
+                    }
+                    else
+                    {
+                        Toast.MakeText(this, "Please enter a valid box number", ToastLength.Short)?.Show();
+                    }
+                })
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Create();
+
+            alertDialog.ShowEvent += (sender, args) =>
+            {
+                // Increase button text size by 50%
+                var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
+                var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
+
+                if (positiveBtn != null)
+                {
+                    positiveBtn.TextSize = 21;
+                }
+                if (negativeBtn != null)
+                {
+                    negativeBtn.TextSize = 21;
+                }
+
+                boxNumberInput.RequestFocus();
+                var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                inputMethodManager?.ShowSoftInput(boxNumberInput, Android.Views.InputMethods.ShowFlags.Implicit);
+            };
+
+            alertDialog.Show();
+        }
+
+        private void MoveScanToBox(ScanRecord scanToMove, int targetBox)
+        {
+            ShowConfirmationDialog(
+                "Move Bird Scan",
+                $"Move bird {scanToMove.BirdId} from Box {_currentBox} to Box {targetBox}?",
+                ("Yes, Move", () =>
+                {
+                    // Remove from current box
+                    if (_boxDataStorage.ContainsKey(_currentBox))
+                    {
+                        var currentBoxData = _boxDataStorage[_currentBox];
+                        var scanToRemove = currentBoxData.ScannedIds.FirstOrDefault(s =>
+                            s.BirdId == scanToMove.BirdId &&
+                            s.Timestamp == scanToMove.Timestamp);
+
+                        if (scanToRemove != null)
+                        {
+                            currentBoxData.ScannedIds.Remove(scanToRemove);
+
+                            // Add to target box
+                            if (!_boxDataStorage.ContainsKey(targetBox))
+                                _boxDataStorage[targetBox] = new BoxData();
+
+                            var targetBoxData = _boxDataStorage[targetBox];
+                            
+                            // Check if bird already exists in target box
+                            if (!targetBoxData.ScannedIds.Any(s => s.BirdId == scanToMove.BirdId))
+                            {
+                                targetBoxData.ScannedIds.Add(scanToMove);
+                                
+                                SaveDataToInternalStorage();
+                                UpdateScannedIdsDisplay(currentBoxData.ScannedIds);
+
+                                Toast.MakeText(this, $"🔄 Bird {scanToMove.BirdId} moved from Box {_currentBox} to Box {targetBox}", ToastLength.Long)?.Show();
+                            }
+                            else
+                            {
+                                // Restore to current box since target already has this bird
+                                currentBoxData.ScannedIds.Add(scanToRemove);
+                                Toast.MakeText(this, $"❌ Bird {scanToMove.BirdId} already exists in Box {targetBox}", ToastLength.Long)?.Show();
+                            }
+                        }
+                    }
+                }),
+                ("Cancel", () => { })
+            );
+        }
+
+        private void LoadDataFromInternalStorage()
+        {
+            try
+            {
+                var internalPath = FilesDir?.AbsolutePath;
+                if (string.IsNullOrEmpty(internalPath))
+                    return;
+
+                var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
+
+                if (File.Exists(filePath))
+                {
+                    var json = File.ReadAllText(filePath);
+                    var appState = JsonSerializer.Deserialize<AppDataState>(json);
+
+                    if (appState != null)
+                    {
+                        _currentBox = appState.CurrentBox;
+                        _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
+                        Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _currentBox = 1;
+                _boxDataStorage = new Dictionary<int, BoxData>();
+                System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
             }
         }
 
@@ -1056,38 +1238,6 @@ namespace BluePenguinMonitoring
             }
         }
 
-        private void LoadDataFromInternalStorage()
-        {
-            try
-            {
-                var internalPath = FilesDir?.AbsolutePath;
-                if (string.IsNullOrEmpty(internalPath))
-                    return; // This might not be handling the case properly
-
-                var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
-
-                if (File.Exists(filePath))
-                {
-                    var json = File.ReadAllText(filePath);
-                    var appState = JsonSerializer.Deserialize<AppDataState>(json);
-
-                    if (appState != null)
-                    {
-                        _currentBox = appState.CurrentBox;
-                        _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
-                        // Toast might fail if UI isn't ready yet
-                        Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // The initialization in catch block might not be sufficient
-                _currentBox = 1;
-                _boxDataStorage = new Dictionary<int, BoxData>();
-            }
-        }
-
         private void ClearInternalStorageData()
         {
             try
@@ -1105,6 +1255,38 @@ namespace BluePenguinMonitoring
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to clear auto-save file: {ex.Message}");
+            }
+        }
+
+        private void AddScannedId(string fullEid)
+        {
+            var cleanEid = new string(fullEid.Where(char.IsLetterOrDigit).ToArray());
+            var shortId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
+
+            if (!_boxDataStorage.ContainsKey(_currentBox))
+                _boxDataStorage[_currentBox] = new BoxData();
+
+            var boxData = _boxDataStorage[_currentBox];
+
+            if (!boxData.ScannedIds.Any(s => s.BirdId == shortId))
+            {
+                var scanRecord = new ScanRecord
+                {
+                    BirdId = shortId,
+                    Timestamp = DateTime.Now,
+                    Latitude = _currentLocation?.Latitude ?? 0,
+                    Longitude = _currentLocation?.Longitude ?? 0,
+                    Accuracy = _currentLocation?.Accuracy ?? -1
+                };
+
+                boxData.ScannedIds.Add(scanRecord);
+                SaveDataToInternalStorage();
+
+                RunOnUiThread(() =>
+                {
+                    UpdateScannedIdsDisplay(boxData.ScannedIds);
+                    Toast.MakeText(this, $"🐧 Bird {shortId} added to Box {_currentBox}", ToastLength.Short)?.Show();
+                });
             }
         }
 
@@ -1187,7 +1369,7 @@ namespace BluePenguinMonitoring
             var instructionText = new TextView(this)
             {
                 Text = "Enter box number (1-150):",
-                TextSize = 24 // Increased from 16 (50% bigger)
+                TextSize = 24
             };
             instructionText.SetTextColor(TEXT_PRIMARY);
             var instructionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -1200,7 +1382,7 @@ namespace BluePenguinMonitoring
                 InputType = Android.Text.InputTypes.ClassNumber,
                 Text = _currentBox.ToString(),
                 Hint = "Box number",
-                TextSize = 21 // Increased from 14 (50% bigger)
+                TextSize = 21
             };
             boxNumberInput.SetTextColor(TEXT_PRIMARY);
             boxNumberInput.SetPadding(16, 16, 16, 16);
@@ -1231,17 +1413,16 @@ namespace BluePenguinMonitoring
 
             alertDialog.ShowEvent += (sender, args) =>
             {
-                // Increase button text size by 50%
                 var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
                 var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
 
                 if (positiveBtn != null)
                 {
-                    positiveBtn.TextSize = 21; // Increased from default 14 (50% bigger)
+                    positiveBtn.TextSize = 21;
                 }
                 if (negativeBtn != null)
                 {
-                    negativeBtn.TextSize = 21; // Increased from default 14 (50% bigger)
+                    negativeBtn.TextSize = 21;
                 }
 
                 boxNumberInput.RequestFocus();
@@ -1273,7 +1454,7 @@ namespace BluePenguinMonitoring
         {
             _bluetoothManager?.Dispose();
 
-            var editTexts = new[]
+            var editTexts = new []
             {
                 (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false)
             };
