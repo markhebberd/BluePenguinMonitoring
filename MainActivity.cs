@@ -13,6 +13,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Text;
 
 namespace BluePenguinMonitoring
 {
@@ -40,6 +43,10 @@ namespace BluePenguinMonitoring
         // Add alternating row colors for bird scans
         private static readonly Color SCAN_ROW_EVEN = Color.ParseColor("#FAFAFA");
         private static readonly Color SCAN_ROW_ODD = Color.ParseColor("#F5F5F5");
+        
+        // Add sex-based background colors
+        private static readonly Color FEMALE_BACKGROUND = Color.ParseColor("#FFE4E1"); // Light pink
+        private static readonly Color MALE_BACKGROUND = Color.ParseColor("#E6F3FF");   // Light blue
 
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
@@ -63,15 +70,22 @@ namespace BluePenguinMonitoring
         private Button? _clearBoxButton;
         private EditText? _manualScanEditText;
 
+        // HTTP client for CSV downloads
+        private static readonly HttpClient _httpClient = new HttpClient();
+        private const string GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/edit?usp=sharing";
+
         // Data storage
         private Dictionary<int, BoxData> _boxDataStorage = new Dictionary<int, BoxData>();
+        private List<CsvRowData> _downloadedCsvData = new List<CsvRowData>();
+        private Dictionary<string, PenguinData> _remotePenguinData = new Dictionary<string, PenguinData>();
+
         private int _currentBox = 1;
         private const string AUTO_SAVE_FILENAME = "penguin_data_autosave.json";
 
         // High value confirmation tracking - reset on each entry
         private bool _isProcessingConfirmation = false;
 
-        // Data model classes remain the same
+        // Data model classes
         public class BoxData
         {
             public List<ScanRecord> ScannedIds { get; set; } = new List<ScanRecord>();
@@ -96,6 +110,63 @@ namespace BluePenguinMonitoring
             public int CurrentBox { get; set; } = 1;
             public DateTime LastSaved { get; set; }
             public Dictionary<int, BoxData> BoxData { get; set; } = new Dictionary<int, BoxData>();
+        }
+
+        public class CsvRowData
+        {
+            public string Number { get; set; } = "";
+            public string ScannedId { get; set; } = "";
+            public string ChipDate { get; set; } = "";
+            public string Sex { get; set; } = "";
+            public string VidForScanner { get; set; } = "";
+            public string PlusBoxes { get; set; } = "";
+            public string ChipBox { get; set; } = "";
+            public string BreedBox2021 { get; set; } = "";
+            public string BreedBox2022 { get; set; } = "";
+            public string BreedBox2023 { get; set; } = "";
+            public string BreedBox2024 { get; set; } = "";
+            public string BreedBox2025 { get; set; } = "";
+            public string LastKnownLifeStage { get; set; } = "";
+            public string NestSuccess2021 { get; set; } = "";
+            public string ReClutch21 { get; set; } = "";
+            public string NestSuccess2022 { get; set; } = "";
+            public string ReClutch22 { get; set; } = "";
+            public string NestSuccess2023 { get; set; } = "";
+            public string ReClutch23 { get; set; } = "";
+            public string NestSuccess2024 { get; set; } = "";
+            public string ReClutch24 { get; set; } = "";
+            public string ChipBy { get; set; } = "";
+            public string ChipAs { get; set; } = "";
+            public string ChipOk { get; set; } = "";
+            public string ChipWeight { get; set; } = "";
+            public string FlipperLength { get; set; } = "";
+            public string Persistence { get; set; } = "";
+            public string AlarmsScanner { get; set; } = "";
+            public string WasSingle { get; set; } = "";
+            public string ChickSizeSex { get; set; } = "";
+            public string ChickReturnDate { get; set; } = "";
+            public string ReChip { get; set; } = "";
+            public string ReChipBy { get; set; } = "";
+            public string ActiveChip2 { get; set; } = "";
+            public string RechipDate { get; set; } = "";
+            public string FullIso15Digits { get; set; } = "";
+            public string Solo { get; set; } = "";
+            public string Kommentar { get; set; } = "";
+        }
+
+        public enum LifeStage
+        {
+            Adult,
+            Chick,
+            Returnee
+        }
+
+        public class PenguinData
+        {
+            public string ScannedId { get; set; } = "";
+            public LifeStage LastKnownLifeStage { get; set; }
+            public string Sex { get; set; } = "";
+            public string VidForScanner { get; set; } = "";
         }
 
         // Add a field for the data card title so it can be updated dynamically
@@ -136,10 +207,14 @@ namespace BluePenguinMonitoring
             permissions.AddRange(new[]
             {
                 Android.Manifest.Permission.AccessFineLocation,
-                Android.Manifest.Permission.AccessCoarseLocation
+                Android.Manifest.Permission.AccessCoarseLocation,
+                Android.Manifest.Permission.Internet // Add internet permission for CSV download
             });
 
-            RequestPermissions(permissions.ToArray(), 1);
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
+            {
+                RequestPermissions(permissions.ToArray(), 1);
+            }
         }
 
         private void InitializeGPS()
@@ -165,7 +240,7 @@ namespace BluePenguinMonitoring
             _bluetoothManager = new BluetoothManager();
             _bluetoothManager.StatusChanged += OnBluetoothStatusChanged;
             _bluetoothManager.EidDataReceived += OnEidDataReceived;
-            _bluetoothManager.StartConnectionAsync();
+            _ = _bluetoothManager.StartConnectionAsync();
         }
 
         private void OnBluetoothStatusChanged(string status)
@@ -178,6 +253,7 @@ namespace BluePenguinMonitoring
             AddScannedId(eidData);
         }
 
+        // ILocationListener implementation
         public void OnLocationChanged(Location location)
         {
             _currentLocation = location;
@@ -185,9 +261,20 @@ namespace BluePenguinMonitoring
             UpdateStatusText();
         }
 
-        public void OnStatusChanged(string? provider, Availability status, Bundle? extras) { }
-        public void OnProviderEnabled(string provider) { }
-        public void OnProviderDisabled(string provider) { }
+        public void OnProviderDisabled(string provider)
+        {
+            // Handle provider disabled
+        }
+
+        public void OnProviderEnabled(string provider)
+        {
+            // Handle provider enabled
+        }
+
+        public void OnStatusChanged(string? provider, Availability status, Bundle? extras)
+        {
+            // Handle status change
+        }
 
         private void UpdateStatusText(string? bluetoothStatus = null)
         {
@@ -209,6 +296,223 @@ namespace BluePenguinMonitoring
                         _statusText.SetTextColor(TEXT_SECONDARY);
                 }
             });
+        }
+
+        private string ConvertToGoogleSheetsCsvUrl(string shareUrl)
+        {
+            // Extract the spreadsheet ID from the sharing URL
+            var uri = new Uri(shareUrl);
+            var pathSegments = uri.AbsolutePath.Split('/');
+            var spreadsheetId = "";
+            
+            for (int i = 0; i < pathSegments.Length; i++)
+            {
+                if (pathSegments[i] == "d" && i + 1 < pathSegments.Length)
+                {
+                    spreadsheetId = pathSegments[i + 1];
+                    break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(spreadsheetId))
+            {
+                throw new ArgumentException("Could not extract spreadsheet ID from URL");
+            }
+
+            // Return the CSV export URL
+            return $"https://docs.google.com/spreadsheets/d/{spreadsheetId}/export?format=csv";
+        }
+
+        private async Task DownloadCsvDataAsync()
+        {
+            try
+            {
+                var csvUrl = ConvertToGoogleSheetsCsvUrl(GOOGLE_SHEETS_URL);
+                
+                RunOnUiThread(() => 
+                {
+                    Toast.MakeText(this, "📥 Downloading CSV data...", ToastLength.Short)?.Show();
+                });
+
+                var response = await _httpClient.GetAsync(csvUrl);
+                response.EnsureSuccessStatusCode();
+
+                var csvContent = await response.Content.ReadAsStringAsync();
+                var parsedData = ParseCsvData(csvContent);
+
+                _downloadedCsvData = parsedData;
+
+                // Populate the penguin data dictionary
+                _remotePenguinData.Clear();
+                foreach (var row in parsedData)
+                {
+                    if (!string.IsNullOrEmpty(row.ScannedId) && row.ScannedId.Length >= 8)
+                    {
+                        // Extract the 8-digit ID (take last 8 characters to match scanning behavior)
+                        var cleanId = new string(row.ScannedId.Where(char.IsLetterOrDigit).ToArray());
+                        var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
+
+                        if (eightDigitId.Length == 8)
+                        {
+                            // Parse life stage
+                            var lifeStage = LifeStage.Adult; // Default
+                            if (!string.IsNullOrEmpty(row.LastKnownLifeStage))
+                            {
+                                if (Enum.TryParse<LifeStage>(row.LastKnownLifeStage, true, out var parsedLifeStage))
+                                {
+                                    lifeStage = parsedLifeStage;
+                                }
+                            }
+
+                            var penguinData = new PenguinData
+                            {
+                                ScannedId = eightDigitId,
+                                LastKnownLifeStage = lifeStage,
+                                Sex = row.Sex ?? "",
+                                VidForScanner = row.VidForScanner ?? ""
+                            };
+
+                            _remotePenguinData[eightDigitId] = penguinData;
+                        }
+                    }
+                }
+
+                RunOnUiThread(() => 
+                {
+                    Toast.MakeText(this, $"✅ Downloaded {parsedData.Count} rows, {_remotePenguinData.Count} penguin records", ToastLength.Short)?.Show();
+                });
+            }
+            catch (Exception ex)
+            {
+                RunOnUiThread(() => 
+                {
+                    Toast.MakeText(this, $"❌ Download failed: {ex.Message}", ToastLength.Long)?.Show();
+                });
+            }
+        }
+
+        private List<CsvRowData> ParseCsvData(string csvContent)
+        {
+            var result = new List<CsvRowData>();
+
+            try
+            {
+                var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+                if (lines.Length <= 1)
+                {
+                    return result; // No data rows
+                }
+
+                // Skip header row (first line)
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var line = lines[i].Trim();
+                    if (string.IsNullOrEmpty(line))
+                        continue;
+
+                    var columns = ParseCsvLine(line);
+
+                    // Ensure we have enough columns (should have 36 based on header)
+                    while (columns.Count < 36)
+                    {
+                        columns.Add("");
+                    }
+
+                    var csvRow = new CsvRowData
+                    {
+                        Number = columns[0],
+                        ScannedId = columns[1],
+                        ChipDate = columns[2],
+                        Sex = columns[3],
+                        VidForScanner = columns[4],
+                        PlusBoxes = columns[5],
+                        ChipBox = columns[6],
+                        BreedBox2021 = columns[7],
+                        BreedBox2022 = columns[8],
+                        BreedBox2023 = columns[9],
+                        BreedBox2024 = columns[10],
+                        BreedBox2025 = columns[11],
+                        LastKnownLifeStage = columns[12],
+                        NestSuccess2021 = columns[13],
+                        ReClutch21 = columns[14],
+                        NestSuccess2022 = columns[15],
+                        ReClutch22 = columns[16],
+                        NestSuccess2023 = columns[17],
+                        ReClutch23 = columns[18],
+                        NestSuccess2024 = columns[19],
+                        ReClutch24 = columns[20],
+                        ChipBy = columns[21],
+                        ChipAs = columns[22],
+                        ChipOk = columns[23],
+                        ChipWeight = columns[24],
+                        FlipperLength = columns[25],
+                        Persistence = columns[26],
+                        AlarmsScanner = columns[27],
+                        WasSingle = columns[28],
+                        ChickSizeSex = columns[29],
+                        ChickReturnDate = columns[30],
+                        ReChip = columns[31],
+                        ReChipBy = columns[32],
+                        ActiveChip2 = columns[33],
+                        RechipDate = columns[34],
+                        FullIso15Digits = columns[35],
+                        Solo = columns.Count > 36 ? columns[36] : "",
+                        Kommentar = columns.Count > 37 ? columns[37] : ""
+                    };
+
+                    result.Add(csvRow);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"CSV parsing error: {ex.Message}");
+            }
+
+            return result;
+        }
+
+        private List<string> ParseCsvLine(string line)
+        {
+            var result = new List<string>();
+            var currentField = new StringBuilder();
+            var inQuotes = false;
+
+            for (int i = 0; i < line.Length; i++)
+            {
+                var c = line[i];
+
+                if (c == '"')
+                {
+                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                    {
+                        // Escaped quote
+                        currentField.Append('"');
+                        i++; // Skip next quote
+                    }
+                    else
+                    {
+                        inQuotes = !inQuotes;
+                    }
+                }
+                else if (c == ',' && !inQuotes)
+                {
+                    result.Add(currentField.ToString());
+                    currentField.Clear();
+                }
+                else
+                {
+                    currentField.Append(c);
+                }
+            }
+
+            result.Add(currentField.ToString());
+            return result;
+        }
+
+        private void OnDownloadCsvClick(object? sender, EventArgs e)
+        {
+            _ = Task.Run(async () => await DownloadCsvDataAsync());
         }
 
         private void CreateDataRecordingUI()
@@ -248,7 +552,7 @@ namespace BluePenguinMonitoring
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons   
+            // Action buttons - Updated to include Download CSV button
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
@@ -256,6 +560,15 @@ namespace BluePenguinMonitoring
             );
             topButtonLayout.LayoutParameters = statusParams;
             headerCard.AddView(topButtonLayout);
+
+            // Add CSV download button
+            var csvButtonLayout = CreateStyledButtonLayout(
+                ("Download CSV", OnDownloadCsvClick, PRIMARY_DARK)
+            );
+            var csvButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            csvButtonParams.SetMargins(0, 8, 0, 0);
+            csvButtonLayout.LayoutParameters = csvButtonParams;
+            headerCard.AddView(csvButtonLayout);
 
             // Navigation card
             var boxNavLayout = CreateNavigationLayout();
@@ -732,7 +1045,7 @@ namespace BluePenguinMonitoring
             var titleText = new TextView(this)
             {
                 Text = title,
-                TextSize = 24, // Increased from default (50% bigger)
+                TextSize = 24,
                 Gravity = GravityFlags.Center
             };
             titleText.SetTextColor(TEXT_PRIMARY);
@@ -745,7 +1058,7 @@ namespace BluePenguinMonitoring
             var messageText = new TextView(this)
             {
                 Text = message,
-                TextSize = 21, // Increased from default 14 (50% bigger)
+                TextSize = 21,
                 Gravity = GravityFlags.Start
             };
             messageText.SetTextColor(TEXT_PRIMARY);
@@ -754,29 +1067,31 @@ namespace BluePenguinMonitoring
             messageText.LayoutParameters = messageParams;
             dialogView.AddView(messageText);
 
-            var alertDialog = new AlertDialog.Builder(this, Android.Resource.Style.ThemeDeviceDefaultLightDialog)
+            var alertDialog = new AlertDialog.Builder(this)
                 .SetView(dialogView)
                 .SetPositiveButton(positiveButton.text, (s, e) => positiveButton.action())
                 .SetNegativeButton(negativeButton.text, (s, e) => negativeButton.action())
                 .Create();
 
-            alertDialog.ShowEvent += (sender, args) =>
+            if (alertDialog != null)
             {
-                // Increase button text size by 50%
-                var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
-                var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
-
-                if (positiveBtn != null)
+                alertDialog.ShowEvent += (sender, args) =>
                 {
-                    positiveBtn.TextSize = 21; // Increased from default 14 (50% bigger)
-                }
-                if (negativeBtn != null)
-                {
-                    negativeBtn.TextSize = 21; // Increased from default 14 (50% bigger)
-                }
-            };
+                    var positiveBtn = alertDialog.GetButton((int)DialogButtonType.Positive);
+                    var negativeBtn = alertDialog.GetButton((int)DialogButtonType.Negative);
 
-            alertDialog?.Show();
+                    if (positiveBtn != null)
+                    {
+                        positiveBtn.TextSize = 21;
+                    }
+                    if (negativeBtn != null)
+                    {
+                        negativeBtn.TextSize = 21;
+                    }
+                };
+
+                alertDialog.Show();
+            }
         }
 
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
@@ -1015,16 +1330,43 @@ namespace BluePenguinMonitoring
             layoutParams.SetMargins(0, 2, 0, 2);
             scanLayout.LayoutParameters = layoutParams;
 
-            // Add alternating background colors and padding for better visual separation
-            var backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+            // Determine background color based on penguin sex data
+            Color backgroundColor;
+            string additionalInfo = "";
+            
+            if (_remotePenguinData.TryGetValue(scan.BirdId, out var penguinData))
+            {
+                // Penguin found in remote data
+                if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
+                {
+                    backgroundColor = FEMALE_BACKGROUND;
+                    additionalInfo = " ♀";
+                }
+                else if (penguinData.Sex.Equals("M", StringComparison.OrdinalIgnoreCase))
+                {
+                    backgroundColor = MALE_BACKGROUND;
+                    additionalInfo = " ♂";
+                }
+                else
+                {
+                    // Unknown sex, use alternating colors
+                    backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+                }
+            }
+            else
+            {
+                // Penguin not found in remote data, use alternating colors
+                backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+            }
+
             scanLayout.Background = CreateRoundedBackground(backgroundColor, 4);
             scanLayout.SetPadding(12, 8, 12, 8);
 
-            // Scan info text
+            // Scan info text with additional penguin information
             var timeStr = scan.Timestamp.ToString("MMM dd, HH:mm");
             var scanText = new TextView(this)
             {
-                Text = $"• {scan.BirdId} at {timeStr}",
+                Text = $"• {scan.BirdId}{additionalInfo} at {timeStr}",
                 TextSize = 14
             };
             scanText.SetTextColor(TEXT_PRIMARY);
@@ -1060,7 +1402,8 @@ namespace BluePenguinMonitoring
                 TextSize = 12
             };
             deleteButton.SetTextColor(Color.White);
-            deleteButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); deleteButton.SetPadding(12, 8, 12, 8);
+            deleteButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); 
+            deleteButton.SetPadding(12, 8, 12, 8);
             deleteButton.Background = CreateRoundedBackground(DANGER_COLOR, 6);
             deleteButton.SetAllCaps(false);
 
@@ -1236,6 +1579,7 @@ namespace BluePenguinMonitoring
                             {
                                 targetBoxData.ScannedIds.Add(scanToMove);
                                 
+
                                 SaveDataToInternalStorage();
                                 UpdateScannedIdsDisplay(currentBoxData.ScannedIds);
 
@@ -1353,12 +1697,48 @@ namespace BluePenguinMonitoring
                 };
 
                 boxData.ScannedIds.Add(scanRecord);
+
+                // Check if this penguin should auto-increment Adults count
+                if (_remotePenguinData.TryGetValue(shortId, out var penguinData))
+                {
+                    if (penguinData.LastKnownLifeStage == LifeStage.Adult || 
+                        penguinData.LastKnownLifeStage == LifeStage.Returnee)
+                    {
+                        boxData.Adults++;
+                        
+                        RunOnUiThread(() =>
+                        {
+                            // Update the Adults field in the UI
+                            if (_adultsEditText != null)
+                            {
+                                _adultsEditText.Text = boxData.Adults.ToString();
+                            }
+                        });
+                    }
+                }
+
                 SaveDataToInternalStorage();
 
                 RunOnUiThread(() =>
                 {
                     UpdateScannedIdsDisplay(boxData.ScannedIds);
-                    Toast.MakeText(this, $"🐧 Bird {shortId} added to Box {_currentBox}", ToastLength.Short)?.Show();
+                    
+                    // Enhanced toast message with life stage info
+                    string toastMessage = $"🐧 Bird {shortId} added to Box {_currentBox}";
+                    if (_remotePenguinData.TryGetValue(shortId, out var penguin))
+                    {
+                        if (penguin.LastKnownLifeStage == LifeStage.Adult || 
+                            penguin.LastKnownLifeStage == LifeStage.Returnee)
+                        {
+                            toastMessage += $" (+1 Adult)";
+                        }
+                        else if (penguin.LastKnownLifeStage == LifeStage.Chick)
+                        {
+                            toastMessage += $" (Chick)";
+                        }
+                    }
+                    
+                    Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
                 });
             }
         }
@@ -1604,13 +1984,45 @@ namespace BluePenguinMonitoring
             };
 
             boxData.ScannedIds.Add(scanRecord);
+
+            // Check if this penguin should auto-increment Adults count
+            if (_remotePenguinData.TryGetValue(cleanInput, out var penguinData))
+            {
+                if (penguinData.LastKnownLifeStage == LifeStage.Adult || 
+                    penguinData.LastKnownLifeStage == LifeStage.Returnee)
+                {
+                    boxData.Adults++;
+                    
+                    // Update the Adults field in the UI
+                    if (_adultsEditText != null)
+                    {
+                        _adultsEditText.Text = boxData.Adults.ToString();
+                    }
+                }
+            }
+
             SaveDataToInternalStorage();
 
             // Clear input and update display
             _manualScanEditText.Text = "";
             UpdateScannedIdsDisplay(boxData.ScannedIds);
 
-            Toast.MakeText(this, $"🐧 Bird {cleanInput} manually added to Box {_currentBox}", ToastLength.Short)?.Show();
+            // Enhanced toast message with life stage info
+            string toastMessage = $"🐧 Bird {cleanInput} manually added to Box {_currentBox}";
+            if (_remotePenguinData.TryGetValue(cleanInput, out var penguin))
+            {
+                if (penguin.LastKnownLifeStage == LifeStage.Adult || 
+                    penguin.LastKnownLifeStage == LifeStage.Returnee)
+                {
+                    toastMessage += $" (+1 Adult)";
+                }
+                else if (penguin.LastKnownLifeStage == LifeStage.Chick)
+                {
+                    toastMessage += $" (Chick)";
+                }
+            }
+            
+            Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
         }
 
         private string? GetSelectedGateStatus()
