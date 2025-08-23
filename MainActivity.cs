@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Text;
@@ -328,7 +329,191 @@ namespace BluePenguinMonitoring
                 }
             });
         }
+        private void LoadJsonDataFromFile()
+        {
+            try
+            {
+                var downloadsPath = Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath;
 
+                if (string.IsNullOrEmpty(downloadsPath))
+                {
+                    Toast.MakeText(this, "Downloads directory not accessible", ToastLength.Long)?.Show();
+                    return;
+                }
+
+                // Look for the most recent penguin monitoring JSON file
+                var files = Directory.GetFiles(downloadsPath, "PenguinMonitoring *.json")
+                    .OrderByDescending(f => File.GetCreationTime(f))
+                    .ToArray();
+
+                if (files.Length == 0)
+                {
+                    Toast.MakeText(this, "No penguin monitoring JSON files found in Downloads", ToastLength.Long)?.Show();
+                    return;
+                }
+
+                // Show file selection dialog
+                ShowFileSelectionDialog(files);
+            }
+            catch (Exception ex)
+            {
+                Toast.MakeText(this, $"❌ Failed to browse files: {ex.Message}", ToastLength.Long)?.Show();
+            }
+        }
+
+        private void ShowFileSelectionDialog(string[] files)
+        {
+            var fileNames = files.Select(f => 
+            {
+                var fileName = System.IO.Path.GetFileName(f);
+                var fileInfo = new FileInfo(f);
+                var fileSize = fileInfo.Length / 1024; // Size in KB
+                var creationTime = fileInfo.CreationTime.ToString("MMM dd, HH:mm");
+                return $"{fileName}\n{creationTime} • {fileSize} KB";
+            }).ToArray();
+
+            var builder = new AlertDialog.Builder(this);
+            builder.SetTitle("Select JSON File to Load");
+            
+            builder.SetItems(fileNames, (sender, args) =>
+            {
+                var selectedFile = files[args.Which];
+                var fileName = System.IO.Path.GetFileName(selectedFile);
+                
+                ShowConfirmationDialog(
+                    "Load JSON Data",
+                    $"Load data from:\n{fileName}\n\nThis will replace current box data.",
+                    ("Load", () => LoadJsonFileData(selectedFile)),
+                    ("Cancel", () => { })
+                );
+            });
+
+            builder.SetNegativeButton("Cancel", (sender, args) => { });
+            
+            var dialog = builder.Create();
+            dialog?.Show();
+        }
+        private void LoadJsonFileData(string filePath)
+        {
+            try
+            {
+                var json = File.ReadAllText(filePath);
+                var loadedData = JsonSerializer.Deserialize<JsonNode>(json);
+
+                if (loadedData == null)
+                {
+                    Toast.MakeText(this, "❌ Invalid JSON file format", ToastLength.Long)?.Show();
+                    return;
+                }
+
+                // Extract box data from the JSON structure
+                var boxesNode = loadedData["Boxes"];
+                if (boxesNode == null)
+                {
+                    Toast.MakeText(this, "❌ No box data found in JSON file", ToastLength.Long)?.Show();
+                    return;
+                }
+
+                var newBoxDataStorage = new Dictionary<int, BoxData>();
+                int boxCount = 0;
+                int birdCount = 0;
+
+                foreach (var boxItem in boxesNode.AsArray())
+                {
+                    var boxNumber = boxItem?["BoxNumber"]?.GetValue<int>() ?? 0;
+                    var dataNode = boxItem?["Data"];
+
+                    if (boxNumber > 0 && dataNode != null)
+                    {
+                        var boxData = new BoxData
+                        {
+                            Adults = dataNode["Adults"]?.GetValue<int>() ?? 0,
+                            Eggs = dataNode["Eggs"]?.GetValue<int>() ?? 0,
+                            Chicks = dataNode["Chicks"]?.GetValue<int>() ?? 0,
+                            GateStatus = dataNode["GateStatus"]?.GetValue<string>(),
+                            Notes = dataNode["Notes"]?.GetValue<string>() ?? ""
+                        };
+
+                        // Load scanned IDs
+                        var scannedIdsNode = dataNode["ScannedIds"];
+                        if (scannedIdsNode != null)
+                        {
+                            foreach (var scanItem in scannedIdsNode.AsArray())
+                            {
+                                var scanRecord = new ScanRecord
+                                {
+                                    BirdId = scanItem?["BirdId"]?.GetValue<string>() ?? "",
+                                    Timestamp = scanItem?["Timestamp"]?.GetValue<DateTime>() ?? DateTime.Now,
+                                    Latitude = scanItem?["Latitude"]?.GetValue<double>() ?? 0,
+                                    Longitude = scanItem?["Longitude"]?.GetValue<double>() ?? 0,
+                                    Accuracy = scanItem?["Accuracy"]?.GetValue<float>() ?? -1
+                                };
+
+                                boxData.ScannedIds.Add(scanRecord);
+                                birdCount++;
+                            }
+                        }
+
+                        newBoxDataStorage[boxNumber] = boxData;
+                        boxCount++;
+                    }
+                }
+
+                // Replace current data with loaded data
+                _boxDataStorage = newBoxDataStorage;
+
+                // Update current box if it exists in loaded data, otherwise go to first box
+                if (!_boxDataStorage.ContainsKey(_currentBox))
+                {
+                    _currentBox = _boxDataStorage.Keys.Any() ? _boxDataStorage.Keys.Min() : 1;
+                }
+
+                // Refresh UI
+                LoadBoxData();
+                UpdateUI();
+                SaveDataToInternalStorage(); // Auto-save the loaded data
+
+                var fileName = System.IO.Path.GetFileName(filePath);
+                Toast.MakeText(this, $"✅ Loaded {boxCount} boxes, {birdCount} birds\nFrom: {fileName}", ToastLength.Long)?.Show();
+            }
+            catch (Exception ex)
+            {
+                Toast.MakeText(this, $"❌ Failed to load JSON: {ex.Message}", ToastLength.Long)?.Show();
+            }
+        }
+
+        private void ShowBoxDataSummary()
+        {
+            if (_boxDataStorage.Count == 0)
+            {
+                Toast.MakeText(this, "No box data to display", ToastLength.Short)?.Show();
+                return;
+            }
+
+            var totalBirds = _boxDataStorage.Values.Sum(box => box.ScannedIds.Count);
+            var totalAdults = _boxDataStorage.Values.Sum(box => box.Adults);
+            var totalEggs = _boxDataStorage.Values.Sum(box => box.Eggs);
+            var totalChicks = _boxDataStorage.Values.Sum(box => box.Chicks);
+            var gateUpCount = _boxDataStorage.Values.Count(box => box.GateStatus == "gate up");
+            var regateCount = _boxDataStorage.Values.Count(box => box.GateStatus == "regate");
+
+            var summary = $"📊 Data Summary:\n\n" +
+                         $"📦 {_boxDataStorage.Count} boxes with data\n" +
+                         $"🐧 {totalBirds} bird scans\n" +
+                         $"👥 {totalAdults} adults\n" +
+                         $"🥚 {totalEggs} eggs\n" +
+                         $"🐣 {totalChicks} chicks\n" +
+                         $"🚪 Gate: {gateUpCount} up, {regateCount} regate\n\n" +
+                         $"Box range: {(_boxDataStorage.Keys.Any() ? _boxDataStorage.Keys.Min() : 0)} - {(_boxDataStorage.Keys.Any() ? _boxDataStorage.Keys.Max() : 0)}";
+
+            ShowConfirmationDialog(
+                "Box Data Summary",
+                summary,
+                ("OK", () => { }
+            ),
+                ("Load JSON", LoadJsonDataFromFile)
+            );
+        }
         private string ConvertToGoogleSheetsCsvUrl(string shareUrl)
         {
             // Extract the spreadsheet ID from the sharing URL
@@ -608,7 +793,7 @@ namespace BluePenguinMonitoring
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons - Updated to move BirdStats between Clear Box and Save Data
+            // Action buttons - Updated to include Load Data button
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
@@ -617,6 +802,16 @@ namespace BluePenguinMonitoring
             );
             topButtonLayout.LayoutParameters = statusParams;
             headerCard.AddView(topButtonLayout);
+
+            // Add second row of buttons for data management
+            var dataButtonLayout = CreateStyledButtonLayout(
+                ("Load Data", (s, e) => LoadJsonDataFromFile(), PRIMARY_COLOR),
+                ("Summary", (s, e) => ShowBoxDataSummary(), SUCCESS_COLOR)
+            );
+            var dataButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            dataButtonParams.SetMargins(0, 8, 0, 0);
+            dataButtonLayout.LayoutParameters = dataButtonParams;
+            headerCard.AddView(dataButtonLayout);
 
             // Navigation card
             var boxNavLayout = CreateNavigationLayout();
@@ -1935,7 +2130,7 @@ namespace BluePenguinMonitoring
             // Validate 8-digit alphanumeric
             var cleanInput = new string(inputText.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
             
-            if (cleanInput.Length != 8)
+            if ( cleanInput.Length != 8)
             {
                 Toast.MakeText(this, "Scan number must be exactly 8 digits/letters", ToastLength.Short)?.Show();
                 _manualScanEditText.RequestFocus();
