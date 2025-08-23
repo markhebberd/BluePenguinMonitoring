@@ -4,6 +4,7 @@ using Android.Content;
 using Android.Graphics;
 using Android.Graphics.Drawables;
 using Android.Locations;
+using Android.Media;
 using Android.OS;
 using Android.Text;
 using Android.Views;
@@ -84,6 +85,10 @@ namespace BluePenguinMonitoring
 
         // High value confirmation tracking - reset on each entry
         private bool _isProcessingConfirmation = false;
+
+        // Vibration and sound components
+        private Vibrator? _vibrator;
+        private MediaPlayer? _alertMediaPlayer;
 
         // Data model classes
         public class BoxData
@@ -180,6 +185,7 @@ namespace BluePenguinMonitoring
             LoadDataFromInternalStorage();
             CreateDataRecordingUI();
             LoadBoxData();
+            InitializeVibrationAndSound();
         }
 
         private void RequestPermissions()
@@ -216,7 +222,31 @@ namespace BluePenguinMonitoring
                 RequestPermissions(permissions.ToArray(), 1);
             }
         }
+        private void InitializeVibrationAndSound()
+        {
+            try
+            {
+                // Initialize vibrator
+                _vibrator = (Vibrator?)GetSystemService(VibratorService);
 
+                // Initialize alert sound (using system notification sound)
+                var notificationUri = Android.Media.RingtoneManager.GetDefaultUri(Android.Media.RingtoneType.Notification);
+                if (notificationUri != null)
+                {
+                    _alertMediaPlayer = MediaPlayer.Create(this, notificationUri);
+                    _alertMediaPlayer?.SetAudioAttributes(
+                        new AudioAttributes.Builder()
+                            .SetUsage(AudioUsageKind.Alarm)
+                            .SetContentType(AudioContentType.Sonification)
+                            .Build()
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to initialize vibration/sound: {ex.Message}");
+            }
+        }
         private void InitializeGPS()
         {
             _locationManager = (LocationManager?)GetSystemService(LocationService);
@@ -524,7 +554,7 @@ namespace BluePenguinMonitoring
 
             var layout = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
 
             // App header
@@ -552,23 +582,15 @@ namespace BluePenguinMonitoring
             headerCard.AddView(_statusText);
             layout.AddView(headerCard);
 
-            // Action buttons - Updated to include Download CSV button
+            // Action buttons - Updated to move BirdStats between Clear Box and Save Data
             var topButtonLayout = CreateStyledButtonLayout(
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
+                ("Bird Stats", OnDownloadCsvClick, PRIMARY_DARK),
                 ("Save Data", OnSaveDataClick, SUCCESS_COLOR)
             );
             topButtonLayout.LayoutParameters = statusParams;
             headerCard.AddView(topButtonLayout);
-
-            // Add CSV download button
-            var csvButtonLayout = CreateStyledButtonLayout(
-                ("Download CSV", OnDownloadCsvClick, PRIMARY_DARK)
-            );
-            var csvButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            csvButtonParams.SetMargins(0, 8, 0, 0);
-            csvButtonLayout.LayoutParameters = csvButtonParams;
-            headerCard.AddView(csvButtonLayout);
 
             // Navigation card
             var boxNavLayout = CreateNavigationLayout();
@@ -612,7 +634,7 @@ namespace BluePenguinMonitoring
         {
             var card = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
 
             card.SetPadding(20, 16, 20, 16);
@@ -646,7 +668,7 @@ namespace BluePenguinMonitoring
         {
             var layout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
 
             for (int i = 0; i < buttons.Length; i++)
@@ -672,7 +694,7 @@ namespace BluePenguinMonitoring
         {
             var layout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
 
             _prevBoxButton = CreateStyledButton("← Prev box", PRIMARY_COLOR);
@@ -743,7 +765,7 @@ namespace BluePenguinMonitoring
             // Scanned birds container
             _scannedIdsContainer = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
             _scannedIdsContainer.SetPadding(16, 16, 16, 16);
             _scannedIdsContainer.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
@@ -755,7 +777,7 @@ namespace BluePenguinMonitoring
             // Headings row: Adults, Eggs, Chicks, Gate Status
             var headingsLayout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
             var headingsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             headingsParams.SetMargins(0, 0, 0, 8);
@@ -776,7 +798,7 @@ namespace BluePenguinMonitoring
             // Input fields row: Adults, Eggs, Chicks inputs, Gate Status spinner
             var inputFieldsLayout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
             var inputFieldsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             inputFieldsParams.SetMargins(0, 0, 0, 16);
@@ -1038,7 +1060,7 @@ namespace BluePenguinMonitoring
         {
             var dialogView = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
             dialogView.SetPadding(30, 30, 30, 30);
 
@@ -1277,7 +1299,7 @@ namespace BluePenguinMonitoring
             // Add manual input section at the bottom
             var manualInputLayout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
             var manualInputParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             manualInputParams.SetMargins(0, 12, 0, 0);
@@ -1323,7 +1345,7 @@ namespace BluePenguinMonitoring
         {
             var scanLayout = new LinearLayout(this)
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Android.Widget.Orientation.Horizontal
             };
 
             var layoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -1458,7 +1480,7 @@ namespace BluePenguinMonitoring
         {
             var dialogView = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
             dialogView.SetPadding(30, 30, 30, 30);
 
@@ -1628,6 +1650,51 @@ namespace BluePenguinMonitoring
                 System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
             }
         }
+        private void TriggerChickAlert()
+        {
+            try
+            {
+                // Vibrate for 500ms
+                if (_vibrator != null)
+                {
+                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.O)
+                    {
+                        // Use VibrationEffect for API 26+
+                        var vibrationEffect = VibrationEffect.CreateOneShot(500, VibrationEffect.DefaultAmplitude);
+                        _vibrator.Vibrate(vibrationEffect);
+                    }
+                    else
+                    {
+                        // Use deprecated method for older APIs
+#pragma warning disable CS0618 // Type or member is obsolete
+                        _vibrator.Vibrate(500);
+#pragma warning restore CS0618 // Type or member is obsolete
+                    }
+                }
+
+                // Play alert sound
+                if (_alertMediaPlayer != null)
+                {
+                    try
+                    {
+                        if (_alertMediaPlayer.IsPlaying)
+                        {
+                            _alertMediaPlayer.Stop();
+                            _alertMediaPlayer.Prepare();
+                        }
+                        _alertMediaPlayer.Start();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to play alert sound: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to trigger chick alert: {ex.Message}");
+            }
+        }
 
         private void SaveDataToInternalStorage()
         {
@@ -1735,6 +1802,7 @@ namespace BluePenguinMonitoring
                         else if (penguin.LastKnownLifeStage == LifeStage.Chick)
                         {
                             toastMessage += $" (Chick)";
+                            TriggerChickAlert();
                         }
                     }
                     
@@ -1815,7 +1883,7 @@ namespace BluePenguinMonitoring
         {
             var dialogView = new LinearLayout(this)
             {
-                Orientation = Orientation.Vertical
+                Orientation = Android.Widget.Orientation.Vertical
             };
             dialogView.SetPadding(30, 30, 30, 30);
 
@@ -2019,6 +2087,7 @@ namespace BluePenguinMonitoring
                 else if (penguin.LastKnownLifeStage == LifeStage.Chick)
                 {
                     toastMessage += $" (Chick)";
+                    //vibrate adn play an alert here. 
                 }
             }
             
