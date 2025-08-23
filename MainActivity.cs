@@ -56,6 +56,7 @@ namespace BluePenguinMonitoring
         private EditText? _adultsEditText;
         private EditText? _eggsEditText;
         private EditText? _chicksEditText;
+        private Spinner? _gateStatusSpinner;
         private EditText? _notesEditText;
         private Button? _prevBoxButton;
         private Button? _nextBoxButton;
@@ -77,6 +78,7 @@ namespace BluePenguinMonitoring
             public int Adults { get; set; } = 0;
             public int Eggs { get; set; } = 0;
             public int Chicks { get; set; } = 0;
+            public string? GateStatus { get; set; } = null; 
             public string Notes { get; set; } = "";
         }
 
@@ -416,16 +418,16 @@ namespace BluePenguinMonitoring
             {
                 Text = $"Box {_currentBox}",
                 TextSize = 30,
-                Gravity = GravityFlags.CenterHorizontal // Center horizontally
+                Gravity = GravityFlags.CenterHorizontal
             };
             _dataCardTitle.SetTextColor(TEXT_PRIMARY);
             _dataCardTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             var dataTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            dataTitleParams.SetMargins(0, 0, 0, 16); // More space below title
+            dataTitleParams.SetMargins(0, 0, 0, 16);
             _dataCardTitle.LayoutParameters = dataTitleParams;
             layout.AddView(_dataCardTitle);
 
-            // Scanned birds container - no nested ScrollView needed
+            // Scanned birds container
             _scannedIdsContainer = new LinearLayout(this)
             {
                 Orientation = Orientation.Vertical
@@ -433,10 +435,11 @@ namespace BluePenguinMonitoring
             _scannedIdsContainer.SetPadding(16, 16, 16, 16);
             _scannedIdsContainer.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
             var idsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            idsParams.SetMargins(0, 0, 0, 16); // More space below scanned birds
+            idsParams.SetMargins(0, 0, 0, 16);
             _scannedIdsContainer.LayoutParameters = idsParams;
             layout.AddView(_scannedIdsContainer);
 
+            // Headings row: Adults, Eggs, Chicks, Gate Status
             var headingsLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
@@ -448,27 +451,38 @@ namespace BluePenguinMonitoring
             var adultsLabel = CreateDataLabel("Adults");
             var eggsLabel = CreateDataLabel("Eggs");
             var chicksLabel = CreateDataLabel("Chicks");
+            var gateLabel = CreateDataLabel("Gate Status");
+// ------------ ^ Added Gate Status label ------------ //
 
             headingsLayout.AddView(adultsLabel);
             headingsLayout.AddView(eggsLabel);
             headingsLayout.AddView(chicksLabel);
+            headingsLayout.AddView(gateLabel);
             layout.AddView(headingsLayout);
 
+            // Input fields row: Adults, Eggs, Chicks inputs, Gate Status spinner
             var inputFieldsLayout = new LinearLayout(this)
             {
                 Orientation = Orientation.Horizontal
             };
             var inputFieldsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            inputFieldsParams.SetMargins(0, 0, 0, 16); // More space below number fields
+            inputFieldsParams.SetMargins(0, 0, 0, 16);
             inputFieldsLayout.LayoutParameters = inputFieldsParams;
 
             _adultsEditText = CreateStyledNumberField();
             _eggsEditText = CreateStyledNumberField();
             _chicksEditText = CreateStyledNumberField();
+            _gateStatusSpinner = CreateGateStatusSpinner();
+
+            // Set the spinner to have the same layout weight as the input fields
+            var spinnerParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            spinnerParams.SetMargins(4, 0, 4, 0);
+            _gateStatusSpinner.LayoutParameters = spinnerParams;
 
             inputFieldsLayout.AddView(_adultsEditText);
             inputFieldsLayout.AddView(_eggsEditText);
             inputFieldsLayout.AddView(_chicksEditText);
+            inputFieldsLayout.AddView(_gateStatusSpinner);
             layout.AddView(inputFieldsLayout);
 
             var notesLabel = new TextView(this)
@@ -479,7 +493,7 @@ namespace BluePenguinMonitoring
             notesLabel.SetTextColor(TEXT_PRIMARY);
             notesLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             var notesLabelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            notesLabelParams.SetMargins(0, 0, 0, 8); // More space below notes label
+            notesLabelParams.SetMargins(0, 0, 0, 8);
             notesLabel.LayoutParameters = notesLabelParams;
             layout.AddView(notesLabel);
 
@@ -495,7 +509,7 @@ namespace BluePenguinMonitoring
             _notesEditText.SetPadding(16, 16, 16, 16);
             _notesEditText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
             var notesEditParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            notesEditParams.SetMargins(0, 0, 0, 8); // More space below notes field
+            notesEditParams.SetMargins(0, 0, 0, 8);
             _notesEditText.LayoutParameters = notesEditParams;
             _notesEditText.TextChanged += OnDataChanged;
             layout.AddView(_notesEditText);
@@ -693,10 +707,14 @@ namespace BluePenguinMonitoring
             var totalAdults = _boxDataStorage.Values.Sum(box => box.Adults);
             var totalEggs = _boxDataStorage.Values.Sum(box => box.Eggs);
             var totalChicks = _boxDataStorage.Values.Sum(box => box.Chicks);
+            
+            // Only count actual gate status values - ignore nulls
+            var gateUpCount = _boxDataStorage.Values.Count(box => box.GateStatus == "gate up");
+            var regateCount = _boxDataStorage.Values.Count(box => box.GateStatus == "regate");
 
             ShowConfirmationDialog(
                 "Save All Data",
-                $"Save data to Downloads folder?\n\n📦 {totalBoxes} boxes\n🐧 {totalBirds} bird scans\n👥 {totalAdults} adults\n🥚 {totalEggs} eggs\n🐣 {totalChicks} chicks",
+                $"Save data to Downloads folder?\n\n📦 {totalBoxes} boxes\n🐧 {totalBirds} bird scans\n👥 {totalAdults} adults\n🥚 {totalEggs} eggs\n🐣 {totalChicks} chicks\n🚪 Gate: {gateUpCount} up, {regateCount} regate",
                 ("Save", SaveAllData),
                 ("Cancel", () => { }
             )
@@ -837,6 +855,7 @@ namespace BluePenguinMonitoring
             boxData.Adults = adults;
             boxData.Eggs = eggs;
             boxData.Chicks = chicks;
+            boxData.GateStatus = GetSelectedGateStatus();
             boxData.Notes = _notesEditText?.Text ?? "";
 
             SaveDataToInternalStorage();
@@ -851,12 +870,16 @@ namespace BluePenguinMonitoring
                 if (editText != null) editText.TextChanged -= OnDataChanged;
             }
 
+            if (_gateStatusSpinner != null)
+                _gateStatusSpinner.ItemSelected -= OnGateStatusChanged;
+
             if (_boxDataStorage.ContainsKey(_currentBox))
             {
                 var boxData = _boxDataStorage[_currentBox];
                 if (_adultsEditText != null) _adultsEditText.Text = boxData.Adults.ToString();
                 if (_eggsEditText != null) _eggsEditText.Text = boxData.Eggs.ToString();
                 if (_chicksEditText != null) _chicksEditText.Text = boxData.Chicks.ToString();
+                SetSelectedGateStatus(boxData.GateStatus);
                 if (_notesEditText != null) _notesEditText.Text = boxData.Notes;
                 UpdateScannedIdsDisplay(boxData.ScannedIds);
             }
@@ -865,6 +888,7 @@ namespace BluePenguinMonitoring
                 if (_adultsEditText != null) _adultsEditText.Text = "0";
                 if (_eggsEditText != null) _eggsEditText.Text = "0";
                 if (_chicksEditText != null) _chicksEditText.Text = "0";
+                SetSelectedGateStatus(null);
                 if (_notesEditText != null) _notesEditText.Text = "";
                 UpdateScannedIdsDisplay(new List<ScanRecord>());
             }
@@ -873,6 +897,9 @@ namespace BluePenguinMonitoring
             {
                 if (editText != null) editText.TextChanged += OnDataChanged;
             }
+
+            if (_gateStatusSpinner != null)
+                _gateStatusSpinner.ItemSelected += OnGateStatusChanged;
         }
 
         // Update the title when the box changes
@@ -964,8 +991,7 @@ namespace BluePenguinMonitoring
             };
             addButton.SetTextColor(Color.White);
             addButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            addButton.SetPadding(16, 12, 16, 12);
-            addButton.Background = CreateRoundedBackground(SUCCESS_COLOR, 6);
+            addButton.SetPadding(16, 12, 16, 12); addButton.Background = CreateRoundedBackground(SUCCESS_COLOR, 6);
             addButton.SetAllCaps(false);
 
             var addButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -1013,7 +1039,7 @@ namespace BluePenguinMonitoring
                 TextSize = 12
             };
             moveButton.SetTextColor(Color.White);
-            moveButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            moveButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); 
             moveButton.SetPadding(12, 8, 12, 8);
             moveButton.Background = CreateRoundedBackground(PRIMARY_COLOR, 6);
             moveButton.SetAllCaps(false);
@@ -1034,8 +1060,7 @@ namespace BluePenguinMonitoring
                 TextSize = 12
             };
             deleteButton.SetTextColor(Color.White);
-            deleteButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            deleteButton.SetPadding(12, 8, 12, 8);
+            deleteButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); deleteButton.SetPadding(12, 8, 12, 8);
             deleteButton.Background = CreateRoundedBackground(DANGER_COLOR, 6);
             deleteButton.SetAllCaps(false);
 
@@ -1101,8 +1126,7 @@ namespace BluePenguinMonitoring
                 Gravity = GravityFlags.Center
             };
             titleText.SetTextColor(TEXT_PRIMARY);
-            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             titleParams.SetMargins(0, 0, 0, 16);
             titleText.LayoutParameters = titleParams;
             dialogView.AddView(titleText);
@@ -1521,6 +1545,9 @@ namespace BluePenguinMonitoring
                 }
             }
 
+            if (_gateStatusSpinner != null)
+                _gateStatusSpinner.ItemSelected -= OnGateStatusChanged;
+
             if (_prevBoxButton != null) _prevBoxButton.Click -= OnPrevBoxClick;
             if (_nextBoxButton != null) _nextBoxButton.Click -= OnNextBoxClick;
             if (_clearBoxButton != null) _clearBoxButton.Click -= OnClearBoxesClick;
@@ -1584,6 +1611,58 @@ namespace BluePenguinMonitoring
             UpdateScannedIdsDisplay(boxData.ScannedIds);
 
             Toast.MakeText(this, $"🐧 Bird {cleanInput} manually added to Box {_currentBox}", ToastLength.Short)?.Show();
+        }
+
+        private string? GetSelectedGateStatus()
+        {
+            if (_gateStatusSpinner?.SelectedItem != null)
+            {
+                var selected = _gateStatusSpinner.SelectedItem.ToString() ?? "";
+                return string.IsNullOrEmpty(selected) ? null : selected;
+            }
+            return null;
+        }
+
+        private void SetSelectedGateStatus(string? gateStatus)
+        {
+            if (_gateStatusSpinner?.Adapter != null)
+            {
+                var adapter = _gateStatusSpinner.Adapter as ArrayAdapter<string>;
+                if (adapter != null)
+                {
+                    var displayValue = gateStatus ?? "";
+                    var position = adapter.GetPosition(displayValue);
+                    if (position >= 0)
+                        _gateStatusSpinner.SetSelection(position);
+                }
+            }
+        }
+
+        private Spinner CreateGateStatusSpinner()
+        {
+            var spinner = new Spinner(this);
+            spinner.SetPadding(16, 20, 16, 20);
+            spinner.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            
+            // Create options with blank first option instead of "null"
+            var gateStatusOptions = new string[] { "", "gate up", "regate" };
+            var adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, gateStatusOptions);
+            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+            spinner.Adapter = adapter;
+            
+            spinner.ItemSelected += OnGateStatusChanged;
+            
+            return spinner;
+        }
+
+        private void OnGateStatusChanged(object? sender, AdapterView.ItemSelectedEventArgs e)
+        {
+            // Only save if a real gate status is selected (not the blank option)
+            var selectedItem = _gateStatusSpinner?.SelectedItem?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(selectedItem))
+            {
+                SaveCurrentBoxData();
+            }
         }
     }
 }
