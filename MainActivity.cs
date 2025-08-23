@@ -689,10 +689,13 @@ namespace BluePenguinMonitoring
         {
             var totalBoxes = _boxDataStorage.Count;
             var totalBirds = _boxDataStorage.Values.Sum(box => box.ScannedIds.Count);
+            var totalAdults = _boxDataStorage.Values.Sum(box => box.Adults);
+            var totalEggs = _boxDataStorage.Values.Sum(box => box.Eggs);
+            var totalChicks = _boxDataStorage.Values.Sum(box => box.Chicks);
 
             ShowConfirmationDialog(
                 "Save All Data",
-                $"Save data to Downloads folder?\n\n📦 {totalBoxes} boxes\n🐧 {totalBirds} bird scans",
+                $"Save data to Downloads folder?\n\n📦 {totalBoxes} boxes\n🐧 {totalBirds} bird scans\n👥 {totalAdults} adults\n🥚 {totalEggs} eggs\n🐣 {totalChicks} chicks",
                 ("Save", SaveAllData),
                 ("Cancel", () => { }
             )
