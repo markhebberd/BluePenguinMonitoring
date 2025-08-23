@@ -60,6 +60,7 @@ namespace BluePenguinMonitoring
         private Button? _prevBoxButton;
         private Button? _nextBoxButton;
         private Button? _clearBoxButton;
+        private EditText? _manualScanEditText;
 
         // Data storage
         private Dictionary<int, BoxData> _boxDataStorage = new Dictionary<int, BoxData>();
@@ -930,6 +931,51 @@ namespace BluePenguinMonitoring
                     _scannedIdsContainer.AddView(scanLayout);
                 }
             }
+
+            // Add manual input section at the bottom
+            var manualInputLayout = new LinearLayout(this)
+            {
+                Orientation = Orientation.Horizontal
+            };
+            var manualInputParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            manualInputParams.SetMargins(0, 12, 0, 0);
+            manualInputLayout.LayoutParameters = manualInputParams;
+
+            _manualScanEditText = new EditText(this)
+            {
+                InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapCharacters,
+                Hint = "Enter 8-digit scan number",
+                TextSize = 14
+            };
+            _manualScanEditText.SetTextColor(TEXT_PRIMARY);
+            _manualScanEditText.SetHintTextColor(TEXT_SECONDARY);
+            _manualScanEditText.SetPadding(12, 12, 12, 12);
+            _manualScanEditText.Background = CreateRoundedBackground(Color.White, 6);
+            _manualScanEditText.SetFilters(new IInputFilter[] { new InputFilterLengthFilter(8) });
+
+            var editTextParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            editTextParams.SetMargins(0, 0, 8, 0);
+            _manualScanEditText.LayoutParameters = editTextParams;
+
+            var addButton = new Button(this)
+            {
+                Text = "Add",
+                TextSize = 12
+            };
+            addButton.SetTextColor(Color.White);
+            addButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            addButton.SetPadding(16, 12, 16, 12);
+            addButton.Background = CreateRoundedBackground(SUCCESS_COLOR, 6);
+            addButton.SetAllCaps(false);
+
+            var addButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            addButton.LayoutParameters = addButtonParams;
+
+            addButton.Click += OnManualAddClick;
+
+            manualInputLayout.AddView(_manualScanEditText);
+            manualInputLayout.AddView(addButton);
+            _scannedIdsContainer.AddView(manualInputLayout);
         }
 
         private LinearLayout CreateScanRecordView(ScanRecord scan, int index)
@@ -1261,9 +1307,9 @@ namespace BluePenguinMonitoring
             }
         }
 
-        private void AddScannedId(string fullEid)
+        private void AddScannedId(String fullEid)
         {
-            var cleanEid = new string(fullEid.Where(char.IsLetterOrDigit).ToArray());
+            var cleanEid = new String(fullEid.Where(char.IsLetterOrDigit).ToArray());
             var shortId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
 
             if (!_boxDataStorage.ContainsKey(_currentBox))
@@ -1459,7 +1505,7 @@ namespace BluePenguinMonitoring
 
             var editTexts = new []
             {
-                (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false)
+                (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false), (_manualScanEditText, false)
             };
 
             foreach (var (editText, hasNumberEvents) in editTexts)
@@ -1483,6 +1529,61 @@ namespace BluePenguinMonitoring
             _locationManager?.RemoveUpdates(this);
 
             base.OnDestroy();
+        }
+
+        private void OnManualAddClick(object? sender, EventArgs e)
+        {
+            if (_manualScanEditText == null) return;
+
+            var inputText = _manualScanEditText.Text?.Trim() ?? "";
+
+            if (string.IsNullOrEmpty(inputText))
+            {
+                Toast.MakeText(this, "Please enter a scan number", ToastLength.Short)?.Show();
+                return;
+            }
+
+            // Validate 8-digit alphanumeric
+            var cleanInput = new string(inputText.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
+            
+            if (cleanInput.Length != 8)
+            {
+                Toast.MakeText(this, "Scan number must be exactly 8 digits/letters", ToastLength.Short)?.Show();
+                _manualScanEditText.RequestFocus();
+                return;
+            }
+
+            // Check if bird already exists in current box
+            if (!_boxDataStorage.ContainsKey(_currentBox))
+                _boxDataStorage[_currentBox] = new BoxData();
+
+            var boxData = _boxDataStorage[_currentBox];
+
+            if (boxData.ScannedIds.Any(s => s.BirdId == cleanInput))
+            {
+                Toast.MakeText(this, $"Bird {cleanInput} already scanned in this box", ToastLength.Short)?.Show();
+                _manualScanEditText.Text = "";
+                return;
+            }
+
+            // Add the scan record
+            var scanRecord = new ScanRecord
+            {
+                BirdId = cleanInput,
+                Timestamp = DateTime.Now,
+                Latitude = _currentLocation?.Latitude ?? 0,
+                Longitude = _currentLocation?.Longitude ?? 0,
+                Accuracy = _currentLocation?.Accuracy ?? -1
+            };
+
+            boxData.ScannedIds.Add(scanRecord);
+            SaveDataToInternalStorage();
+
+            // Clear input and update display
+            _manualScanEditText.Text = "";
+            UpdateScannedIdsDisplay(boxData.ScannedIds);
+
+            Toast.MakeText(this, $"🐧 Bird {cleanInput} manually added to Box {_currentBox}", ToastLength.Short)?.Show();
         }
     }
 }
