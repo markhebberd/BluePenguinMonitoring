@@ -1,0 +1,6 @@
+CSV file output
+flag if detect chick scanned, alarm
+disable attempt to connect
+swipe to change box
+keyboard pop change box prompt
+clicking on a scan entry should prompt to enter a new piece of optional information connected with the scan result, Sex. It should have M or F as the options. 
