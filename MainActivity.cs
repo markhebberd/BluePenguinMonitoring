@@ -45,10 +45,11 @@ namespace BluePenguinMonitoring
         // Add alternating row colors for bird scans
         private static readonly Color SCAN_ROW_EVEN = Color.ParseColor("#FAFAFA");
         private static readonly Color SCAN_ROW_ODD = Color.ParseColor("#F5F5F5");
-        
+
         // Add sex-based background colors
         private static readonly Color FEMALE_BACKGROUND = Color.ParseColor("#FFE4E1"); // Light pink
-        private static readonly Color MALE_BACKGROUND = Color.ParseColor("#E6F3FF");   // Light blue
+        private static readonly Color MALE_BACKGROUND = Color.ParseColor("#E6F3FF"); // Light blue
+        private static readonly Color CHICK_BACKGROUND = Color.ParseColor("#FFFFE6");   // Light yellow
 
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
@@ -865,20 +866,10 @@ namespace BluePenguinMonitoring
                 ("Clear All", OnClearBoxesClick, DANGER_COLOR),
                 ("Clear Box", OnClearBoxClick, WARNING_COLOR),
                 ("Bird Stats", OnDownloadCsvClick, PRIMARY_DARK),
-                ("Save Data", OnSaveDataClick, SUCCESS_COLOR)
+                ("Data", OnDataClick, SUCCESS_COLOR)
             );
             topButtonLayout.LayoutParameters = statusParams;
             headerCard.AddView(topButtonLayout);
-
-            // Add second row of buttons for data management
-            var dataButtonLayout = CreateStyledButtonLayout(
-                ("Load Data", (s, e) => LoadJsonDataFromFile(), PRIMARY_COLOR),
-                ("Summary", (s, e) => ShowBoxDataSummary(), SUCCESS_COLOR)
-            );
-            var dataButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            dataButtonParams.SetMargins(0, 8, 0, 0);
-            dataButtonLayout.LayoutParameters = dataButtonParams;
-            headerCard.AddView(dataButtonLayout);
 
             // Navigation card
             var boxNavLayout = CreateNavigationLayout();
@@ -1603,8 +1594,13 @@ namespace BluePenguinMonitoring
             
             if (_remotePenguinData.TryGetValue(scan.BirdId, out var penguinData))
             {
-                // Penguin found in remote data
-                if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
+                // Penguin found in remote data - prioritize life stage over sex
+                if (penguinData.LastKnownLifeStage == LifeStage.Chick)
+                {
+                    backgroundColor = CHICK_BACKGROUND;
+                    additionalInfo = " 🐣"; // Chick emoji
+                }
+                else if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
                 {
                     backgroundColor = FEMALE_BACKGROUND;
                     additionalInfo = " ♀";
@@ -2411,6 +2407,45 @@ namespace BluePenguinMonitoring
             {
                 SaveCurrentBoxData();
             }
+        }
+
+        private void OnDataClick(object? sender, EventArgs e)
+        {
+            ShowDataOptionsDialog();
+        }
+
+        private void ShowDataOptionsDialog()
+        {
+            var options = new string[] 
+            {
+                "📊 Summary - View data overview",
+                "💾 Save Data - Export to file", 
+                "📂 Load Data - Import from file"
+            };
+
+            var builder = new AlertDialog.Builder(this);
+            builder.SetTitle("Data Options");
+            
+            builder.SetItems(options, (sender, args) =>
+            {
+                switch (args.Which)
+                {
+                    case 0: // Summary
+                        ShowBoxDataSummary();
+                        break;
+                    case 1: // Save Data
+                        OnSaveDataClick(null, EventArgs.Empty);
+                        break;
+                    case 2: // Load Data
+                        LoadJsonDataFromFile();
+                        break;
+                }
+            });
+
+            builder.SetNegativeButton("Cancel", (sender, args) => { });
+            
+            var dialog = builder.Create();
+            dialog?.Show();
         }
     }
 }
