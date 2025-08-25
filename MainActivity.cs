@@ -10,8 +10,6 @@ using Android.OS;
 using Android.Text;
 using Android.Views;
 using Android.Widget;
-using AndroidX.Core.App;
-using AndroidX.Core.Content;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -162,14 +160,15 @@ namespace BluePenguinMonitoring
 
             if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M && permissions.Count > 0)
             {
-                // Check which permissions are not granted
+                // Check which permissions are not granted using native .NET Android API
                 var permissionsToRequest = permissions.Where(p => 
-                    ContextCompat.CheckSelfPermission(this, p) != Permission.Granted).ToArray();
+                    CheckSelfPermission(p) != Android.Content.PM.Permission.Granted).ToArray();
 
                 if (permissionsToRequest.Length > 0)
                 {
                     System.Diagnostics.Debug.WriteLine($"Requesting permissions: {string.Join(", ", permissionsToRequest)}");
-                    ActivityCompat.RequestPermissions(this, permissionsToRequest, 1);
+                    // Use native .NET Android API instead of AndroidX
+                    RequestPermissions(permissionsToRequest, 1);
                 }
                 else
                 {
@@ -324,7 +323,7 @@ namespace BluePenguinMonitoring
                         // Request permission if not granted (Android 6-10)
                         if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
                         {
-                            ActivityCompat.RequestPermissions(this, new string[] { Android.Manifest.Permission.ReadExternalStorage }, 2);
+                            RequestPermissions(new string[] { Android.Manifest.Permission.ReadExternalStorage }, 2);
                         }
                         return;
                     }
@@ -1585,7 +1584,7 @@ namespace BluePenguinMonitoring
                                 _boxDataStorage[targetBox] = new BoxData();
 
                             var targetBoxData = _boxDataStorage[targetBox];
-                            
+                        
                             // Check if bird already exists in target box
                             if (!targetBoxData.ScannedIds.Any(s => s.BirdId == scanToMove.BirdId))
                             {
@@ -1965,8 +1964,8 @@ namespace BluePenguinMonitoring
                 }
                 else if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M) // Android 6+ (API 23+)
                 {
-                    // Android 6-10 - Check READ_EXTERNAL_STORAGE permission
-                    var hasReadPermission = ContextCompat.CheckSelfPermission(this, Android.Manifest.Permission.ReadExternalStorage) == Permission.Granted;
+                    // Android 6-10 - Check READ_EXTERNAL_STORAGE permission using native API
+                    var hasReadPermission = CheckSelfPermission(Android.Manifest.Permission.ReadExternalStorage) == Android.Content.PM.Permission.Granted;
                     System.Diagnostics.Debug.WriteLine($"Android 6-10: READ_EXTERNAL_STORAGE = {hasReadPermission}");
                     return hasReadPermission;
                 }
@@ -2159,7 +2158,6 @@ namespace BluePenguinMonitoring
                 else if (penguin.LastKnownLifeStage == LifeStage.Chick)
                 {
                     toastMessage += $" (Chick)";
-                    //vibrate and play an alert here. 
                 }
             }
             
