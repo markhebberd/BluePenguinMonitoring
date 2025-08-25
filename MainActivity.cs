@@ -70,7 +70,7 @@ namespace BluePenguinMonitoring
 
         // HTTP client for CSV downloads
         private static readonly HttpClient _httpClient = new HttpClient();
-        private const string GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/edit?usp=sharing";
+        private const string GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE";
 
         // Data storage
         private Dictionary<int, BoxData> _boxDataStorage = new Dictionary<int, BoxData>();
@@ -89,6 +89,8 @@ namespace BluePenguinMonitoring
 
         // Add a field for the data card title so it can be updated dynamically
         private TextView? _dataCardTitle;
+        private LinearLayout _boxTitleLayout;
+        private ImageView _lockIconView;
         public void OnSwipePrevious()
         {
             if (_currentBox > 1)
@@ -301,41 +303,6 @@ namespace BluePenguinMonitoring
                         _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
                 }
             });
-        }
-        private void LoadDataFromInternalStorage()
-        {
-            try
-            {
-                var internalPath = FilesDir?.AbsolutePath;
-                if (string.IsNullOrEmpty(internalPath))
-                    return;
-
-                // Load main app data
-                var appState = _dataStorageService.LoadDataFromInternalStorage(internalPath);
-                if (appState != null)
-                {
-                    _currentBox = appState.CurrentBox;
-                    _currentBoxIsLocked = appState.CurrentBoxIsLocked;
-                    _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
-                    Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
-                }
-
-                // Load remote penguin data
-                var remotePenguinData = _dataStorageService.LoadRemotePenguinDataFromInternalStorage(internalPath);
-                if (remotePenguinData != null)
-                {
-                    _remotePenguinData = remotePenguinData;
-                    Toast.MakeText(this, $"🐧 {_remotePenguinData.Count} bird records loaded", ToastLength.Short)?.Show();
-                }
-            }
-            catch (Exception ex)
-            {
-                _currentBox = 1;
-                _currentBoxIsLocked = true;
-                _boxDataStorage = new Dictionary<int, BoxData>();
-                _remotePenguinData = new Dictionary<string, PenguinData>();
-                System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
-            }
         }
         private void LoadJsonDataFromFile()
         {
@@ -908,6 +875,25 @@ namespace BluePenguinMonitoring
 
         private void CreateBoxDataCard(LinearLayout layout)
         {
+            // Horizontal layout for lock icon + box title
+            _boxTitleLayout = new LinearLayout(this)
+            {
+                Orientation = Android.Widget.Orientation.Horizontal,
+            };
+            _boxTitleLayout.SetGravity(GravityFlags.CenterHorizontal);
+            var boxTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            boxTitleParams.SetMargins(0, 0, 0, 16);
+            _boxTitleLayout.LayoutParameters = boxTitleParams;
+
+            // Lock icon
+            _lockIconView = new ImageView(this);
+            _lockIconView.SetImageResource(Android.Resource.Drawable.IcLockLock);
+            var iconParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            iconParams.SetMargins(0, 0, 12, 0); // Space between icon and text
+            _lockIconView.LayoutParameters = iconParams;
+            _boxTitleLayout.AddView(_lockIconView);
+
+            // Box title text
             _dataCardTitle = new TextView(this)
             {
                 Text = $"Box {_currentBox}",
@@ -916,10 +902,11 @@ namespace BluePenguinMonitoring
             };
             _dataCardTitle.SetTextColor(UIFactory.TEXT_PRIMARY);
             _dataCardTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var dataTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            dataTitleParams.SetMargins(0, 0, 0, 16);
+            var dataTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             _dataCardTitle.LayoutParameters = dataTitleParams;
-            layout.AddView(_dataCardTitle);
+            _boxTitleLayout.AddView(_dataCardTitle);
+
+            layout.AddView(_boxTitleLayout);
 
             // Scanned birds container
             _scannedIdsContainer = new LinearLayout(this)
@@ -1669,6 +1656,7 @@ namespace BluePenguinMonitoring
                 if (appState != null)
                 {
                     _currentBox = appState.CurrentBox;
+                    _currentBoxIsLocked = appState.BoxesAreLocked;
                     _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
                     Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
                 }
@@ -1684,6 +1672,7 @@ namespace BluePenguinMonitoring
             catch (Exception ex)
             {
                 _currentBox = 1;
+                _currentBoxIsLocked = true;
                 _boxDataStorage = new Dictionary<int, BoxData>();
                 _remotePenguinData = new Dictionary<string, PenguinData>();
                 System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
