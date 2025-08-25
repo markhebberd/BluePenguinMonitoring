@@ -10,6 +10,5 @@ namespace BluePenguinMonitoring.Models
         public int Chicks { get; set; } = 0;
         public string? GateStatus { get; set; } = null; 
         public string Notes { get; set; } = "";
-        public bool IsLocked { get; set; } = true;
     }
 }
