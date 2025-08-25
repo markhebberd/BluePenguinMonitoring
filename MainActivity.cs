@@ -57,6 +57,7 @@ namespace BluePenguinMonitoring
         private Button? _nextBoxButton;
         private Button? _clearBoxButton;
         private EditText? _manualScanEditText;
+        private Button? _lockUnlockButton;
 
         // Add gesture detection components
         private GestureDetector? _gestureDetector;
@@ -77,6 +78,7 @@ namespace BluePenguinMonitoring
         private Dictionary<string, PenguinData> _remotePenguinData = new Dictionary<string, PenguinData>();
 
         private int _currentBox = 1;
+        private bool _currentBoxIsLocked = true; // Boxes start locked by default
 
         // High value confirmation tracking - reset on each entry
         private bool _isProcessingConfirmation = false;
@@ -91,6 +93,11 @@ namespace BluePenguinMonitoring
         {
             if (_currentBox > 1)
             {
+                if (!_currentBoxIsLocked)
+                {
+                    Toast.MakeText(this, "Please lock the current box before navigating", ToastLength.Short)?.Show();
+                    return;
+                }
                 NavigateToBox(_currentBox - 1, () => _currentBox > 1);
             }
             else
@@ -103,6 +110,11 @@ namespace BluePenguinMonitoring
         {
             if (_currentBox < 150)
             {
+                if (!_currentBoxIsLocked)
+                {
+                    Toast.MakeText(this, "Please lock the current box before navigating", ToastLength.Short)?.Show();
+                    return;
+                }
                 NavigateToBox(_currentBox + 1, () => _currentBox < 150);
             }
             else
@@ -289,6 +301,41 @@ namespace BluePenguinMonitoring
                         _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
                 }
             });
+        }
+        private void LoadDataFromInternalStorage()
+        {
+            try
+            {
+                var internalPath = FilesDir?.AbsolutePath;
+                if (string.IsNullOrEmpty(internalPath))
+                    return;
+
+                // Load main app data
+                var appState = _dataStorageService.LoadDataFromInternalStorage(internalPath);
+                if (appState != null)
+                {
+                    _currentBox = appState.CurrentBox;
+                    _currentBoxIsLocked = appState.CurrentBoxIsLocked;
+                    _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
+                    Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
+                }
+
+                // Load remote penguin data
+                var remotePenguinData = _dataStorageService.LoadRemotePenguinDataFromInternalStorage(internalPath);
+                if (remotePenguinData != null)
+                {
+                    _remotePenguinData = remotePenguinData;
+                    Toast.MakeText(this, $"🐧 {_remotePenguinData.Count} bird records loaded", ToastLength.Short)?.Show();
+                }
+            }
+            catch (Exception ex)
+            {
+                _currentBox = 1;
+                _currentBoxIsLocked = true;
+                _boxDataStorage = new Dictionary<int, BoxData>();
+                _remotePenguinData = new Dictionary<string, PenguinData>();
+                System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
+            }
         }
         private void LoadJsonDataFromFile()
         {
