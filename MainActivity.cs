@@ -1,6 +1,7 @@
 ﻿using Android;
 using Android.App;
 using Android.Content;
+using Android.Content.PM;
 using Android.Graphics;
 using Android.Graphics.Drawables;
 using Android.Locations;
@@ -9,6 +10,8 @@ using Android.OS;
 using Android.Text;
 using Android.Views;
 using Android.Widget;
+using AndroidX.Core.App;
+using AndroidX.Core.Content;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,6 +21,11 @@ using System.Text.Json.Nodes;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Text;
+using BluePenguinMonitoring.Models;
+using BluePenguinMonitoring.UI.Gestures;
+using BluePenguinMonitoring.UI.Utils;
+using BluePenguinMonitoring.UI.Factories;
+using BluePenguinMonitoring.Services;
 
 namespace BluePenguinMonitoring
 {
@@ -30,27 +38,6 @@ namespace BluePenguinMonitoring
     )]
     public class MainActivity : Activity, ILocationListener
     {
-        // Modern color palette
-        private static readonly Color PRIMARY_COLOR = Color.ParseColor("#2196F3");
-        private static readonly Color PRIMARY_DARK = Color.ParseColor("#1976D2");
-        private static readonly Color SUCCESS_COLOR = Color.ParseColor("#4CAF50");
-        private static readonly Color WARNING_COLOR = Color.ParseColor("#FF9800");
-        private static readonly Color DANGER_COLOR = Color.ParseColor("#F44336");
-        private static readonly Color TEXT_FIELD_BACKGROUND_COLOR = Color.ParseColor("#F0F0F0");
-        private static readonly Color BACKGROUND_COLOR = Color.LightGray;
-        private static readonly Color CARD_COLOR = Color.White;
-        private static readonly Color TEXT_PRIMARY = Color.ParseColor("#212121");
-        private static readonly Color TEXT_SECONDARY = Color.ParseColor("#757575");
-        
-        // Add alternating row colors for bird scans
-        private static readonly Color SCAN_ROW_EVEN = Color.ParseColor("#FAFAFA");
-        private static readonly Color SCAN_ROW_ODD = Color.ParseColor("#F5F5F5");
-
-        // Add sex-based background colors
-        private static readonly Color FEMALE_BACKGROUND = Color.ParseColor("#FFE4E1"); // Light pink
-        private static readonly Color MALE_BACKGROUND = Color.ParseColor("#E6F3FF"); // Light blue
-        private static readonly Color CHICK_BACKGROUND = Color.ParseColor("#FFFFE6");   // Light yellow
-
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
 
@@ -77,6 +64,11 @@ namespace BluePenguinMonitoring
         private GestureDetector? _gestureDetector;
         private LinearLayout? _dataCard;
 
+        // Services
+        private UIFactory _uiFactory;
+        private DataStorageService _dataStorageService = new DataStorageService();
+        private CsvDataService _csvDataService = new CsvDataService();
+
         // HTTP client for CSV downloads
         private static readonly HttpClient _httpClient = new HttpClient();
         private const string GOOGLE_SHEETS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/edit?usp=sharing";
@@ -87,8 +79,6 @@ namespace BluePenguinMonitoring
         private Dictionary<string, PenguinData> _remotePenguinData = new Dictionary<string, PenguinData>();
 
         private int _currentBox = 1;
-        private const string AUTO_SAVE_FILENAME = "penguin_data_autosave.json";
-        private const string REMOTE_BIRD_DATA_FILENAME = "remotePenguinData.json";
 
         // High value confirmation tracking - reset on each entry
         private bool _isProcessingConfirmation = false;
@@ -97,132 +87,9 @@ namespace BluePenguinMonitoring
         private Vibrator? _vibrator;
         private MediaPlayer? _alertMediaPlayer;
 
-        // Data model classes
-        public class BoxData
-        {
-            public List<ScanRecord> ScannedIds { get; set; } = new List<ScanRecord>();
-            public int Adults { get; set; } = 0;
-            public int Eggs { get; set; } = 0;
-            public int Chicks { get; set; } = 0;
-            public string? GateStatus { get; set; } = null; 
-            public string Notes { get; set; } = "";
-        }
-        private class SwipeGestureDetector : GestureDetector.SimpleOnGestureListener
-        {
-            private readonly MainActivity _activity;
-            private const int SWIPE_THRESHOLD = 100;
-            private const int SWIPE_VELOCITY_THRESHOLD = 100;
-
-            public SwipeGestureDetector(MainActivity activity)
-            {
-                _activity = activity;
-            }
-
-            public override bool OnFling(MotionEvent? e1, MotionEvent e2, float velocityX, float velocityY)
-            {
-                if (e1 == null || e2 == null) return false;
-
-                float diffX = e2.GetX() - e1.GetX();
-                float diffY = e2.GetY() - e1.GetY();
-
-                // Check if it's a horizontal swipe (not vertical)
-                if (Math.Abs(diffX) > Math.Abs(diffY))
-                {
-                    // Check if swipe distance and velocity are sufficient
-                    if (Math.Abs(diffX) > SWIPE_THRESHOLD && Math.Abs(velocityX) > SWIPE_VELOCITY_THRESHOLD)
-                    {
-                        if (diffX > 0)
-                        {
-                            // Swipe right → Previous box
-                            _activity.OnSwipePrevious();
-                        }
-                        else
-                        {
-                            // Swipe left → Next box
-                            _activity.OnSwipeNext();
-                        }
-                        return true;
-                    }
-                }
-                return false;
-            }
-        }
-        public class ScanRecord
-        {
-            public string BirdId { get; set; } = "";
-            public DateTime Timestamp { get; set; }
-            public double Latitude { get; set; }
-            public double Longitude { get; set; }
-            public float Accuracy { get; set; }
-        }
-
-        public class AppDataState
-        {
-            public int CurrentBox { get; set; } = 1;
-            public DateTime LastSaved { get; set; }
-            public Dictionary<int, BoxData> BoxData { get; set; } = new Dictionary<int, BoxData>();
-        }
-
-        public class CsvRowData
-        {
-            public string Number { get; set; } = "";
-            public string ScannedId { get; set; } = "";
-            public string ChipDate { get; set; } = "";
-            public string Sex { get; set; } = "";
-            public string VidForScanner { get; set; } = "";
-            public string PlusBoxes { get; set; } = "";
-            public string ChipBox { get; set; } = "";
-            public string BreedBox2021 { get; set; } = "";
-            public string BreedBox2022 { get; set; } = "";
-            public string BreedBox2023 { get; set; } = "";
-            public string BreedBox2024 { get; set; } = "";
-            public string BreedBox2025 { get; set; } = "";
-            public string LastKnownLifeStage { get; set; } = "";
-            public string NestSuccess2021 { get; set; } = "";
-            public string ReClutch21 { get; set; } = "";
-            public string NestSuccess2022 { get; set; } = "";
-            public string ReClutch22 { get; set; } = "";
-            public string NestSuccess2023 { get; set; } = "";
-            public string ReClutch23 { get; set; } = "";
-            public string NestSuccess2024 { get; set; } = "";
-            public string ReClutch24 { get; set; } = "";
-            public string ChipBy { get; set; } = "";
-            public string ChipAs { get; set; } = "";
-            public string ChipOk { get; set; } = "";
-            public string ChipWeight { get; set; } = "";
-            public string FlipperLength { get; set; } = "";
-            public string Persistence { get; set; } = "";
-            public string AlarmsScanner { get; set; } = "";
-            public string WasSingle { get; set; } = "";
-            public string ChickSizeSex { get; set; } = "";
-            public string ChickReturnDate { get; set; } = "";
-            public string ReChip { get; set; } = "";
-            public string ReChipBy { get; set; } = "";
-            public string ActiveChip2 { get; set; } = "";
-            public string RechipDate { get; set; } = "";
-            public string FullIso15Digits { get; set; } = "";
-            public string Solo { get; set; } = "";
-            public string Kommentar { get; set; } = "";
-        }
-
-        public enum LifeStage
-        {
-            Adult,
-            Chick,
-            Returnee
-        }
-
-        public class PenguinData
-        {
-            public string ScannedId { get; set; } = "";
-            public LifeStage LastKnownLifeStage { get; set; }
-            public string Sex { get; set; } = "";
-            public string VidForScanner { get; set; } = "";
-        }
-
         // Add a field for the data card title so it can be updated dynamically
         private TextView? _dataCardTitle;
-        private void OnSwipePrevious()
+        public void OnSwipePrevious()
         {
             if (_currentBox > 1)
             {
@@ -234,7 +101,7 @@ namespace BluePenguinMonitoring
             }
         }
 
-        private void OnSwipeNext()
+        public void OnSwipeNext()
         {
             if (_currentBox < 150)
             {
@@ -249,6 +116,7 @@ namespace BluePenguinMonitoring
         {
             base.OnCreate(savedInstanceState);
 
+            _uiFactory = new UIFactory(this);
             RequestPermissions();
             LoadDataFromInternalStorage();
             CreateDataRecordingUI();
@@ -259,6 +127,13 @@ namespace BluePenguinMonitoring
         private void RequestPermissions()
         {
             var permissions = new List<string>();
+
+            // Always request READ_EXTERNAL_STORAGE for Android 6-12 (API 23-32)
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M && 
+                Android.OS.Build.VERSION.SdkInt <= Android.OS.BuildVersionCodes.S) // Changed from < R to <= S
+            {
+                permissions.Add(Android.Manifest.Permission.ReadExternalStorage);
+            }
 
             if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.S)
             {
@@ -282,12 +157,33 @@ namespace BluePenguinMonitoring
             {
                 Android.Manifest.Permission.AccessFineLocation,
                 Android.Manifest.Permission.AccessCoarseLocation,
-                Android.Manifest.Permission.Internet // Add internet permission for CSV download
+                Android.Manifest.Permission.Internet
             });
 
-            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
+            if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M && permissions.Count > 0)
             {
-                RequestPermissions(permissions.ToArray(), 1);
+                // Check which permissions are not granted
+                var permissionsToRequest = permissions.Where(p => 
+                    ContextCompat.CheckSelfPermission(this, p) != Permission.Granted).ToArray();
+
+                if (permissionsToRequest.Length > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Requesting permissions: {string.Join(", ", permissionsToRequest)}");
+                    ActivityCompat.RequestPermissions(this, permissionsToRequest, 1);
+                }
+                else
+                {
+                    // All permissions already granted
+                    System.Diagnostics.Debug.WriteLine("All permissions already granted");
+                    InitializeGPS();
+                    InitializeBluetooth();
+                }
+            }
+            else
+            {
+                // Pre-Android 6 or no permissions needed
+                InitializeGPS();
+                InitializeBluetooth();
             }
         }
         private void InitializeVibrationAndSound()
@@ -387,11 +283,11 @@ namespace BluePenguinMonitoring
 
                     // Update status color based on connection state
                     if (btStatus.Contains("Connected") && _gpsAccuracy > 0)
-                        _statusText.SetTextColor(SUCCESS_COLOR);
+                        _statusText.SetTextColor(UIFactory.SUCCESS_COLOR);
                     else if (btStatus.Contains("Connected"))
-                        _statusText.SetTextColor(WARNING_COLOR);
+                        _statusText.SetTextColor(UIFactory.WARNING_COLOR);
                     else
-                        _statusText.SetTextColor(TEXT_SECONDARY);
+                        _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
                 }
             });
         }
@@ -399,6 +295,41 @@ namespace BluePenguinMonitoring
         {
             try
             {
+                // Check permissions first
+                if (!CheckExternalStoragePermissions())
+                {
+                    var sdkVersion = (int)Android.OS.Build.VERSION.SdkInt;
+                    
+                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.R) // Android 11+
+                    {
+                        Toast.MakeText(this, "⚠️ Android 11+ detected!\n\nFor file access, please:\n1. Go to Settings > Apps > BluePenguinMonitoring\n2. Enable 'All files access'\n\nOr try using the app's save/export feature instead.", ToastLength.Long)?.Show();
+                        
+                        // Try to open the manage storage settings
+                        try
+                        {
+                            var intent = new Intent(Android.Provider.Settings.ActionManageAppAllFilesAccessPermission);
+                            intent.SetData(Android.Net.Uri.Parse("package:" + PackageName));
+                            StartActivity(intent);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Failed to open storage settings: {ex.Message}");
+                        }
+                        return;
+                    }
+                    else
+                    {
+                        Toast.MakeText(this, "Storage permission required to load files. Please grant permission and try again.", ToastLength.Long)?.Show();
+                        
+                        // Request permission if not granted (Android 6-10)
+                        if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M)
+                        {
+                            ActivityCompat.RequestPermissions(this, new string[] { Android.Manifest.Permission.ReadExternalStorage }, 2);
+                        }
+                        return;
+                    }
+                }
+
                 var downloadsPath = Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath;
 
                 if (string.IsNullOrEmpty(downloadsPath))
@@ -407,14 +338,70 @@ namespace BluePenguinMonitoring
                     return;
                 }
 
-                // Look for the most recent penguin monitoring JSON file
-                var files = Directory.GetFiles(downloadsPath, "PenguinMonitoring *.json")
-                    .OrderByDescending(f => File.GetCreationTime(f))
+                // Force media scanner to update Downloads folder
+                try
+                {
+                    var intent = new Intent(Intent.ActionMediaScannerScanFile);
+                    intent.SetData(Android.Net.Uri.FromFile(new Java.IO.File(downloadsPath)));
+                    SendBroadcast(intent);
+                    
+                    // Also try scanning the entire Downloads directory
+                    var mediaScanIntent = new Intent(Intent.ActionMediaMounted);
+                    mediaScanIntent.SetData(Android.Net.Uri.FromFile(new Java.IO.File(downloadsPath)));
+                    SendBroadcast(mediaScanIntent);
+                    
+                    // Give it a moment to scan
+                    System.Threading.Thread.Sleep(500);
+                }
+                catch (Exception scanEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Media scanner failed: {scanEx.Message}");
+                }
+
+                // Debug: Show what files are actually detected
+                var allFiles = Directory.GetFiles(downloadsPath, "*", SearchOption.TopDirectoryOnly);
+                System.Diagnostics.Debug.WriteLine($"Downloads path: {downloadsPath}");
+                System.Diagnostics.Debug.WriteLine($"Total files found: {allFiles.Length}");
+                
+                var debugInfo = new System.Text.StringBuilder();
+                debugInfo.AppendLine($"📂 Downloads: {allFiles.Length} files found");
+                debugInfo.AppendLine($"🤖 Android API: {(int)Android.OS.Build.VERSION.SdkInt}");
+                
+                foreach (var file in allFiles.Take(10)) // Show first 10 files
+                {
+                    var fileInfo = new FileInfo(file);
+                    System.Diagnostics.Debug.WriteLine($"File: {fileInfo.Name}, Size: {fileInfo.Length}, Created: {fileInfo.CreationTime}, LastWrite: {fileInfo.LastWriteTime}");
+                    debugInfo.AppendLine($"• {fileInfo.Name} ({fileInfo.Length / 1024}KB)");
+                }
+                
+                if (allFiles.Length > 10)
+                {
+                    debugInfo.AppendLine($"... and {allFiles.Length - 10} more files");
+                }
+
+                // Check permissions
+                var hasReadPermission = CheckExternalStoragePermissions();
+                debugInfo.AppendLine($"📋 Read Permission: {(hasReadPermission ? "✅ Granted" : "❌ Denied")}");
+
+                // Toast the debug info to user
+                Toast.MakeText(this, debugInfo.ToString(), ToastLength.Long)?.Show();
+
+                // Look for JSON files (try multiple patterns)
+                var jsonFiles = allFiles.Where(f => f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+                var files = jsonFiles
+                    .OrderByDescending(f => File.GetLastWriteTime(f)) // Use LastWriteTime instead of CreationTime
                     .ToArray();
 
                 if (files.Length == 0)
                 {
-                    Toast.MakeText(this, "No penguin monitoring JSON files found in Downloads", ToastLength.Long)?.Show();
+                    var message = $"No JSON files found.\n\n" +
+                                 $"📂 Total files: {allFiles.Length}\n" +
+                                 $"📋 Permissions: {(hasReadPermission ? "✅" : "❌")}\n" +
+                                 $"🤖 Android API: {(int)Android.OS.Build.VERSION.SdkInt}\n" +
+                                 $"📁 Path: {downloadsPath}";
+                    
+                    Toast.MakeText(this, message, ToastLength.Long)?.Show();
                     return;
                 }
 
@@ -424,6 +411,7 @@ namespace BluePenguinMonitoring
             catch (Exception ex)
             {
                 Toast.MakeText(this, $"❌ Failed to browse files: {ex.Message}", ToastLength.Long)?.Show();
+                System.Diagnostics.Debug.WriteLine($"LoadJsonDataFromFile error: {ex}");
             }
         }
 
@@ -582,27 +570,7 @@ namespace BluePenguinMonitoring
         }
         private string ConvertToGoogleSheetsCsvUrl(string shareUrl)
         {
-            // Extract the spreadsheet ID from the sharing URL
-            var uri = new Uri(shareUrl);
-            var pathSegments = uri.AbsolutePath.Split('/');
-            var spreadsheetId = "";
-            
-            for (int i = 0; i < pathSegments.Length; i++)
-            {
-                if (pathSegments[i] == "d" && i + 1 < pathSegments.Length)
-                {
-                    spreadsheetId = pathSegments[i + 1];
-                    break;
-                }
-            }
-
-            if (string.IsNullOrEmpty(spreadsheetId))
-            {
-                throw new ArgumentException("Could not extract spreadsheet ID from URL");
-            }
-
-            // Return the CSV export URL
-            return $"https://docs.google.com/spreadsheets/d/{spreadsheetId}/export?format=csv";
+            return _csvDataService.ConvertToGoogleSheetsCsvUrl(shareUrl);
         }
         private async Task DownloadCsvDataAsync()
         {
@@ -619,7 +587,7 @@ namespace BluePenguinMonitoring
                 response.EnsureSuccessStatusCode();
 
                 var csvContent = await response.Content.ReadAsStringAsync();
-                var parsedData = ParseCsvData(csvContent);
+                var parsedData = _csvDataService.ParseCsvData(csvContent);
 
                 _downloadedCsvData = parsedData;
 
@@ -674,124 +642,7 @@ namespace BluePenguinMonitoring
                 });
             }
         }
-        private List<CsvRowData> ParseCsvData(string csvContent)
-        {
-            var result = new List<CsvRowData>();
 
-            try
-            {
-                var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-                if (lines.Length <= 1)
-                {
-                    return result; // No data rows
-                }
-
-                // Skip header row (first line)
-                for (int i = 1; i < lines.Length; i++)
-                {
-                    var line = lines[i].Trim();
-                    if (string.IsNullOrEmpty(line))
-                        continue;
-
-                    var columns = ParseCsvLine(line);
-
-                    // Ensure we have enough columns (should have 36 based on header)
-                    while (columns.Count < 36)
-                    {
-                        columns.Add("");
-                    }
-
-                    var csvRow = new CsvRowData
-                    {
-                        Number = columns[0],
-                        ScannedId = columns[1],
-                        ChipDate = columns[2],
-                        Sex = columns[3],
-                        VidForScanner = columns[4],
-                        PlusBoxes = columns[5],
-                        ChipBox = columns[6],
-                        BreedBox2021 = columns[7],
-                        BreedBox2022 = columns[8],
-                        BreedBox2023 = columns[9],
-                        BreedBox2024 = columns[10],
-                        BreedBox2025 = columns[11],
-                        LastKnownLifeStage = columns[12],
-                        NestSuccess2021 = columns[13],
-                        ReClutch21 = columns[14],
-                        NestSuccess2022 = columns[15],
-                        ReClutch22 = columns[16],
-                        NestSuccess2023 = columns[17],
-                        ReClutch23 = columns[18],
-                        NestSuccess2024 = columns[19],
-                        ReClutch24 = columns[20],
-                        ChipBy = columns[21],
-                        ChipAs = columns[22],
-                        ChipOk = columns[23],
-                        ChipWeight = columns[24],
-                        FlipperLength = columns[25],
-                        Persistence = columns[26],
-                        AlarmsScanner = columns[27],
-                        WasSingle = columns[28],
-                        ChickSizeSex = columns[29],
-                        ChickReturnDate = columns[30],
-                        ReChip = columns[31],
-                        ReChipBy = columns[32],
-                        ActiveChip2 = columns[33],
-                        RechipDate = columns[34],
-                        FullIso15Digits = columns[35],
-                        Solo = columns.Count > 36 ? columns[36] : "",
-                        Kommentar = columns.Count > 37 ? columns[37] : ""
-                    };
-
-                    result.Add(csvRow);
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"CSV parsing error: {ex.Message}");
-            }
-
-            return result;
-        }
-
-        private List<string> ParseCsvLine(string line)
-        {
-            var result = new List<string>();
-            var currentField = new StringBuilder();
-            var inQuotes = false;
-
-            for (int i = 0; i < line.Length; i++)
-            {
-                var c = line[i];
-
-                if (c == '"')
-                {
-                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        // Escaped quote
-                        currentField.Append('"');
-                        i++; // Skip next quote
-                    }
-                    else
-                    {
-                        inQuotes = !inQuotes;
-                    }
-                }
-                else if (c == ',' && !inQuotes)
-                {
-                    result.Add(currentField.ToString());
-                    currentField.Clear();
-                }
-                else
-                {
-                    currentField.Append(c);
-                }
-            }
-
-            result.Add(currentField.ToString());
-            return result;
-        }
         private void OnDownloadCsvClick(object? sender, EventArgs e)
         {
             _ = Task.Run(async () => await DownloadCsvDataAsync());
@@ -801,18 +652,14 @@ namespace BluePenguinMonitoring
             try
             {
                 var internalPath = FilesDir?.AbsolutePath;
-                if (string.IsNullOrEmpty(internalPath))
-                    return;
-
-                var json = JsonSerializer.Serialize(_remotePenguinData, new JsonSerializerOptions { WriteIndented = true });
-                var filePath = System.IO.Path.Combine(internalPath, REMOTE_BIRD_DATA_FILENAME);
-
-                File.WriteAllText(filePath, json);
-
-                RunOnUiThread(() =>
+                if (!string.IsNullOrEmpty(internalPath))
                 {
-                    Toast.MakeText(this, $"💾 Bird stats saved! ({_remotePenguinData.Count} records)", ToastLength.Short)?.Show();
-                });
+                    _dataStorageService.SaveRemotePenguinDataToInternalStorage(internalPath, _remotePenguinData);
+                    RunOnUiThread(() =>
+                    {
+                        Toast.MakeText(this, $"💾 Bird stats saved! ({_remotePenguinData.Count} records)", ToastLength.Short)?.Show();
+                    });
+                }
             }
             catch (Exception ex)
             {
@@ -825,7 +672,7 @@ namespace BluePenguinMonitoring
         private void CreateDataRecordingUI()
         {
             var scrollView = new ScrollView(this);
-            scrollView.SetBackgroundColor(BACKGROUND_COLOR);
+            scrollView.SetBackgroundColor(UIFactory.BACKGROUND_COLOR);
 
             // Initialize gesture detector and apply to ScrollView
             _gestureDetector = new GestureDetector(this, new SwipeGestureDetector(this));
@@ -837,14 +684,14 @@ namespace BluePenguinMonitoring
             };
 
             // App header
-            var headerCard = CreateCard();
+            var headerCard = _uiFactory.CreateCard();
             var titleText = new TextView(this)
             {
                 Text = "🐧 Penguin Monitoring",
                 TextSize = 24,
                 Gravity = GravityFlags.Center
             };
-            titleText.SetTextColor(PRIMARY_COLOR);
+            titleText.SetTextColor(UIFactory.PRIMARY_COLOR);
             titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             headerCard.AddView(titleText);
 
@@ -854,7 +701,7 @@ namespace BluePenguinMonitoring
                 TextSize = 14,
                 Gravity = GravityFlags.Center
             };
-            _statusText.SetTextColor(TEXT_SECONDARY);
+            _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
             var statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             statusParams.SetMargins(0, 20, 0, 0);
             _statusText.LayoutParameters = statusParams;
@@ -863,10 +710,10 @@ namespace BluePenguinMonitoring
 
             // Action buttons
             var topButtonLayout = CreateStyledButtonLayout(
-                ("Clear All", OnClearBoxesClick, DANGER_COLOR),
-                ("Clear Box", OnClearBoxClick, WARNING_COLOR),
-                ("Bird Stats", OnDownloadCsvClick, PRIMARY_DARK),
-                ("Data", OnDataClick, SUCCESS_COLOR)
+                ("Clear All", OnClearBoxesClick, UIFactory.DANGER_COLOR),
+                ("Clear Box", OnClearBoxClick, UIFactory.WARNING_COLOR),
+                ("Bird Stats", OnDownloadCsvClick, UIFactory.PRIMARY_DARK),
+                ("Data", OnDataClick, UIFactory.SUCCESS_COLOR)
             );
             topButtonLayout.LayoutParameters = statusParams;
             headerCard.AddView(topButtonLayout);
@@ -877,7 +724,7 @@ namespace BluePenguinMonitoring
             headerCard.AddView(boxNavLayout);
 
             // Data card (remove gesture detection from here)
-            _dataCard = CreateCard();
+            _dataCard = _uiFactory.CreateCard();
             CreateBoxDataCard(_dataCard);
 
             layout.AddView(_dataCard);
@@ -933,7 +780,7 @@ namespace BluePenguinMonitoring
         private GradientDrawable CreateCardBackground()
         {
             var drawable = new GradientDrawable();
-            drawable.SetColor(CARD_COLOR);
+            drawable.SetColor(UIFactory.CARD_COLOR);
             drawable.SetCornerRadius(12 * Resources?.DisplayMetrics?.Density ?? 12);
             drawable.SetStroke(1, Color.ParseColor("#E0E0E0"));
             return drawable;
@@ -957,7 +804,7 @@ namespace BluePenguinMonitoring
             for (int i = 0; i < buttons.Length; i++)
             {
                 var (text, handler, color) = buttons[i];
-                var button = CreateStyledButton(text, color);
+                var button = _uiFactory.CreateStyledButton(text, color);
                 button.Click += handler;
 
                 var buttonParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
@@ -980,7 +827,7 @@ namespace BluePenguinMonitoring
                 Orientation = Android.Widget.Orientation.Horizontal
             };
 
-            _prevBoxButton = CreateStyledButton("← Prev box", PRIMARY_COLOR);
+            _prevBoxButton = _uiFactory.CreateStyledButton("← Prev box", UIFactory.PRIMARY_COLOR);
             _prevBoxButton.Click += OnPrevBoxClick;
             var prevParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             _prevBoxButton.LayoutParameters = prevParams;
@@ -995,13 +842,13 @@ namespace BluePenguinMonitoring
             _boxNumberText.SetTextColor(Color.White);
             _boxNumberText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             _boxNumberText.SetPadding(16, 24, 16, 24);
-            _boxNumberText.Background = CreateRoundedBackground(PRIMARY_COLOR, 8);
+            _boxNumberText.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_COLOR, 8);
             _boxNumberText.Click += OnBoxNumberClick;
             var boxParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             boxParams.SetMargins(8, 0, 8, 0);
             _boxNumberText.LayoutParameters = boxParams;
 
-            _nextBoxButton = CreateStyledButton("Next box →", PRIMARY_COLOR);
+            _nextBoxButton = _uiFactory.CreateStyledButton("Next box →", UIFactory.PRIMARY_COLOR);
             _nextBoxButton.Click += OnNextBoxClick;
             var nextParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             _nextBoxButton.LayoutParameters = nextParams;
@@ -1013,23 +860,6 @@ namespace BluePenguinMonitoring
             return layout;
         }
 
-        private Button CreateStyledButton(string text, Color backgroundColor)
-        {
-            var button = new Button(this)
-            {
-                Text = text,
-                TextSize = 14
-            };
-
-            button.SetTextColor(Color.White);
-            button.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            button.SetPadding(16, 20, 16, 20);
-            button.Background = CreateRoundedBackground(backgroundColor, 8);
-            button.SetAllCaps(false);
-
-            return button;
-        }
-
         private void CreateBoxDataCard(LinearLayout layout)
         {
             _dataCardTitle = new TextView(this)
@@ -1038,7 +868,7 @@ namespace BluePenguinMonitoring
                 TextSize = 30,
                 Gravity = GravityFlags.CenterHorizontal
             };
-            _dataCardTitle.SetTextColor(TEXT_PRIMARY);
+            _dataCardTitle.SetTextColor(UIFactory.TEXT_PRIMARY);
             _dataCardTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             var dataTitleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             dataTitleParams.SetMargins(0, 0, 0, 16);
@@ -1051,7 +881,7 @@ namespace BluePenguinMonitoring
                 Orientation = Android.Widget.Orientation.Vertical
             };
             _scannedIdsContainer.SetPadding(16, 16, 16, 16);
-            _scannedIdsContainer.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            _scannedIdsContainer.Background = _uiFactory.CreateRoundedBackground(UIFactory.TEXT_FIELD_BACKGROUND_COLOR, 8);
             var idsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             idsParams.SetMargins(0, 0, 0, 16);
             _scannedIdsContainer.LayoutParameters = idsParams;
@@ -1066,11 +896,10 @@ namespace BluePenguinMonitoring
             headingsParams.SetMargins(0, 0, 0, 8);
             headingsLayout.LayoutParameters = headingsParams;
 
-            var adultsLabel = CreateDataLabel("Adults");
-            var eggsLabel = CreateDataLabel("Eggs");
-            var chicksLabel = CreateDataLabel("Chicks");
-            var gateLabel = CreateDataLabel("Gate Status");
-// ------------ ^ Added Gate Status label ------------ //
+            var adultsLabel = _uiFactory.CreateDataLabel("Adults");
+            var eggsLabel = _uiFactory.CreateDataLabel("Eggs");
+            var chicksLabel = _uiFactory.CreateDataLabel("Chicks");
+            var gateLabel = _uiFactory.CreateDataLabel("Gate Status");
 
             headingsLayout.AddView(adultsLabel);
             headingsLayout.AddView(eggsLabel);
@@ -1087,16 +916,31 @@ namespace BluePenguinMonitoring
             inputFieldsParams.SetMargins(0, 0, 0, 16);
             inputFieldsLayout.LayoutParameters = inputFieldsParams;
 
-            _adultsEditText = CreateStyledNumberField();
-            _eggsEditText = CreateStyledNumberField();
-            _chicksEditText = CreateStyledNumberField();
-            _gateStatusSpinner = CreateGateStatusSpinner();
+            _adultsEditText = _uiFactory.CreateStyledNumberField();
+            _eggsEditText = _uiFactory.CreateStyledNumberField();
+            _chicksEditText = _uiFactory.CreateStyledNumberField();
+            _gateStatusSpinner = _uiFactory.CreateGateStatusSpinner();
 
             // Set the spinner to have the same layout weight as the input fields
             var spinnerParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             spinnerParams.SetMargins(4, 0, 4, 0);
             _gateStatusSpinner.LayoutParameters = spinnerParams;
 
+            // Add event handlers
+            _adultsEditText.TextChanged += OnDataChanged;
+            _adultsEditText.Click += OnNumberFieldClick;
+            _adultsEditText.FocusChange += OnNumberFieldFocus;
+            
+            _eggsEditText.TextChanged += OnDataChanged;
+            _eggsEditText.Click += OnNumberFieldClick;
+            _eggsEditText.FocusChange += OnNumberFieldFocus;
+            
+            _chicksEditText.TextChanged += OnDataChanged;
+            _chicksEditText.Click += OnNumberFieldClick;
+            _chicksEditText.FocusChange += OnNumberFieldFocus;
+
+            _gateStatusSpinner.ItemSelected += OnGateStatusChanged;
+            
             inputFieldsLayout.AddView(_adultsEditText);
             inputFieldsLayout.AddView(_eggsEditText);
             inputFieldsLayout.AddView(_chicksEditText);
@@ -1108,7 +952,7 @@ namespace BluePenguinMonitoring
                 Text = "Notes:",
                 TextSize = 16
             };
-            notesLabel.SetTextColor(TEXT_PRIMARY);
+            notesLabel.SetTextColor(UIFactory.TEXT_PRIMARY);
             notesLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             var notesLabelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             notesLabelParams.SetMargins(0, 0, 0, 8);
@@ -1122,72 +966,15 @@ namespace BluePenguinMonitoring
                 Gravity = Android.Views.GravityFlags.Top | Android.Views.GravityFlags.Start
             };
             _notesEditText.SetLines(3);
-            _notesEditText.SetTextColor(TEXT_PRIMARY);
-            _notesEditText.SetHintTextColor(TEXT_SECONDARY);
+            _notesEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
+            _notesEditText.SetHintTextColor(UIFactory.TEXT_SECONDARY);
             _notesEditText.SetPadding(16, 16, 16, 16);
-            _notesEditText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            _notesEditText.Background = _uiFactory.CreateRoundedBackground(UIFactory.TEXT_FIELD_BACKGROUND_COLOR, 8);
             var notesEditParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             notesEditParams.SetMargins(0, 0, 0, 8);
             _notesEditText.LayoutParameters = notesEditParams;
             _notesEditText.TextChanged += OnDataChanged;
             layout.AddView(_notesEditText);
-        }
-
-        private TextView CreateDataLabel(string text)
-        {
-            var label = new TextView(this)
-            {
-                Text = text,
-                TextSize = 14,
-                Gravity = GravityFlags.Center,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            label.SetTextColor(TEXT_PRIMARY);
-            label.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            return label;
-        }
-
-        private EditText CreateStyledNumberField()
-        {
-            var editText = new EditText(this)
-            {
-                InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "0",
-                Gravity = GravityFlags.Center,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-
-            editText.SetTextColor(TEXT_PRIMARY);
-            editText.SetTextSize(Android.Util.ComplexUnitType.Sp, 16);
-            editText.SetPadding(16, 20, 16, 20);
-            editText.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8); // <-- updated
-            editText.TextChanged += OnDataChanged;
-            editText.Click += OnNumberFieldClick;
-            editText.FocusChange += OnNumberFieldFocus;
-
-            var layoutParams = (LinearLayout.LayoutParams)editText.LayoutParameters;
-            layoutParams.SetMargins(4, 0, 4, 0);
-
-            return editText;
-        }
-
-        private EditText CreateInlineNumberField()
-        {
-            var editText = new EditText(this)
-            {
-                InputType = Android.Text.InputTypes.ClassNumber,
-                Text = "0",
-                Gravity = GravityFlags.Center,
-                LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1)
-            };
-            editText.TextChanged += OnDataChanged;
-            editText.Click += OnNumberFieldClick;
-            editText.FocusChange += OnNumberFieldFocus;
-
-            var layoutParams = (LinearLayout.LayoutParams)editText.LayoutParameters;
-            layoutParams.SetMargins(5, 0, 5, 0);
-
-            return editText;
         }
 
         private void OnNumberFieldClick(object? sender, EventArgs e)
@@ -1203,6 +990,16 @@ namespace BluePenguinMonitoring
             if (e.HasFocus && sender is EditText editText)
             {
                 editText.Post(() => editText.SelectAll());
+            }
+        }
+
+        private void OnGateStatusChanged(object? sender, AdapterView.ItemSelectedEventArgs e)
+        {
+            // Only save if a real gate status is selected (not the blank option)
+            var selectedItem = _gateStatusSpinner?.SelectedItem?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(selectedItem))
+            {
+                SaveCurrentBoxData();
             }
         }
 
@@ -1443,8 +1240,7 @@ namespace BluePenguinMonitoring
                 if (editText != null) editText.TextChanged -= OnDataChanged;
             }
 
-            if (_gateStatusSpinner != null)
-                _gateStatusSpinner.ItemSelected -= OnGateStatusChanged;
+            _gateStatusSpinner.ItemSelected -= OnGateStatusChanged;
 
             if (_boxDataStorage.ContainsKey(_currentBox))
             {
@@ -1471,8 +1267,7 @@ namespace BluePenguinMonitoring
                 if (editText != null) editText.TextChanged += OnDataChanged;
             }
 
-            if (_gateStatusSpinner != null)
-                _gateStatusSpinner.ItemSelected += OnGateStatusChanged;
+            _gateStatusSpinner.ItemSelected += OnGateStatusChanged;
         }
 
         // Update the title when the box changes
@@ -1505,7 +1300,7 @@ namespace BluePenguinMonitoring
                     Text = "No birds scanned yet",
                     TextSize = 14
                 };
-                emptyText.SetTextColor(TEXT_SECONDARY);
+                emptyText.SetTextColor(UIFactory.TEXT_SECONDARY);
                 _scannedIdsContainer.AddView(emptyText);
             }
             else
@@ -1516,7 +1311,7 @@ namespace BluePenguinMonitoring
                     Text = $"🐧 {scans.Count} bird{(scans.Count == 1 ? "" : "s")} scanned:",
                     TextSize = 14
                 };
-                headerText.SetTextColor(TEXT_PRIMARY);
+                headerText.SetTextColor(UIFactory.TEXT_PRIMARY);
                 headerText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                 var headerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
                 headerParams.SetMargins(0, 0, 0, 12);
@@ -1547,10 +1342,10 @@ namespace BluePenguinMonitoring
                 Hint = "Enter 8-digit scan number",
                 TextSize = 14
             };
-            _manualScanEditText.SetTextColor(TEXT_PRIMARY);
-            _manualScanEditText.SetHintTextColor(TEXT_SECONDARY);
+            _manualScanEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
+            _manualScanEditText.SetHintTextColor(UIFactory.TEXT_SECONDARY);
             _manualScanEditText.SetPadding(12, 12, 12, 12);
-            _manualScanEditText.Background = CreateRoundedBackground(Color.White, 6);
+            _manualScanEditText.Background = _uiFactory.CreateRoundedBackground(Color.White, 6);
             _manualScanEditText.SetFilters(new IInputFilter[] { new InputFilterLengthFilter(8) });
 
             var editTextParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
@@ -1564,7 +1359,8 @@ namespace BluePenguinMonitoring
             };
             addButton.SetTextColor(Color.White);
             addButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            addButton.SetPadding(16, 12, 16, 12); addButton.Background = CreateRoundedBackground(SUCCESS_COLOR, 6);
+            addButton.SetPadding(16, 12, 16, 12); 
+            addButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.SUCCESS_COLOR, 6);
             addButton.SetAllCaps(false);
 
             var addButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -1597,32 +1393,32 @@ namespace BluePenguinMonitoring
                 // Penguin found in remote data - prioritize life stage over sex
                 if (penguinData.LastKnownLifeStage == LifeStage.Chick)
                 {
-                    backgroundColor = CHICK_BACKGROUND;
+                    backgroundColor = UIFactory.CHICK_BACKGROUND;
                     additionalInfo = " 🐣"; // Chick emoji
                 }
                 else if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
                 {
-                    backgroundColor = FEMALE_BACKGROUND;
+                    backgroundColor = UIFactory.FEMALE_BACKGROUND;
                     additionalInfo = " ♀";
                 }
                 else if (penguinData.Sex.Equals("M", StringComparison.OrdinalIgnoreCase))
                 {
-                    backgroundColor = MALE_BACKGROUND;
+                    backgroundColor = UIFactory.MALE_BACKGROUND;
                     additionalInfo = " ♂";
                 }
                 else
                 {
                     // Unknown sex, use alternating colors
-                    backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+                    backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
                 }
             }
             else
             {
                 // Penguin not found in remote data, use alternating colors
-                backgroundColor = index % 2 == 0 ? SCAN_ROW_EVEN : SCAN_ROW_ODD;
+                backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
             }
 
-            scanLayout.Background = CreateRoundedBackground(backgroundColor, 4);
+            scanLayout.Background = _uiFactory.CreateRoundedBackground(backgroundColor, 4);
             scanLayout.SetPadding(12, 8, 12, 8);
 
             // Scan info text with additional penguin information
@@ -1632,7 +1428,7 @@ namespace BluePenguinMonitoring
                 Text = $"• {scan.BirdId}{additionalInfo} at {timeStr}",
                 TextSize = 14
             };
-            scanText.SetTextColor(TEXT_PRIMARY);
+            scanText.SetTextColor(UIFactory.TEXT_PRIMARY);
             var textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             scanText.LayoutParameters = textParams;
             scanLayout.AddView(scanText);
@@ -1646,7 +1442,7 @@ namespace BluePenguinMonitoring
             moveButton.SetTextColor(Color.White);
             moveButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); 
             moveButton.SetPadding(12, 8, 12, 8);
-            moveButton.Background = CreateRoundedBackground(PRIMARY_COLOR, 6);
+            moveButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_COLOR, 6);
             moveButton.SetAllCaps(false);
 
             var moveButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -1667,7 +1463,7 @@ namespace BluePenguinMonitoring
             deleteButton.SetTextColor(Color.White);
             deleteButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal); 
             deleteButton.SetPadding(12, 8, 12, 8);
-            deleteButton.Background = CreateRoundedBackground(DANGER_COLOR, 6);
+            deleteButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.DANGER_COLOR, 6);
             deleteButton.SetAllCaps(false);
 
             var deleteButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -1724,7 +1520,7 @@ namespace BluePenguinMonitoring
                 InputType = Android.Text.InputTypes.ClassNumber,
                 Hint = "Enter box number (1-150)"
             };
-            input.SetTextColor(TEXT_PRIMARY);
+            input.SetTextColor(UIFactory.TEXT_PRIMARY);
 
             var alertDialog = new AlertDialog.Builder(this)
                 .SetTitle($"Move Bird {scanToMove.BirdId}")
@@ -1823,32 +1619,20 @@ namespace BluePenguinMonitoring
                     return;
 
                 // Load main app data
-                var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
-                if (File.Exists(filePath))
+                var appState = _dataStorageService.LoadDataFromInternalStorage(internalPath);
+                if (appState != null)
                 {
-                    var json = File.ReadAllText(filePath);
-                    var appState = JsonSerializer.Deserialize<AppDataState>(json);
-
-                    if (appState != null)
-                    {
-                        _currentBox = appState.CurrentBox;
-                        _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
-                        Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
-                    }
+                    _currentBox = appState.CurrentBox;
+                    _boxDataStorage = appState.BoxData ?? new Dictionary<int, BoxData>();
+                    Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
                 }
 
                 // Load remote penguin data
-                var remoteBirdDataPath = System.IO.Path.Combine(internalPath, REMOTE_BIRD_DATA_FILENAME);
-                if (File.Exists(remoteBirdDataPath))
+                var remotePenguinData = _dataStorageService.LoadRemotePenguinDataFromInternalStorage(internalPath);
+                if (remotePenguinData != null)
                 {
-                    var remoteBirdJson = File.ReadAllText(remoteBirdDataPath);
-                    var remotePenguinData = JsonSerializer.Deserialize<Dictionary<string, PenguinData>>(remoteBirdJson);
-                    
-                    if (remotePenguinData != null)
-                    {
-                        _remotePenguinData = remotePenguinData;
-                        Toast.MakeText(this, $"🐧 {_remotePenguinData.Count} bird records loaded", ToastLength.Short)?.Show();
-                    }
+                    _remotePenguinData = remotePenguinData;
+                    Toast.MakeText(this, $"🐧 {_remotePenguinData.Count} bird records loaded", ToastLength.Short)?.Show();
                 }
             }
             catch (Exception ex)
@@ -1907,28 +1691,14 @@ namespace BluePenguinMonitoring
 
         private void SaveDataToInternalStorage()
         {
-            try
+            var appState = new AppDataState
             {
-                var internalPath = FilesDir?.AbsolutePath;
-                if (string.IsNullOrEmpty(internalPath))
-                    return;
+                CurrentBox = _currentBox,
+                LastSaved = DateTime.Now,
+                BoxData = _boxDataStorage
+            };
 
-                var appState = new AppDataState
-                {
-                    CurrentBox = _currentBox,
-                    LastSaved = DateTime.Now,
-                    BoxData = _boxDataStorage
-                };
-
-                var json = JsonSerializer.Serialize(appState, new JsonSerializerOptions { WriteIndented = true });
-                var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
-
-                File.WriteAllText(filePath, json);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Auto-save failed: {ex.Message}");
-            }
+            _dataStorageService.SaveDataToInternalStorage(FilesDir?.AbsolutePath ?? "", appState);
         }
 
         private void ClearInternalStorageData()
@@ -1938,11 +1708,7 @@ namespace BluePenguinMonitoring
                 var internalPath = FilesDir?.AbsolutePath;
                 if (!string.IsNullOrEmpty(internalPath))
                 {
-                    var filePath = System.IO.Path.Combine(internalPath, AUTO_SAVE_FILENAME);
-                    if (File.Exists(filePath))
-                    {
-                        File.Delete(filePath);
-                    }
+                    _dataStorageService.ClearInternalStorageData(internalPath);
                 }
             }
             catch (Exception ex)
@@ -2036,9 +1802,9 @@ namespace BluePenguinMonitoring
                 Text = defaultFileName,
                 Hint = "Enter filename (without .json extension)"
             };
-            input.SetTextColor(TEXT_PRIMARY);
+            input.SetTextColor(UIFactory.TEXT_PRIMARY);
             input.SetPadding(16, 16, 16, 16);
-            input.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
+            input.Background = _uiFactory.CreateRoundedBackground(UIFactory.TEXT_FIELD_BACKGROUND_COLOR, 8);
 
             var alertDialog = new AlertDialog.Builder(this)
                 .SetTitle("Save Data File")
@@ -2158,11 +1924,63 @@ namespace BluePenguinMonitoring
                 {
                     InitializeGPS();
                     InitializeBluetooth();
+                    Toast.MakeText(this, "✅ All permissions granted", ToastLength.Short)?.Show();
                 }
                 else
                 {
-                    Toast.MakeText(this, "Required permissions not granted. App functionality will be limited.", ToastLength.Long)?.Show();
+                    var deniedPermissions = permissions.Zip(grantResults, (perm, result) => new { Permission = perm, Granted = result == Permission.Granted })
+                        .Where(x => !x.Granted)
+                        .Select(x => x.Permission)
+                        .ToArray();
+                    
+                    Toast.MakeText(this, $"⚠️ Some permissions denied. App functionality may be limited.\nDenied: {string.Join(", ", deniedPermissions.Select(p => p.Split('.').Last()))}", ToastLength.Long)?.Show();
                 }
+            }
+            else if (requestCode == 2) // READ_EXTERNAL_STORAGE request from LoadJsonDataFromFile
+            {
+                if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
+                {
+                    Toast.MakeText(this, "✅ Storage permission granted. Try loading files again.", ToastLength.Short)?.Show();
+                }
+                else
+                {
+                    Toast.MakeText(this, "❌ Storage permission denied. Cannot access Downloads folder.", ToastLength.Long)?.Show();
+                }
+            }
+        }
+
+        private bool CheckExternalStoragePermissions()
+        {
+            try
+            {
+                var sdkVersion = (int)Android.OS.Build.VERSION.SdkInt;
+                System.Diagnostics.Debug.WriteLine($"Checking permissions for Android API {sdkVersion}");
+
+                if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.R) // Android 11+ (API 30+)
+                {
+                    // Android 11+ - Check if we have MANAGE_EXTERNAL_STORAGE
+                    var hasManageStorage = Android.OS.Environment.IsExternalStorageManager;
+                    System.Diagnostics.Debug.WriteLine($"Android 11+: MANAGE_EXTERNAL_STORAGE = {hasManageStorage}");
+                    return hasManageStorage;
+                }
+                else if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.M) // Android 6+ (API 23+)
+                {
+                    // Android 6-10 - Check READ_EXTERNAL_STORAGE permission
+                    var hasReadPermission = ContextCompat.CheckSelfPermission(this, Android.Manifest.Permission.ReadExternalStorage) == Permission.Granted;
+                    System.Diagnostics.Debug.WriteLine($"Android 6-10: READ_EXTERNAL_STORAGE = {hasReadPermission}");
+                    return hasReadPermission;
+                }
+                else
+                {
+                    // Pre-Android 6 - Permission granted at install time
+                    System.Diagnostics.Debug.WriteLine("Pre-Android 6: Permissions granted at install time");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Permission check failed: {ex.Message}");
+                return false;
             }
         }
 
@@ -2179,7 +1997,7 @@ namespace BluePenguinMonitoring
                 Text = _currentBox.ToString(),
                 Hint = "Box number"
             };
-            input.SetTextColor(TEXT_PRIMARY);
+            input.SetTextColor(UIFactory.TEXT_PRIMARY);
 
             var alertDialog = new AlertDialog.Builder(this)
                 .SetTitle("Jump to Box")
@@ -2229,46 +2047,32 @@ namespace BluePenguinMonitoring
 
             Toast.MakeText(this, $"📦 Jumped to Box {_currentBox}", ToastLength.Short)?.Show();
         }
-        protected override void OnDestroy()
+
+        private string? GetSelectedGateStatus()
         {
-            _bluetoothManager?.Dispose();
-
-            // Clean up gesture detector
-            if (_dataCard != null)
+            if (_gateStatusSpinner?.SelectedItem != null)
             {
-                _dataCard.Touch -= OnScrollViewTouch;
+                var selected = _gateStatusSpinner.SelectedItem.ToString() ?? "";
+                return string.IsNullOrEmpty(selected) ? null : selected;
             }
+            return null;
+        }
 
-            var editTexts = new[]
+        private void SetSelectedGateStatus(string? gateStatus)
+        {
+            if (_gateStatusSpinner?.Adapter != null)
             {
-                (_adultsEditText, true), (_eggsEditText, true), (_chicksEditText, true), (_notesEditText, false), (_manualScanEditText, false)
-            };
-
-            foreach (var (editText, hasNumberEvents) in editTexts)
-            {
-                if (editText != null)
+                var adapter = _gateStatusSpinner.Adapter as ArrayAdapter<string>;
+                if (adapter != null)
                 {
-                    editText.TextChanged -= OnDataChanged;
-                    if (hasNumberEvents)
-                    {
-                        editText.Click -= OnNumberFieldClick;
-                        editText.FocusChange -= OnNumberFieldFocus;
-                    }
+                    var displayValue = gateStatus ?? "";
+                    var position = adapter.GetPosition(displayValue);
+                    if (position >= 0)
+                        _gateStatusSpinner.SetSelection(position);
                 }
             }
-
-            if (_gateStatusSpinner != null)
-                _gateStatusSpinner.ItemSelected -= OnGateStatusChanged;
-
-            if (_prevBoxButton != null) _prevBoxButton.Click -= OnPrevBoxClick;
-            if (_nextBoxButton != null) _nextBoxButton.Click -= OnNextBoxClick;
-            if (_clearBoxButton != null) _clearBoxButton.Click -= OnClearBoxesClick;
-            if (_boxNumberText != null) _boxNumberText.Click -= OnBoxNumberClick;
-
-            _locationManager?.RemoveUpdates(this);
-
-            base.OnDestroy();
         }
+
         private void OnManualAddClick(object? sender, EventArgs e)
         {
             if (_manualScanEditText == null) return;
@@ -2284,7 +2088,7 @@ namespace BluePenguinMonitoring
             // Validate 8-digit alphanumeric
             var cleanInput = new string(inputText.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
             
-            if ( cleanInput.Length != 8)
+            if (cleanInput.Length != 8)
             {
                 Toast.MakeText(this, "Scan number must be exactly 8 digits/letters", ToastLength.Short)?.Show();
                 _manualScanEditText.RequestFocus();
@@ -2330,6 +2134,11 @@ namespace BluePenguinMonitoring
                         _adultsEditText.Text = boxData.Adults.ToString();
                     }
                 }
+                else if (penguinData.LastKnownLifeStage == LifeStage.Chick)
+                {
+                    // Trigger chick alert for manual entries as well
+                    TriggerChickAlert();
+                }
             }
 
             SaveDataToInternalStorage();
@@ -2350,63 +2159,11 @@ namespace BluePenguinMonitoring
                 else if (penguin.LastKnownLifeStage == LifeStage.Chick)
                 {
                     toastMessage += $" (Chick)";
-                    //vibrate adn play an alert here. 
+                    //vibrate and play an alert here. 
                 }
             }
             
             Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
-        }
-
-        private string? GetSelectedGateStatus()
-        {
-            if (_gateStatusSpinner?.SelectedItem != null)
-            {
-                var selected = _gateStatusSpinner.SelectedItem.ToString() ?? "";
-                return string.IsNullOrEmpty(selected) ? null : selected;
-            }
-            return null;
-        }
-
-        private void SetSelectedGateStatus(string? gateStatus)
-        {
-            if (_gateStatusSpinner?.Adapter != null)
-            {
-                var adapter = _gateStatusSpinner.Adapter as ArrayAdapter<string>;
-                if (adapter != null)
-                {
-                    var displayValue = gateStatus ?? "";
-                    var position = adapter.GetPosition(displayValue);
-                    if (position >= 0)
-                        _gateStatusSpinner.SetSelection(position);
-                }
-            }
-        }
-
-        private Spinner CreateGateStatusSpinner()
-        {
-            var spinner = new Spinner(this);
-            spinner.SetPadding(16, 20, 16, 20);
-            spinner.Background = CreateRoundedBackground(TEXT_FIELD_BACKGROUND_COLOR, 8);
-            
-            // Create options with blank first option instead of "null"
-            var gateStatusOptions = new string[] { "", "gate up", "regate" };
-            var adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, gateStatusOptions);
-            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-            spinner.Adapter = adapter;
-            
-            spinner.ItemSelected += OnGateStatusChanged;
-            
-            return spinner;
-        }
-
-        private void OnGateStatusChanged(object? sender, AdapterView.ItemSelectedEventArgs e)
-        {
-            // Only save if a real gate status is selected (not the blank option)
-            var selectedItem = _gateStatusSpinner?.SelectedItem?.ToString() ?? "";
-            if (!string.IsNullOrEmpty(selectedItem))
-            {
-                SaveCurrentBoxData();
-            }
         }
 
         private void OnDataClick(object? sender, EventArgs e)

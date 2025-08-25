@@ -19,4 +19,7 @@
     <None Remove=".gitignore" />
     <None Remove="LICENSE" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Xamarin.AndroidX.Core" Version="1.13.1.1" />
+  </ItemGroup>
 </Project>
