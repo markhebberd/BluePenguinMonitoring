@@ -40,7 +40,6 @@ namespace PenguinMonitor.Services
                 };
                 bw.RunWorkerCompleted += (sender, e) =>
                 {
-                    //Toast.MakeText(this, "Response from Penguin server: " + response, ToastLength.Long)?.Show();
                 };
                 bw.RunWorkerAsync();
             }
@@ -160,11 +159,9 @@ namespace PenguinMonitor.Services
                             {
                                 if (response == "fail")
                                 {
-                                    Toast.MakeText(context, "Unable to incremental on server.", ToastLength.Short)?.Show();
                                 }
                                 else
                                 {
-                                    Toast.MakeText(context, "Boxes " + response + " on server.", ToastLength.Short)?.Show();
                                 }
                             });
                         };
@@ -259,14 +256,12 @@ namespace PenguinMonitor.Services
 
                 new Handler(Looper.MainLooper).Post(() =>
                 {
-                    Toast.MakeText(context, $"Got {boxDataCount} box monitor, {remotePenguinData.Count} remote bird infos", ToastLength.Long)?.Show();
                 });
             }
             catch (Exception ex)
             {
                 new Handler(Looper.MainLooper).Post(() =>
                   {
-                      Toast.MakeText(context, $"❌ Download failed: {ex.Message}", ToastLength.Long)?.Show();
                   });
             }
         }

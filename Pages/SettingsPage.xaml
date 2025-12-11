@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="PenguinMonitor.Pages.SettingsPage"
+             Title="⚙️ Settings">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="15">
+
+            <!-- Version Info -->
+            <Label Text="{Binding VersionText}"
+                   HorizontalOptions="Center"
+                   FontSize="14"
+                   TextColor="Gray"/>
+
+            <!-- Bluetooth Enable -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <CheckBox x:Name="BluetoothCheckBox"
+                              IsChecked="{Binding AppSettings.IsBlueToothEnabled}"
+                              CheckedChanged="OnBluetoothChanged">
+                    </CheckBox>
+                    <Label Text="Enable Bluetooth"
+                           FontSize="16"
+                           FontAttributes="Bold"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Set Time for Monitor -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <CheckBox IsChecked="{Binding AppSettings.ActiveSessionTimeStampActive}">
+                    </CheckBox>
+                    <Label Text="{Binding TimeStampText}"
+                           FontSize="14"/>
+                    <Button Text="Set Date/Time"
+                            Command="{Binding SetTimeCommand}"
+                            BackgroundColor="#2196F3"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Show Box Tag Delete Button -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <HorizontalStackLayout Spacing="10">
+                    <CheckBox IsChecked="{Binding AppSettings.ShowBoxTagDeleteButton}">
+                    </CheckBox>
+                    <Label Text="Show box tag delete button"
+                           VerticalOptions="Center"
+                           FontSize="14"/>
+                </HorizontalStackLayout>
+            </Border>
+
+            <!-- Show Differences with Previous Monitor -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <HorizontalStackLayout Spacing="10">
+                    <CheckBox IsChecked="{Binding AppSettings.ShowDifferencesWithPreviousMonitor}">
+                    </CheckBox>
+                    <Label Text="Show differences with previous monitor"
+                           VerticalOptions="Center"
+                           FontSize="14"/>
+                </HorizontalStackLayout>
+            </Border>
+
+            <!-- Box Sets Configuration -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Box sets:"
+                           FontSize="16"
+                           FontAttributes="Bold"/>
+                    <Entry Text="{Binding AppSettings.AllBoxSetsString}"
+                           Placeholder="Example: {1-150,AA-AC},{N1-N6}..."
+                           BackgroundColor="#F5F5F5"
+                           TextColor="Black"/>
+                    <Button Text="Apply"
+                            Command="{Binding ApplyBoxSetsCommand}"
+                            BackgroundColor="#4CAF50"
+                            TextColor="White"
+                            CornerRadius="8"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Select Box Set -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Select box set(s):"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                    <Picker x:Name="BoxSetPicker"
+                            ItemsSource="{Binding BoxSetOptions}"
+                            SelectedItem="{Binding AppSettings.BoxSetString}"
+                            HorizontalOptions="FillAndExpand"
+                            BackgroundColor="#F5F5F5"/>
+                </VerticalStackLayout>
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

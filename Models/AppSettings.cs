@@ -1,5 +1,4 @@
 ﻿using PenguinMonitor.Services;
-using PenguinMonitor.UI.Factories;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;

@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="PenguinMonitor.Pages.BoxDataPage"
+             Title="📦 Box Data">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="15">
+
+            <!-- Box Navigation -->
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+                <Button Text="← Prev Box"
+                        Command="{Binding PrevBoxCommand}"
+                        BackgroundColor="#2196F3"
+                        TextColor="White"
+                        Grid.Column="0"/>
+
+                <Button Text="{Binding CurrentBoxName}"
+                        Command="{Binding SelectBoxCommand}"
+                        BackgroundColor="#2196F3"
+                        TextColor="White"
+                        Grid.Column="1"/>
+
+                <Button Text="Next Box →"
+                        Command="{Binding NextBoxCommand}"
+                        BackgroundColor="#2196F3"
+                        TextColor="White"
+                        Grid.Column="2"/>
+            </Grid>
+
+            <!-- Box Title with Lock -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Image Source="{Binding LockIcon}"
+                           WidthRequest="24"
+                           HeightRequest="24"
+                           Grid.Column="0"/>
+
+                    <Label Text="{Binding BoxTitle}"
+                           FontSize="24"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           VerticalOptions="Center"
+                           Grid.Column="1"/>
+
+                    <Button Text="🔒"
+                            Command="{Binding ToggleLockCommand}"
+                            BackgroundColor="Transparent"
+                            TextColor="Black"
+                            Grid.Column="2"/>
+                </Grid>
+            </Border>
+
+            <!-- Scanned Birds -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="#F5F5F5"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Scanned Bird IDs"
+                           FontSize="16"
+                           FontAttributes="Bold"/>
+
+                    <CollectionView ItemsSource="{Binding ScannedBirds}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate>
+                                <HorizontalStackLayout Spacing="10" Padding="5">
+                                    <Label Text="{Binding BirdId}"
+                                           FontSize="14"
+                                           FontAttributes="Bold"/>
+                                    <Label Text="{Binding Timestamp, StringFormat='{0:HH:mm:ss}'}"
+                                           FontSize="12"
+                                           TextColor="Gray"/>
+                                    <Label Text="{Binding GpsInfo}"
+                                           FontSize="11"
+                                           TextColor="Gray"/>
+                                </HorizontalStackLayout>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                    <Label Text="{Binding NoScansMessage}"
+                           IsVisible="{Binding HasNoScans}"
+                           TextColor="Gray"
+                           FontSize="14"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Count Fields -->
+            <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="10" RowSpacing="10">
+                <!-- Adults -->
+                <VerticalStackLayout Grid.Column="0" Spacing="5">
+                    <Label Text="Adults"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                    <Stepper Value="{Binding BoxData.Adults}"
+                             Minimum="0"
+                             Maximum="10"
+                             Increment="1"
+                             HorizontalOptions="Center"/>
+                    <Label Text="{Binding BoxData.Adults}"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                </VerticalStackLayout>
+
+                <!-- Eggs -->
+                <VerticalStackLayout Grid.Column="1" Spacing="5">
+                    <Label Text="Eggs"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                    <Stepper Value="{Binding BoxData.Eggs}"
+                             Minimum="0"
+                             Maximum="10"
+                             Increment="1"
+                             HorizontalOptions="Center"/>
+                    <Label Text="{Binding BoxData.Eggs}"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                </VerticalStackLayout>
+
+                <!-- Chicks -->
+                <VerticalStackLayout Grid.Column="2" Spacing="5">
+                    <Label Text="Chicks"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                    <Stepper Value="{Binding BoxData.Chicks}"
+                             Minimum="0"
+                             Maximum="10"
+                             Increment="1"
+                             HorizontalOptions="Center"/>
+                    <Label Text="{Binding BoxData.Chicks}"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                </VerticalStackLayout>
+
+                <!-- Gate Status -->
+                <VerticalStackLayout Grid.Column="3" Spacing="5">
+                    <Label Text="Gate"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"/>
+                    <Picker ItemsSource="{Binding GateStatusOptions}"
+                            SelectedItem="{Binding BoxData.GateStatus}"
+                            HorizontalOptions="Center"
+                            WidthRequest="80"/>
+                </VerticalStackLayout>
+            </Grid>
+
+            <!-- Breeding Chance -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Breeding Likelihood"
+                           FontSize="16"
+                           FontAttributes="Bold"/>
+                    <Picker ItemsSource="{Binding BreedingChanceOptions}"
+                            SelectedItem="{Binding BoxData.BreedingChance}"
+                            HorizontalOptions="FillAndExpand"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Notes -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Background="White"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Notes"
+                           FontSize="16"
+                           FontAttributes="Bold"/>
+                    <Editor Text="{Binding BoxData.Notes}"
+                            Placeholder="Enter notes about this box..."
+                            HeightRequest="100"
+                            BackgroundColor="#F5F5F5"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Action Buttons -->
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="10" Margin="0,20,0,0">
+                <Button Text="Clear Box"
+                        Command="{Binding ClearBoxCommand}"
+                        BackgroundColor="#FFC107"
+                        TextColor="White"
+                        Grid.Column="0"/>
+
+                <Button Text="Save"
+                        Command="{Binding SaveBoxCommand}"
+                        BackgroundColor="#4CAF50"
+                        TextColor="White"
+                        Grid.Column="1"/>
+            </Grid>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
