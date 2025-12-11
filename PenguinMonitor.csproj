@@ -44,6 +44,7 @@
     <AndroidSdbHostPort>10000</AndroidSdbHostPort>
     <AndroidSdbTargetPort>10000</AndroidSdbTargetPort>
     <Debuggable>true</Debuggable>
+    <AndroidKeyStore>false</AndroidKeyStore>
   </PropertyGroup>
 
   <ItemGroup>
