@@ -31,8 +31,9 @@
                 "${workspaceFolder}/PenguinMonitor.csproj",
                 "-c",
                 "Debug",
-                "-t:Install",
-                "-p:AndroidKeyStore=False"
+                "-t:Run",
+                "-f",
+                "net9.0-android"
             ],
             "problemMatcher": "$msCompile",
             "group": "build",
@@ -143,8 +144,9 @@
                 "${workspaceFolder}/PenguinMonitor.csproj",
                 "-c",
                 "Debug",
-                "-t:Install",
-                "-p:AndroidKeyStore=False"
+                "-t:Run",
+                "-f",
+                "net9.0-android"
             ],
             "problemMatcher": "$msCompile",
             "group": "build",
