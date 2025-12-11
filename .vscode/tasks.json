@@ -146,7 +146,8 @@
                 "Debug",
                 "-t:Run",
                 "-f",
-                "net9.0-android"
+                "net9.0-android",
+                "-p:AndroidAttachDebugger=true"
             ],
             "problemMatcher": "$msCompile",
             "group": "build",
@@ -186,7 +187,6 @@
                 "shell",
                 "am",
                 "start",
-                "-D",
                 "-n",
                 "PenguinMonitor.PenguinMonitor/crc6438a9d54b14bd3e7a.MainActivity"
             ],
@@ -209,15 +209,31 @@
             "problemMatcher": []
         },
         {
+            "label": "android-debug-kill",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "shell",
+                "am",
+                "force-stop",
+                "PenguinMonitor.PenguinMonitor"
+            ],
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            }
+        },
+        {
             "label": "android-debug-build",
             "dependsOn": [
-                "android-debug-build-install",
-                "android-debug-launch",
-                "android-debug-wait",
-                "android-debug-forward-port"
+                "android-debug-build-install"
             ],
             "dependsOrder": "sequence",
-            "problemMatcher": []
+            "problemMatcher": [],
+            "group": "build"
         }
     ]
 }

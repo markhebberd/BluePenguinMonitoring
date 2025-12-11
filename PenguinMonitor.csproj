@@ -51,11 +51,22 @@
     <!-- App Icon -->
     <MauiIcon Include="Resources\appicon.svg" ForegroundFile="Resources\appiconfg.svg" Color="#512BD4" />
 
+    <!-- Splash Screen -->
+    <MauiSplashScreen Include="Resources\appicon.svg" Color="#512BD4" BaseSize="128,128" />
+
     <!-- Images -->
     <MauiImage Include="Resources\Images\*" />
 
+    <!-- Custom Fonts -->
+    <MauiFont Include="Resources\Fonts\*" />
+
     <!-- Raw Assets -->
     <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Android -->
+    <AndroidResource Include="Platforms\Android\Resources\**\*" />
   </ItemGroup>
 
   <ItemGroup>

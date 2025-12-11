@@ -7,8 +7,7 @@
             "request": "attach",
             "address": "localhost",
             "port": 10000,
-            "preLaunchTask": "android-debug-build",
-            "sourceMaps": true
+            "preLaunchTask": "android-debug-build"
         },
         {
             "name": "Android: Build & Deploy",
