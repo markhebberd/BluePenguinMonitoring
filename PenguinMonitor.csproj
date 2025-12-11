@@ -29,9 +29,16 @@
 	<AndroidSigningKeyPass>$(SigningKeyPassword)</AndroidSigningKeyPass>
   </PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)'=='Debug'">
-		<EmbedAssembliesIntoApk>false</EmbedAssembliesIntoApk> <!-- Speeds up debug builds -->
+		<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk> <!-- Required for .NET 9 debugging -->
 		<AndroidAot>false</AndroidAot> <!-- Optional: skip AOT for debug -->
 		<AndroidLinkMode>None</AndroidLinkMode> <!-- Optional: reduce linking in debug -->
+		<DebugSymbols>true</DebugSymbols>
+		<DebugType>portable</DebugType>
+		<AndroidEnableDebugging>true</AndroidEnableDebugging>
+		<AndroidAttachDebugger>true</AndroidAttachDebugger>
+		<AndroidSdbHostPort>10000</AndroidSdbHostPort>
+		<AndroidSdbTargetPort>10000</AndroidSdbTargetPort>
+		<Debuggable>true</Debuggable>
 	</PropertyGroup>
   <ItemGroup>
     <None Remove=".gitattributes" />

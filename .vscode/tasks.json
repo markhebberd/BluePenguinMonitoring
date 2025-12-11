@@ -1,0 +1,221 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "android-build",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/PenguinMonitor.csproj",
+                "-c",
+                "Debug",
+                "-p:AndroidKeyStore=False"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": "build",
+            "options": {
+                "env": {
+                    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:HOME}/Android/Sdk/platform-tools:${env:HOME}/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
+                }
+            }
+        },
+        {
+            "label": "android-deploy",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/PenguinMonitor.csproj",
+                "-c",
+                "Debug",
+                "-t:Install",
+                "-p:AndroidKeyStore=False"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": "build",
+            "options": {
+                "env": {
+                    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:HOME}/Android/Sdk/platform-tools:${env:HOME}/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "android-build-run",
+            "dependsOn": ["android-deploy"],
+            "dependsOrder": "sequence",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "shell",
+                "am",
+                "start",
+                "-n",
+                "PenguinMonitor.PenguinMonitor/crc6438a9d54b14bd3e7a.MainActivity"
+            ],
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "android-clean",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "clean",
+                "${workspaceFolder}/PenguinMonitor.csproj",
+                "-c",
+                "Debug"
+            ],
+            "problemMatcher": "$msCompile",
+            "options": {
+                "env": {
+                    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+                    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:PATH}"
+                }
+            }
+        },
+        {
+            "label": "android-logcat",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "logcat",
+                "-v",
+                "color",
+                "*:W",
+                "mono:D",
+                "mono-rt:D",
+                "PenguinMonitor:D"
+            ],
+            "isBackground": true,
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "android-clear-logcat",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "logcat",
+                "-c"
+            ],
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            }
+        },
+        {
+            "label": "android-debug-build-install",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/PenguinMonitor.csproj",
+                "-c",
+                "Debug",
+                "-t:Install",
+                "-p:AndroidKeyStore=False"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": "build",
+            "options": {
+                "env": {
+                    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:HOME}/Android/Sdk/platform-tools:${env:HOME}/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "android-debug-forward-port",
+            "command": "bash",
+            "type": "shell",
+            "args": [
+                "-c",
+                "${env:HOME}/Android/Sdk/platform-tools/adb shell pidof PenguinMonitor.PenguinMonitor | xargs -I {} ${env:HOME}/Android/Sdk/platform-tools/adb forward tcp:10000 jdwp:{}"
+            ],
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            }
+        },
+        {
+            "label": "android-debug-launch",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "shell",
+                "am",
+                "start",
+                "-D",
+                "-n",
+                "PenguinMonitor.PenguinMonitor/crc6438a9d54b14bd3e7a.MainActivity"
+            ],
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            }
+        },
+        {
+            "label": "android-debug-wait",
+            "command": "bash",
+            "type": "shell",
+            "args": [
+                "-c",
+                "echo 'Waiting 2 seconds for app to start...' && sleep 2"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "android-debug-build",
+            "dependsOn": [
+                "android-debug-build-install",
+                "android-debug-launch",
+                "android-debug-wait",
+                "android-debug-forward-port"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        }
+    ]
+}
