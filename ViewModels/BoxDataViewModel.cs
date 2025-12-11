@@ -3,54 +3,166 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using PenguinMonitor.Models;
+using PenguinMonitor.Services;
 
 namespace PenguinMonitor.ViewModels;
 
 public class BoxDataViewModel : INotifyPropertyChanged
 {
-    private BoxData _boxData;
-    private string _currentBoxName = "1";
-    private bool _isLocked = false;
-    private Dictionary<string, int> _boxNamesAndIndexes;
+    private readonly DataManager _dataManager = DataManager.Instance;
+    private readonly DataStorageService _dataStorageService = new DataStorageService();
+    private BoxData? _currentBoxData;
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    public BoxData BoxData
+    public BoxDataViewModel()
     {
-        get => _boxData;
-        set
+        // Subscribe to data manager events
+        _dataManager.DataChanged += OnDataManagerChanged;
+        _dataManager.BoxChanged += OnBoxChanged;
+
+        // Initialize box names (simple 1-150 for now, can be loaded from settings later)
+        for (int i = 1; i <= 150; i++)
         {
-            _boxData = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ScannedBirds));
-            OnPropertyChanged(nameof(HasNoScans));
+            _dataManager.BoxNamesAndIndexes[i.ToString()] = i;
         }
+        _dataManager.CurrentBoxName = "1";
+        _dataManager.CurrentBoxIndex = 1;
+
+        // Initialize commands
+        PrevBoxCommand = new Command(OnPreviousBox, () => _dataManager.CanNavigateToPreviousBox());
+        NextBoxCommand = new Command(OnNextBox, () => _dataManager.CanNavigateToNextBox());
+        SelectBoxCommand = new Command(OnSelectBox);
+        ClearBoxCommand = new Command(OnClearBox, () => CurrentBoxData != null && IsLocked);
+        ToggleLockCommand = new Command(OnToggleLock);
+        SaveBoxCommand = new Command(OnSaveData);
+
+        // Load initial data
+        RefreshView();
     }
 
-    public string CurrentBoxName
-    {
-        get => _currentBoxName;
-        set
-        {
-            _currentBoxName = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(BoxTitle));
-        }
-    }
-
+    // Properties bound to UI
+    public string CurrentBoxName => _dataManager.CurrentBoxName;
     public string BoxTitle => $"Box {CurrentBoxName}";
+    public bool IsLocked => _dataManager.IsBoxLocked;
+    public string LockIcon => IsLocked ? "locked_green.png" : "unlocked_red.png";
 
-    public string LockIcon => _isLocked ? "lock_closed" : "lock_open";
+    public BoxData? CurrentBoxData
+    {
+        get => _currentBoxData;
+        set
+        {
+            _currentBoxData = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasNoScans));
+            OnPropertyChanged(nameof(NoScansMessage));
+            OnPropertyChanged(nameof(ScannedBirds));
+            OnPropertyChanged(nameof(Adults));
+            OnPropertyChanged(nameof(Eggs));
+            OnPropertyChanged(nameof(Chicks));
+            OnPropertyChanged(nameof(Notes));
+            OnPropertyChanged(nameof(GateStatus));
+            OnPropertyChanged(nameof(BreedingChance));
+        }
+    }
 
-    public bool HasNoScans => !BoxData.ScannedIds.Any();
-
+    public bool HasNoScans => CurrentBoxData == null || !CurrentBoxData.ScannedIds.Any();
     public string NoScansMessage => "No birds scanned yet. Enable Bluetooth in Settings to scan.";
 
-    public ObservableCollection<ScanRecord> ScannedBirds { get; set; }
+    public ObservableCollection<ScanRecord> ScannedBirds
+    {
+        get => CurrentBoxData != null
+            ? new ObservableCollection<ScanRecord>(CurrentBoxData.ScannedIds)
+            : new ObservableCollection<ScanRecord>();
+    }
+
+    public string Adults
+    {
+        get => CurrentBoxData?.Adults.ToString() ?? "0";
+        set
+        {
+            if (CurrentBoxData != null && int.TryParse(value, out int adults))
+            {
+                CurrentBoxData.Adults = adults;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
+
+    public string Eggs
+    {
+        get => CurrentBoxData?.Eggs.ToString() ?? "0";
+        set
+        {
+            if (CurrentBoxData != null && int.TryParse(value, out int eggs))
+            {
+                CurrentBoxData.Eggs = eggs;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
+
+    public string Chicks
+    {
+        get => CurrentBoxData?.Chicks.ToString() ?? "0";
+        set
+        {
+            if (CurrentBoxData != null && int.TryParse(value, out int chicks))
+            {
+                CurrentBoxData.Chicks = chicks;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
+
+    public string Notes
+    {
+        get => CurrentBoxData?.Notes ?? "";
+        set
+        {
+            if (CurrentBoxData != null)
+            {
+                CurrentBoxData.Notes = value;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
+
+    public string GateStatus
+    {
+        get => CurrentBoxData?.GateStatus ?? "";
+        set
+        {
+            if (CurrentBoxData != null)
+            {
+                CurrentBoxData.GateStatus = value;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
+
+    public string BreedingChance
+    {
+        get => CurrentBoxData?.BreedingChance ?? "";
+        set
+        {
+            if (CurrentBoxData != null)
+            {
+                CurrentBoxData.BreedingChance = value;
+                OnPropertyChanged();
+                SaveCurrentBoxData();
+            }
+        }
+    }
 
     public ObservableCollection<string> GateStatusOptions { get; } = new()
     {
-        "Open", "Closed", "Half", "None"
+        "Open", "Closed", "Gate up", "Regate", "None"
     };
 
     public ObservableCollection<string> BreedingChanceOptions { get; } = new()
@@ -63,132 +175,116 @@ public class BoxDataViewModel : INotifyPropertyChanged
         "DCM - Decommissioned"
     };
 
+    // Commands
     public ICommand PrevBoxCommand { get; }
     public ICommand NextBoxCommand { get; }
     public ICommand SelectBoxCommand { get; }
-    public ICommand ToggleLockCommand { get; }
     public ICommand ClearBoxCommand { get; }
+    public ICommand ToggleLockCommand { get; }
     public ICommand SaveBoxCommand { get; }
 
-    public BoxDataViewModel()
+    private void OnPreviousBox()
     {
-        _boxData = new BoxData();
-        ScannedBirds = new ObservableCollection<ScanRecord>();
-
-        // Initialize box navigation (simple 1-150 for demo)
-        _boxNamesAndIndexes = new Dictionary<string, int>();
-        for (int i = 1; i <= 150; i++)
-        {
-            _boxNamesAndIndexes[i.ToString()] = i;
-        }
-
-        PrevBoxCommand = new Command(NavigatePreviousBox);
-        NextBoxCommand = new Command(NavigateNextBox);
-        SelectBoxCommand = new Command(async () => await SelectBox());
-        ToggleLockCommand = new Command(ToggleLock);
-        ClearBoxCommand = new Command(ClearBox);
-        SaveBoxCommand = new Command(SaveBox);
-
-        LoadCurrentBox();
+        _dataManager.NavigateToPreviousBox();
+        RefreshView();
     }
 
-    public void LoadCurrentBox()
+    private void OnNextBox()
     {
-        // In full implementation, load from DataStorageService
-        // For now, just reset to empty box
-        BoxData = new BoxData
-        {
-            Adults = 0,
-            Eggs = 0,
-            Chicks = 0,
-            GateStatus = "Open",
-            BreedingChance = "UNL - Unlikely to breed",
-            Notes = ""
-        };
-
-        ScannedBirds.Clear();
-        foreach (var scan in BoxData.ScannedIds)
-        {
-            ScannedBirds.Add(scan);
-        }
-
-        OnPropertyChanged(nameof(CurrentBoxName));
-        OnPropertyChanged(nameof(BoxTitle));
+        _dataManager.NavigateToNextBox();
+        RefreshView();
     }
 
-    private void NavigatePreviousBox()
-    {
-        var currentIndex = _boxNamesAndIndexes[CurrentBoxName];
-        if (currentIndex > 1)
-        {
-            var prevBox = _boxNamesAndIndexes.FirstOrDefault(x => x.Value == currentIndex - 1).Key;
-            if (prevBox != null)
-            {
-                CurrentBoxName = prevBox;
-                LoadCurrentBox();
-            }
-        }
-    }
-
-    private void NavigateNextBox()
-    {
-        var currentIndex = _boxNamesAndIndexes[CurrentBoxName];
-        if (currentIndex < _boxNamesAndIndexes.Count)
-        {
-            var nextBox = _boxNamesAndIndexes.FirstOrDefault(x => x.Value == currentIndex + 1).Key;
-            if (nextBox != null)
-            {
-                CurrentBoxName = nextBox;
-                LoadCurrentBox();
-            }
-        }
-    }
-
-    private async Task SelectBox()
+    private async void OnSelectBox()
     {
         var boxName = await Application.Current.MainPage.DisplayPromptAsync(
             "Select Box",
             "Enter box name or number:",
             initialValue: CurrentBoxName);
 
-        if (!string.IsNullOrEmpty(boxName) && _boxNamesAndIndexes.ContainsKey(boxName))
+        if (!string.IsNullOrEmpty(boxName) && _dataManager.BoxNamesAndIndexes.ContainsKey(boxName))
         {
-            CurrentBoxName = boxName;
-            LoadCurrentBox();
+            _dataManager.CurrentBoxName = boxName;
+            _dataManager.CurrentBoxIndex = _dataManager.BoxNamesAndIndexes[boxName];
+            RefreshView();
         }
     }
 
-    private void ToggleLock()
+    private void OnClearBox()
     {
-        _isLocked = !_isLocked;
-        if (_isLocked)
-        {
-            SaveBox();
-        }
+        if (!IsLocked) return;
+
+        // Show confirmation dialog
+        Application.Current?.MainPage?.DisplayAlert(
+            "Clear Box",
+            $"Are you sure you want to clear all data for Box {CurrentBoxName}?",
+            "Yes", "No").ContinueWith(task =>
+            {
+                if (task.Result)
+                {
+                    _dataManager.ClearCurrentBox();
+                    RefreshView();
+                }
+            });
+    }
+
+    private void OnToggleLock()
+    {
+        _dataManager.IsBoxLocked = !_dataManager.IsBoxLocked;
+        OnPropertyChanged(nameof(IsLocked));
         OnPropertyChanged(nameof(LockIcon));
+        ((Command)ClearBoxCommand).ChangeCanExecute();
     }
 
-    private void ClearBox()
+    private void OnSaveData()
     {
-        BoxData = new BoxData
+        // TODO: Implement save to disk/server using DataStorageService
+        Application.Current?.MainPage?.DisplayAlert("Save", "Data saved successfully", "OK");
+    }
+
+    private void SaveCurrentBoxData()
+    {
+        if (CurrentBoxData != null)
         {
+            _dataManager.SetCurrentBoxData(CurrentBoxData);
+        }
+    }
+
+    private void RefreshView()
+    {
+        CurrentBoxData = _dataManager.GetCurrentBoxData() ?? new BoxData
+        {
+            ScannedIds = new List<ScanRecord>(),
             Adults = 0,
             Eggs = 0,
             Chicks = 0,
+            Notes = "",
             GateStatus = "Open",
-            BreedingChance = "UNL - Unlikely to breed",
-            Notes = ""
+            BreedingChance = "",
+            whenDataCollectedUtc = DateTime.UtcNow
         };
-        ScannedBirds.Clear();
+
+        OnPropertyChanged(nameof(CurrentBoxName));
+        OnPropertyChanged(nameof(BoxTitle));
+        OnPropertyChanged(nameof(IsLocked));
+        OnPropertyChanged(nameof(LockIcon));
+
+        ((Command)PrevBoxCommand).ChangeCanExecute();
+        ((Command)NextBoxCommand).ChangeCanExecute();
+        ((Command)ClearBoxCommand).ChangeCanExecute();
     }
 
-    private void SaveBox()
+    private void OnDataManagerChanged(object? sender, EventArgs e)
     {
-        // In full implementation, save to DataStorageService
-        Application.Current.MainPage.DisplayAlert("Saved", $"Box {CurrentBoxName} data saved", "OK");
+        RefreshView();
     }
 
-    protected void OnPropertyChanged([CallerMemberName] string propertyName = null)
+    private void OnBoxChanged(object? sender, string boxName)
+    {
+        RefreshView();
+    }
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }

@@ -16,6 +16,6 @@ public partial class BoxDataPage : ContentPage
 	protected override void OnAppearing()
 	{
 		base.OnAppearing();
-		_viewModel.LoadCurrentBox();
+		// Data is automatically loaded in ViewModel constructor
 	}
 }

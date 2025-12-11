@@ -3,24 +3,17 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using PenguinMonitor.Models;
+using PenguinMonitor.Services;
 
 namespace PenguinMonitor.ViewModels;
 
 public class SettingsViewModel : INotifyPropertyChanged
 {
-    private AppSettings _appSettings;
+    private readonly DataManager _dataManager = DataManager.Instance;
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    public AppSettings AppSettings
-    {
-        get => _appSettings;
-        set
-        {
-            _appSettings = value;
-            OnPropertyChanged();
-        }
-    }
+    public AppSettings AppSettings => _dataManager.AppSettings;
 
     public string VersionText => $"Version: 37.25 (MAUI)";
 
@@ -34,17 +27,18 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     public SettingsViewModel()
     {
-        // Initialize with default settings
-        _appSettings = new AppSettings(FileSystem.AppDataDirectory)
+        // Initialize AppSettings if not already set
+        if (string.IsNullOrEmpty(AppSettings.filesDir))
         {
-            IsBlueToothEnabled = false,
-            ActiveSessionTimeStampActive = false,
-            ActiveSessionLocalTimeStamp = DateTime.Now,
-            ShowBoxTagDeleteButton = false,
-            ShowDifferencesWithPreviousMonitor = false,
-            AllBoxSetsString = "{1-150,AA-AC}",
-            BoxSetString = "All"
-        };
+            AppSettings.filesDir = FileSystem.AppDataDirectory;
+            AppSettings.IsBlueToothEnabled = false;
+            AppSettings.ActiveSessionTimeStampActive = false;
+            AppSettings.ActiveSessionLocalTimeStamp = DateTime.Now;
+            AppSettings.ShowBoxTagDeleteButton = false;
+            AppSettings.ShowDifferencesWithPreviousMonitor = false;
+            AppSettings.AllBoxSetsString = "{1-150,AA-AC}";
+            AppSettings.BoxSetString = "All";
+        }
 
         BoxSetOptions = new ObservableCollection<string> { "All" };
         UpdateBoxSetOptions();
