@@ -2,6 +2,33 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "prepare-debug",
+            "type": "shell",
+            "command": "adb kill-server && adb start-server && adb devices",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "deploy-debuggable",
+            "type": "shell",
+            "command": "dotnet build -t:Run -f net9.0-android --configuration Debug ${workspaceFolder}",
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "DOTNET_ROOT": "${env:HOME}/.dotnet",
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/.dotnet:${env:HOME}/.dotnet/tools:${env:HOME}/Android/Sdk/platform-tools:${env:HOME}/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
             "label": "android-build",
             "command": "dotnet",
             "type": "process",

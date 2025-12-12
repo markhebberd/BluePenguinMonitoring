@@ -837,33 +837,101 @@ public class OverviewViewModel : INotifyPropertyChanged
 
     private async Task OnClearAllAsync()
     {
-        bool confirmed = await Application.Current!.MainPage!.DisplayAlert(
-            "Clear All Data",
-            "Are you sure you want to clear ALL box data for the current monitor? This cannot be undone.",
-            "Clear All",
-            "Cancel");
+        int currentlyVisibleMonitor = _dataManager.AppSettings.CurrentlyVisibleMonitor;
 
-        if (!confirmed)
+        if (currentlyVisibleMonitor == 0)
+        {
+            // Clearing local data
+            bool confirmed = await Application.Current!.MainPage!.DisplayAlert(
+                "Clear All Data",
+                "Are you sure you want to clear ALL box data for the current monitor? This cannot be undone.",
+                "Clear All",
+                "Cancel");
+
+            if (!confirmed)
+                return;
+
+            // Clear all box data in monitor 0 (current/local data)
+            if (_dataManager.AllMonitorData.ContainsKey(0))
+            {
+                _dataManager.AllMonitorData[0].BoxData.Clear();
+                _dataManager.RaiseDataChanged();
+
+                // Save the cleared data
+#if ANDROID
+                var context = Platform.CurrentActivity;
+                if (context != null)
+                {
+                    await DataStorageService.SaveAllMonitorDataToDisk(context, _dataManager.AllMonitorData, reportHome: false);
+                }
+#endif
+            }
+
+            RefreshData();
+            await Application.Current?.MainPage?.DisplayAlert("Cleared", "All box data has been cleared.", "OK");
+        }
+        else
+        {
+            // Deleting historical monitor from server - ask for reason
+            await ShowDeletionReasonDialogAsync();
+        }
+    }
+
+    /// <summary>
+    /// Show dialog to delete a monitor from the server with an optional reason
+    /// </summary>
+    private async Task ShowDeletionReasonDialogAsync()
+    {
+        int currentlyVisibleMonitor = _dataManager.AppSettings.CurrentlyVisibleMonitor;
+        if (!_dataManager.AllMonitorData.ContainsKey(currentlyVisibleMonitor))
             return;
 
-        // Clear all box data in monitor 0 (current/local data)
-        if (_dataManager.AllMonitorData.ContainsKey(0))
-        {
-            _dataManager.AllMonitorData[0].BoxData.Clear();
-            _dataManager.RaiseDataChanged();
+        var currentMonitor = _dataManager.AllMonitorData[currentlyVisibleMonitor];
 
-            // Save the cleared data
+        string? deletionReason = await Application.Current!.MainPage!.DisplayPromptAsync(
+            "Delete Monitor Data",
+            "Set this monitor to be ignored on the server?\n\nEnter a reason for deletion (optional):",
+            "Yes, flag to be ignored",
+            "Cancel",
+            "Reason (optional)");
+
+        if (deletionReason == null)
+            return; // User cancelled
+
+        // Save the deletion reason to the monitor
+        if (!string.IsNullOrWhiteSpace(deletionReason))
+        {
+            currentMonitor.DeletionReason = deletionReason;
+        }
+        currentMonitor.IsDeleted = true;
+
+        // Save locally
 #if ANDROID
-            var context = Platform.CurrentActivity;
-            if (context != null)
-            {
-                await DataStorageService.SaveAllMonitorDataToDisk(context, _dataManager.AllMonitorData, reportHome: false);
-            }
+        var context = Platform.CurrentActivity;
+        if (context != null)
+        {
+            await DataStorageService.SaveAllMonitorDataToDisk(context, _dataManager.AllMonitorData, reportHome: false);
+        }
 #endif
+
+        // Send deletion request to server
+        string question = "DeletePenguinMonitor:" + currentMonitor.filename + "~~~~" + currentMonitor.LastSaved.ToFileTimeUtc();
+        if (!string.IsNullOrWhiteSpace(deletionReason))
+        {
+            question += "~~~~" + deletionReason;
+        }
+
+        try
+        {
+            string response = await Task.Run(() => Backend.RequestServerResponse(question));
+            await Application.Current?.MainPage?.DisplayAlert("Server Response", response, "OK");
+        }
+        catch (Exception ex)
+        {
+            await Application.Current?.MainPage?.DisplayAlert("Error", $"Failed to send deletion request: {ex.Message}", "OK");
         }
 
         RefreshData();
-        await Application.Current?.MainPage?.DisplayAlert("Cleared", "All box data has been cleared.", "OK");
     }
 
     private async Task OnBirdStatsAsync()
@@ -923,6 +991,7 @@ public class OverviewViewModel : INotifyPropertyChanged
             "Cancel",
             null,
             "💾 Save to file",
+            "💾📤 Save & Upload",
             "📂 Load from device",
             "🌐 Load from server",
             "📤 Upload to server") ?? "Cancel";
@@ -930,7 +999,10 @@ public class OverviewViewModel : INotifyPropertyChanged
         switch (action)
         {
             case "💾 Save to file":
-                await SaveToFileAsync();
+                await SaveToFileAsync(uploadAfterSave: false);
+                break;
+            case "💾📤 Save & Upload":
+                await SaveToFileAsync(uploadAfterSave: true);
                 break;
             case "📂 Load from device":
                 await LoadFromDeviceAsync();
@@ -944,7 +1016,7 @@ public class OverviewViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task SaveToFileAsync()
+    private async Task SaveToFileAsync(bool uploadAfterSave = false)
     {
         try
         {
@@ -954,12 +1026,29 @@ public class OverviewViewModel : INotifyPropertyChanged
                 return;
             }
 
-            var monitorData = _dataManager.AllMonitorData[0];
-            var json = JsonConvert.SerializeObject(monitorData, Formatting.Indented);
-
-            // Generate filename with timestamp
+            // Generate default filename with timestamp
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmm");
-            var filename = $"PenguinMonitor_{timestamp}.json";
+            var defaultFilename = $"PenguinMonitor_{timestamp}";
+
+            // Prompt user for custom filename
+            string? customFilename = await Application.Current!.MainPage!.DisplayPromptAsync(
+                "Save Data",
+                "Enter filename (without extension):",
+                "Save",
+                "Cancel",
+                defaultFilename,
+                initialValue: defaultFilename);
+
+            if (string.IsNullOrWhiteSpace(customFilename))
+                return; // User cancelled
+
+            // Sanitize filename
+            customFilename = new string(customFilename.Where(c => !Path.GetInvalidFileNameChars().Contains(c)).ToArray());
+            var filename = $"{customFilename}.json";
+
+            var monitorData = _dataManager.AllMonitorData[0];
+            monitorData.filename = filename;
+            var json = JsonConvert.SerializeObject(monitorData, Formatting.Indented);
 
             // Save to Downloads folder
             var downloadsPath = Android.OS.Environment.GetExternalStoragePublicDirectory(
@@ -970,6 +1059,12 @@ public class OverviewViewModel : INotifyPropertyChanged
                 var filePath = Path.Combine(downloadsPath, filename);
                 File.WriteAllText(filePath, json);
                 await Application.Current?.MainPage?.DisplayAlert("Saved", $"Data saved to Downloads/{filename}", "OK");
+
+                // Upload to server if requested
+                if (uploadAfterSave)
+                {
+                    await UploadToServerAsync();
+                }
             }
             else
             {

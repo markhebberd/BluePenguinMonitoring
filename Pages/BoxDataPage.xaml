@@ -289,8 +289,22 @@
                                 HeightRequest="80"
                                 BackgroundColor="#F5F5F5"
                                 IsEnabled="{Binding CanEdit}"/>
+
+                        <!-- Manage Sticky Notes Button -->
+                        <Button Text="Manage Sticky Notes"
+                                Command="{Binding ManageStickyNotesCommand}"
+                                BackgroundColor="#2196F3"
+                                TextColor="White"
+                                IsEnabled="{Binding CanEdit}"/>
                     </VerticalStackLayout>
                 </Border>
+
+                <!-- Delete Box Tag Button -->
+                <Button Text="Delete Box Tag"
+                        Command="{Binding DeleteBoxTagCommand}"
+                        BackgroundColor="#F44336"
+                        TextColor="White"
+                        IsVisible="{Binding ShowDeleteBoxTagButton}"/>
 
                 <!-- Action Button - Clear when locked with data, Cancel when unlocked -->
                 <Button Text="{Binding ActionButtonText}"

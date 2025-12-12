@@ -89,6 +89,8 @@ public class SettingsViewModel : INotifyPropertyChanged
                 _selectedBoxSet = value;
                 AppSettings.BoxSetString = value ?? "All";
                 OnPropertyChanged();
+                // Re-populate box names when selection changes
+                _dataManager.PopulateBoxNames();
             }
         }
     }
@@ -221,6 +223,8 @@ public class SettingsViewModel : INotifyPropertyChanged
     private void ApplyBoxSets()
     {
         UpdateBoxSetOptions();
+        // Re-populate box names with the new settings
+        _dataManager.PopulateBoxNames();
     }
 
     private void UpdateBoxSetOptions()

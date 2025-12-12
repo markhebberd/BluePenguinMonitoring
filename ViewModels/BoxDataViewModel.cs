@@ -97,8 +97,10 @@ public class BoxDataViewModel : INotifyPropertyChanged
 {
     private readonly DataManager _dataManager = DataManager.Instance;
     private readonly DataStorageService _dataStorageService = new DataStorageService();
+    private readonly FeedbackService _feedbackService = FeedbackService.Instance;
     private BoxData? _currentBoxData;
     private string _manualScanInput = "";
+    private bool _highOffspringCountConfirmed = false;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -107,20 +109,22 @@ public class BoxDataViewModel : INotifyPropertyChanged
         // Subscribe to data manager events
         _dataManager.DataChanged += OnDataManagerChanged;
         _dataManager.BoxChanged += OnBoxChanged;
+        _dataManager.EidDataReceived += OnEidDataReceived;
 
-        // Initialize box names ONLY if not already done (lazy)
+        // Initialize feedback service
+        _feedbackService.Initialize();
+
+        // Initialize box names from settings (if not already done)
         if (_dataManager.BoxNamesAndIndexes.Count == 0)
         {
-            for (int i = 1; i <= 150; i++)
-            {
-                _dataManager.BoxNamesAndIndexes[i.ToString()] = i;
-            }
+            _dataManager.PopulateBoxNames();
         }
 
         if (string.IsNullOrEmpty(_dataManager.CurrentBoxName))
         {
-            _dataManager.CurrentBoxName = "1";
-            _dataManager.CurrentBoxIndex = 1;
+            var firstBox = _dataManager.BoxNamesAndIndexes.FirstOrDefault();
+            _dataManager.CurrentBoxName = firstBox.Key ?? "1";
+            _dataManager.CurrentBoxIndex = firstBox.Value > 0 ? firstBox.Value : 1;
         }
 
         // Initialize commands
@@ -135,9 +139,134 @@ public class BoxDataViewModel : INotifyPropertyChanged
         AddManualScanCommand = new Command(OnAddManualScan);
         ViewOlderDataCommand = new Command(OnViewOlderData);
         ViewNewerDataCommand = new Command(OnViewNewerData);
+        ManageStickyNotesCommand = new Command(OnManageStickyNotes);
+        DeleteBoxTagCommand = new Command(OnDeleteBoxTag);
 
         // Load initial data
         RefreshView();
+    }
+
+    /// <summary>
+    /// Handle EID data received from Bluetooth scanner
+    /// </summary>
+    private void OnEidDataReceived(string eidData)
+    {
+        // Must run on main thread for UI updates
+        MainThread.BeginInvokeOnMainThread(() => ProcessEidData(eidData));
+    }
+
+    private void ProcessEidData(string eidData)
+    {
+        var cleanEid = new string(eidData.Where(char.IsLetterOrDigit).ToArray());
+
+        // Check if it's a box tag
+        if (BoxTagService.IsBoxTag(cleanEid))
+        {
+            HandleBoxTagScan(cleanEid);
+            return;
+        }
+
+        // Regular bird scan - unlock the box
+        _dataManager.IsBoxLocked = false;
+        _highOffspringCountConfirmed = false;
+
+        // Add the scan
+        AddScannedId(cleanEid);
+
+        // Haptic feedback
+        _feedbackService.OnScanSuccess();
+
+        RefreshView();
+    }
+
+    private void HandleBoxTagScan(string tagId)
+    {
+        _feedbackService.OnBoxTagScan();
+
+        // Check if this tag is already assigned to a box
+        var existingBoxId = BoxTagService.GetBoxIdByTag(_dataManager.BoxTags, tagId);
+
+        if (existingBoxId != null)
+        {
+            // Tag found - jump to that box
+            if (_dataManager.BoxNamesAndIndexes.ContainsKey(existingBoxId))
+            {
+                _dataManager.CurrentBoxName = existingBoxId;
+                _dataManager.CurrentBoxIndex = _dataManager.BoxNamesAndIndexes[existingBoxId];
+                _dataManager.IsBoxLocked = true;
+                RefreshView();
+                _dataManager.RaiseBoxChanged(existingBoxId);
+            }
+        }
+        else
+        {
+            // New tag - assign to current box
+            BoxTagService.AssignBoxTag(
+                _dataManager.BoxTags,
+                _dataManager.CurrentBoxName,
+                tagId,
+                0, 0, -1, // GPS coords not available here
+                _dataManager.AppSettings.filesDir);
+
+            OnPropertyChanged(nameof(HasBoxTag));
+            OnPropertyChanged(nameof(ShowDeleteBoxTagButton));
+        }
+    }
+
+    private void AddScannedId(string birdId)
+    {
+        // Ensure we have box data
+        if (CurrentBoxData == null)
+        {
+            CurrentBoxData = new BoxData();
+        }
+
+        // Check for duplicates
+        if (CurrentBoxData.ScannedIds.Any(s => s.BirdId == birdId))
+        {
+            return; // Already scanned
+        }
+
+        var scanRecord = new ScanRecord
+        {
+            BirdId = birdId,
+            Timestamp = DateTime.UtcNow,
+            Latitude = 0,
+            Longitude = 0,
+            Accuracy = -1
+        };
+
+        CurrentBoxData.ScannedIds.Add(scanRecord);
+
+        // Check if this is a dead bird - alert!
+        bool isDeadBird = false;
+        if (_dataManager.RemotePenguinData != null &&
+            _dataManager.RemotePenguinData.TryGetValue(birdId, out var penguinData))
+        {
+            if (penguinData.LastKnownLifeStage == LifeStage.Dead)
+            {
+                isDeadBird = true;
+                _feedbackService.OnAlertScan();
+                Application.Current?.MainPage?.DisplayAlert("⚠️ DEAD BIRD SCANNED",
+                    $"Bird {birdId} is marked as DEAD in the database!", "OK");
+            }
+
+            // Update adult/chick count based on penguin data
+            if (penguinData.LastKnownLifeStage == LifeStage.Adult ||
+                penguinData.LastKnownLifeStage == LifeStage.Returnee ||
+                (penguinData.LastKnownLifeStage == LifeStage.Chick && DateTime.Today > penguinData.ChipDate.AddMonths(3)))
+            {
+                CurrentBoxData.Adults++;
+                OnPropertyChanged(nameof(Adults));
+            }
+            else if (penguinData.LastKnownLifeStage == LifeStage.Chick)
+            {
+                CurrentBoxData.Chicks++;
+                OnPropertyChanged(nameof(Chicks));
+            }
+        }
+
+        SaveCurrentBoxData();
     }
 
     // Properties bound to UI
@@ -337,6 +466,7 @@ public class BoxDataViewModel : INotifyPropertyChanged
             {
                 CurrentBoxData.Adults = adults;
                 OnPropertyChanged();
+                CheckForHighOffspringCount();
                 SaveCurrentBoxData();
             }
         }
@@ -351,6 +481,8 @@ public class BoxDataViewModel : INotifyPropertyChanged
             {
                 CurrentBoxData.Eggs = eggs;
                 OnPropertyChanged();
+                AutoSetBreedingChance();
+                CheckForHighOffspringCount();
                 SaveCurrentBoxData();
             }
         }
@@ -365,8 +497,60 @@ public class BoxDataViewModel : INotifyPropertyChanged
             {
                 CurrentBoxData.Chicks = chicks;
                 OnPropertyChanged();
+                AutoSetBreedingChance();
+                CheckForHighOffspringCount();
                 SaveCurrentBoxData();
             }
+        }
+    }
+
+    /// <summary>
+    /// Auto-set breeding chance to BR when eggs or chicks are entered
+    /// </summary>
+    private void AutoSetBreedingChance()
+    {
+        if (CurrentBoxData == null) return;
+
+        if (CurrentBoxData.Eggs > 0 || CurrentBoxData.Chicks > 0)
+        {
+            if (CurrentBoxData.BreedingChance != "BR")
+            {
+                CurrentBoxData.BreedingChance = "BR";
+                OnPropertyChanged(nameof(BreedingChance));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check for high offspring counts and show confirmation dialog
+    /// </summary>
+    private async void CheckForHighOffspringCount()
+    {
+        if (_highOffspringCountConfirmed || CurrentBoxData == null) return;
+
+        int adults = CurrentBoxData.Adults;
+        int eggs = CurrentBoxData.Eggs;
+        int chicks = CurrentBoxData.Chicks;
+
+        var highValues = new List<(string type, int count)>();
+        if (adults > 2) highValues.Add(("adults", adults));
+        if (eggs > 2) highValues.Add(("eggs", eggs));
+        if (chicks > 2) highValues.Add(("chicks", chicks));
+        if (chicks + eggs > 2 && eggs > 0 && chicks > 0) highValues.Add(("eggs & chicks combined", chicks + eggs));
+
+        if (highValues.Count > 0)
+        {
+            var message = "Are you sure you have found:\n\n";
+            foreach (var (type, count) in highValues)
+                message += $"• {count} {type}\n";
+            message += "\nPlease check this is correct.";
+
+            await Application.Current!.MainPage!.DisplayAlert(
+                "High Value Confirmation",
+                message,
+                "OK");
+
+            _highOffspringCountConfirmed = true;
         }
     }
 
@@ -447,6 +631,10 @@ public class BoxDataViewModel : INotifyPropertyChanged
     public bool CanClearBox => IsLocked && CurrentBoxData != null && HasAnyData();
     public double ClearButtonOpacity => CanClearBox ? 1.0 : 0.5;
 
+    // Box tag properties
+    public bool HasBoxTag => _dataManager.BoxTags.ContainsKey(_dataManager.CurrentBoxName);
+    public bool ShowDeleteBoxTagButton => HasBoxTag && _dataManager.AppSettings.ShowBoxTagDeleteButton;
+
     // Commands
     public ICommand PrevBoxCommand { get; }
     public ICommand NextBoxCommand { get; }
@@ -458,6 +646,8 @@ public class BoxDataViewModel : INotifyPropertyChanged
     public ICommand MoveScanCommand { get; }
     public ICommand AddManualScanCommand { get; }
     public ICommand ViewOlderDataCommand { get; }
+    public ICommand ManageStickyNotesCommand { get; }
+    public ICommand DeleteBoxTagCommand { get; }
     public ICommand ViewNewerDataCommand { get; }
 
     private bool HasAnyData()
@@ -918,6 +1108,92 @@ public class BoxDataViewModel : INotifyPropertyChanged
 
         RefreshLockState();
         RefreshHistoricalDataState();
+        OnPropertyChanged(nameof(HasBoxTag));
+        OnPropertyChanged(nameof(ShowDeleteBoxTagButton));
+    }
+
+    /// <summary>
+    /// Show sticky notes management dialog
+    /// </summary>
+    private async void OnManageStickyNotes()
+    {
+        var olderBoxDatas = DataStorageService.getOlderBoxDatas(
+            _dataManager.AllMonitorData,
+            _dataManager.AppSettings.CurrentlyVisibleMonitor + _dataManager.CurrentHistoricalDataIndex,
+            _dataManager.CurrentBoxName);
+
+        string stickyNotesString = DataStorageService.getStickyNotes(olderBoxDatas);
+        var currentNotes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(stickyNotesString))
+        {
+            currentNotes = stickyNotesString.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        }
+
+        // Build display message
+        string message = currentNotes.Count > 0
+            ? $"Current sticky notes:\n{string.Join("\n", currentNotes.Select(n => $"• {n}"))}\n\n"
+            : "No sticky notes yet.\n\n";
+        message += "To add a note: type the note text below.\nTo remove a note: type 'remove:notename'";
+
+        string result = await Application.Current!.MainPage!.DisplayPromptAsync(
+            $"Sticky Notes - Box {_dataManager.CurrentBoxName}",
+            message,
+            "OK",
+            "Cancel",
+            "Enter note or 'remove:notename'");
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            if (CurrentBoxData == null)
+            {
+                CurrentBoxData = new BoxData();
+            }
+
+            string currentNotesText = CurrentBoxData.Notes ?? "";
+            if (!currentNotesText.EndsWith(" ") && !string.IsNullOrEmpty(currentNotesText))
+                currentNotesText += " ";
+
+            if (result.StartsWith("remove:", StringComparison.OrdinalIgnoreCase))
+            {
+                // Remove a sticky note
+                string noteToRemove = result.Substring(7).Trim().Replace(" ", "_");
+                currentNotesText += $"l-{noteToRemove} ";
+            }
+            else
+            {
+                // Add a sticky note (replace spaces with underscores to make it a single token)
+                string newNote = result.Trim().Replace(" ", "_");
+                currentNotesText += $"l={newNote} ";
+            }
+
+            CurrentBoxData.Notes = currentNotesText;
+            OnPropertyChanged(nameof(Notes));
+            SaveCurrentBoxData();
+            RefreshView();
+        }
+    }
+
+    /// <summary>
+    /// Delete box tag for current box
+    /// </summary>
+    private async void OnDeleteBoxTag()
+    {
+        bool confirmed = await Application.Current!.MainPage!.DisplayAlert(
+            "Delete Box Tag",
+            $"Delete the box tag for Box {_dataManager.CurrentBoxName}?",
+            "Delete",
+            "Cancel");
+
+        if (confirmed)
+        {
+            BoxTagService.RemoveBoxTag(
+                _dataManager.BoxTags,
+                _dataManager.CurrentBoxName,
+                _dataManager.AppSettings.filesDir);
+
+            OnPropertyChanged(nameof(HasBoxTag));
+            OnPropertyChanged(nameof(ShowDeleteBoxTagButton));
+        }
     }
 
     private void OnDataManagerChanged(object? sender, EventArgs e)

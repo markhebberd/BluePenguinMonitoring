@@ -2,7 +2,20 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Android: Run",
+            "name": "Debug MAUI Android",
+            "type": "maui",
+            "request": "launch",
+            "preLaunchTask": "maui: Build"
+        },
+        {
+            "name": "Attach to Mono Android",
+            "type": "mono",
+            "request": "attach",
+            "address": "127.0.0.1",
+            "port": 10000
+        },
+        {
+            "name": "Android: Run (no debug)",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "android-run-with-logs",
