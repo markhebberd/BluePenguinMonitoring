@@ -23,7 +23,22 @@
             }
         },
         {
+            "label": "android-check-device",
+            "type": "process",
+            "command": "bash",
+            "args": [
+                "${workspaceFolder}/.vscode/check-android-device.sh"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
             "label": "android-deploy",
+            "dependsOn": ["android-check-device"],
+            "dependsOrder": "sequence",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -31,7 +46,7 @@
                 "${workspaceFolder}/PenguinMonitor.csproj",
                 "-c",
                 "Debug",
-                "-t:Run",
+                "-t:Install",
                 "-f",
                 "net9.0-android"
             ],
@@ -137,6 +152,8 @@
         },
         {
             "label": "android-debug-build-install",
+            "dependsOn": ["android-check-device"],
+            "dependsOrder": "sequence",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -144,10 +161,9 @@
                 "${workspaceFolder}/PenguinMonitor.csproj",
                 "-c",
                 "Debug",
-                "-t:Run",
+                "-t:Install",
                 "-f",
-                "net9.0-android",
-                "-p:AndroidAttachDebugger=true"
+                "net9.0-android"
             ],
             "problemMatcher": "$msCompile",
             "group": "build",
@@ -229,11 +245,48 @@
         {
             "label": "android-debug-build",
             "dependsOn": [
-                "android-debug-build-install"
+                "android-debug-build-install",
+                "android-debug-launch"
             ],
             "dependsOrder": "sequence",
             "problemMatcher": [],
             "group": "build"
+        },
+        {
+            "label": "android-run-with-logs",
+            "dependsOn": [
+                "android-clear-logcat",
+                "android-build-run"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "android-logcat-app-only",
+            "command": "${env:HOME}/Android/Sdk/platform-tools/adb",
+            "type": "shell",
+            "args": [
+                "logcat",
+                "-v",
+                "color",
+                "-v",
+                "time",
+                "--pid=$(${HOME}/Android/Sdk/platform-tools/adb shell pidof PenguinMonitor.PenguinMonitor)"
+            ],
+            "isBackground": true,
+            "problemMatcher": [],
+            "options": {
+                "env": {
+                    "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+                    "PATH": "${env:HOME}/Android/Sdk/platform-tools:${env:PATH}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
         }
     ]
 }

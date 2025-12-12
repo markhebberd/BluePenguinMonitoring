@@ -2,24 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Android: Debug",
-            "type": "mono",
-            "request": "attach",
-            "address": "localhost",
-            "port": 10000,
-            "preLaunchTask": "android-debug-build"
-        },
-        {
-            "name": "Android: Build & Deploy",
+            "name": "Android: Run",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "android-build-run",
+            "preLaunchTask": "android-run-with-logs",
             "program": "/bin/true",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "internalConsoleOptions": "neverOpen",
-            "stopAtEntry": false,
-            "requireExactSource": false
+            "internalConsoleOptions": "neverOpen"
         }
     ]
 }

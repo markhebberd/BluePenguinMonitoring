@@ -5,14 +5,20 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:local="clr-namespace:PenguinMonitor"
     xmlns:pages="clr-namespace:PenguinMonitor.Pages"
-    Title="Penguin Monitor">
+    Shell.TabBarBackgroundColor="#E3F2FD"
+    Shell.TabBarTitleColor="#1565C0"
+    Shell.TabBarUnselectedColor="#9E9E9E"
+    Shell.TabBarForegroundColor="#1565C0">
 
     <TabBar>
         <Tab Title="⚙️ Settings">
-            <ShellContent ContentTemplate="{DataTemplate pages:SettingsPage}" />
+            <ShellContent Route="SettingsPage" ContentTemplate="{DataTemplate pages:SettingsPage}" />
         </Tab>
         <Tab Title="📦 Box Data">
-            <ShellContent ContentTemplate="{DataTemplate pages:BoxDataPage}" />
+            <ShellContent Route="BoxDataPage" ContentTemplate="{DataTemplate pages:BoxDataPage}" />
+        </Tab>
+        <Tab Title="📊 Overview">
+            <ShellContent Route="OverviewPage" ContentTemplate="{DataTemplate pages:OverviewPage}" />
         </Tab>
     </TabBar>
 

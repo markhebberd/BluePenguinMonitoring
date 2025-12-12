@@ -1,3 +1,4 @@
+using PenguinMonitor.Services;
 using PenguinMonitor.ViewModels;
 
 namespace PenguinMonitor.Pages;
@@ -5,6 +6,7 @@ namespace PenguinMonitor.Pages;
 public partial class SettingsPage : ContentPage
 {
 	private readonly SettingsViewModel _viewModel;
+	private readonly DataManager _dataManager = DataManager.Instance;
 
 	public SettingsPage()
 	{
@@ -17,13 +19,13 @@ public partial class SettingsPage : ContentPage
 	{
 		if (e.Value)
 		{
-			// Initialize Bluetooth
-			await DisplayAlert("Bluetooth", "Bluetooth enabled - initialization code needed", "OK");
+			// Initialize and start Bluetooth connection
+			await _dataManager.EnableBluetoothAsync();
 		}
 		else
 		{
 			// Disable Bluetooth
-			await DisplayAlert("Bluetooth", "Bluetooth disabled", "OK");
+			_dataManager.DisableBluetooth();
 		}
 	}
 }

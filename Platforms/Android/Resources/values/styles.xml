@@ -22,4 +22,23 @@
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:windowIsTranslucent">false</item>
     </style>
+
+    <!-- Bottom Navigation / Tab Bar styling -->
+    <style name="Widget.Design.BottomNavigationView" parent="Widget.MaterialComponents.BottomNavigationView">
+        <item name="itemTextAppearanceActive">@style/TabBarTextAppearance</item>
+        <item name="itemTextAppearanceInactive">@style/TabBarTextAppearanceInactive</item>
+        <item name="itemPaddingTop">16dp</item>
+        <item name="itemPaddingBottom">16dp</item>
+    </style>
+
+    <style name="TabBarTextAppearance" parent="TextAppearance.MaterialComponents.Caption">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">#1565C0</item>
+    </style>
+
+    <style name="TabBarTextAppearanceInactive" parent="TextAppearance.MaterialComponents.Caption">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">#757575</item>
+    </style>
 </resources>

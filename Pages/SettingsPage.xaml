@@ -2,123 +2,154 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="PenguinMonitor.Pages.SettingsPage"
-             Title="⚙️ Settings">
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="#F5F5F5">
 
     <ScrollView>
-        <VerticalStackLayout Padding="20" Spacing="15">
+        <VerticalStackLayout Padding="16" Spacing="10">
 
             <!-- Version Info -->
             <Label Text="{Binding VersionText}"
                    HorizontalOptions="Center"
                    FontSize="14"
-                   TextColor="Gray"/>
+                   TextColor="#757575"/>
+
+            <!-- Status Line -->
+            <Label Text="{Binding StatusText}"
+                   HorizontalOptions="Center"
+                   FontSize="14"
+                   TextColor="{Binding StatusColor}"/>
 
             <!-- Bluetooth Enable -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
-                <VerticalStackLayout Spacing="10">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
+                <HorizontalStackLayout Spacing="10">
                     <CheckBox x:Name="BluetoothCheckBox"
                               IsChecked="{Binding AppSettings.IsBlueToothEnabled}"
-                              CheckedChanged="OnBluetoothChanged">
-                    </CheckBox>
+                              CheckedChanged="OnBluetoothChanged"
+                              VerticalOptions="Center"
+                              Color="#2196F3"/>
                     <Label Text="Enable Bluetooth"
-                           FontSize="16"
-                           FontAttributes="Bold"/>
-                </VerticalStackLayout>
-            </Border>
+                           FontSize="15"
+                           TextColor="#212121"
+                           VerticalOptions="Center"/>
+                </HorizontalStackLayout>
+            </Frame>
 
             <!-- Set Time for Monitor -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
                 <VerticalStackLayout Spacing="10">
-                    <CheckBox IsChecked="{Binding AppSettings.ActiveSessionTimeStampActive}">
-                    </CheckBox>
-                    <Label Text="{Binding TimeStampText}"
-                           FontSize="14"/>
-                    <Button Text="Set Date/Time"
-                            Command="{Binding SetTimeCommand}"
-                            BackgroundColor="#2196F3"
-                            TextColor="White"
-                            CornerRadius="8"/>
+                    <HorizontalStackLayout Spacing="10">
+                        <CheckBox IsChecked="{Binding AppSettings.ActiveSessionTimeStampActive}"
+                                  VerticalOptions="Center"
+                                  Color="#2196F3"/>
+                        <Label Text="{Binding TimeStampText}"
+                               FontSize="15"
+                               TextColor="#212121"
+                               VerticalOptions="Center"/>
+                    </HorizontalStackLayout>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <DatePicker x:Name="SessionDatePicker"
+                                    Date="{Binding SessionDate}"
+                                    Format="d MMM yyyy"
+                                    TextColor="#212121"/>
+                        <TimePicker x:Name="SessionTimePicker"
+                                    Time="{Binding SessionTime}"
+                                    Format="HH:mm"
+                                    TextColor="#212121"
+                                    Grid.Column="1"/>
+                    </Grid>
                 </VerticalStackLayout>
-            </Border>
+            </Frame>
 
             <!-- Show Box Tag Delete Button -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
                 <HorizontalStackLayout Spacing="10">
-                    <CheckBox IsChecked="{Binding AppSettings.ShowBoxTagDeleteButton}">
-                    </CheckBox>
+                    <CheckBox IsChecked="{Binding AppSettings.ShowBoxTagDeleteButton}"
+                              VerticalOptions="Center"
+                              Color="#2196F3"/>
                     <Label Text="Show box tag delete button"
                            VerticalOptions="Center"
-                           FontSize="14"/>
+                           FontSize="15"
+                           TextColor="#212121"/>
                 </HorizontalStackLayout>
-            </Border>
+            </Frame>
 
             <!-- Show Differences with Previous Monitor -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
                 <HorizontalStackLayout Spacing="10">
-                    <CheckBox IsChecked="{Binding AppSettings.ShowDifferencesWithPreviousMonitor}">
-                    </CheckBox>
+                    <CheckBox IsChecked="{Binding AppSettings.ShowDifferencesWithPreviousMonitor}"
+                              VerticalOptions="Center"
+                              Color="#2196F3"/>
                     <Label Text="Show differences with previous monitor"
                            VerticalOptions="Center"
-                           FontSize="14"/>
+                           FontSize="15"
+                           TextColor="#212121"/>
                 </HorizontalStackLayout>
-            </Border>
+            </Frame>
 
             <!-- Box Sets Configuration -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
                 <VerticalStackLayout Spacing="10">
                     <Label Text="Box sets:"
                            FontSize="16"
-                           FontAttributes="Bold"/>
-                    <Entry Text="{Binding AppSettings.AllBoxSetsString}"
-                           Placeholder="Example: {1-150,AA-AC},{N1-N6}..."
-                           BackgroundColor="#F5F5F5"
-                           TextColor="Black"/>
-                    <Button Text="Apply"
-                            Command="{Binding ApplyBoxSetsCommand}"
-                            BackgroundColor="#4CAF50"
-                            TextColor="White"
-                            CornerRadius="8"/>
+                           FontAttributes="Bold"
+                           TextColor="#212121"/>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <Entry Text="{Binding AppSettings.AllBoxSetsString}"
+                               Placeholder="{}{1-150,AA-AC},{N1-N6}..."
+                               BackgroundColor="#F0F0F0"
+                               TextColor="#212121"
+                               PlaceholderColor="#757575"/>
+                        <Button Text="Apply"
+                                Command="{Binding ApplyBoxSetsCommand}"
+                                BackgroundColor="#4CAF50"
+                                TextColor="White"
+                                CornerRadius="8"
+                                Grid.Column="1"/>
+                    </Grid>
                 </VerticalStackLayout>
-            </Border>
+            </Frame>
 
             <!-- Select Box Set -->
-            <Border StrokeThickness="2"
-                    Stroke="#2196F3"
-                    Background="White"
-                    Padding="15"
-                    StrokeShape="RoundRectangle 8">
+            <Frame BackgroundColor="White"
+                   BorderColor="#E0E0E0"
+                   CornerRadius="12"
+                   Padding="16"
+                   HasShadow="False">
                 <VerticalStackLayout Spacing="10">
                     <Label Text="Select box set(s):"
                            FontSize="16"
                            FontAttributes="Bold"
+                           TextColor="#212121"
                            HorizontalOptions="Center"/>
                     <Picker x:Name="BoxSetPicker"
                             ItemsSource="{Binding BoxSetOptions}"
-                            SelectedItem="{Binding AppSettings.BoxSetString}"
+                            SelectedItem="{Binding SelectedBoxSet}"
                             HorizontalOptions="FillAndExpand"
-                            BackgroundColor="#F5F5F5"/>
+                            TextColor="#212121"
+                            TitleColor="#757575"/>
                 </VerticalStackLayout>
-            </Border>
+            </Frame>
 
         </VerticalStackLayout>
     </ScrollView>

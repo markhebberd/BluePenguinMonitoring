@@ -482,5 +482,84 @@ namespace PenguinMonitor.Services
             }
             return " " + Math.Ceiling((today - expectedDate).TotalDays) + " days ago";
         }
+
+        public static string GetFilterTextRepresentation(AppSettings appSettings)
+        {
+            List<string> showFilters = new List<string>();
+            List<string> hideFilters = new List<string>();
+
+            // Build show filters list
+            if (appSettings.ShowAllBoxesInMultiBoxView)
+            {
+                showFilters.Add("all");
+            }
+            else
+            {
+                if (appSettings.ShowBoxesWithDataInMultiBoxView) showFilters.Add("with data");
+                if (appSettings.ShowNoBoxesInMultiBoxView) showFilters.Add("NO");
+                if (appSettings.ShowUnlikleyBoxesInMultiBoxView) showFilters.Add("UNL");
+                if (appSettings.ShowPotentialBoxesInMultiBoxView) showFilters.Add("POT");
+                if (appSettings.ShowConfidentBoxesInMultiBoxView) showFilters.Add("CON");
+                if (appSettings.ShowBreedingBoxesInMultiBoxView) showFilters.Add("BR");
+                if (appSettings.ShowDCMBoxesInMultiboxView) showFilters.Add("DCM");
+                if (appSettings.ShowBoxesWithNotesInMultiboxView) showFilters.Add("has notes");
+                if (appSettings.ShowInterestingBoxesInMultiBoxView) showFilters.Add("has sticky notes");
+                if (appSettings.ShowSingleEggBoxesInMultiboxView) showFilters.Add("single egg");
+                if (appSettings.ShowDoubleEggBoxesInMultiboxView) showFilters.Add("double egg");
+            }
+
+            // Build hide filters list
+            if (appSettings.HideBoxesWithDataInMultiBoxView) hideFilters.Add("with data");
+            if (appSettings.HideNoBoxesInMultiBoxView) hideFilters.Add("NO");
+            if (appSettings.HideUnlikelyBoxesInMultiBoxView) hideFilters.Add("UNL");
+            if (appSettings.HidePotentialBoxesInMultiBoxView) hideFilters.Add("POT");
+            if (appSettings.HideConfidentBoxesInMultiBoxView) hideFilters.Add("CON");
+            if (appSettings.HideBreedingBoxesInMultiBoxView) hideFilters.Add("BR");
+            if (appSettings.HideDCMInMultiBoxView) hideFilters.Add("DCM");
+            if (appSettings.HideBoxesWithNotesInMultiboxView) hideFilters.Add("has notes");
+            if (appSettings.HideInterestingBoxesInMultiBoxView) hideFilters.Add("has sticky notes");
+            if (appSettings.HideSingleEggBoxesInMultiboxView) hideFilters.Add("single egg");
+            if (appSettings.HideDoubleEggBoxesInMultiboxView) hideFilters.Add("double egg");
+            if (appSettings.HideBeforeCurrentInMultiBoxView) hideFilters.Add("#<current boxes");
+
+            // Format the text
+            string result = "";
+
+            if (appSettings.ShowAllBoxesInMultiBoxView && hideFilters.Count == 0)
+            {
+                result = "All";
+            }
+            else if (appSettings.ShowAllBoxesInMultiBoxView)
+            {
+                result = "All except " + string.Join(", ", hideFilters);
+            }
+            else
+            {
+                if (showFilters.Count > 0)
+                {
+                    result = string.Join(", ", showFilters.Take(showFilters.Count - 1));
+                    if (showFilters.Count > 1)
+                        result += " and " + showFilters.Last();
+                    else
+                        result = showFilters[0];
+                }
+
+                if (hideFilters.Count > 0)
+                {
+                    string hideText = string.Join(", ", hideFilters.Take(hideFilters.Count - 1));
+                    if (hideFilters.Count > 1)
+                        hideText += " and " + hideFilters.Last();
+                    else
+                        hideText = hideFilters[0];
+
+                    if (!string.IsNullOrEmpty(result))
+                        result += " except " + hideText;
+                    else
+                        result = "None except " + hideText;
+                }
+            }
+
+            return string.IsNullOrEmpty(result) ? "^ ^ Select show box filters ^ ^" : result;
+        }
     }
 }

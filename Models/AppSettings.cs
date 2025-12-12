@@ -1,12 +1,4 @@
-﻿using PenguinMonitor.Services;
-using System;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using static Android.Renderscripts.Sampler;
 using Newtonsoft.Json;
 
 
@@ -20,6 +12,11 @@ namespace PenguinMonitor.Models
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(""));
         }
         public string filesDir;
+
+        public AppSettings() : this("")
+        {
+        }
+
         public AppSettings(string filesDir)
         {
             this.filesDir = filesDir;

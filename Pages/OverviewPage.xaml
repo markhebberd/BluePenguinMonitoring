@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="PenguinMonitor.Pages.OverviewPage"
+             Shell.NavBarIsVisible="False">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="10" Spacing="10">
+
+            <!-- Action Buttons at TOP -->
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8" Margin="0,5,0,5">
+                <Button Grid.Column="0"
+                        Text="{Binding ClearAllButtonText}"
+                        Command="{Binding ClearAllCommand}"
+                        BackgroundColor="#F44336"
+                        TextColor="White"
+                        FontSize="12"/>
+                <Button Grid.Column="1"
+                        Text="{Binding BirdStatsButtonText}"
+                        Command="{Binding BirdStatsCommand}"
+                        BackgroundColor="{Binding BirdStatsButtonColor}"
+                        TextColor="White"
+                        FontSize="12"
+                        IsEnabled="{Binding CanDownloadBirdStats}"/>
+                <Button Grid.Column="2"
+                        Text="Save/Load"
+                        Command="{Binding SaveLoadCommand}"
+                        BackgroundColor="#4CAF50"
+                        TextColor="White"
+                        FontSize="12"/>
+            </Grid>
+
+            <!-- Header Card with Data Info -->
+            <Border StrokeThickness="{Binding HeaderBorderThickness}"
+                    Stroke="{Binding HeaderBorderColor}"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="10">
+
+                    <!-- Title Row with Expand Button -->
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Button Grid.Column="0"
+                                Text="{Binding FiltersExpandButtonText}"
+                                Command="{Binding ToggleFiltersCommand}"
+                                BackgroundColor="Transparent"
+                                TextColor="#2196F3"
+                                FontSize="16"/>
+                        <VerticalStackLayout Grid.Column="2" HorizontalOptions="End">
+                            <Label Text="{Binding DataSourceText}"
+                                   FontSize="12"
+                                   HorizontalTextAlignment="End"/>
+                            <Label Text="{Binding DataTimestampText}"
+                                   FontSize="12"
+                                   HorizontalTextAlignment="End"/>
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- Filters Section (Collapsible) -->
+                    <VerticalStackLayout IsVisible="{Binding ShowFiltersCard}" Spacing="8">
+
+                        <!-- Show/Hide Filter Toggle Buttons -->
+                        <HorizontalStackLayout Spacing="8" HorizontalOptions="Center">
+                            <Button Text="{Binding ShowFiltersButtonText}"
+                                    Command="{Binding ToggleShowFiltersCommand}"
+                                    BackgroundColor="#2196F3"
+                                    TextColor="White"
+                                    FontSize="12"
+                                    Padding="8,4"/>
+                            <Button Text="{Binding HideFiltersButtonText}"
+                                    Command="{Binding ToggleHideFiltersCommand}"
+                                    BackgroundColor="#2196F3"
+                                    TextColor="White"
+                                    FontSize="12"
+                                    Padding="8,4"/>
+                        </HorizontalStackLayout>
+
+                        <!-- Current Filter Text -->
+                        <Label Text="{Binding FilterTextRepresentation}"
+                               FontSize="14"
+                               FontAttributes="Bold"
+                               HorizontalTextAlignment="Center"/>
+
+                        <!-- Show Filters Checkboxes -->
+                        <VerticalStackLayout IsVisible="{Binding ShowFiltersVisible}" Spacing="4">
+                            <Label Text="Show box filters" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowAllBoxes}" />
+                                    <Label Text="All" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowBoxesWithData}" />
+                                    <Label Text="With data" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowNoBoxes}" />
+                                    <Label Text="NO" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowUnlikelyBoxes}" />
+                                    <Label Text="UNL" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowPotentialBoxes}" />
+                                    <Label Text="POT" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowConfidentBoxes}" />
+                                    <Label Text="CON" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowBreedingBoxes}" />
+                                    <Label Text="BR" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowDCMBoxes}" />
+                                    <Label Text="DCM" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowBoxesWithNotes}" />
+                                    <Label Text="Notes" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowInterestingBoxes}" />
+                                    <Label Text="Sticky notes" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowSingleEggBoxes}" />
+                                    <Label Text="Single egg" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding ShowDoubleEggBoxes}" />
+                                    <Label Text="Double egg" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+                        </VerticalStackLayout>
+
+                        <!-- Hide Filters Checkboxes -->
+                        <VerticalStackLayout IsVisible="{Binding HideFiltersVisible}" Spacing="4">
+                            <Label Text="Hide box filters" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideBoxesWithData}" />
+                                    <Label Text="With data" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideNoBoxes}" />
+                                    <Label Text="NO" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideUnlikelyBoxes}" />
+                                    <Label Text="UNL" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HidePotentialBoxes}" />
+                                    <Label Text="POT" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideConfidentBoxes}" />
+                                    <Label Text="CON" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideBreedingBoxes}" />
+                                    <Label Text="BR" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideDCMBoxes}" />
+                                    <Label Text="DCM" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideBoxesWithNotes}" />
+                                    <Label Text="Notes" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideInterestingBoxes}" />
+                                    <Label Text="Sticky notes" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideSingleEggBoxes}" />
+                                    <Label Text="Single egg" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+
+                            <FlexLayout Wrap="Wrap" JustifyContent="Center">
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideDoubleEggBoxes}" />
+                                    <Label Text="Double egg" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout>
+                                    <CheckBox IsChecked="{Binding HideBeforeCurrent}" />
+                                    <Label Text="&lt; current" VerticalOptions="Center"/>
+                                </HorizontalStackLayout>
+                            </FlexLayout>
+                        </VerticalStackLayout>
+
+                        <!-- Monitor Navigation Buttons -->
+                        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                            <Button Grid.Column="0"
+                                    Text="Prev monitor"
+                                    Command="{Binding PreviousMonitorCommand}"
+                                    IsEnabled="{Binding CanGoToPreviousMonitor}"
+                                    BackgroundColor="#2196F3"
+                                    TextColor="White"
+                                    FontSize="12"/>
+                            <Button Grid.Column="1"
+                                    Text="Next monitor"
+                                    Command="{Binding NextMonitorCommand}"
+                                    IsEnabled="{Binding CanGoToNextMonitor}"
+                                    BackgroundColor="#2196F3"
+                                    TextColor="White"
+                                    FontSize="12"/>
+                            <Button Grid.Column="2"
+                                    Text="Latest"
+                                    Command="{Binding LatestMonitorCommand}"
+                                    IsEnabled="{Binding CanGoToNextMonitor}"
+                                    BackgroundColor="#2196F3"
+                                    TextColor="White"
+                                    FontSize="12"/>
+                        </Grid>
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Summary Stats -->
+            <Border StrokeThickness="2"
+                    Stroke="#2196F3"
+                    Padding="15"
+                    StrokeShape="RoundRectangle 8">
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="{Binding SummaryText}"
+                           FontSize="14"
+                           LineBreakMode="WordWrap"/>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Box Grid -->
+            <CollectionView ItemsSource="{Binding FilteredBoxes}">
+                <CollectionView.ItemsLayout>
+                    <GridItemsLayout Orientation="Vertical" Span="3" HorizontalItemSpacing="4" VerticalItemSpacing="4"/>
+                </CollectionView.ItemsLayout>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border StrokeThickness="{Binding BorderThickness}"
+                                Stroke="{Binding BorderColor}"
+                                Background="{Binding BackgroundColor}"
+                                Padding="8"
+                                MinimumHeightRequest="80"
+                                StrokeShape="RoundRectangle 4">
+                            <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                                <Label Text="{Binding BoxTitle}"
+                                       FontSize="14"
+                                       FontAttributes="Bold"
+                                       HorizontalOptions="Center"/>
+                                <Label Text="{Binding EmojiSummary}"
+                                       FontSize="12"
+                                       HorizontalOptions="Center"/>
+                                <Label Text="{Binding BreedingStatus}"
+                                       FontSize="10"
+                                       HorizontalOptions="Center"
+                                       IsVisible="{Binding HasBreedingStatus}"/>
+                                <Label Text="{Binding GateAndNotes}"
+                                       FontSize="10"
+                                       TextColor="Gray"
+                                       HorizontalOptions="Center"
+                                       IsVisible="{Binding HasGateOrNotes}"/>
+                            </VerticalStackLayout>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding SelectCommand}"/>
+                            </Border.GestureRecognizers>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
