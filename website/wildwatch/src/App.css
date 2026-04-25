@@ -1,0 +1,177 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { overflow-x:hidden; width:100%; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f5f7fa; color:#333; }
+.app { min-height:100vh; max-width:100vw; overflow-x:hidden; }
+
+/* Header */
+header { background:linear-gradient(135deg,#1a5276,#2e86c1); color:#fff; padding:10px 20px; display:flex; align-items:baseline; gap:14px; overflow:hidden; flex-wrap:wrap; }
+header h1 { font-size:20px; cursor:pointer; }
+header h1:hover { opacity:.8; }
+.sub { font-size:13px; opacity:.8; }
+.hstats { margin-left:auto; font-size:12px; opacity:.85; }
+
+/* Top row: map + stats */
+.top-row { display:grid; grid-template-columns:1fr 320px; gap:16px; padding:16px 20px; }
+.map-container { height:400px; border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+.map-container .leaflet-container { border-radius:12px; }
+.marker-selected { filter:hue-rotate(120deg) brightness(1.2); }
+.map-empty { height:400px; display:flex; align-items:center; justify-content:center; background:#e8ecef; border-radius:12px; color:#666; }
+
+/* Stats panel */
+.stats-panel { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+.stats-panel h3 { font-size:15px; color:#1a5276; margin-bottom:12px; border-bottom:2px solid #e8ecef; padding-bottom:6px; }
+.stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.stat { display:flex; flex-direction:column; padding:10px; background:#f8f9fa; border-radius:8px; text-align:center; }
+.stat-value { font-size:20px; font-weight:700; color:#1a5276; }
+.stat-label { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.5px; margin-top:3px; }
+.selected-box-detail { margin-top:16px; padding-top:12px; border-top:2px solid #e8ecef; }
+.selected-box-detail h4 { color:#1a5276; margin-bottom:6px; }
+.selected-box-detail table { width:100%; font-size:13px; word-break:break-all; }
+.selected-box-detail td { padding:3px 0; }
+.selected-box-detail td:first-child { color:#888; width:70px; }
+
+/* Penguin search */
+.search-section { padding:0 20px 12px; }
+.penguin-search { position:relative; }
+.penguin-search-input { width:100%; padding:10px 14px; font-size:15px; border:2px solid #ddd; border-radius:8px; outline:none; max-width:100%; }
+.penguin-search-input:focus { border-color:#2196F3; }
+.penguin-results { background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; margin-top:-2px; max-height:300px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1); }
+.penguin-result { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid #f0f0f0; cursor:pointer; }
+.penguin-result:last-child { border-bottom:none; }
+.penguin-result:hover { background:#f5f5f5; }
+.penguin-result.f { border-left:3px solid #E8B4B8; background:#FFF8F7; }
+.penguin-result.f:hover { background:#FFE4E1; }
+.penguin-result.m { border-left:3px solid #B4D4E8; background:#F5FAFF; }
+.penguin-result.m:hover { background:#E6F3FF; }
+.penguin-result.chick { border-left:3px solid #FDD835; background:#FFFEF5; }
+.penguin-result.chick:hover { background:#FFFDE7; }
+.pr-tag { font-family:monospace; font-size:14px; font-weight:600; }
+.pr-meta { display:flex; gap:8px; font-size:11px; color:#666; }
+.pr-age { font-weight:600; color:#1a5276; }
+.pr-stat { color:#888; }
+
+/* Box grid */
+.grid-section { padding:0 20px 16px; }
+.box-grid { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+.box-grid h3 { font-size:15px; color:#1a5276; margin-bottom:12px; border-bottom:2px solid #e8ecef; padding-bottom:6px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); gap:6px; }
+.box-card { padding:8px 6px; text-align:center; background:#f8f9fa; border:2px solid transparent; border-radius:6px; cursor:pointer; transition:all .15s; }
+.box-card:hover { border-color:#2e86c1; background:#eaf2f8; }
+.box-card.selected { border-color:#1a5276; background:#d4e6f1; }
+.box-number { font-size:16px; font-weight:700; color:#1a5276; }
+.box-icons { font-size:11px; line-height:1; margin-top:1px; }
+.box-tag { font-size:9px; color:#888; font-family:monospace; margin-top:1px; }
+.box-date { font-size:9px; color:#aaa; margin-top:1px; }
+
+/* Split view: grid sidebar + detail */
+.split-view { display:flex; flex:1; overflow:hidden; }
+.grid-sidebar { width:220px; flex-shrink:0; overflow-y:auto; border-right:1px solid #ddd; padding:8px; background:#fff; }
+.grid-sidebar .grid { grid-template-columns:repeat(auto-fill,minmax(45px,1fr)); gap:3px; }
+.grid-sidebar .box-card { padding:4px 2px; }
+.grid-sidebar .box-number { font-size:13px; }
+.grid-sidebar .box-tag, .grid-sidebar .box-date { display:none; }
+.grid-sidebar h3 { font-size:13px; margin-bottom:8px; }
+
+/* Box detail layout */
+.detail { flex:1; overflow-y:auto; padding:16px 20px; }
+.detail-area { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
+.detail-full { padding:12px 16px; }
+.detail-split { display:flex; flex:1; overflow:hidden; }
+.detail-obs { flex:1; overflow-y:auto; padding:0 16px 16px; }
+.detail-bird { width:400px; flex-shrink:0; overflow-y:auto; border-left:1px solid #ddd; padding:12px; background:#fafafa; }
+
+/* All birds row */
+.all-birds { margin:8px 0 12px; }
+.season-birds { margin-bottom:6px; }
+.bird-row { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; max-width:100%; overflow:hidden; }
+.bird-chip { font-size:11px; padding:3px 7px; border-radius:4px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; cursor:default; }
+.bird-chip.f { background:#FFE4E1; border-color:#E8B4B8; }
+.bird-chip.m { background:#E6F3FF; border-color:#B4D4E8; }
+
+/* Breeding status bar */
+.status-bar-wrap { margin:12px 0 16px; }
+.status-bar-labels { position:relative; height:16px; }
+.month-label { position:absolute; font-size:9px; color:#888; transform:translateX(-50%); }
+.status-bar { position:relative; height:24px; background:#eee; border-radius:4px; overflow:hidden; }
+.status-segment { position:absolute; top:0; height:100%; }
+.status-marker { position:absolute; top:-2px; width:2px; height:28px; background:#333; opacity:.4; }
+.status-bar-legend { display:flex; gap:10px; margin-top:6px; font-size:10px; color:#666; flex-wrap:wrap; }
+.status-bar-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:2px; vertical-align:middle; border:1px solid rgba(0,0,0,.1); }
+.detail-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.detail-head h2 { font-size:18px; color:#1a5276; }
+.detail-head button { background:none; border:none; font-size:22px; cursor:pointer; color:#888; padding:2px 6px; border-radius:4px; }
+.detail-head button:hover { background:#f0f0f0; }
+.tag-info { font-size:11px; color:#666; background:#f5f5f5; padding:4px 8px; border-radius:4px; margin-bottom:6px; font-family:monospace; }
+.muted { font-size:12px; color:#888; margin-bottom:8px; }
+.small { font-size:10px; }
+.season-heading { font-size:14px; color:#1a5276; margin:12px 0 8px; }
+.season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
+.season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
+.season-divider span { font-size:13px; color:#888; white-space:nowrap; }
+.obs-card.highlighted { background:#FFF9C4; border-left-color:#FDD835; box-shadow:0 0 8px rgba(253,216,53,.4); }
+.obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
+.obs-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+.obs-top b { font-size:12px; }
+.obs-nums { display:flex; gap:8px; font-size:13px; align-items:center; flex-wrap:wrap; }
+.badge { font-size:10px; padding:1px 6px; border-radius:8px; color:#fff; font-weight:600; }
+.gate { font-size:10px; color:#666; background:#e8e8e8; padding:1px 5px; border-radius:3px; }
+.obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
+.scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
+.scan { font-size:9px; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; }
+.scan.f { background:#FFE4E1; }
+.scan.m { background:#E6F3FF; }
+.scan.chick { background:#FFFDE7; }
+.sex-icon { font-weight:700; margin-right:2px; }
+.scan.f .sex-icon { color:#C62828; }
+.scan.m .sex-icon { color:#1565C0; }
+.age-info { font-size:8px; color:#666; margin-left:3px; }
+.chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
+
+/* Clickable */
+.clickable { cursor:pointer; }
+.clickable:hover { filter:brightness(.9); }
+
+/* Bird page */
+.bird-page { max-width:800px; margin:0 auto; padding:16px 20px; }
+.back-btn { background:none; border:1px solid #ccc; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:12px; }
+.back-btn:hover { background:#f0f0f0; }
+.bird-detail {}
+.bird-header { border-left:4px solid #2196F3; padding-left:12px; margin-bottom:16px; }
+.bird-header h2 { font-size:20px; color:#1a5276; }
+.bird-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
+.bird-badge { font-size:12px; padding:2px 8px; border-radius:10px; border:1px solid rgba(0,0,0,.1); }
+.bird-section { margin-bottom:20px; }
+.bird-section h3 { font-size:15px; color:#1a5276; margin-bottom:8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
+.partner-card { background:#f8f9fa; border-radius:6px; padding:10px; margin-bottom:8px; }
+.partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.partner-sightings { padding-left:8px; }
+.partner-row { display:flex; gap:10px; align-items:center; font-size:12px; padding:2px 0; }
+
+/* Loading */
+.center { height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+.spinner { width:32px; height:32px; border:3px solid #e0e0e0; border-top-color:#2e86c1; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+@media (max-width:900px) {
+  .top-row { grid-template-columns:1fr; padding:8px; gap:8px; }
+  .map-container { height:250px; }
+  .split-view { flex-direction:column; }
+  .grid-sidebar { width:100%; max-height:120px; border-right:none; border-bottom:1px solid #ddd; }
+  .detail-split { flex-direction:column; }
+  .detail-bird { width:100%; border-left:none; border-top:1px solid #ddd; }
+  .detail-full { padding:8px; }
+  .detail-obs { padding:0 8px 8px; }
+  .grid-section { padding:0 8px 8px; }
+  .search-section { padding:0 8px 8px; }
+  .bird-page { padding:8px; }
+  .hstats { display:none; }
+  .sub { display:none; }
+  header { padding:8px 12px; }
+  .stats-panel { padding:10px; }
+  .stats-grid { grid-template-columns:1fr 1fr 1fr; gap:4px; }
+  .stat { padding:6px; }
+  .stat-value { font-size:16px; }
+  .penguin-result { flex-direction:column; align-items:flex-start; gap:2px; }
+  .obs-card { padding:6px 8px; }
+  .obs-top { flex-direction:column; gap:2px; }
+}
