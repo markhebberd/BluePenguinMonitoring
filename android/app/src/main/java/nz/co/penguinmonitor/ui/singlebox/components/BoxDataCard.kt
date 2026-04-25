@@ -171,10 +171,18 @@ private fun NumberField(
     enabled: Boolean,
     modifier: Modifier = Modifier
 ) {
+    // Select all text on focus (matches C# click-selects-all behavior)
+    var textFieldValue by remember(value) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(
+            text = value.toString(),
+            selection = androidx.compose.ui.text.TextRange(0, value.toString().length)
+        ))
+    }
     OutlinedTextField(
-        value = value.toString(),
-        onValueChange = { text ->
-            val num = text.filter { it.isDigit() }.toIntOrNull() ?: 0
+        value = textFieldValue,
+        onValueChange = { tfv ->
+            textFieldValue = tfv
+            val num = tfv.text.filter { it.isDigit() }.toIntOrNull() ?: 0
             onValueChange(num)
         },
         label = { Text(label) },

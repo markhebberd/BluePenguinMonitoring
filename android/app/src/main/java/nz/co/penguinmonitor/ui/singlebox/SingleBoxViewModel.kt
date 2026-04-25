@@ -272,6 +272,11 @@ class SingleBoxViewModel @Inject constructor(
     fun updateGateStatus(status: String?) {
         if (_isBoxLocked.value || _historicalDataIndex.value > 0) return
         updateCurrentBox { it.copy(gateStatus = status) }
+        // Gate status change auto-locks and saves (matches C# behavior)
+        if (!status.isNullOrBlank()) {
+            _isBoxLocked.value = true
+            viewModelScope.launch { monitorRepository.save() }
+        }
     }
 
     fun updateBreedingChance(chance: String?) {

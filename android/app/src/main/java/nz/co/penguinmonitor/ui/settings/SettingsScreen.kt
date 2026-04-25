@@ -1,6 +1,7 @@
 package nz.co.penguinmonitor.ui.settings
 
-import androidx.compose.foundation.layout.Arrangement
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -32,11 +34,13 @@ import nz.co.penguinmonitor.ui.common.BoxSetEditorDialog
 import nz.co.penguinmonitor.ui.common.StatusBar
 import nz.co.penguinmonitor.ui.theme.PrimaryBlue
 import nz.co.penguinmonitor.ui.theme.WarningYellow
+import java.util.Calendar
 
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
     val bluetoothState by viewModel.bluetoothState.collectAsState()
     val locationState by viewModel.locationState.collectAsState()
@@ -56,9 +60,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = "Settings",
@@ -67,7 +69,7 @@ fun SettingsScreen(
                 )
 
                 Text(
-                    text = "v1.0",
+                    text = "Version: 37.34",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -75,63 +77,53 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Bluetooth toggle
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = settings.isBluetoothEnabled,
-                        onCheckedChange = { viewModel.toggleBluetooth(it) }
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = settings.isBluetoothEnabled, onCheckedChange = { viewModel.toggleBluetooth(it) })
                     Text("Enable Bluetooth (HR5 Reader)")
                 }
 
-                // Active session timestamp
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                // Active session timestamp with date/time picker
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Checkbox(
                         checked = settings.activeSessionTimeStampActive,
                         onCheckedChange = { active ->
-                            viewModel.updateActiveSessionTimestamp(
-                                if (active) kotlinx.datetime.Clock.System.now() else null,
-                                active
-                            )
+                            if (active) {
+                                // Show date picker, then time picker
+                                val cal = Calendar.getInstance()
+                                DatePickerDialog(context, { _, year, month, day ->
+                                    TimePickerDialog(context, { _, hour, minute ->
+                                        cal.set(year, month, day, hour, minute)
+                                        val instant = kotlinx.datetime.Instant.fromEpochMilliseconds(cal.timeInMillis)
+                                        viewModel.updateActiveSessionTimestamp(instant, true)
+                                    }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+                                }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+                            } else {
+                                viewModel.updateActiveSessionTimestamp(null, false)
+                            }
                         }
                     )
                     Text("Set time for monitor")
                 }
 
                 if (settings.activeSessionTimeStampActive && settings.activeSessionLocalTimeStamp != null) {
+                    val ts = settings.activeSessionLocalTimeStamp!!
+                    val dt = java.time.Instant.ofEpochSecond(ts.epochSeconds).atZone(java.time.ZoneId.systemDefault())
                     Text(
-                        text = "Session: ${settings.activeSessionLocalTimeStamp}",
+                        text = "Session: ${dt.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm, d MMM yyyy"))}",
                         fontSize = 12.sp,
                         modifier = Modifier.padding(start = 48.dp)
                     )
                 }
 
                 // Show box tag delete button
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = settings.showBoxTagDeleteButton,
-                        onCheckedChange = { viewModel.toggleShowBoxTagDeleteButton(it) }
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = settings.showBoxTagDeleteButton, onCheckedChange = { viewModel.toggleShowBoxTagDeleteButton(it) })
                     Text("Show box tag delete button")
                 }
 
                 // Show differences with previous monitor
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(
-                        checked = settings.showBreedingDatesTimeline,
-                        onCheckedChange = { viewModel.updateTimelineSettings(showTimeline = it) }
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = settings.showBreedingDatesTimeline, onCheckedChange = { viewModel.updateTimelineSettings(showTimeline = it) })
                     Text("Show breeding dates timeline")
                 }
 
@@ -140,32 +132,19 @@ fun SettingsScreen(
                 // Edit Box Tags Mode
                 OutlinedButton(
                     onClick = { viewModel.toggleEditBoxTagsMode() },
-                    colors = if (editBoxTagsMode) {
-                        ButtonDefaults.outlinedButtonColors(containerColor = WarningYellow)
-                    } else {
-                        ButtonDefaults.outlinedButtonColors()
-                    },
+                    colors = if (editBoxTagsMode) ButtonDefaults.outlinedButtonColors(containerColor = WarningYellow) else ButtonDefaults.outlinedButtonColors(),
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (editBoxTagsMode) "Exit Box Tags Mode" else "Edit Box Tags Mode")
-                }
+                ) { Text(if (editBoxTagsMode) "Exit Box Tags Mode" else "Edit Box Tags Mode") }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Box sets editor
-                OutlinedButton(
-                    onClick = { showBoxSetEditor = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                OutlinedButton(onClick = { showBoxSetEditor = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Edit Box Sets")
                 }
 
                 if (settings.allBoxSetsString.isNotBlank()) {
-                    Text(
-                        text = "Current: ${settings.allBoxSetsString}",
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                    Text(text = "Current: ${settings.allBoxSetsString}", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -175,16 +154,10 @@ fun SettingsScreen(
                     onClick = { viewModel.downloadRemoteData() },
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isSyncing) "Downloading..." else "Download Remote Data")
-                }
+                ) { Text(if (isSyncing) "Downloading..." else "Download Remote Data") }
 
                 syncStatusMessage?.let { msg ->
-                    Text(
-                        text = msg,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    Text(text = msg, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -193,10 +166,7 @@ fun SettingsScreen(
     if (showBoxSetEditor) {
         BoxSetEditorDialog(
             currentBoxSetsString = settings.allBoxSetsString,
-            onApply = { newSets ->
-                viewModel.updateBoxSets(newSets)
-                showBoxSetEditor = false
-            },
+            onApply = { viewModel.updateBoxSets(it); showBoxSetEditor = false },
             onDismiss = { showBoxSetEditor = false }
         )
     }

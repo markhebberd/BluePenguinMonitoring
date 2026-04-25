@@ -95,6 +95,13 @@ fun SingleBoxScreen(
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         if (abs(dragAmount) > 100) {
+                            // Vibrate on swipe (matches C# 50ms haptic)
+                            @Suppress("DEPRECATION")
+                            (context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator)?.let {
+                                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                                    it.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                }
+                            }
                             if (dragAmount > 0) {
                                 if (historicalIndex > 0) viewModel.setHistoricalIndex(historicalIndex - 1)
                             } else {
@@ -252,7 +259,7 @@ fun SingleBoxScreen(
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(file.name, fontSize = 14.sp)
-                                    Text("${file.size / 1024}KB", fontSize = 11.sp)
+                                    Text("${file.size / 1024}KB - ${java.text.SimpleDateFormat("d MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(file.lastModified))}", fontSize = 11.sp)
                                 }
                             }
                         }
