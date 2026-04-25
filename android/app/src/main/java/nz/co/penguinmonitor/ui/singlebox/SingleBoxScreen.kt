@@ -67,6 +67,7 @@ fun SingleBoxScreen(
     val currentBoxTag by viewModel.currentBoxTag.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
     val dialogRequest by viewModel.dialogRequest.collectAsState()
+    val isDownloading by viewModel.isDownloading.collectAsState()
 
     var showJumpDialog by remember { mutableStateOf(false) }
     var showStickyNotesDialog by remember { mutableStateOf(false) }
@@ -108,7 +109,7 @@ fun SingleBoxScreen(
     ) {
         StatusBar(bluetoothState = bluetoothState, locationState = locationState)
 
-        // Top action buttons: Clear box | Clear all | Data summary | Save/Load
+        // Top action buttons - matches C# layout
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,23 +117,26 @@ fun SingleBoxScreen(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Button(
-                onClick = { showClearBoxConfirm = true },
-                enabled = !isLocked,
-                colors = ButtonDefaults.buttonColors(containerColor = WarningYellow),
-                modifier = Modifier.weight(1f)
-            ) { Text("Clear", fontSize = 12.sp) }
-
-            Button(
                 onClick = { showClearAllConfirm = true },
                 colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
                 modifier = Modifier.weight(1f)
             ) { Text("Clear all", fontSize = 12.sp) }
 
             Button(
-                onClick = { viewModel.showDataSummary() },
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                onClick = { showClearBoxConfirm = true },
+                enabled = !isLocked,
+                colors = ButtonDefaults.buttonColors(containerColor = WarningYellow),
                 modifier = Modifier.weight(1f)
-            ) { Text("Summary", fontSize = 12.sp) }
+            ) { Text("Clear box", fontSize = 12.sp) }
+
+            Button(
+                onClick = { viewModel.downloadBirdStats() },
+                enabled = !isDownloading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isDownloading) WarningYellow else PrimaryBlue
+                ),
+                modifier = Modifier.weight(1f)
+            ) { Text(if (isDownloading) "Loading..." else "Bird stats", fontSize = 12.sp) }
 
             Button(
                 onClick = { showSaveLoadMenu = true },

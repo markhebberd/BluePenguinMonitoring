@@ -598,6 +598,41 @@ class SingleBoxViewModel @Inject constructor(
         }
     }
 
+    // --- Bird Stats (download remote data) ---
+
+    private val _isDownloading = MutableStateFlow(false)
+    val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
+
+    fun downloadBirdStats() {
+        if (_isDownloading.value) return
+        viewModelScope.launch {
+            _isDownloading.value = true
+            _toastMessage.value = "Loading data..."
+            try {
+                val penguinJob = launch { penguinRepository.downloadAndRefresh() }
+                val monitorJob = launch { monitorRepository.downloadRemoteMonitors() }
+                val tagJob = launch {
+                    if (boxTagRepository.isApiConfigured) {
+                        val boxNames = boxNames.value
+                        boxTagRepository.syncWithApi(boxNames.toSet())
+                    }
+                }
+                penguinJob.join()
+                monitorJob.join()
+                tagJob.join()
+                monitorRepository.save(reportHome = false)
+
+                val penguinCount = penguinRepository.penguinData.value.size
+                val monitorCount = monitorRepository.allMonitorData.value.values.sumOf { it.boxData.size }
+                _toastMessage.value = "Got $monitorCount box monitors, $penguinCount bird infos"
+            } catch (e: Exception) {
+                _toastMessage.value = "Download failed: ${e.message}"
+            } finally {
+                _isDownloading.value = false
+            }
+        }
+    }
+
     // --- Data Summary ---
 
     fun showDataSummary() {

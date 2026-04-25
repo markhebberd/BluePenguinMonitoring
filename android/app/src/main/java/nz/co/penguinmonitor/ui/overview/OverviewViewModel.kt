@@ -63,8 +63,22 @@ class OverviewViewModel @Inject constructor(
         showDifferences: Boolean
     ): List<BoxCardDisplay> {
         val boxDict = BoxSetParser.createBoxDictionary(settings.boxSetString, settings.allBoxSetsString)
-        val monitorIndex = settings.currentlyVisibleMonitor
-        val currentMonitor = allData[monitorIndex] ?: return emptyList()
+        var monitorIndex = settings.currentlyVisibleMonitor
+
+        // If current monitor is empty, find the first one with data
+        var currentMonitor = allData[monitorIndex]
+        if (currentMonitor == null || currentMonitor.boxData.isEmpty()) {
+            for (i in 0 until allData.size) {
+                val m = allData[i]
+                if (m != null && m.boxData.isNotEmpty()) {
+                    currentMonitor = m
+                    monitorIndex = i
+                    break
+                }
+            }
+        }
+        if (currentMonitor == null || currentMonitor.boxData.isEmpty()) return emptyList()
+
         val previousMonitor = allData.getOrDefault(monitorIndex + 1, null)
 
         return boxDict.keys.mapNotNull { boxName ->

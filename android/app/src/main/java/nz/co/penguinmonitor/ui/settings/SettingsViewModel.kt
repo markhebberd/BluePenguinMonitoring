@@ -47,19 +47,11 @@ class SettingsViewModel @Inject constructor(
     val syncStatusMessage: StateFlow<String?> = _syncStatusMessage.asStateFlow()
 
     init {
+        // Data loading and first-launch download handled by PenguinMonitorApp.onCreate()
+        // This ViewModel only handles Settings screen UI actions
         viewModelScope.launch {
-            settingsRepository.load()
-            monitorRepository.load()
-            penguinRepository.load()
-
             val s = settings.value
-            if (s.isBoxTagsApiConfigured) {
-                boxTagRepository.initializeApi(s.boxTagsApiUrl, s.boxTagsApiKey)
-            }
-            boxTagRepository.load()
-
             locationService.startLocationUpdates()
-
             if (s.isBluetoothEnabled) {
                 bluetoothManager.startConnection(viewModelScope)
             }
