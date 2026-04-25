@@ -2,17 +2,14 @@ package nz.co.penguinmonitor.ui.overview
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+// PaddingValues no longer needed
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Checkbox
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+// Grid replaced with manual rows for single-page scroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +41,7 @@ fun OverviewScreen(
     var showFilters by remember { mutableStateOf(settings.showFiltersVisible) }
     var hideFilters by remember { mutableStateOf(settings.hideFiltersVisible) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         // Monitor navigation
         MonitorNavigationBar(
             currentMonitorIndex = settings.currentlyVisibleMonitor,
@@ -85,19 +82,29 @@ fun OverviewScreen(
             }
         }
 
-        // Box grid - 3 columns
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.weight(1f)
+        // Box grid - 3 columns (non-lazy for single-page scroll)
+        val rows = boxCards.chunked(3)
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(boxCards, key = { it.boxName }) { card ->
-                BoxSummaryCard(
-                    card = card,
-                    onClick = { onBoxSelected(card.boxName) }
-                )
+            rows.forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    row.forEach { card ->
+                        BoxSummaryCard(
+                            card = card,
+                            onClick = { onBoxSelected(card.boxName) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    // Fill empty cells in last row
+                    repeat(3 - row.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
 

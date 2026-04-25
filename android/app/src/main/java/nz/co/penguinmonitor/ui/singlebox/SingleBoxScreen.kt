@@ -90,7 +90,7 @@ fun SingleBoxScreen(
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
@@ -103,9 +103,11 @@ fun SingleBoxScreen(
                                 }
                             }
                             if (dragAmount > 0) {
-                                if (historicalIndex > 0) viewModel.setHistoricalIndex(historicalIndex - 1)
-                            } else {
+                                // Swipe right = older data (matches C#)
                                 viewModel.setHistoricalIndex(historicalIndex + 1)
+                            } else {
+                                // Swipe left = newer data (matches C#)
+                                if (historicalIndex > 0) viewModel.setHistoricalIndex(historicalIndex - 1)
                             }
                         }
                         dragAmount = 0f
@@ -114,8 +116,6 @@ fun SingleBoxScreen(
                 )
             }
     ) {
-        StatusBar(bluetoothState = bluetoothState, locationState = locationState)
-
         // Top action buttons - matches C# layout
         Row(
             modifier = Modifier
@@ -165,9 +165,8 @@ fun SingleBoxScreen(
 
         Column(
             modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
         ) {
             BoxDataCard(
                 boxData = boxData,
