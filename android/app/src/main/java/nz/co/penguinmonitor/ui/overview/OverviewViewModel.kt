@@ -21,17 +21,20 @@ import nz.co.penguinmonitor.util.BoxSetParser
 import nz.co.penguinmonitor.util.BreedingDateCalculator
 import javax.inject.Inject
 
+// Border types matching C# logic
+enum class CardBorder { DEFAULT, RED_THICK, BLUE_THICK, YELLOW_THICK }
+
 data class BoxCardDisplay(
     val boxName: String,
     val boxData: BoxData?,
-    val adultsEmoji: String,
-    val eggsEmoji: String,
-    val chicksEmoji: String,
+    val emojiLine: String,        // 🐧🥚🐣
+    val previousEmoji: String,    // (🥚🐣) if different
     val breedingChance: String?,
+    val showBreedingChance: Boolean,
     val breedingStatusText: String,
-    val notesPreview: String,
-    val hasChanged: Boolean,
-    val gateStatus: String?
+    val bottomLine: String,       // gate + notes + sticky + NRF
+    val border: CardBorder,
+    val isSelected: Boolean
 )
 
 @HiltViewModel
@@ -65,7 +68,6 @@ class OverviewViewModel @Inject constructor(
         val boxDict = BoxSetParser.createBoxDictionary(settings.boxSetString, settings.allBoxSetsString)
         var monitorIndex = settings.currentlyVisibleMonitor
 
-        // If current monitor is empty, find the first one with data
         var currentMonitor = allData[monitorIndex]
         if (currentMonitor == null || currentMonitor.boxData.isEmpty()) {
             for (i in 0 until allData.size) {
@@ -82,41 +84,104 @@ class OverviewViewModel @Inject constructor(
         val previousMonitor = allData.getOrDefault(monitorIndex + 1, null)
 
         return boxDict.keys.mapNotNull { boxName ->
-            val boxData = currentMonitor.boxData[boxName]
+            var thisBoxData = currentMonitor.boxData[boxName]
+            val currentExists = thisBoxData != null
+
+            if (!shouldShowBox(boxName, thisBoxData, settings)) return@mapNotNull null
+
+            val olderBoxes = BreedingDateCalculator.getOlderBoxData(allData, monitorIndex, boxName).toMutableList()
+
+            // If no current data but older exists, use first older as current (matches C#)
+            if (!currentExists && olderBoxes.isNotEmpty()) {
+                thisBoxData = olderBoxes.removeFirst()
+            }
+
             val previousData = previousMonitor?.boxData?.get(boxName)
 
-            // Apply filters
-            if (!shouldShowBox(boxName, boxData, settings)) return@mapNotNull null
+            // --- Border logic matching C# exactly ---
+            var border = CardBorder.DEFAULT
+            var differenceFound = false
 
-            val olderBoxes = BreedingDateCalculator.getOlderBoxData(allData, monitorIndex, boxName)
-            val breedingStatus = BreedingDateCalculator.getBoxBreedingStatusString(boxName, boxData, olderBoxes)
+            if (showDifferences && currentExists) {
+                val showDiffFromPrevious = previousData != null && thisBoxData != null && (
+                    thisBoxData.adults != previousData.adults ||
+                    thisBoxData.eggs != previousData.eggs ||
+                    thisBoxData.chicks != previousData.chicks ||
+                    thisBoxData.gateStatus != previousData.gateStatus ||
+                    thisBoxData.breedingChance != previousData.breedingChance ||
+                    thisBoxData.notes != previousData.notes
+                )
+                if (showDiffFromPrevious || allData.size == monitorIndex + 1 ||
+                    allData[monitorIndex + 1]?.boxData?.containsKey(boxName) != true) {
+                    border = CardBorder.RED_THICK
+                }
+            }
 
-            val hasChanged = showDifferences && previousData != null && boxData != null &&
-                    (boxData.adults != previousData.adults ||
-                            boxData.eggs != previousData.eggs ||
-                            boxData.chicks != previousData.chicks ||
-                            boxData.breedingChance != previousData.breedingChance)
+            if (!currentExists) {
+                border = CardBorder.YELLOW_THICK
+            } else if (thisBoxData != null && olderBoxes.isNotEmpty()) {
+                val first = olderBoxes.first()
+                if (thisBoxData.eggs + thisBoxData.chicks < first.eggs + first.chicks) {
+                    differenceFound = true
+                    border = CardBorder.RED_THICK
+                } else if (thisBoxData.breedingChance != "BR" && thisBoxData.eggs + thisBoxData.chicks > 0) {
+                    border = CardBorder.RED_THICK
+                } else if (thisBoxData.eggs != first.eggs || thisBoxData.chicks != first.chicks) {
+                    differenceFound = true
+                    border = CardBorder.BLUE_THICK
+                }
+            } else if (thisBoxData != null && thisBoxData.breedingChance != "BR" && thisBoxData.eggs + thisBoxData.chicks > 0) {
+                border = CardBorder.RED_THICK
+            }
 
-            val adultsStr = "\uD83D\uDC27".repeat(boxData?.adults ?: 0) // 🐧
-            val eggsStr = "\uD83E\uDD5A".repeat(boxData?.eggs ?: 0) // 🥚
-            val chicksStr = "\uD83D\uDC23".repeat(boxData?.chicks ?: 0) // 🐣
+            // --- Emoji line ---
+            val emojiLine = buildString {
+                if (thisBoxData != null) {
+                    append("\uD83D\uDC27".repeat(thisBoxData.adults))
+                    append("\uD83E\uDD5A".repeat(thisBoxData.eggs))
+                    append("\uD83D\uDC23".repeat(thisBoxData.chicks))
+                }
+            }
 
-            val notesPreview = buildString {
-                boxData?.gateStatus?.let { if (it.isNotBlank()) append("$it ") }
-                boxData?.notes?.let { if (it.isNotBlank()) append(it.take(30)) }
+            // Previous emoji in parens if difference found
+            val previousEmoji = if (differenceFound && olderBoxes.isNotEmpty()) {
+                val prev = olderBoxes.first()
+                if (prev.eggs + prev.chicks > 0 && thisBoxData != null &&
+                    (thisBoxData.eggs != prev.eggs || thisBoxData.chicks != prev.chicks)) {
+                    "(" + "\uD83E\uDD5A".repeat(prev.eggs) + "\uD83D\uDC23".repeat(prev.chicks) + ")"
+                } else ""
+            } else ""
+
+            // Show breeding chance when not BR, or when BR but no offspring
+            val showBC = thisBoxData?.breedingChance != null &&
+                (thisBoxData.breedingChance != "BR" || (thisBoxData.breedingChance == "BR" && thisBoxData.eggs + thisBoxData.chicks == 0))
+
+            // Breeding status
+            val breedingStatus = BreedingDateCalculator.getBoxBreedingStatusString(boxName, thisBoxData, olderBoxes)
+
+            // Bottom line: gate + notes + sticky notes
+            val stickyNotes = BreedingDateCalculator.getStickyNotes(olderBoxes)
+            val bottomLine = buildString {
+                thisBoxData?.gateStatus?.let { if (it.isNotBlank()) append(it) }
+                val hasNotes = thisBoxData?.notes?.isNotBlank() == true
+                if (hasNotes) {
+                    if (isNotEmpty()) append(" & ")
+                    append("notes")
+                }
+                if (stickyNotes.isNotBlank()) append(" ($stickyNotes)")
             }.trim()
 
             BoxCardDisplay(
                 boxName = boxName,
-                boxData = boxData,
-                adultsEmoji = adultsStr,
-                eggsEmoji = eggsStr,
-                chicksEmoji = chicksStr,
-                breedingChance = boxData?.breedingChance,
+                boxData = thisBoxData,
+                emojiLine = emojiLine,
+                previousEmoji = previousEmoji,
+                breedingChance = thisBoxData?.breedingChance,
+                showBreedingChance = showBC,
                 breedingStatusText = breedingStatus,
-                notesPreview = notesPreview,
-                hasChanged = hasChanged,
-                gateStatus = boxData?.gateStatus
+                bottomLine = bottomLine,
+                border = border,
+                isSelected = false
             )
         }
     }
@@ -128,7 +193,6 @@ class OverviewViewModel @Inject constructor(
         val hasNotes = boxData?.notes?.isNotBlank() == true
         val eggs = boxData?.eggs ?: 0
 
-        // Hide filters (applied first)
         if (settings.hideBoxesWithDataInMultiBoxView && hasData) return false
         if (settings.hideDCMInMultiBoxView && chance == "DCM") return false
         if (settings.hideABNInMultiBoxView && chance == "ABN") return false
@@ -141,7 +205,6 @@ class OverviewViewModel @Inject constructor(
         if (settings.hideSingleEggBoxesInMultiboxView && eggs == 1) return false
         if (settings.hideDoubleEggBoxesInMultiboxView && eggs >= 2) return false
 
-        // Show filters (if any are active, only show matching)
         val anyShowActive = settings.showBoxesWithDataInMultiBoxView ||
                 settings.showNoBoxesInMultiBoxView || settings.showUnlikleyBoxesInMultiBoxView ||
                 settings.showPotentialBoxesInMultiBoxView || settings.showConfidentBoxesInMultiBoxView ||
@@ -170,37 +233,25 @@ class OverviewViewModel @Inject constructor(
     }
 
     fun navigateToMonitor(index: Int) {
-        viewModelScope.launch {
-            settingsRepository.update { it.copy(currentlyVisibleMonitor = index) }
-        }
+        viewModelScope.launch { settingsRepository.update { it.copy(currentlyVisibleMonitor = index) } }
     }
 
     fun nextMonitor() {
         val current = settings.value.currentlyVisibleMonitor
         val maxIndex = monitorRepository.allMonitorData.value.size - 1
-        if (current < maxIndex) {
-            navigateToMonitor(current + 1)
-        }
+        if (current < maxIndex) navigateToMonitor(current + 1)
     }
 
     fun previousMonitor() {
         val current = settings.value.currentlyVisibleMonitor
-        if (current > 0) {
-            navigateToMonitor(current - 1)
-        }
+        if (current > 0) navigateToMonitor(current - 1)
     }
 
-    fun showLatestMonitor() {
-        navigateToMonitor(0)
-    }
+    fun showLatestMonitor() { navigateToMonitor(0) }
 
-    fun toggleShowDifferences() {
-        _showDifferences.value = !_showDifferences.value
-    }
+    fun toggleShowDifferences() { _showDifferences.value = !_showDifferences.value }
 
     fun updateFilter(transform: (AppSettings) -> AppSettings) {
-        viewModelScope.launch {
-            settingsRepository.update(transform)
-        }
+        viewModelScope.launch { settingsRepository.update(transform) }
     }
 }
