@@ -15,12 +15,11 @@ export function getSeasonStart(date: Date = new Date()): Date {
 }
 
 /**
- * Get the season label for a given date, e.g. "2025/26"
+ * Get the season label for a given date, e.g. "2025"
  */
 export function getSeasonLabel(date: Date = new Date()): string {
   const start = getSeasonStart(date);
-  const y = start.getFullYear();
-  return `${y}/${(y + 1).toString().slice(-2)}`;
+  return `${start.getFullYear()}`;
 }
 
 /**

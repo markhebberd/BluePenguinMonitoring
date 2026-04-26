@@ -379,11 +379,8 @@ class SingleBoxViewModel @Inject constructor(
             shouldAlert = true
         }
 
-        // Auto-set breeding chance
-        var breedingChance = currentData.breedingChance
-        if (currentData.eggs + chicks > 0 && breedingChance.isNullOrBlank()) {
-            breedingChance = "BR"
-        }
+        // Guard is derived from egg/chick presence - no auto-set needed
+        val breedingChance = currentData.breedingChance
 
         val updatedBox = currentData.copy(
             scannedIds = updatedScans,
@@ -858,11 +855,7 @@ class SingleBoxViewModel @Inject constructor(
         val currentData = monitorRepository.getCurrentBoxData(boxName) ?: BoxData()
         val updated = transform(currentData)
 
-        val finalData = if (updated.eggs + updated.chicks > 0 && updated.breedingChance.isNullOrBlank()) {
-            updated.copy(breedingChance = "BR")
-        } else updated
-
-        monitorRepository.updateCurrentMonitor(boxName, finalData)
+        monitorRepository.updateCurrentMonitor(boxName, updated)
         viewModelScope.launch { monitorRepository.save(reportHome = false) }
     }
 }

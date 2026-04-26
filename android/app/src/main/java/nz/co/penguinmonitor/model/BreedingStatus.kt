@@ -2,11 +2,10 @@ package nz.co.penguinmonitor.model
 
 enum class BreedingStatus(val code: String, val label: String) {
     NONE("", ""),
-    NO_DATA("NO", "No data"),
+    NO_DATA("NO", "No"),
     UNLIKELY("UNL", "Unlikely"),
     POTENTIAL("POT", "Potential"),
     CONFIDENT("CON", "Confident"),
-    BREEDING("BR", "Breeding"),
     DCM("DCM", "DCM"),
     ABN("ABN", "Abandoned");
 
@@ -15,7 +14,8 @@ enum class BreedingStatus(val code: String, val label: String) {
             return entries.find { it.code == code } ?: NONE
         }
 
-        val spinnerOptions = listOf("", "NO", "UNL", "POT", "CON", "BR", "ABN", "DCM")
+        // BR removed - Guard is derived from egg/chick presence
+        val spinnerOptions = listOf("", "NO", "UNL", "POT", "CON", "ABN", "DCM")
         val gateStatusOptions = listOf("", "Gate up", "Regate")
     }
 }

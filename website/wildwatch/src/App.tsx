@@ -19,97 +19,270 @@ interface BoxDetailData {
   observations: Observation[];
 }
 
+// Color progression: NO → UNL → POT → CON → BR → Guard → PG → Molting. Red = alert only.
 const STATUS_COLORS: Record<string,string> = {
-  UNL:'#FDD835', POT:'#FF9800', CON:'#E53935', BR:'#4CAF50',
-  ABN:'#9E9E9E', DCM:'#795548', NO:'#E0E0E0', '':'#F5F5F5',
+  NO:'#E0E0E0',       // gray
+  UNL:'#FFF9C4',      // pale yellow
+  POT:'#FFF176',      // yellow
+  CON:'#FFD54F',      // amber-yellow
+  BR:'#66BB6A',       // light green - breeding/eggs
+  G:'#4CAF50',        // green - guard
+  PG:'#8BC34A',       // yellow-green - post guard
+  MOULT:'#FFB74D',    // amber - moulting
+  ABN:'#F44336',      // red - alert
+  DCM:'#795548',      // brown
+  '':'#F5F5F5',
 };
 
 const STATUS_NAMES: Record<string,string> = {
-  BR:'Breeding', CON:'Confident', POT:'Potential', UNL:'Unlikely',
-  ABN:'Abandoned', DCM:'DCM',
+  NO:'No', UNL:'Unlikely', POT:'Potential', CON:'Confident',
+  G:'Guard', PG:'Post-guard', MOULT:'Moulting',
+  DCM:'DCM',
 };
 
-function BreedingStatusBar({ observations }: { observations: Observation[] }) {
-  // Timeline covers last 12 months
-  const now = new Date();
-  const start = new Date(now);
-  start.setFullYear(start.getFullYear() - 1);
-  const totalMs = now.getTime() - start.getTime();
+function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
+  observations: Observation[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
+  onHighlight?: (obsDate: string | null) => void;
+  onScrollTo?: (obsDate: string) => void;
+}) {
+  const totalMs = seasonEnd.getTime() - seasonStart.getTime();
+  if (totalMs <= 0) return null;
 
-  // Sort observations oldest first
-  const sorted = [...observations].sort(
-    (a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime()
-  );
+  const sorted = [...observations]
+    .filter(o => { const t = new Date(o.observation_time_utc).getTime(); return t >= seasonStart.getTime() && t <= seasonEnd.getTime(); })
+    .sort((a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime());
 
-  // Build status changes: only explicit non-empty status values count.
-  // A null/blank breeding_status means "no change" - previous status persists.
-  interface StatusChange { time: number; status: string; }
-  const changes: StatusChange[] = [];
+  // Also consider obs before this season to get the initial status
+  const allSorted = [...observations].sort((a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime());
+
+  // Build status changes from ALL observations (to carry forward pre-season status)
+  // BR maps to G (Guard). Also: if eggs/chicks present but no status set, infer Guard.
+  const changes: { time: number; status: string }[] = [];
   let runningStatus = '';
-
-  for (const obs of sorted) {
-    const s = obs.breeding_status;
+  for (const obs of allSorted) {
+    let s = obs.breeding_status;
+    if (s === 'BR') s = 'G';
+    // If eggs or chicks present but no explicit status, infer Guard
+    if (!s && (obs.eggs > 0 || obs.chicks > 0) && runningStatus !== 'G') {
+      s = 'G';
+    }
     if (s && s !== runningStatus) {
       runningStatus = s;
       changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: s });
     }
   }
 
-  // Build segments from changes
-  const segments: { startPct: number; endPct: number; status: string }[] = [];
-  for (let i = 0; i < changes.length; i++) {
-    const segStart = Math.max(changes[i].time, start.getTime());
-    const segEnd = (i + 1 < changes.length) ? changes[i + 1].time : now.getTime();
-    if (segEnd <= start.getTime()) continue; // entirely before window
-    const startPct = ((segStart - start.getTime()) / totalMs) * 100;
-    const endPct = Math.min(100, ((segEnd - start.getTime()) / totalMs) * 100);
-    segments.push({ startPct, endPct, status: changes[i].status });
-  }
+  const dataEnd = todayCutoff ? Math.min(todayCutoff.getTime(), seasonEnd.getTime()) : seasonEnd.getTime();
 
-  // Month labels
-  const months: { label: string; pct: number }[] = [];
-  for (let m = 0; m < 12; m++) {
-    const d = new Date(start);
-    d.setMonth(d.getMonth() + m);
-    d.setDate(1);
-    if (d.getTime() >= start.getTime() && d.getTime() <= now.getTime()) {
-      const pct = ((d.getTime() - start.getTime()) / totalMs) * 100;
-      months.push({ label: d.toLocaleDateString('en-NZ', { month: 'short' }), pct });
+  // Calculate egg laid date using C# logic exactly:
+  // Start from the most recent monitor with eggs/chicks, walk backwards to find
+  // the last monitor where eggs+chicks==0. Probable laid date = midpoint.
+  let probableLaidTime: number | null = null;
+  const reversed = [...allSorted].reverse(); // newest first, like C#
+  // Find most recent monitor with eggs or chicks
+  const mostRecent = reversed.find(o => o.eggs + o.chicks > 0);
+  if (mostRecent) {
+    let whenOffspringFound = new Date(mostRecent.observation_time_utc).getTime();
+    // Walk backwards through older monitors
+    const olderThanRecent = allSorted.filter(o =>
+      new Date(o.observation_time_utc).getTime() < whenOffspringFound
+    ).reverse(); // newest older first
+
+    for (const older of olderThanRecent) {
+      if (older.breeding_status === 'ABN' && older.eggs + older.chicks > 0) {
+        break; // Abandoned - no date calculation
+      }
+      if (older.eggs + older.chicks === 0) {
+        if (older.breeding_status === 'ABN') break;
+        // Found the empty monitor before eggs appeared
+        let adjustedFound = whenOffspringFound;
+        if (mostRecent.eggs > 1) adjustedFound -= 2 * 86400000; // 2 days earlier for multiple eggs
+        const whenNotFound = new Date(older.observation_time_utc).getTime();
+        const uncertainty = (adjustedFound - whenNotFound) / 2;
+        probableLaidTime = whenNotFound + Math.ceil(uncertainty / 86400000) * 86400000;
+        break;
+      }
+      // This older monitor also has eggs/chicks - keep walking back
+      whenOffspringFound = new Date(older.observation_time_utc).getTime();
     }
   }
 
-  // Observation markers (dots on the bar)
-  const markers = sorted
-    .filter(o => new Date(o.observation_time_utc).getTime() >= start.getTime())
-    .map(o => {
-      const pct = ((new Date(o.observation_time_utc).getTime() - start.getTime()) / totalMs) * 100;
-      return { pct, status: o.breeding_status || '' };
-    });
+  // Breeding milestones from laid date (matching C#: Hatch=38d, PG=52d, Chip=80d, Fledge=87d)
+  const DAY = 86400000;
+  void (probableLaidTime ? probableLaidTime + 38 * DAY : null); // guardTime/hatch at 38d - observer-set G covers this
+  const pgTime2 = probableLaidTime ? probableLaidTime + 52 * DAY : null;
+  void (probableLaidTime ? probableLaidTime + 80 * DAY : null); // chipTime - 80d, within PG phase
+  const fledgeTime = probableLaidTime ? probableLaidTime + 87 * DAY : null;
+
+  // Build segments: observer-set statuses first, then overlay calculated phases
+  const segments: { startPct: number; endPct: number; status: string }[] = [];
+
+  // Observer-set status segments
+  for (let i = 0; i < changes.length; i++) {
+    const segStart = Math.max(changes[i].time, seasonStart.getTime());
+    let segEnd = (i + 1 < changes.length) ? Math.min(changes[i + 1].time, dataEnd) : dataEnd;
+    // Truncate Guard at PG start (calculated)
+    if (changes[i].status === 'G' && pgTime2 && pgTime2 < segEnd && pgTime2 > segStart) {
+      segEnd = pgTime2;
+    }
+    if (segEnd <= seasonStart.getTime()) continue;
+    if (segStart >= dataEnd) continue;
+    const startPct = ((segStart - seasonStart.getTime()) / totalMs) * 100;
+    const endPct = ((segEnd - seasonStart.getTime()) / totalMs) * 100;
+    segments.push({ startPct, endPct, status: changes[i].status });
+  }
+
+  // Add calculated PG phase after guard ends
+  // Observer sets BR (displayed as G) from egg appearance. PG starts at +52d from laid date.
+  // Don't add a separate Guard - the observer-set G covers it.
+  if (probableLaidTime && pgTime2) {
+    const addPhase = (start: number, end: number, status: string) => {
+      const s = Math.max(start, seasonStart.getTime());
+      const e = Math.min(end, dataEnd);
+      if (e <= s) return;
+      segments.push({ startPct: ((s - seasonStart.getTime()) / totalMs) * 100, endPct: ((e - seasonStart.getTime()) / totalMs) * 100, status });
+    };
+    if (pgTime2 < dataEnd) addPhase(pgTime2, fledgeTime!, 'PG');
+    // Moulting only shown from biometric data, not calculated automatically
+  }
+
+  // Future portion (white) after today
+  const futurePct = todayCutoff ? ((todayCutoff.getTime() - seasonStart.getTime()) / totalMs) * 100 : null;
+
+  // Month labels for this season
+  const months: { label: string; pct: number }[] = [];
+  for (let m = 0; m < 13; m++) {
+    const d = new Date(seasonStart);
+    d.setMonth(d.getMonth() + m);
+    d.setDate(1);
+    if (d.getTime() >= seasonStart.getTime() && d.getTime() <= seasonEnd.getTime()) {
+      months.push({ label: d.toLocaleDateString('en-NZ', { month: 'short' }), pct: ((d.getTime() - seasonStart.getTime()) / totalMs) * 100 });
+    }
+  }
+
+  // Find first egg and first chick appearance in this season
+  let firstEggTime: number | null = null;
+  let firstChickTime: number | null = null;
+  let prevEggs = 0;
+  let prevChicks = 0;
+  for (const o of sorted) {
+    if (o.eggs > 0 && prevEggs === 0 && firstEggTime === null) {
+      firstEggTime = new Date(o.observation_time_utc).getTime();
+    }
+    if (o.chicks > 0 && prevChicks === 0 && firstChickTime === null) {
+      firstChickTime = new Date(o.observation_time_utc).getTime();
+    }
+    prevEggs = o.eggs;
+    prevChicks = o.chicks;
+  }
+  const pgTime = firstEggTime ? firstEggTime + 52 * 24 * 60 * 60 * 1000 : null; // 52 days after first egg
+
+  // Milestone markers for egg and chick first appearance
+  const milestones: { pct: number; icon: string; label: string }[] = [];
+  if (firstEggTime && firstEggTime >= seasonStart.getTime() && firstEggTime <= seasonEnd.getTime()) {
+    milestones.push({ pct: ((firstEggTime - seasonStart.getTime()) / totalMs) * 100, icon: '\uD83E\uDD5A', label: 'First egg' });
+  }
+  if (firstChickTime && firstChickTime >= seasonStart.getTime() && firstChickTime <= seasonEnd.getTime()) {
+    milestones.push({ pct: ((firstChickTime - seasonStart.getTime()) / totalMs) * 100, icon: '\uD83D\uDC23', label: 'First chick' });
+  }
+
+  // Classify each monitor as routine, significant, or warning
+  type MarkerType = 'routine' | 'egg-appear' | 'chick-appear' | 'egg-gone' | 'chick-gone' | 'no-adult-warn';
+  const markers: { pct: number; obs: typeof sorted[0]; type: MarkerType; icon: string; date: string }[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const o = sorted[i];
+    const prev = i > 0 ? sorted[i - 1] : null;
+    const t = new Date(o.observation_time_utc).getTime();
+    const pct = ((t - seasonStart.getTime()) / totalMs) * 100;
+
+    // Detect significant events
+    const eggsAppeared = prev !== null && prev.eggs === 0 && o.eggs > 0;
+    const chicksAppeared = prev !== null && prev.chicks === 0 && o.chicks > 0;
+    const eggsGone = prev !== null && prev.eggs > 0 && o.eggs === 0 && o.chicks <= prev.chicks;
+    const chicksGone = prev !== null && prev.chicks > 0 && o.chicks === 0;
+    const prePgNoAdults = pgTime !== null && t < pgTime && o.eggs + o.chicks > 0 && o.adults === 0;
+
+    let type: MarkerType = 'routine';
+    let icon = '';
+    if (prePgNoAdults) { type = 'no-adult-warn'; icon = '⚠'; }
+    else if (eggsGone || chicksGone) { type = eggsGone ? 'egg-gone' : 'chick-gone'; icon = '✕'; }
+    else if (eggsAppeared) { type = 'egg-appear'; icon = '\uD83E\uDD5A'; }
+    else if (chicksAppeared) { type = 'chick-appear'; icon = '\uD83D\uDC23'; }
+
+    markers.push({ pct, obs: o, type, icon, date: o.observation_time_utc });
+  }
+
+  return (
+    <div className="season-bar">
+      <div className="season-bar-label">{label}</div>
+      <div className="season-bar-content">
+        <div className="status-bar-labels">
+          {months.map((m, i) => <span key={i} className="month-label" style={{ left: `${m.pct}%` }}>{m.label}</span>)}
+        </div>
+        <div className="status-bar">
+          {segments.map((seg, i) => (
+            <div key={i} className="status-segment" style={{ left: `${seg.startPct}%`, width: `${seg.endPct - seg.startPct}%`, backgroundColor: STATUS_COLORS[seg.status] || STATUS_COLORS[''] }}
+              title={STATUS_NAMES[seg.status] || 'No status'} />
+          ))}
+          {markers.map((m, i) => (
+            m.type === 'routine' ? (
+              <div key={i}
+                className="status-marker-tick"
+                style={{ left: `${m.pct}%` }}
+                onMouseEnter={() => onHighlight?.(m.date)}
+                onMouseLeave={() => onHighlight?.(null)}
+                onClick={() => onScrollTo?.(m.date)}
+                title={`${fmtDateTime(m.obs.observation_time_utc)}\n\uD83D\uDC27${m.obs.adults} \uD83E\uDD5A${m.obs.eggs} \uD83D\uDC23${m.obs.chicks}${m.obs.breeding_status ? ' ' + m.obs.breeding_status : ''}`}
+              />
+            ) : (
+              <div key={i}
+                className={`status-marker-event ${m.type}`}
+                style={{ left: `${m.pct}%` }}
+                onMouseEnter={() => onHighlight?.(m.date)}
+                onMouseLeave={() => onHighlight?.(null)}
+                onClick={() => onScrollTo?.(m.date)}
+                title={`${fmtDateTime(m.obs.observation_time_utc)}\n\uD83D\uDC27${m.obs.adults} \uD83E\uDD5A${m.obs.eggs} \uD83D\uDC23${m.obs.chicks}${m.obs.breeding_status ? ' ' + m.obs.breeding_status : ''}${m.type === 'no-adult-warn' ? '\n⚠ No adults before post-guard!' : m.type.includes('gone') ? '\n✕ Disappeared' : ''}`}
+              >{m.icon}</div>
+            )
+          ))}
+          {/* milestones now shown as event markers */}
+          {futurePct !== null && futurePct < 100 && (
+            <div className="status-future" style={{ left: `${futurePct}%`, width: `${100 - futurePct}%` }} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observations: Observation[]; onHighlight?: (date: string | null) => void; onScrollTo?: (date: string) => void }) {
+  const now = new Date();
+  const currentSeasonStart = getSeasonStart(now);
+  void now; // currentSeasonEnd no longer needed - full year bar with todayCutoff
+
+  // Previous season
+  const prevSeasonEnd = new Date(currentSeasonStart);
+  const prevSeasonStart = new Date(prevSeasonEnd);
+  prevSeasonStart.setFullYear(prevSeasonStart.getFullYear() - 1);
+
+  const prevLabel = getSeasonLabel(prevSeasonStart);
+  const currentLabel = getSeasonLabel(now);
+
+  // Current season bar runs full year (Apr 1 to Mar 31) but after today is white/empty
+  const currentSeasonFullEnd = new Date(currentSeasonStart);
+  currentSeasonFullEnd.setFullYear(currentSeasonFullEnd.getFullYear() + 1);
+
+  const hasPrevData = observations.some(o => {
+    const t = new Date(o.observation_time_utc).getTime();
+    return t >= prevSeasonStart.getTime() && t < prevSeasonEnd.getTime();
+  });
 
   return (
     <div className="status-bar-wrap">
-      <div className="status-bar-labels">
-        {months.map((m, i) => (
-          <span key={i} className="month-label" style={{ left: `${m.pct}%` }}>{m.label}</span>
-        ))}
-      </div>
-      <div className="status-bar">
-        {segments.map((seg, i) => (
-          <div
-            key={i}
-            className="status-segment"
-            style={{
-              left: `${seg.startPct}%`,
-              width: `${seg.endPct - seg.startPct}%`,
-              backgroundColor: STATUS_COLORS[seg.status] || STATUS_COLORS[''],
-            }}
-            title={`${STATUS_NAMES[seg.status] || 'No status'}`}
-          />
-        ))}
-        {markers.map((m, i) => (
-          <div key={i} className="status-marker" style={{ left: `${m.pct}%` }} title="Monitoring visit" />
-        ))}
-      </div>
+      <SeasonBar observations={observations} seasonStart={currentSeasonStart} seasonEnd={currentSeasonFullEnd} label={currentLabel} todayCutoff={now} onHighlight={onHighlight} onScrollTo={onScrollTo} />
+      {hasPrevData && (
+        <SeasonBar observations={observations} seasonStart={prevSeasonStart} seasonEnd={prevSeasonEnd} label={prevLabel} onHighlight={onHighlight} onScrollTo={onScrollTo} />
+      )}
       <div className="status-bar-legend">
         {Object.entries(STATUS_NAMES).map(([k, v]) => (
           <span key={k}><i style={{ background: STATUS_COLORS[k] }} />{v}</span>
@@ -202,10 +375,10 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
   );
 }
 
-function ObsCard({ obs, onBirdClick, highlight }: { obs: Observation; onBirdClick?: (tag:string)=>void; highlight?: boolean }) {
+function ObsCard({ obs, onBirdClick, highlight, scrollTo }: { obs: Observation; onBirdClick?: (tag:string)=>void; highlight?: boolean; scrollTo?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (highlight && ref.current) {
+    if (scrollTo && ref.current) {
       ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [highlight]);
@@ -415,6 +588,7 @@ function App() {
   const [birdData, setBirdData] = useState<any>(null);
   const [birdLoading, setBirdLoading] = useState(false);
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
+  const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const [allPenguins, setAllPenguins] = useState<any[]>([]);
   const [penguinSearch, setPenguinSearch] = useState('');
 
@@ -502,7 +676,7 @@ function App() {
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird}
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
-              onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); }} />
+              onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
           ) : <p className="muted">Bird not found</p>}
         </div>
       </div>
@@ -547,7 +721,7 @@ function App() {
             {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
                 {boxDetail.location?.rfid_tag_number && <div className="tag-info">Tag: {boxDetail.location.rfid_tag_number.slice(-8)}</div>}
-                <BreedingStatusBar observations={boxDetail.observations} />
+                <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(d); setScrollToObs(d); }} />
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} />
               </>
             ) : null}
@@ -575,11 +749,11 @@ function App() {
                 return (<>
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})</h3>
                   {thisSeason.length === 0 && <p className="muted">No observations this season</p>}
-                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} />)}
+                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} />)}
                   {sortedPrev.map(([label, obs]) => (
                     <div key={label}>
                       <div className="season-divider"><hr/><span>{label} ({obs.length})</span><hr/></div>
-                      {obs.map((o,i) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={openBird} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} />)}
+                      {obs.map((o,i) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={openBird} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} />)}
                     </div>
                   ))}
                 </>);
@@ -589,7 +763,7 @@ function App() {
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
-                  onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); }} />
+                  onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
               ) : birdLoading ? <p className="muted">Loading bird...</p> : <p className="muted">Select a bird</p>}
             </div>
           </div>

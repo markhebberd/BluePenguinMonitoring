@@ -90,11 +90,27 @@ header h1:hover { opacity:.8; }
 
 /* Breeding status bar */
 .status-bar-wrap { margin:12px 0 16px; }
+.season-bar { display:flex; align-items:stretch; margin-bottom:4px; }
+.season-bar-label { font-size:10px; color:#888; width:40px; flex-shrink:0; display:flex; align-items:center; }
+.season-bar-content { flex:1; min-width:0; }
 .status-bar-labels { position:relative; height:16px; }
 .month-label { position:absolute; font-size:9px; color:#888; transform:translateX(-50%); }
-.status-bar { position:relative; height:24px; background:#eee; border-radius:4px; overflow:hidden; }
-.status-segment { position:absolute; top:0; height:100%; }
+.status-bar { position:relative; height:28px; background:#eee; border-radius:4px; overflow:visible; }
+.status-segment { position:absolute; top:0; height:100%; border-radius:2px; }
 .status-marker { position:absolute; top:-2px; width:2px; height:28px; background:#333; opacity:.4; }
+/* Routine monitor - small subtle tick */
+.status-marker-tick { position:absolute; top:-4px; width:2px; height:8px; background:rgba(0,0,0,.3); cursor:pointer; z-index:3; transform:translateX(-1px); }
+.status-marker-tick:hover { background:#000; height:12px; top:-6px; width:3px; }
+
+/* Significant event - larger with icon */
+.status-marker-event { position:absolute; top:-14px; font-size:12px; cursor:pointer; z-index:4; transform:translateX(-50%); text-shadow:0 1px 2px rgba(0,0,0,.3); line-height:1; }
+.status-marker-event:hover { font-size:16px; top:-18px; }
+.status-marker-event.egg-gone, .status-marker-event.chick-gone { color:#F44336; font-weight:bold; font-size:10px; top:-12px; }
+.status-marker-event.egg-gone:hover, .status-marker-event.chick-gone:hover { font-size:14px; top:-16px; }
+.status-marker-event.no-adult-warn { color:#F44336; font-size:14px; top:-16px; }
+.status-marker-event.no-adult-warn:hover { font-size:18px; top:-20px; }
+.status-milestone { position:absolute; top:-4px; font-size:16px; z-index:4; transform:translateX(-50%); pointer-events:none; text-shadow:0 1px 2px rgba(0,0,0,.3); }
+.status-future { position:absolute; top:0; height:100%; background:#fff; opacity:.85; }
 .status-bar-legend { display:flex; gap:10px; margin-top:6px; font-size:10px; color:#666; flex-wrap:wrap; }
 .status-bar-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:2px; vertical-align:middle; border:1px solid rgba(0,0,0,.1); }
 .detail-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
