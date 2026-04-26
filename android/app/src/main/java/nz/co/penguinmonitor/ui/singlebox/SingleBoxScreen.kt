@@ -38,7 +38,9 @@ import nz.co.penguinmonitor.ui.common.BoxNavigationBar
 import nz.co.penguinmonitor.ui.common.ConfirmationDialog
 import nz.co.penguinmonitor.ui.common.StatusBar
 import nz.co.penguinmonitor.ui.common.StickyNotesDialog
+import nz.co.penguinmonitor.ui.singlebox.components.BiometricData
 import nz.co.penguinmonitor.ui.singlebox.components.BoxDataCard
+import nz.co.penguinmonitor.ui.singlebox.components.PenguinObservationDialog
 import nz.co.penguinmonitor.ui.singlebox.components.BoxTagDeleteButton
 import nz.co.penguinmonitor.ui.singlebox.components.HistoricalDataIndicator
 import nz.co.penguinmonitor.ui.singlebox.components.LockToggle
@@ -76,6 +78,7 @@ fun SingleBoxScreen(
     var showClearBoxConfirm by remember { mutableStateOf(false) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showSaveLoadMenu by remember { mutableStateOf(false) }
+    var showBiometricDialog by remember { mutableStateOf<ScannedBirdDisplay?>(null) }
 
     // Toast messages
     LaunchedEffect(toastMessage) {
@@ -183,6 +186,7 @@ fun SingleBoxScreen(
                 onAddScan = { viewModel.addScannedId(it) },
                 onDeleteScan = { showDeleteScanConfirm = it },
                 onMoveScan = { showMoveDialog = it },
+                onBirdTap = { showBiometricDialog = it },
                 onManageStickyNotes = { showStickyNotesDialog = true }
             )
 
@@ -413,6 +417,18 @@ fun SingleBoxScreen(
             onAddNote = { viewModel.addStickyNote(it) },
             onRemoveNote = { viewModel.removeStickyNote(it) },
             onDismiss = { showStickyNotesDialog = false }
+        )
+    }
+
+    // Penguin biometric observation dialog
+    showBiometricDialog?.let { bird ->
+        PenguinObservationDialog(
+            bird = bird,
+            onSave = { data ->
+                viewModel.saveBiometricData(bird.scanRecord.birdId, data)
+                showBiometricDialog = null
+            },
+            onDismiss = { showBiometricDialog = null }
         )
     }
 }

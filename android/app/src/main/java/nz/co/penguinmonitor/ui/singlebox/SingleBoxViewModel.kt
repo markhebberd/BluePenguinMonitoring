@@ -754,6 +754,31 @@ class SingleBoxViewModel @Inject constructor(
         viewModelScope.launch { boxTagRepository.removeBoxTag(_currentBoxName.value) }
     }
 
+    fun saveBiometricData(birdId: String, data: nz.co.penguinmonitor.ui.singlebox.components.BiometricData) {
+        // TODO: Save to local biometric data store and sync to server API
+        // For now, append to notes as a record
+        val record = buildString {
+            append("BIO[$birdId]:")
+            if (data.isMoulting) append(" MOULTING")
+            if (data.weight.isNotBlank()) append(" wt=${data.weight}g")
+            if (data.sex.isNotBlank()) append(" sex=${data.sex}")
+            if (data.leftFlipperLength.isNotBlank()) append(" lf=${data.leftFlipperLength}")
+            if (data.rightFlipperLength.isNotBlank()) append(" rf=${data.rightFlipperLength}")
+            if (data.bodyLength.isNotBlank()) append(" body=${data.bodyLength}")
+            if (data.beakLength.isNotBlank()) append(" beak=${data.beakLength}")
+            if (data.conditionHealthy) append(" healthy")
+            if (data.conditionUnderweight) append(" underweight")
+            if (data.conditionTicks) append(" ticks")
+            if (data.conditionDead) append(" dead")
+            if (data.conditionDogAttacked) append(" dog-attacked")
+            if (data.conditionAttacked) append(" attacked")
+            if (data.notes.isNotBlank()) append(" notes:${data.notes}")
+        }
+        _toastMessage.value = "Saved: $record"
+        // Append to current box notes
+        updateCurrentBox { it.copy(notes = (it.notes + " " + record).trim()) }
+    }
+
     fun clearToastMessage() { _toastMessage.value = null }
     fun dismissDialog() { _dialogRequest.value = null }
 

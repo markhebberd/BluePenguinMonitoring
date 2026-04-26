@@ -46,6 +46,7 @@ fun BoxDataCard(
     onAddScan: (String) -> Unit,
     onDeleteScan: (Int) -> Unit,
     onMoveScan: (Int) -> Unit,
+    onBirdTap: (ScannedBirdDisplay) -> Unit,
     onManageStickyNotes: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -68,7 +69,8 @@ fun BoxDataCard(
                 birds = scannedBirds,
                 isEditable = isEditable,
                 onDeleteScan = onDeleteScan,
-                onMoveScan = onMoveScan
+                onMoveScan = onMoveScan,
+                onBirdTap = onBirdTap
             )
 
             // Manual scan entry
