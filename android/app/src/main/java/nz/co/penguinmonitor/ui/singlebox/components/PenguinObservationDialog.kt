@@ -37,8 +37,7 @@ data class BiometricData(
     val isMoulting: Boolean = false,
     val weight: String = "",
     val sex: String = "",
-    val leftFlipperLength: String = "",
-    val rightFlipperLength: String = "",
+    val flipperLength: String = "",
     val bodyLength: String = "",
     val beakLength: String = "",
     val conditionHealthy: Boolean = false,
@@ -104,25 +103,15 @@ fun PenguinObservationDialog(
                     singleLine = true
                 )
 
-                // Flipper lengths
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = data.leftFlipperLength,
-                        onValueChange = { data = data.copy(leftFlipperLength = it) },
-                        label = { Text("L flipper (mm)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                    )
-                    OutlinedTextField(
-                        value = data.rightFlipperLength,
-                        onValueChange = { data = data.copy(rightFlipperLength = it) },
-                        label = { Text("R flipper (mm)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                    )
-                }
+                // Flipper length (right flipper only)
+                OutlinedTextField(
+                    value = data.flipperLength,
+                    onValueChange = { data = data.copy(flipperLength = it) },
+                    label = { Text("Flipper length (mm)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
 
                 // Body + beak
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
