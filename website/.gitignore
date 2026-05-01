@@ -1,9 +1,3 @@
 node_modules/
 wildwatch/dist/
 wildwatch/node_modules/
-*.php
-*.csv
-*.json
-!wildwatch/package.json
-!wildwatch/tsconfig.json
-!wildwatch/vite.config.ts

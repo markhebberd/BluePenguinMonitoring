@@ -86,8 +86,8 @@ CREATE TABLE IF NOT EXISTS observations (
 
 CREATE TABLE IF NOT EXISTS penguins (
     penguin_id INT AUTO_INCREMENT PRIMARY KEY,
-    tag_number VARCHAR(17) NOT NULL UNIQUE,
-    chip_date DATE,
+    penguin_number VARCHAR(20),
+    initial_chip_date DATE,
     chipped_as_adult BOOLEAN DEFAULT FALSE,
     sex VARCHAR(10),
     life_stage VARCHAR(20),
@@ -96,10 +96,23 @@ CREATE TABLE IF NOT EXISTS penguins (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS penguin_chips (
+    chip_id INT AUTO_INCREMENT PRIMARY KEY,
+    penguin_id INT NOT NULL,
+    chip_number VARCHAR(17) NOT NULL UNIQUE,
+    chip_date DATE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
+    INDEX idx_penguin (penguin_id),
+    INDEX idx_chip_number (chip_number)
+);
+
 CREATE TABLE IF NOT EXISTS penguin_scans (
     scan_id INT AUTO_INCREMENT PRIMARY KEY,
     observation_id INT NOT NULL,
     penguin_id INT NOT NULL,
+    chip_id INT,
     scan_time_utc DATETIME NOT NULL,
     latitude DOUBLE,
     longitude DOUBLE,
@@ -107,6 +120,7 @@ CREATE TABLE IF NOT EXISTS penguin_scans (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (observation_id) REFERENCES observations(observation_id) ON DELETE CASCADE,
     FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
+    FOREIGN KEY (chip_id) REFERENCES penguin_chips(chip_id),
     INDEX idx_observation (observation_id),
     INDEX idx_penguin (penguin_id)
 );
