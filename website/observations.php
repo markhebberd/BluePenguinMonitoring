@@ -91,10 +91,9 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
 
     // Get scans for each observation
     foreach ($observations as &$obs) {
-        $scanSql = "SELECT ps.scan_time_utc, pc.chip_number AS tag_number, p.sex, p.life_stage, p.vid_for_scanner
+        $scanSql = "SELECT ps.scan_time_utc, p.tag_number, p.sex, p.life_stage, p.vid_for_scanner
                     FROM penguin_scans ps
                     JOIN penguins p ON ps.penguin_id = p.penguin_id
-                    LEFT JOIN penguin_chips pc ON ps.chip_id = pc.chip_id
                     WHERE ps.observation_id = ?
                     ORDER BY ps.scan_time_utc";
         $scanStmt = $pdo->prepare($scanSql);

@@ -87,7 +87,9 @@ CREATE TABLE IF NOT EXISTS observations (
 CREATE TABLE IF NOT EXISTS penguins (
     penguin_id INT AUTO_INCREMENT PRIMARY KEY,
     penguin_number VARCHAR(20),
+    tag_number VARCHAR(17) UNIQUE,
     initial_chip_date DATE,
+    chip_date DATE,
     chipped_as_adult BOOLEAN DEFAULT FALSE,
     sex VARCHAR(10),
     life_stage VARCHAR(20),

@@ -61,12 +61,19 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   let runningStatus = '';
   for (const obs of allSorted) {
     let s = obs.breeding_status;
-    if (s === 'BR') s = 'G';
-    // If eggs or chicks present but no explicit status, infer Guard
+    // BR only maps to Guard when eggs or chicks are present
+    if (s === 'BR') {
+      s = (obs.eggs > 0 || obs.chicks > 0) ? 'G' : null;
+    }
+    // Infer Guard from egg/chick presence even without explicit status
     if (!s && (obs.eggs > 0 || obs.chicks > 0) && runningStatus !== 'G') {
       s = 'G';
     }
-    if (s && s !== runningStatus) {
+    // End Guard when eggs+chicks drop to 0
+    if (runningStatus === 'G' && obs.eggs === 0 && obs.chicks === 0 && !s) {
+      runningStatus = '';
+      changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: '' });
+    } else if (s && s !== runningStatus) {
       runningStatus = s;
       changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: s });
     }
@@ -127,6 +134,7 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     }
     if (segEnd <= seasonStart.getTime()) continue;
     if (segStart >= dataEnd) continue;
+    if (!changes[i].status) continue; // skip empty status segments
     const startPct = ((segStart - seasonStart.getTime()) / totalMs) * 100;
     const endPct = ((segEnd - seasonStart.getTime()) / totalMs) * 100;
     segments.push({ startPct, endPct, status: changes[i].status });
@@ -314,16 +322,23 @@ function fmtChipAge(chipDate: string | null, chippedAsAdult: boolean): string | 
   return `${timeStr} old`;
 }
 
-function PenguinBadge({ scan, onClick }: { scan: Scan; onClick: () => void }) {
+function PenguinBadge({ scan, onClick, observationDate }: { scan: Scan; onClick: () => void; observationDate?: string }) {
   const sex = (scan.sex || '').toUpperCase();
-  const sexIcon = sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : '';
-  const isChick = scan.life_stage === 'Chick' || (scan.chipped_as_adult === 0 && scan.chip_date);
+  // Chick if chipped as chick AND under 6 months from hatch (hatch = chip_date - 6 weeks)
+  const isChick = (() => {
+    if (scan.chipped_as_adult) return false;
+    if (!scan.chip_date) return false;
+    const hatchTime = new Date(scan.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
+    const obsTime = observationDate ? new Date(observationDate).getTime() : Date.now();
+    return (obsTime - hatchTime) < 180 * 86400000; // 6 months from hatch
+  })();
+  const icon = isChick && !sex ? '\uD83D\uDC23' : sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : '';
   const sexClass = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
   const ageStr = fmtChipAge(scan.chip_date, !!scan.chipped_as_adult);
 
   return (
     <span className={`scan clickable ${sexClass}`} onClick={onClick}>
-      {sexIcon && <span className="sex-icon">{sexIcon}</span>}
+      {icon && <span className="sex-icon">{icon}</span>}
       {scan.tag_number.slice(-8)}
       {ageStr && <span className="age-info">{ageStr}</span>}
     </span>
@@ -399,7 +414,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo }: { obs: Observation; 
       {obs.scans.length>0 && (
         <div className="scans">
           {obs.scans.map((s,j) => (
-            <PenguinBadge key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} />
+            <PenguinBadge key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
           ))}
         </div>
       )}
@@ -551,12 +566,16 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
         <div className="penguin-results">
           {filtered.slice(0, 20).map((p: any) => {
             const sex = (p.sex || '').toUpperCase();
-            const cls = p.life_stage === 'Chick' ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
+            const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
+            const cls = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
             const age = fmtChipAge(p.chip_date, !!p.chipped_as_adult);
             return (
               <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }}>
                 <span className="pr-tag">
-                  {sex === 'F' ? '\u2640 ' : sex === 'M' ? '\u2642 ' : ''}{p.tag_number}
+                  {(() => {
+                    const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
+                    return isChick && !sex ? '\uD83D\uDC23 ' : sex === 'F' ? '\u2640 ' : sex === 'M' ? '\u2642 ' : '';
+                  })()}{p.tag_number}
                 </span>
                 <span className="pr-meta">
                   {age && <span className="pr-age">{age}</span>}
@@ -577,20 +596,647 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   );
 }
 
+function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, observerId?: number | string) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      if (isRegister) {
+        const r = await fetch('/penguin-api/crud.php?action=register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password })
+        });
+        const data = await r.json();
+        if (data.success) {
+          // Auto-login after register
+          setIsRegister(false);
+          setError('');
+          const r2 = await fetch('/penguin-api/crud.php?action=login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+          const d2 = await r2.json();
+          if (d2.token) onLogin(d2.token, d2.name);
+          else setError('Registered but login failed');
+        } else {
+          setError(data.error || 'Registration failed');
+        }
+      } else {
+        const r = await fetch('/penguin-api/crud.php?action=login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await r.json();
+        if (data.token) onLogin(data.token, data.name, data.observer_id);
+        else setError(data.error || 'Login failed');
+      }
+    } catch {
+      setError('Connection failed');
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <h1>WildWatch</h1>
+        <p className="login-sub">Penguin Colony Monitoring</p>
+        <form onSubmit={handleSubmit}>
+          {isRegister && <input type="text" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />}
+          <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required />
+          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+          {error && <div className="login-error">{error}</div>}
+          <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Register' : 'Log in'}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function parseDateFlex(input: string): string | null {
+  // Parse dates in day-first formats. Year always required.
+  // "11/2/25", "11-2-2025", "11 2 25", "26/7/25"
+  // NEVER American format. Day is always first.
+  const parts = input.trim().split(/[\s\/\-]+/);
+  if (parts.length !== 3) return null;
+  const day = parseInt(parts[0]);
+  const month = parseInt(parts[1]);
+  let year = parseInt(parts[2]);
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (year < 100) year += 2000;
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+
+function parseSeasonDate(input: string, _seasonYear: number): string | null {
+  return parseDateFlex(input);
+}
+
+function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPenguins: any[]; onBack: () => void }) {
+  const [season, setSeason] = useState(getSeasonStart().getFullYear());
+  const [box, setBox] = useState('');
+  const [dateInput, setDateInput] = useState('');
+  const [parsedDate, setParsedDate] = useState<string|null>(null);
+  const [adults, setAdults] = useState(0);
+  const [eggs, setEggs] = useState(0);
+  const [chicks, setChicks] = useState(0);
+  const [gateStatus, setGateStatus] = useState('');
+  const [breedingStatus, setBreedingStatus] = useState('');
+  const [notes, setNotes] = useState('');
+  const [birdSearch, setBirdSearch] = useState('');
+  const [dateMappings, setDateMappings] = useState<{date_number:number; actual_date:string}[]>([]);
+  const [showDateEditor, setShowDateEditor] = useState(false);
+  const [dateEditorText, setDateEditorText] = useState('');
+  const [scannedBirds, setScannedBirds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  // Load date mappings for season
+  useEffect(() => {
+    if (season < 2020) return;
+    fetch(`/penguin-api/dates.php?season=${season}`)
+      .then(r => r.json())
+      .then(d => setDateMappings(d))
+      .catch(() => setDateMappings([]));
+  }, [season]);
+
+  useEffect(() => {
+    // Try date number lookup first, then "d m" format
+    const trimmed = dateInput.trim();
+    const num = parseInt(trimmed);
+    if (!isNaN(num) && trimmed === String(num)) {
+      const mapping = dateMappings.find(m => m.date_number === num);
+      if (mapping) { setParsedDate(mapping.actual_date); return; }
+    }
+    setParsedDate(parseSeasonDate(trimmed, season));
+  }, [dateInput, season, dateMappings]);
+
+  const filteredBirds = birdSearch.length > 0
+    ? allPenguins.filter((p: any) => p.tag_number.includes(birdSearch) && !p.tag_number.startsWith('LA900025') && !p.tag_number.startsWith('9130')).slice(0, 10)
+    : [];
+  const [searchIdx, setSearchIdx] = useState(-1);
+  useEffect(() => { setSearchIdx(-1); }, [birdSearch]);
+
+  const handleSearchKey = (e: React.KeyboardEvent) => {
+    if (filteredBirds.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, filteredBirds.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter' && searchIdx >= 0) { e.preventDefault(); addBird(filteredBirds[searchIdx].tag_number); }
+  };
+
+  const addBird = (tag: string) => {
+    const short = tag.slice(-8);
+    if (scannedBirds.includes(short)) return;
+
+    // Reject box tags
+    if (tag.startsWith('LA900025') || tag.startsWith('9130') || short.startsWith('9130')) {
+      setMessage('Box tag - not a penguin');
+      return;
+    }
+
+    // Check date vs chip date and life stage
+    const birdInfo = allPenguins.find((p: any) => p.tag_number.slice(-8) === short || p.tag_number === tag);
+    if (birdInfo && parsedDate) {
+      if (birdInfo.chip_date && parsedDate < birdInfo.chip_date) {
+        if (!confirm(`WARNING: Observation date ${parsedDate} is before this penguin's chip date ${birdInfo.chip_date}. Continue?`)) return;
+      }
+      if (birdInfo.life_stage === 'Dead') {
+        if (!confirm(`WARNING: ${short} is recorded as dead. Continue?`)) return;
+      }
+    }
+
+    // Check for alerts
+    const seenBirds = new Set<string>();
+    for (const o of existingObs) {
+      for (const s of (o.scans || [])) seenBirds.add(s.tag_number.slice(-8));
+    }
+    scannedBirds.forEach(b => seenBirds.add(b));
+    const isNew = !seenBirds.has(short);
+
+    // Red alert: only if the date being entered is AFTER eggs first appeared
+    if (isNew && parsedDate) {
+      const firstEggDate = existingObs
+        .filter((o: any) => o.eggs > 0)
+        .map((o: any) => o.observation_time_utc.slice(0, 10))
+        .sort()[0];
+      if (firstEggDate && parsedDate >= firstEggDate) {
+        if (!confirm(`RED ALERT: ${short} has not been seen in this box before and eggs appeared on ${firstEggDate}. This observation is dated ${parsedDate}. Are you sure?`)) return;
+      } else if (seenBirds.size >= 2) {
+        if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this box (${seenBirds.size} already seen). Are you sure?`)) return;
+      }
+    } else if (isNew && seenBirds.size >= 2) {
+      if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this box (${seenBirds.size} already seen). Are you sure?`)) return;
+    }
+
+    setScannedBirds([...scannedBirds, short]);
+    setBirdSearch('');
+
+    // Auto-increment adult or chick count based on bird age at observation date
+    const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === short || p.tag_number === tag);
+    if (bird && parsedDate && bird.chip_date) {
+      const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
+      const obsTime = new Date(parsedDate).getTime();
+      const isChick = !bird.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
+      if (isChick) setChicks(c => c + 1);
+      else setAdults(a => a + 1);
+    } else {
+      setAdults(a => a + 1);
+    }
+  };
+
+  const removeBird = (tag: string) => {
+    const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === tag || p.tag_number === tag);
+    if (bird && parsedDate && bird.chip_date) {
+      const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000;
+      const obsTime = new Date(parsedDate).getTime();
+      const isChick = !bird.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
+      if (isChick) setChicks(c => Math.max(0, c - 1));
+      else setAdults(a => Math.max(0, a - 1));
+    } else {
+      setAdults(a => Math.max(0, a - 1));
+    }
+    setScannedBirds(scannedBirds.filter(b => b !== tag));
+  };
+
+  const handleSave = async () => {
+    if (!box || !parsedDate) { setMessage('Box and valid date required'); return; }
+    setSaving(true); setMessage('');
+
+    try {
+      // Find location_id for this box
+      const dashRes = await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`);
+      const dashData = await dashRes.json();
+      const locationId = dashData.location?.location_id;
+
+      if (!locationId) { setMessage(`Box "${box}" not found in database (no location_id)`); setSaving(false); return; }
+
+      const observerId = parseInt(localStorage.getItem('ww_observer_id') || '3');
+
+      // Create observation
+      const obsRes = await fetch('/penguin-api/crud.php?action=create&table=observations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          location_id: locationId,
+          observer_id: observerId,
+          observation_time_utc: parsedDate + ' 12:00:00',
+          adults, eggs, chicks,
+          breeding_status: breedingStatus || null,
+          gate_status: gateStatus || null,
+          notes,
+          monitor_filename: 'web-entry'
+        })
+      });
+      const obsData = await obsRes.json();
+
+      if (!obsData.success) { setMessage('Failed: ' + (obsData.error || 'unknown')); setSaving(false); return; }
+
+      // 3. Create penguin scans
+      for (const birdId of scannedBirds) {
+        // Find or create penguin
+        const pRes = await fetch(`/penguin-api/crud.php?action=list&table=penguins&tag_number=${birdId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const pData = await pRes.json();
+        let penguinId: number;
+        if (pData.length > 0) {
+          penguinId = pData[0].penguin_id;
+        } else {
+          const createRes = await fetch('/penguin-api/crud.php?action=create&table=penguins', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tag_number: birdId })
+          });
+          const createData = await createRes.json();
+          penguinId = createData.id;
+        }
+
+        await fetch('/penguin-api/crud.php?action=create&table=penguin_scans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            observation_id: obsData.id,
+            penguin_id: penguinId,
+            scan_time_utc: parsedDate + ' 12:00:00'
+          })
+        });
+      }
+
+      setMessage(`Saved: Box ${box}, ${parsedDate}, ${scannedBirds.length} birds`);
+      // Reset form
+      setAdults(0); setEggs(0); setChicks(0); setGateStatus(''); setBreedingStatus('');
+      setNotes(''); setScannedBirds([]); setDateInput('');
+    } catch (e: any) {
+      setMessage('Error: ' + e.message);
+    }
+    setSaving(false);
+  };
+
+  // Load all observations for this box (for status bar + season list)
+  const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
+  useEffect(() => {
+    if (!box) { setAllBoxObs([]); return; }
+    fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(box)}`)
+      .then(r => r.json())
+      .then(d => setAllBoxObs(d.observations || []))
+      .catch(() => setAllBoxObs([]));
+  }, [box, saving]);
+
+  const seasonStart = `${season}-04-01`;
+  const seasonEnd = `${season + 1}-03-31`;
+  const existingObs = allBoxObs.filter(o =>
+    o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
+  );
+
+  return (
+    <div className="entry-page">
+      <div className="entry-header">
+        <button className="back-btn" onClick={onBack}>&larr; Back</button>
+        <h2>Enter Observation Data</h2>
+      </div>
+
+      {/* Persistent context: season + box */}
+      <div className="entry-context">
+        <div className="entry-row-group">
+          <div className="entry-field">
+            <label>Season</label>
+            <select autoFocus value={season} onChange={e => setSeason(parseInt(e.target.value))} style={{width:'80px'}}>
+              {Array.from({length: getSeasonStart().getFullYear() - 2000 - 22}, (_, i) => 23 + i).map(y => <option key={y} value={2000+y}>{y}</option>)}
+            </select>
+          </div>
+          <div className="entry-field">
+            <label>Box</label>
+            <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="e.g. 34" />
+          </div>
+        </div>
+      </div>
+
+      {/* Date mappings - always visible */}
+      <div className="entry-context">
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px'}}>
+          <span style={{fontSize:'13px', fontWeight:600, color:'#1a5276'}}>Date table (season {String(season).slice(-2)})</span>
+          <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m => {
+                const d = m.actual_date;
+                return `${m.date_number} ${parseInt(d.slice(8))}/${parseInt(d.slice(5,7))}/${d.slice(2,4)}`;
+              }).join('\n')); setShowDateEditor(true); }}>
+            {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
+          </button>
+        </div>
+        {dateMappings.length > 0 ? (
+          <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
+            {dateMappings.map(m => (
+              <span key={m.date_number} style={{background:'#e8ecef', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(String(m.date_number))}>
+                <b>{m.date_number}</b> = {m.actual_date.slice(8)+'/'+m.actual_date.slice(5,7)+'/'+m.actual_date.slice(2,4)}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p style={{fontSize:'12px', color:'#888', margin:0}}>No date mappings. Click "Edit dates" to define: 1 = 26/7/25, 2 = 3/8/25...</p>
+        )}
+        {showDateEditor && (
+          <div style={{marginTop:'8px', padding:'8px', background:'#f8f9fa', borderRadius:'6px', border:'1px solid #ddd'}}>
+            <p style={{fontSize:'11px',color:'#888',margin:'0 0 4px'}}>One per line: number d/m/yy (e.g. "1 26/7/25")</p>
+            <textarea value={dateEditorText} onChange={e => setDateEditorText(e.target.value)} rows={10} style={{width:'100%',fontFamily:'monospace',fontSize:'13px',padding:'6px',border:'1px solid #ddd',borderRadius:'4px'}} />
+            <div style={{fontSize:'11px',color:'#888',margin:'4px 0'}}>
+              {dateEditorText.trim().split('\n').filter(l => l.trim()).map((l, i) => {
+                const first = l.trim().split(/[\s]+/)[0];
+                const rest = l.trim().slice(first.length).trim();
+                const parsed = parseDateFlex(rest);
+                const dd = parsed ? `${parseInt(parsed.slice(8))}/${parseInt(parsed.slice(5,7))}/${parsed.slice(2,4)}` : null;
+                return <div key={i} style={{color: parsed ? '#4CAF50' : '#F44336'}}>{first} → {dd || 'invalid'}</div>;
+              })}
+            </div>
+            <div style={{display:'flex', gap:'6px'}}>
+              <button style={{flex:1,padding:'6px',background:'#1a5276',color:'#fff',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}} onClick={async () => {
+                const lines = dateEditorText.trim().split('\n').filter(l => l.trim());
+                const mappings = lines.map(l => {
+                  const first = l.trim().split(/[\s]+/)[0];
+                  const rest = l.trim().slice(first.length).trim();
+                  const parsed = parseDateFlex(rest);
+                  return { n: parseInt(first), date: parsed };
+                }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string}[];
+                await fetch(`/penguin-api/dates.php?season=${season}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify(mappings)
+                });
+                setDateMappings(mappings.map(m => ({ date_number: m.n, actual_date: m.date })));
+                setShowDateEditor(false);
+              }}>Save</button>
+              <button style={{flex:1,padding:'6px',background:'#fff',color:'#666',border:'1px solid #ddd',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}} onClick={() => setShowDateEditor(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="entry-split">
+      {/* LEFT: graph + existing data */}
+      <div className="entry-left">
+      {/* Breeding status bar */}
+      {box && allBoxObs.length > 0 && (
+        <div className="entry-context">
+          <BreedingStatusBar observations={allBoxObs} />
+        </div>
+      )}
+
+      {/* Existing observations for this box+season */}
+      {box && existingObs.length > 0 && (
+        <div className="entry-existing">
+          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''} for Box {box} ({season})</h3>
+          {existingObs.map((o: any, i: number) => (
+            <div key={i} className="entry-existing-row">
+              <span>{fmtDateNZ(o.observation_time_utc)}</span>
+              <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
+              {o.breeding_status && <span className="badge" style={{background:STATUS_COLORS[o.breeding_status]||'#ccc'}}>{o.breeding_status}</span>}
+              {o.gate_status && <span className="gate">{o.gate_status}</span>}
+              {(o.scans || []).map((s: any, j: number) => {
+                const sx = (s.sex||'').toUpperCase();
+                const obsDate = o.observation_time_utc;
+                const isC = !s.chipped_as_adult && s.chip_date && (new Date(obsDate).getTime() - (new Date(s.chip_date).getTime() - 42*86400000)) < 180*86400000;
+                const cls = isC && !sx ? 'chick' : sx === 'F' ? 'f' : sx === 'M' ? 'm' : '';
+                return <span key={j} className={`scan ${cls}`} style={{fontSize:'9px'}}>{s.tag_number.slice(-8)}</span>;
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      </div>
+      {/* RIGHT: New observation form */}
+      <div className="entry-right">
+      <div className="entry-form">
+        <h3>New observation</h3>
+        <div className="entry-row">
+          <label>Date (# or d/m/yy)</label>
+          <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} />
+          {parsedDate && <span className="date-preview">{parsedDate}{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
+          {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
+        </div>
+
+        <div className="entry-row">
+          <label>Add penguins</label>
+          <input type="text" value={birdSearch} onChange={e => setBirdSearch(e.target.value.replace(/[^0-9A-Za-z]/g,''))} onKeyDown={handleSearchKey} placeholder="Search by ID" />
+          {/* Quick add - penguins seen this season */}
+          {box && existingObs.length > 0 && (() => {
+            const seenBirds = new Map<string, { sex: string|null }>();
+            for (const o of existingObs) {
+              for (const s of (o.scans || [])) {
+                const tag = s.tag_number.slice(-8);
+                if (!seenBirds.has(tag)) seenBirds.set(tag, { sex: s.sex });
+              }
+            }
+            return seenBirds.size > 0 ? (
+              <div className="bird-row" style={{marginTop:'6px'}}>
+                {Array.from(seenBirds.entries()).map(([tag, info]) => {
+                  const cls = (info.sex||'').toUpperCase() === 'F' ? 'f' : (info.sex||'').toUpperCase() === 'M' ? 'm' : '';
+                  const already = scannedBirds.includes(tag);
+                  return <span key={tag} className={`bird-chip clickable ${cls} ${already ? 'added' : ''}`}
+                    onClick={() => { if (!already) addBird(tag); }}>
+                    {(info.sex||'').toUpperCase() === 'F' ? '\u2640 ' : (info.sex||'').toUpperCase() === 'M' ? '\u2642 ' : ''}{tag}{already ? ' \u2713' : ''}
+                  </span>;
+                })}
+              </div>
+            ) : null;
+          })()}
+          {filteredBirds.length > 0 && (
+            <div className="penguin-results">
+              {filteredBirds.map((p: any, idx: number) => (
+                <div key={p.tag_number} className={`penguin-result clickable ${(p.sex||'').toUpperCase()==='F'?'f':(p.sex||'').toUpperCase()==='M'?'m':''} ${idx === searchIdx ? 'focused' : ''}`}
+                  onClick={() => addBird(p.tag_number)}>
+                  {p.sex === 'F' ? '\u2640 ' : p.sex === 'M' ? '\u2642 ' : ''}{p.tag_number}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {scannedBirds.length > 0 && (
+          <div className="entry-birds">
+            {scannedBirds.map(b => (
+              <span key={b} className="bird-chip clickable" onClick={() => removeBird(b)}>{b} ✕</span>
+            ))}
+          </div>
+        )}
+
+        <div className="entry-row-group">
+          <div className="entry-field">
+            <label>Adults</label>
+            <input type="number" min="0" value={adults} onChange={e => setAdults(parseInt(e.target.value)||0)} />
+          </div>
+          <div className="entry-field">
+            <label>Eggs</label>
+            <input type="number" min="0" value={eggs} onChange={e => setEggs(parseInt(e.target.value)||0)} />
+          </div>
+          <div className="entry-field">
+            <label>Chicks</label>
+            <input type="number" min="0" value={chicks} onChange={e => setChicks(parseInt(e.target.value)||0)} />
+          </div>
+        </div>
+
+        <div className="entry-row-group">
+          <div className="entry-field">
+            <label>Gate</label>
+            <select value={gateStatus} onChange={e => setGateStatus(e.target.value)}>
+              <option value="">-</option>
+              <option value="Gate up">Gate up</option>
+              <option value="Regate">Regate</option>
+            </select>
+          </div>
+          <div className="entry-field">
+            <label>Status</label>
+            <select value={breedingStatus} onChange={e => setBreedingStatus(e.target.value)}>
+              <option value="">-</option>
+              <option value="NO">No</option>
+              <option value="UNL">Unlikely</option>
+              <option value="POT">Potential</option>
+              <option value="CON">Confident</option>
+              <option value="ABN">Abandoned</option>
+              <option value="DCM">DCM</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="entry-row">
+          <label>Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
+        </div>
+
+        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') ? 'login-error' : 'entry-success'}>{message}</div>}
+
+        <button className="entry-save" onClick={handleSave} disabled={saving || !box || !parsedDate}>
+          {saving ? 'Saving...' : 'Save observation'}
+        </button>
+      </div>
+      </div>
+      </div>
+
+      {/* Date editor is now inline above */}
+    </div>
+  );
+}
+
+function parseUrl(): { box?: string; bird?: string; enter?: boolean } {
+  const path = window.location.pathname;
+  const boxMatch = path.match(/^\/box\/(.+)/);
+  const birdMatch = path.match(/^\/bird\/(.+)/);
+  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter' };
+}
+
 function App() {
+  const [authToken, setAuthToken] = useState<string|null>(localStorage.getItem('ww_token'));
+  const [userName, setUserName] = useState<string|null>(localStorage.getItem('ww_user'));
+
+  const handleLogin = (token: string, name: string, observerId?: number | string) => {
+    localStorage.setItem('ww_token', token);
+    localStorage.setItem('ww_user', name);
+    if (observerId) localStorage.setItem('ww_observer_id', String(observerId));
+    setAuthToken(token);
+    setUserName(name);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('ww_token');
+    localStorage.removeItem('ww_user');
+    setAuthToken(null);
+    setUserName(null);
+  };
+
+  if (!authToken) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return <AuthenticatedApp token={authToken} userName={userName || ''} onLogout={handleLogout} />;
+}
+
+function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true); setMsg('');
+    try {
+      const r = await fetch('/penguin-api/crud.php?action=change_password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ current_password: current, new_password: newPass })
+      });
+      const d = await r.json();
+      if (d.success) { setMsg('Password changed'); setCurrent(''); setNewPass(''); }
+      else setMsg(d.error || 'Failed');
+    } catch { setMsg('Connection failed'); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="login-page" onClick={onClose}>
+      <div className="login-card" onClick={e => e.stopPropagation()}>
+        <h2>Change Password</h2>
+        <form onSubmit={handleSubmit}>
+          <input type="password" placeholder="Current password" value={current} onChange={e => setCurrent(e.target.value)} required />
+          <input type="password" placeholder="New password (6+ chars)" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={6} />
+          {msg && <div className={msg === 'Password changed' ? 'entry-success' : 'login-error'}>{msg}</div>}
+          <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Change password'}</button>
+        </form>
+        <button className="toggle-auth" onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AuthenticatedApp({ token, userName, onLogout }: { token: string; userName: string; onLogout: () => void }) {
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const initial = parseUrl();
   const [boxTags, setBoxTags] = useState<Record<string, BoxTag>>({});
   const [stats, setStats] = useState<any>(null);
-  const [selectedBox, setSelectedBox] = useState<string|null>(null);
+  const [selectedBox, setSelectedBox] = useState<string|null>(initial.box || null);
   const [boxDetail, setBoxDetail] = useState<BoxDetailData|null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selectedBird, setSelectedBird] = useState<string|null>(null);
+  const [selectedBird, setSelectedBird] = useState<string|null>(initial.bird || null);
   const [birdData, setBirdData] = useState<any>(null);
   const [birdLoading, setBirdLoading] = useState(false);
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const [allPenguins, setAllPenguins] = useState<any[]>([]);
   const [penguinSearch, setPenguinSearch] = useState('');
+  const [showEntry, setShowEntry] = useState(initial.enter || false);
+
+  // Sync state to URL
+  useEffect(() => {
+    let path = '/';
+    if (showEntry) path = '/enter';
+    else if (selectedBox) path = `/box/${selectedBox}`;
+    else if (selectedBird) path = `/bird/${selectedBird}`;
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+    }
+  }, [selectedBox, selectedBird, showEntry]);
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const onPopState = () => {
+      const { box, bird, enter } = parseUrl();
+      setSelectedBox(box || null);
+      setSelectedBird(bird || null);
+      setShowEntry(enter || false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   useEffect(() => {
     Promise.all([fetchBoxTags(), fetchOverview(), fetchAllPenguins()])
@@ -663,6 +1309,27 @@ function App() {
 
   if (loading) return <div className="center"><div className="spinner"/><p>Loading colony data...</p></div>;
 
+  // Password dialog renders on top of any page
+  const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
+
+  // Data entry page
+  if (showEntry) {
+    return (
+      <div className="app">
+        <header>
+          <h1 className="logo clickable" onClick={() => { setShowEntry(false); }}>WildWatch</h1>
+          <span className="sub">Tarakohe Penguin Colony</span>
+          <span className="header-user">{userName}
+            <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
+            <button className="logout-btn" onClick={onLogout}>Logout</button>
+          </span>
+        </header>
+        <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => setShowEntry(false)} />
+        {passwordDialog}
+      </div>
+    );
+  }
+
   // Bird page - replaces everything (only when no box is selected)
   if (selectedBird && !selectedBox) {
     return (
@@ -689,6 +1356,12 @@ function App() {
         <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
         <span className="sub">Tarakohe Penguin Colony</span>
         {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
+        <span className="header-user">
+          <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
+          {userName}
+          <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
+          <button className="logout-btn" onClick={onLogout}>Logout</button>
+        </span>
       </header>
 
       {!selectedBox && (
@@ -771,10 +1444,17 @@ function App() {
         </div>
         )}
       </div>
+      {passwordDialog}
     </div>
   );
 }
 
-function fmtDateTime(d:string) { return new Date(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}); }
+function fmtDateTime(d:string) {
+  return new Date(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
+}
+function fmtDateNZ(d:string) {
+  return new Date(d + (d.includes('T') || d.includes('Z') ? '' : 'T00:00:00Z'))
+    .toLocaleDateString('en-NZ',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'Pacific/Auckland'});
+}
 
 export default App;

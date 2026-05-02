@@ -1,160 +1,67 @@
 <?php
-/**
- * Penguins API
- *
- * GET /penguin-api/penguins.php                - All penguins with stats
- * GET /penguin-api/penguins.php?chip_id=X      - Lookup by chip ID
- * GET /penguin-api/penguins.php?penguin_id=X   - Lookup by penguin ID
- *
- * No API key required - public read-only endpoint.
- */
 require_once 'config.php';
-
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Cache-Control: public, max-age=300');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $pdo = getDbConnection();
 
 $chipId = $_GET['chip_id'] ?? null;
-$penguinId = $_GET['penguin_id'] ?? null;
 
 if ($chipId) {
-    handleChipLookup($pdo, $chipId);
-} elseif ($penguinId) {
-    handlePenguinLookup($pdo, $penguinId);
-} else {
-    handleAll($pdo);
-}
-
-function handleChipLookup($pdo, $chipId) {
-    $chipId = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', $chipId));
-
-    $stmt = $pdo->prepare("
-        SELECT p.*, pc.chip_number, pc.chip_date AS chip_chip_date, pc.is_active
-        FROM penguins p
-        JOIN penguin_chips pc ON p.penguin_id = pc.penguin_id
-        WHERE pc.chip_number = ?
-    ");
+    // Lookup by chip number (checks penguin_chips first, falls back to tag_number)
+    $chipId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $chipId));
+    $stmt = $pdo->prepare("SELECT p.* FROM penguins p JOIN penguin_chips pc ON p.penguin_id = pc.penguin_id WHERE pc.chip_number = ?");
     $stmt->execute([$chipId]);
-    $row = $stmt->fetch();
+    $penguin = $stmt->fetch();
 
-    if ($row) {
-        echo json_encode(formatPenguin($pdo, $row));
-    } else {
-        // Fallback: check legacy tag_number
-        $stmt = $pdo->prepare("SELECT * FROM penguins WHERE tag_number LIKE ?");
-        $stmt->execute(['%' . $chipId]);
-        $row = $stmt->fetch();
-
-        if ($row) {
-            echo json_encode(formatPenguin($pdo, $row));
-        } else {
-            http_response_code(404);
-            echo json_encode(['error' => 'Penguin not found']);
-        }
+    if (!$penguin) {
+        $stmt = $pdo->prepare("SELECT * FROM penguins WHERE tag_number = ? OR tag_number LIKE ?");
+        $stmt->execute([$chipId, '%'.$chipId]);
+        $penguin = $stmt->fetch();
     }
-}
 
-function handlePenguinLookup($pdo, $penguinId) {
-    $stmt = $pdo->prepare("SELECT * FROM penguins WHERE penguin_id = ?");
-    $stmt->execute([$penguinId]);
-    $row = $stmt->fetch();
-
-    if ($row) {
-        echo json_encode(formatPenguin($pdo, $row));
+    if ($penguin) {
+        $penguin['chips'] = getChips($pdo, $penguin['penguin_id']);
+        echo json_encode($penguin);
     } else {
         http_response_code(404);
         echo json_encode(['error' => 'Penguin not found']);
     }
+    exit;
 }
 
-function handleAll($pdo) {
-    $sql = "SELECT p.*,
-                COUNT(DISTINCT ps.scan_id) AS total_scans,
-                COUNT(DISTINCT ol.location_id) AS boxes_seen,
-                MAX(ps.scan_time_utc) AS last_seen
-            FROM penguins p
-            LEFT JOIN penguin_scans ps ON p.penguin_id = ps.penguin_id
-            LEFT JOIN observations o ON ps.observation_id = o.observation_id AND o.is_deleted = FALSE
-            LEFT JOIN observation_locations ol ON o.location_id = ol.location_id
-            GROUP BY p.penguin_id
-            ORDER BY last_seen DESC";
-
-    $stmt = $pdo->query($sql);
-    $penguins = $stmt->fetchAll();
-
-    $result = [];
-    foreach ($penguins as $row) {
-        $result[] = [
-            'penguin_id' => (int)$row['penguin_id'],
-            'penguin_number' => $row['penguin_number'],
-            'tag_number' => $row['tag_number'],
-            'sex' => $row['sex'],
-            'life_stage' => $row['life_stage'],
-            'chip_date' => $row['chip_date'] ?? $row['initial_chip_date'],
-            'initial_chip_date' => $row['initial_chip_date'],
-            'chipped_as_adult' => (int)($row['chipped_as_adult'] ?? 0),
-            'vid_for_scanner' => $row['vid_for_scanner'],
-            'total_scans' => (int)$row['total_scans'],
-            'boxes_seen' => (int)$row['boxes_seen'],
-            'last_seen' => $row['last_seen'],
-            'chips' => getChips($row['penguin_id'], $pdo)
-        ];
-    }
-
-    echo json_encode($result);
-}
-
-function formatPenguin($pdo, $row) {
-    $penguinId = $row['penguin_id'];
-
-    // Get scan stats
-    $stmt = $pdo->prepare("
-        SELECT COUNT(DISTINCT ps.scan_id) AS total_scans,
-               COUNT(DISTINCT ol.location_id) AS boxes_seen,
-               MAX(ps.scan_time_utc) AS last_seen
-        FROM penguin_scans ps
+// Return all penguins with summary stats
+$sql = "SELECT
+            p.penguin_id, p.penguin_number, p.tag_number, p.sex, p.life_stage,
+            p.chip_date, p.initial_chip_date, p.chipped_as_adult, p.vid_for_scanner,
+            COUNT(DISTINCT ps.observation_id) as total_scans,
+            COUNT(DISTINCT ol.location_name) as boxes_seen,
+            MAX(o.observation_time_utc) as last_seen,
+            (SELECT COUNT(DISTINCT ps2.penguin_id)
+             FROM penguin_scans ps2
+             JOIN penguin_scans ps3 ON ps2.observation_id = ps3.observation_id AND ps2.penguin_id != ps3.penguin_id
+             WHERE ps3.penguin_id = p.penguin_id) as partner_count,
+            (SELECT SUM(o2.chicks)
+             FROM penguin_scans ps4
+             JOIN observations o2 ON ps4.observation_id = o2.observation_id
+             WHERE ps4.penguin_id = p.penguin_id AND o2.chicks > 0 AND o2.is_deleted = FALSE) as total_chicks_raised
+        FROM penguins p
+        LEFT JOIN penguin_scans ps ON ps.penguin_id = p.penguin_id
         LEFT JOIN observations o ON ps.observation_id = o.observation_id AND o.is_deleted = FALSE
         LEFT JOIN observation_locations ol ON o.location_id = ol.location_id
-        WHERE ps.penguin_id = ?
-    ");
-    $stmt->execute([$penguinId]);
-    $stats = $stmt->fetch();
+        GROUP BY p.penguin_id
+        HAVING total_scans > 0
+        ORDER BY last_seen DESC";
 
-    return [
-        'penguin_id' => (int)$penguinId,
-        'penguin_number' => $row['penguin_number'] ?? null,
-        'tag_number' => $row['tag_number'] ?? null,
-        'sex' => $row['sex'],
-        'life_stage' => $row['life_stage'],
-        'chip_date' => $row['chip_date'] ?? $row['initial_chip_date'] ?? null,
-        'initial_chip_date' => $row['initial_chip_date'] ?? null,
-        'chipped_as_adult' => (int)($row['chipped_as_adult'] ?? 0),
-        'vid_for_scanner' => $row['vid_for_scanner'],
-        'total_scans' => (int)($stats['total_scans'] ?? 0),
-        'boxes_seen' => (int)($stats['boxes_seen'] ?? 0),
-        'last_seen' => $stats['last_seen'],
-        'chips' => getChips($penguinId, $pdo)
-    ];
-}
+$stmt = $pdo->query($sql);
+$penguins = $stmt->fetchAll();
 
-function getChips($penguinId, $pdo) {
+echo json_encode($penguins);
+
+function getChips($pdo, $penguinId) {
     $stmt = $pdo->prepare("SELECT chip_number, chip_date, is_active FROM penguin_chips WHERE penguin_id = ? ORDER BY chip_date");
     $stmt->execute([$penguinId]);
-    $chips = [];
-    foreach ($stmt->fetchAll() as $c) {
-        $chips[] = [
-            'chip_number' => $c['chip_number'],
-            'chip_date' => $c['chip_date'],
-            'is_active' => (bool)$c['is_active']
-        ];
-    }
-    return $chips;
+    return $stmt->fetchAll();
 }
-
