@@ -33,7 +33,7 @@ namespace PenguinMonitor
     public class MainActivity : Activity, ILocationListener
     {
         //Lazy versioning.
-        private static string version = "37.34";
+        private static string version = "37.35";
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
 
