@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory } from './api/boxtags';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -745,8 +745,14 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
   const saveChip = (chipId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_chips', chipId, {[field]: val});
   const saveBio = (bioId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val});
 
+  const mainChip = chips.find((c: any) => c.is_active) || chips[0];
+  const titleChip = mainChip ? mainChip.chip_number.slice(-8) : p.tag_number?.slice(-8) || '';
+
   return (
     <div className="bird-detail">
+      <h3 className="bird-title" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
+        Penguin {p.penguin_number ? `#${p.penguin_number}` : ''} {penguinSexIcon(p.sex)} {titleChip}
+      </h3>
       <div className="bird-header" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
         <div className="obs-top">
           <span className="bird-meta">
@@ -785,50 +791,38 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
       <div className="bird-section">
         <table className="bird-table">
           <tbody>
-            {chips.map((c: any, i: number) => (
-              <tr key={`chip${i}`}>
-                <td className="muted">Chip</td>
-                <td>
-                  {c.chip_number.slice(-8)}
-                  {!editing ? (
-                    <>
-                      {c.chip_date && <span className="muted"> &middot; {c.chip_date}</span>}
-                      {c.chip_box && <span className="muted"> &middot; box <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span></span>}
-                      {c.chip_by && <span className="muted"> &middot; by {c.chip_by}</span>}
-                    </>
-                  ) : (
-                    <>
-                      <span className="muted"> &middot; </span><EditableField value={c.chip_date} type="date" onSave={saveChip(c.chip_id, 'chip_date')} placeholder="date" canEdit={true} />
-                      <span className="muted"> &middot; box </span><EditableField value={c.chip_box} onSave={saveChip(c.chip_id, 'chip_box')} placeholder="box" canEdit={true} />
-                      <span className="muted"> &middot; by </span><EditableField value={c.chip_by} onSave={saveChip(c.chip_id, 'chip_by')} placeholder="who" canEdit={true} />
-                    </>
-                  )}
-                  {!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}
-                </td>
+            {chips.map((c: any, i: number) => (<Fragment key={`chip${i}`}>
+              <tr>
+                <td className="muted">Chip ID</td>
+                <td>{c.chip_number.slice(-8)}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td>
               </tr>
-            ))}
-            {biometrics.map((b: any, i: number) => (
-              <tr key={`bio${i}`}>
+              {(c.chip_date || editing) && <tr>
+                <td className="muted">Chip Date</td>
+                <td>{!editing ? c.chip_date : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.chip_id, 'chip_date')} placeholder="date" canEdit={true} />}</td>
+              </tr>}
+              {(c.chip_box || editing) && <tr>
+                <td className="muted">Chip Box</td>
+                <td>{!editing ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <EditableField value={c.chip_box} onSave={saveChip(c.chip_id, 'chip_box')} placeholder="box" canEdit={true} />}</td>
+              </tr>}
+              {(c.chip_by || editing) && <tr>
+                <td className="muted">Chipped By</td>
+                <td>{!editing ? c.chip_by : <EditableField value={c.chip_by} onSave={saveChip(c.chip_id, 'chip_by')} placeholder="who" canEdit={true} />}</td>
+              </tr>}
+            </Fragment>))}
+            {biometrics.map((b: any, i: number) => (<Fragment key={`bio${i}`}>
+              {b.observation_date && <tr>
                 <td className="muted">Measured</td>
-                <td>
-                  {!editing ? (
-                    <>
-                      {b.weight && <span>{parseFloat(b.weight).toFixed(0)}g</span>}
-                      {b.right_flipper_length && <span className="muted"> &middot; </span>}
-                      {b.right_flipper_length && <span>flipper {parseFloat(b.right_flipper_length).toFixed(0)}mm</span>}
-                      {b.observation_date && <span className="muted"> &middot; {b.observation_date}</span>}
-                    </>
-                  ) : (
-                    <>
-                      <EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span>
-                      <span className="muted"> &middot; flipper </span>
-                      <EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span>
-                      <span className="muted"> &middot; </span><EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
+                <td>{!editing ? b.observation_date : <EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />}</td>
+              </tr>}
+              {(b.weight || editing) && <tr>
+                <td className="muted">Weight</td>
+                <td>{!editing ? <span>{parseFloat(b.weight).toFixed(0)}g</span> : <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td>
+              </tr>}
+              {(b.right_flipper_length || editing) && <tr>
+                <td className="muted">Flipper Length</td>
+                <td>{!editing ? <span>{parseFloat(b.right_flipper_length).toFixed(0)}mm</span> : <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td>
+              </tr>}
+            </Fragment>))}
           </tbody>
         </table>
       </div>
