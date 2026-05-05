@@ -44,6 +44,9 @@
     <None Remove="my-release-key.keystore" />
   </ItemGroup>
   <ItemGroup>
+    <TransformFile Include="Transforms\Metadata.xml" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 

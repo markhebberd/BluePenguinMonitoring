@@ -1,0 +1,4 @@
+<metadata>
+  <!-- Remove Gradle wrapper binding that causes CS0507 access modifier conflict -->
+  <remove-node path="/api/package[@name='org.gradle.wrapper']" />
+</metadata>
