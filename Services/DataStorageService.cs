@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -20,13 +21,16 @@ namespace PenguinMonitor.Services
         private const string ALL_MONITOR_DATA_FILENAME = "penguin_data_autosave.json";
         internal const string REMOTE_BIRD_DATA_FILENAME = "remotePenguinData.json";
         internal const string REMOTE_BOX_DATA_FILENAME = "remoteBoxData.json";
+        internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
         private CsvDataService _csvDataService = new CsvDataService();
 
-        // HTTP client for CSV downloads
+        // HTTP client for API downloads
         private static readonly HttpClient _httpClient = new HttpClient();
-        internal const string ALL_PENGS_URL = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE";
+        internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/penguin-api/penguins.php";
+        internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/penguin-api/crud.php";
+        internal const string WILDWATCH_API_KEY = "b30181424b2d70102fb90a32af6c013e63e7b0d49ae466ebf90aa0f969ddbe02";
 
         public void uploadCurrentMonitorDetailsToServer(string currentDataJson)
         {
@@ -199,59 +203,75 @@ namespace PenguinMonitor.Services
         {
             try
             {
-                Task<HttpResponseMessage> responseBirdsTask =
-                     _httpClient.GetAsync(_csvDataService.ConvertToGoogleSheetsCsvUrl(ALL_PENGS_URL));
+                Task<HttpResponseMessage> responseBirdsTask = _httpClient.GetAsync(WILDWATCH_PENGUINS_URL);
                 Task saveMonitorDataToDiskTask = SaveAllMonitorDataToDisk(context, allMonitorData, reportHome:false, downloadRemoteMonitorData: true);
 
-                // Await them in parallel
-                await Task.WhenAll(responseBirdsTask, saveMonitorDataToDiskTask);
-                // Retrieve results
-                HttpResponseMessage responseBirds = await responseBirdsTask;
+                // Fetch box notes in parallel
+                var notesRequest = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_API_URL}?action=list&table=observation_locations");
+                notesRequest.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
+                Task<HttpResponseMessage> responseLocationsTask = _httpClient.SendAsync(notesRequest);
 
-                var csvContentBirds = await responseBirds.Content.ReadAsStringAsync();
-                var parsedDataBirds = _csvDataService.ParseBirdCsvData(csvContentBirds);
+                await Task.WhenAll(responseBirdsTask, saveMonitorDataToDiskTask, responseLocationsTask);
+
+                // Parse penguins from JSON API
+                HttpResponseMessage responseBirds = await responseBirdsTask;
+                responseBirds.EnsureSuccessStatusCode();
+                var jsonContent = await responseBirds.Content.ReadAsStringAsync();
+                var penguinRecords = JsonConvert.DeserializeObject<List<WildWatchPenguin>>(jsonContent);
 
                 Dictionary<string, PenguinData> remotePenguinData = new Dictionary<string, PenguinData>();
-                foreach (var row in parsedDataBirds)
+                foreach (var record in penguinRecords)
                 {
-                    if (!string.IsNullOrEmpty(row.ScannedId) && row.ScannedId.Length >= 8)
+                    if (string.IsNullOrEmpty(record.tag_number) || record.tag_number.Length < 8)
+                        continue;
+
+                    var cleanId = new string(record.tag_number.Where(char.IsLetterOrDigit).ToArray());
+                    var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
+
+                    if (eightDigitId.Length != 8) continue;
+
+                    var lifeStage = LifeStage.Adult;
+                    if (!string.IsNullOrEmpty(record.life_stage))
                     {
-                        // Extract the 8-digit ID (take last 8 characters to match scanning behavior)
-                        var cleanId = new string(row.ScannedId.Where(char.IsLetterOrDigit).ToArray());
-                        var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
-
-                        if (eightDigitId.Length == 8)
-                        {
-                            // Parse life stage
-                            var lifeStage = LifeStage.Adult; // Default
-                            if (!string.IsNullOrEmpty(row.LastKnownLifeStage))
-                            {
-                                if (Enum.TryParse<LifeStage>(row.LastKnownLifeStage, true, out var parsedLifeStage))
-                                {
-                                    lifeStage = parsedLifeStage;
-                                }
-                                else
-                                {
-                                    throw new Exception("Unknown life stage: " + row.LastKnownLifeStage);
-                                }
-                            }
-
-                            
-
-                            var penguinData = new PenguinData
-                            {
-                                ScannedId = eightDigitId,
-                                LastKnownLifeStage = lifeStage,
-                                Sex = row.Sex ?? "",
-                                VidForScanner = row.VidForScanner ?? "",
-                                ChipDate = DateTime.TryParse(row.ChipDate, out DateTime chipDateFound) ? chipDateFound : DateTime.MinValue
-                            };
-                            remotePenguinData[eightDigitId] = penguinData;
-                        }
+                        if (Enum.TryParse<LifeStage>(record.life_stage, true, out var parsedLifeStage))
+                            lifeStage = parsedLifeStage;
                     }
+
+                    remotePenguinData[eightDigitId] = new PenguinData
+                    {
+                        ScannedId = eightDigitId,
+                        LastKnownLifeStage = lifeStage,
+                        Sex = record.sex ?? "",
+                        VidForScanner = record.vid_for_scanner ?? "",
+                        ChipDate = DateTime.TryParse(record.chip_date, out DateTime chipDateFound) ? chipDateFound : DateTime.MinValue
+                    };
                 }
+
                 var birdJson = JsonConvert.SerializeObject(remotePenguinData, Formatting.Indented);
                 File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME), birdJson);
+
+                // Parse and save box notes from observation_locations
+                HttpResponseMessage responseLocations = await responseLocationsTask;
+                if (responseLocations.IsSuccessStatusCode)
+                {
+                    var locationsJson = await responseLocations.Content.ReadAsStringAsync();
+                    var locations = JsonConvert.DeserializeObject<List<WildWatchLocation>>(locationsJson);
+                    var boxNotes = new Dictionary<string, BoxNoteData>();
+                    foreach (var loc in locations)
+                    {
+                        if (!string.IsNullOrEmpty(loc.location_name))
+                        {
+                            boxNotes[loc.location_name] = new BoxNoteData
+                            {
+                                LocationId = loc.location_id,
+                                BoxName = loc.location_name,
+                                PersistentNotes = loc.persistent_notes ?? ""
+                            };
+                        }
+                    }
+                    var boxNotesJson = JsonConvert.SerializeObject(boxNotes, Formatting.Indented);
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), boxNotesJson);
+                }
 
                 int boxDataCount = 0;
                 foreach (MonitorDetails monitorDetails in allMonitorData.Values)
@@ -350,6 +370,42 @@ namespace PenguinMonitor.Services
                 return null;
             }
         }
+        public Dictionary<string, BoxNoteData> LoadBoxNotesFromDisk(Android.Content.Context context)
+        {
+            try
+            {
+                string path = Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME);
+                if (File.Exists(path))
+                {
+                    var json = File.ReadAllText(path);
+                    return JsonConvert.DeserializeObject<Dictionary<string, BoxNoteData>>(json) ?? new Dictionary<string, BoxNoteData>();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load box notes: {ex.Message}");
+            }
+            return new Dictionary<string, BoxNoteData>();
+        }
+
+        internal async Task<bool> UpdateBoxNotesAsync(int locationId, string notes)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_API_URL}?action=update&table=observation_locations&id={locationId}");
+                request.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
+                var body = JsonConvert.SerializeObject(new { persistent_notes = notes });
+                request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+                var response = await _httpClient.SendAsync(request);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to update box notes: {ex.Message}");
+                return false;
+            }
+        }
+
         public void ClearInternalStorageData(string filesDir)
         {
             try

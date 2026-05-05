@@ -86,7 +86,8 @@ namespace PenguinMonitor
         private List<Spinner?> _breedingChanceSpinner;
         private List<Spinner?> _gateStatusSpinner;
         private List<EditText?> _notesEditText;
-        private AlertDialog? _currentStickyNotesDialog;
+        private Button? _editBoxNotesButton;
+        private Dictionary<string, BoxNoteData> _boxNotes = new Dictionary<string, BoxNoteData>();
 
         public UIFactory.selectedPage selectedPage;
         private readonly (string Text, UIFactory.selectedPage Page)[] _menuItems = new[]
@@ -755,6 +756,7 @@ namespace PenguinMonitor
                         await _dataStorageService.DownloadRemoteData(this, _allMonitorData);
                         _allMonitorData = _dataStorageService.LoadAllMonitorDataFromDisk(this);
                         _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+                        _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
 
                         // Sync box tags with remote API
                         if (BoxTagService.IsApiConfigured && FilesDir?.AbsolutePath != null)
@@ -1151,45 +1153,48 @@ namespace PenguinMonitor
 
             _overviewFiltersLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
 
-            // Show/Hide buttons layout
-            var filterButtonsLayout = new LinearLayout(this);
-            var filterButtonParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-            filterButtonParams.SetMargins(8, 8, 8, 8);
+            // Filter sentence: "Show [all/filters] except [none/filters]"
+            var filterSentenceLayout = new LinearLayout(this);
+            filterSentenceLayout.SetGravity(GravityFlags.Center);
+            var sentenceParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            sentenceParams.SetMargins(8, 12, 8, 12);
+            filterSentenceLayout.LayoutParameters = sentenceParams;
 
-            Button showFiltersToggleButton = _uiFactory.CreateStyledButton(!_appSettings.ShowFiltersVisible ? "Show show box filters" : "Hide show box filters", UIFactory.PRIMARY_BLUE);
-            showFiltersToggleButton.LayoutParameters = filterButtonParams;
-            showFiltersToggleButton.Click += (s, e) =>
+            var showLabel = new TextView(this) { Text = "Show ", TextSize = 18 };
+            showLabel.SetTextColor(Color.Black);
+            filterSentenceLayout.AddView(showLabel);
+
+            string showText = GetShowFilterText();
+            var showButton = new TextView(this) { Text = showText, TextSize = 18 };
+            showButton.SetTextColor(UIFactory.PRIMARY_BLUE);
+            showButton.SetTypeface(null, TypefaceStyle.Bold);
+            showButton.PaintFlags = showButton.PaintFlags | Android.Graphics.PaintFlags.UnderlineText;
+            showButton.Click += (s, e) =>
             {
                 _appSettings.ShowFiltersVisible = !_appSettings.ShowFiltersVisible;
                 _appSettings.HideFiltersVisible = false;
-                showFiltersToggleButton.Text = !_appSettings.ShowFiltersVisible ? "Show show box filters" : "Hide show box filters";
                 DrawPageLayouts();
             };
-            filterButtonsLayout.AddView(showFiltersToggleButton);
+            filterSentenceLayout.AddView(showButton);
 
-            Button hideFiltersToggleButton = _uiFactory.CreateStyledButton(!_appSettings.HideFiltersVisible ? "Show hide box filters" : "Hide hide box filters", UIFactory.PRIMARY_BLUE);
-            hideFiltersToggleButton.LayoutParameters = filterButtonParams;
-            hideFiltersToggleButton.Click += (s, e) =>
+            var exceptLabel = new TextView(this) { Text = " except ", TextSize = 18 };
+            exceptLabel.SetTextColor(Color.Black);
+            filterSentenceLayout.AddView(exceptLabel);
+
+            string hideText = GetHideFilterText();
+            var hideButton = new TextView(this) { Text = hideText, TextSize = 18 };
+            hideButton.SetTextColor(UIFactory.DANGER_RED);
+            hideButton.SetTypeface(null, TypefaceStyle.Bold);
+            hideButton.PaintFlags = hideButton.PaintFlags | Android.Graphics.PaintFlags.UnderlineText;
+            hideButton.Click += (s, e) =>
             {
                 _appSettings.HideFiltersVisible = !_appSettings.HideFiltersVisible;
                 _appSettings.ShowFiltersVisible = false;
-                hideFiltersToggleButton.Text = !_appSettings.HideFiltersVisible ? "Show hide box filters" : "Hide hide box filters";
                 DrawPageLayouts();
             };
-            filterButtonsLayout.AddView(hideFiltersToggleButton);
-            _overviewFiltersLayout.AddView(filterButtonsLayout);
+            filterSentenceLayout.AddView(hideButton);
 
-            // Filter text representation
-            TextView filterTextView = new TextView(this)
-            {
-                Text = GetFilterTextRepresentation(),
-                TextSize = 16,
-                Gravity = GravityFlags.Center
-            };
-            filterTextView.SetTypeface(null, TypefaceStyle.Bold);
-            filterTextView.SetTextColor(Color.Black);
-            filterTextView.SetPadding(16, 8, 16, 8);
-            _overviewFiltersLayout.AddView(filterTextView);
+            _overviewFiltersLayout.AddView(filterSentenceLayout);
 
             // Show filters checkboxes layout
             var showFiltersCheckboxLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
@@ -1197,12 +1202,11 @@ namespace PenguinMonitor
 
             TextView showBoxesTitle = new TextView(this)
             {
-                Text = "Show box filters",
-                TextSize = 16,
+                Text = "Show boxes matching:",
+                TextSize = 14,
                 Gravity = GravityFlags.Center,
             };
-            showBoxesTitle.SetTypeface(null, TypefaceStyle.Bold);
-            showBoxesTitle.SetTextColor(Color.Black);
+            showBoxesTitle.SetTextColor(UIFactory.TEXT_SECONDARY);
             showFiltersCheckboxLayout.AddView(showBoxesTitle);
 
             var showRow1 = new LinearLayout(this);
@@ -1256,7 +1260,7 @@ namespace PenguinMonitor
             showBoxesWithNotesInMultiboxView.Click += (s, e) => { _appSettings.showBoxesWithNotesInMultiboxView = showBoxesWithNotesInMultiboxView.Checked; if (_appSettings.showBoxesWithNotesInMultiboxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
             showRow3.AddView(showBoxesWithNotesInMultiboxView);
 
-            CheckBox showSpecialBoxesInMultiboxView = new CheckBox(this) { Text = "Sticky notes", Checked = _appSettings.ShowInterestingBoxesInMultiBoxView };
+            CheckBox showSpecialBoxesInMultiboxView = new CheckBox(this) { Text = "Box notes", Checked = _appSettings.ShowInterestingBoxesInMultiBoxView };
             showSpecialBoxesInMultiboxView.SetTextColor(Color.Black);
             showSpecialBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowInterestingBoxesInMultiBoxView = showSpecialBoxesInMultiboxView.Checked; if (_appSettings.ShowInterestingBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
             showRow3.AddView(showSpecialBoxesInMultiboxView);
@@ -1282,12 +1286,11 @@ namespace PenguinMonitor
 
             TextView hideBoxesTitle = new TextView(this)
             {
-                Text = "Hide box filters",
-                TextSize = 16,
+                Text = "Hide boxes matching:",
+                TextSize = 14,
                 Gravity = GravityFlags.Center,
             };
-            hideBoxesTitle.SetTypeface(null, TypefaceStyle.Bold);
-            hideBoxesTitle.SetTextColor(Color.Black);
+            hideBoxesTitle.SetTextColor(UIFactory.TEXT_SECONDARY);
             hideFiltersCheckboxLayout.AddView(hideBoxesTitle);
 
             var hideRow1 = new LinearLayout(this);
@@ -1335,7 +1338,7 @@ namespace PenguinMonitor
             hideBoxesWithNotesInMultiboxView.Click += (s, e) => { _appSettings.HideBoxesWithNotesInMultiboxView = hideBoxesWithNotesInMultiboxView.Checked; DrawPageLayouts(); };
             hideRow3.AddView(hideBoxesWithNotesInMultiboxView);
 
-            CheckBox hideSpecialBoxesInMultiBoxView = new CheckBox(this) { Text = "Sticky notes", Checked = _appSettings.HideInterestingBoxesInMultiBoxView };
+            CheckBox hideSpecialBoxesInMultiBoxView = new CheckBox(this) { Text = "Box notes", Checked = _appSettings.HideInterestingBoxesInMultiBoxView };
             hideSpecialBoxesInMultiBoxView.SetTextColor(Color.Black);
             hideSpecialBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HideInterestingBoxesInMultiBoxView = hideSpecialBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
             hideRow3.AddView(hideSpecialBoxesInMultiBoxView);
@@ -1359,6 +1362,22 @@ namespace PenguinMonitor
             hideFiltersCheckboxLayout.AddView(hideRow4);
 
             _overviewFiltersLayout.AddView(hideFiltersCheckboxLayout);
+
+            // Done button (visible when either filter panel is open)
+            if (_appSettings.ShowFiltersVisible || _appSettings.HideFiltersVisible)
+            {
+                var doneButton = _uiFactory.CreateStyledButton("Done", UIFactory.SUCCESS_GREEN);
+                var doneParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                doneParams.SetMargins(16, 8, 16, 8);
+                doneButton.LayoutParameters = doneParams;
+                doneButton.Click += (s, e) =>
+                {
+                    _appSettings.ShowFiltersVisible = false;
+                    _appSettings.HideFiltersVisible = false;
+                    DrawPageLayouts();
+                };
+                _overviewFiltersLayout.AddView(doneButton);
+            }
 
             //Navigate Monitors
             var browseOtherMonitorsLayout = new LinearLayout(this);
@@ -1445,7 +1464,7 @@ namespace PenguinMonitor
                 if (currentBoxDataFound && currentBoxData != null)
                     mostRecentBoxData = currentBoxData;
 
-                string stickyNotes = DataStorageService.getStickyNotes(olderBoxDatas);
+                bool hasBoxNotes = _boxNotes.TryGetValue(boxName, out var boxNoteForFilter) && !string.IsNullOrWhiteSpace(boxNoteForFilter.PersistentNotes);
                 bool showBox = _appSettings.ShowAllBoxesInMultiBoxView
                             || _appSettings.ShowBoxesWithDataInMultiBoxView && _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData.ContainsKey(boxName)
                             || _appSettings.ShowBreedingBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("BR")
@@ -1454,7 +1473,7 @@ namespace PenguinMonitor
                             || _appSettings.ShowUnlikleyBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("UNL")
                             || _appSettings.ShowNoBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("NO")
                             || _appSettings.ShowBoxesWithNotesInMultiboxView && mostRecentBoxData != null && !String.IsNullOrWhiteSpace(mostRecentBoxData.Notes)
-                            || _appSettings.ShowInterestingBoxesInMultiBoxView && (mostRecentBoxData.Eggs > 0 && !nrfPercentageString.StartsWith("0") || !string.IsNullOrWhiteSpace(stickyNotes))
+                            || _appSettings.ShowInterestingBoxesInMultiBoxView && hasBoxNotes
                             || _appSettings.ShowSingleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 1)
                             || _appSettings.ShowDoubleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 2)
                             || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("DCM");
@@ -1468,7 +1487,7 @@ namespace PenguinMonitor
                 bool hideConfident = _appSettings.HideConfidentBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("CON");
                 bool hideBreeding = _appSettings.HideBreedingBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("BR");
                 bool hideNotes = _appSettings.HideBoxesWithNotesInMultiboxView && mostRecentBoxData != null && !String.IsNullOrWhiteSpace(mostRecentBoxData.Notes);
-                bool hideInteresting = _appSettings.HideInterestingBoxesInMultiBoxView && (mostRecentBoxData.Eggs > 0 && !nrfPercentageString.StartsWith("0") || !string.IsNullOrWhiteSpace(stickyNotes));
+                bool hideInteresting = _appSettings.HideInterestingBoxesInMultiBoxView && hasBoxNotes;
                 bool hideSingleEgg = _appSettings.HideSingleEggBoxesInMultiboxView && mostRecentBoxData.Eggs == 1;
                 bool hideDoubleEgg = _appSettings.HideDoubleEggBoxesInMultiboxView && mostRecentBoxData.Eggs == 2;
 
@@ -1638,8 +1657,8 @@ namespace PenguinMonitor
 
             string gateStatus = thisBoxData.GateStatus;
             string notes = string.IsNullOrWhiteSpace(thisBoxData.Notes) ? "" : "notes";
-            string stickyNotes = DataStorageService.getStickyNotes(olderBoxDatas);
-            notes += !string.IsNullOrEmpty(stickyNotes) ? $" ({stickyNotes})" : "";
+            bool hasBoxNotesForCard = _boxNotes.TryGetValue(boxName, out var cardBoxNote) && !string.IsNullOrWhiteSpace(cardBoxNote.PersistentNotes);
+            notes += hasBoxNotesForCard ? $" ({cardBoxNote.PersistentNotes})" : "";
             notes += !nrfPercentageString.StartsWith("0") ? $" (NRF:{nrfPercentageString})" : "";
             string lineThreeStatusText = "";
             if (!string.IsNullOrWhiteSpace(gateStatus) && !string.IsNullOrWhiteSpace(notes))
@@ -2167,83 +2186,52 @@ namespace PenguinMonitor
 
             return layout;
         }
+        private string GetShowFilterText()
+        {
+            if (_appSettings.ShowAllBoxesInMultiBoxView)
+                return "all";
+
+            var filters = new List<string>();
+            if (_appSettings.ShowBoxesWithDataInMultiBoxView) filters.Add("with data");
+            if (_appSettings.ShowNoBoxesInMultiBoxView) filters.Add("NO");
+            if (_appSettings.ShowUnlikleyBoxesInMultiBoxView) filters.Add("UNL");
+            if (_appSettings.ShowPotentialBoxesInMultiBoxView) filters.Add("POT");
+            if (_appSettings.ShowConfidentBoxesInMultiBoxView) filters.Add("CON");
+            if (_appSettings.ShowBreedingBoxesInMultiBoxView) filters.Add("BR");
+            if (_appSettings.ShowDCMBoxesInMultiboxView) filters.Add("DCM");
+            if (_appSettings.showBoxesWithNotesInMultiboxView) filters.Add("notes");
+            if (_appSettings.ShowInterestingBoxesInMultiBoxView) filters.Add("box notes");
+            if (_appSettings.ShowSingleEggBoxesInMultiboxView) filters.Add("1 egg");
+            if (_appSettings.ShowDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
+
+            return filters.Count > 0 ? string.Join(", ", filters) : "all";
+        }
+
+        private string GetHideFilterText()
+        {
+            var filters = new List<string>();
+            if (_appSettings.HideBoxesWithDataInMultiBoxView) filters.Add("with data");
+            if (_appSettings.HideNoBoxesInMultiBoxView) filters.Add("NO");
+            if (_appSettings.HideUnlikelyBoxesInMultiBoxView) filters.Add("UNL");
+            if (_appSettings.HidePotentialBoxesInMultiBoxView) filters.Add("POT");
+            if (_appSettings.HideConfidentBoxesInMultiBoxView) filters.Add("CON");
+            if (_appSettings.HideBreedingBoxesInMultiBoxView) filters.Add("BR");
+            if (_appSettings.HideDCMInMultiBoxView) filters.Add("DCM");
+            if (_appSettings.HideBoxesWithNotesInMultiboxView) filters.Add("notes");
+            if (_appSettings.HideInterestingBoxesInMultiBoxView) filters.Add("box notes");
+            if (_appSettings.HideSingleEggBoxesInMultiboxView) filters.Add("1 egg");
+            if (_appSettings.HideDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
+            if (_appSettings.HideBeforeCurrentInMultiBoxView) filters.Add("<current");
+
+            return filters.Count > 0 ? string.Join(", ", filters) : "none";
+        }
+
         private string GetFilterTextRepresentation()
         {
-            List<string> showFilters = new List<string>();
-            List<string> hideFilters = new List<string>();
-
-            // Build show filters list
-            if (_appSettings.ShowAllBoxesInMultiBoxView)
-            {
-                showFilters.Add("all");
-            }
-            else
-            {
-                if (_appSettings.ShowBoxesWithDataInMultiBoxView) showFilters.Add("with data");
-                if (_appSettings.ShowNoBoxesInMultiBoxView) showFilters.Add("NO");
-                if (_appSettings.ShowUnlikleyBoxesInMultiBoxView) showFilters.Add("UNL");
-                if (_appSettings.ShowPotentialBoxesInMultiBoxView) showFilters.Add("POT");
-                if (_appSettings.ShowConfidentBoxesInMultiBoxView) showFilters.Add("CON");
-                if (_appSettings.ShowBreedingBoxesInMultiBoxView) showFilters.Add("BR");
-                if (_appSettings.ShowDCMBoxesInMultiboxView) showFilters.Add("DCM");
-                if (_appSettings.showBoxesWithNotesInMultiboxView) showFilters.Add("has notes");
-                if (_appSettings.ShowInterestingBoxesInMultiBoxView) showFilters.Add("has sticky notes");
-                if (_appSettings.ShowSingleEggBoxesInMultiboxView) showFilters.Add("single egg");
-                if (_appSettings.ShowDoubleEggBoxesInMultiboxView) showFilters.Add("double egg");
-            }
-
-            // Build hide filters list
-            if (_appSettings.HideBoxesWithDataInMultiBoxView) hideFilters.Add("with data");
-            if (_appSettings.HideNoBoxesInMultiBoxView) hideFilters.Add("NO");
-            if (_appSettings.HideUnlikelyBoxesInMultiBoxView) hideFilters.Add("UNL");
-            if (_appSettings.HidePotentialBoxesInMultiBoxView) hideFilters.Add("POT");
-            if (_appSettings.HideConfidentBoxesInMultiBoxView) hideFilters.Add("CON");
-            if (_appSettings.HideBreedingBoxesInMultiBoxView) hideFilters.Add("BR");
-            if (_appSettings.HideDCMInMultiBoxView) hideFilters.Add("DCM");
-            if (_appSettings.HideBoxesWithNotesInMultiboxView) hideFilters.Add("has notes");
-            if (_appSettings.HideInterestingBoxesInMultiBoxView) hideFilters.Add("has sticky notes");
-            if (_appSettings.HideSingleEggBoxesInMultiboxView) hideFilters.Add("single egg");
-            if (_appSettings.HideDoubleEggBoxesInMultiboxView) hideFilters.Add("double egg");
-            if (_appSettings.HideBeforeCurrentInMultiBoxView) hideFilters.Add("#<current boxes");
-
-            // Format the text
-            string result = "";
-
-            if (_appSettings.ShowAllBoxesInMultiBoxView && hideFilters.Count == 0)
-            {
-                result = "All";
-            }
-            else if (_appSettings.ShowAllBoxesInMultiBoxView)
-            {
-                result = "All except " + string.Join(", ", hideFilters);
-            }
-            else
-            {
-                if (showFilters.Count > 0)
-                {
-                    result = string.Join(", ", showFilters.Take(showFilters.Count - 1));
-                    if (showFilters.Count > 1)
-                        result += " and " + showFilters.Last();
-                    else
-                        result = showFilters[0];
-                }
-
-                if (hideFilters.Count > 0)
-                {
-                    string hideText = string.Join(", ", hideFilters.Take(hideFilters.Count - 1));
-                    if (hideFilters.Count > 1)
-                        hideText += " and " + hideFilters.Last();
-                    else
-                        hideText = hideFilters[0];
-
-                    if (!string.IsNullOrEmpty(result))
-                        result += " except " + hideText;
-                    else
-                        result = "None except " + hideText;
-                }
-            }
-
-            return string.IsNullOrEmpty(result) ? "^ ^ Select show box filters ^ ^" : result;
+            string show = GetShowFilterText();
+            string hide = GetHideFilterText();
+            if (hide == "none") return "Show " + show;
+            return "Show " + show + " except " + hide;
         }
         internal void DrawPageLayouts()
         {
@@ -2317,10 +2305,9 @@ namespace PenguinMonitor
                     _boxSavedTimeTextView.Gravity = GravityFlags.Right;
 
                     _interestingBoxTextView.Visibility = ViewStates.Gone;
-                    string stickyNotes = DataStorageService.getStickyNotes(DataStorageService.getOlderBoxDatas(_allMonitorData, displayMonitorIndex, _currentBoxName));
-                    if (!string.IsNullOrWhiteSpace(stickyNotes))
+                    if (_boxNotes.TryGetValue(_currentBoxName, out var boxNote) && !string.IsNullOrWhiteSpace(boxNote.PersistentNotes))
                     {
-                        _interestingBoxTextView.Text = "💡 Note: " + stickyNotes;
+                        _interestingBoxTextView.Text = "💡 " + boxNote.PersistentNotes;
                         _interestingBoxTextView.Visibility = ViewStates.Visible;
                         _interestingBoxTextView.Gravity = GravityFlags.Center;
                         _interestingBoxTextView.SetBackgroundColor(UIFactory.LIGHT_GRAY);
@@ -2397,13 +2384,18 @@ namespace PenguinMonitor
                     foreach (var button in buttonsToToggle)
                     {
                         bool canGo = true;
-                        if(button.Text.Contains("rev box") && _currentBoxIndex == 1 || button.Text.Contains("ext box") && _currentBoxIndex == _boxNamesAndIndexes.Count) 
+                        if(button.Text.Contains("rev box") && _currentBoxIndex == 1 || button.Text.Contains("ext box") && _currentBoxIndex == _boxNamesAndIndexes.Count)
                         {
                             canGo = false;
                         }
                         button.Enabled = _isBoxLocked && canGo;
                         button.Alpha = button.Enabled ? 2.0f : 0.5f; // Grey out when unlocked
                     }
+
+                    // Show edit notes button only when box is unlocked
+                    if (_editBoxNotesButton != null)
+                        _editBoxNotesButton.Visibility = !_isBoxLocked ? ViewStates.Visible : ViewStates.Gone;
+
                     createMultiBoxViewCard();
                 });
         }
@@ -2691,18 +2683,19 @@ namespace PenguinMonitor
             _notesEditText[0].TextChanged += OnDataChanged;
             _singleBoxDataContentLayout.AddView(_notesEditText[0]);
 
-            // Add button to manage sticky notes
-            var manageStickyNotesButton = new Button(this)
+            // Edit box notes button (visible when box is unlocked)
+            _editBoxNotesButton = new Button(this)
             {
-                Text = "📌 Manage Sticky Notes"
+                Text = "Edit Notes",
+                Visibility = ViewStates.Gone
             };
-            manageStickyNotesButton.SetTextColor(Color.White);
-            manageStickyNotesButton.SetBackgroundColor(UIFactory.PRIMARY_BLUE);
-            var manageNotesButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            manageNotesButtonParams.SetMargins(0, 0, 0, 16);
-            manageStickyNotesButton.LayoutParameters = manageNotesButtonParams;
-            manageStickyNotesButton.Click += (s, e) => ShowStickyNotesDialog();
-            _singleBoxDataContentLayout.AddView(manageStickyNotesButton);
+            _editBoxNotesButton.SetTextColor(Color.White);
+            _editBoxNotesButton.SetBackgroundColor(UIFactory.PRIMARY_BLUE);
+            var editNotesButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            editNotesButtonParams.SetMargins(0, 0, 0, 16);
+            _editBoxNotesButton.LayoutParameters = editNotesButtonParams;
+            _editBoxNotesButton.Click += (s, e) => ShowBoxNotesDialog();
+            _singleBoxDataContentLayout.AddView(_editBoxNotesButton);
             _singleBoxDataOuterLayout.AddView(_singleBoxDataContentLayout);
 
             // Navigation card
@@ -2868,207 +2861,79 @@ namespace PenguinMonitor
             alertDialog?.Show();
         }
 
-        private void ShowStickyNotesDialog()
+        private void ShowBoxNotesDialog()
         {
-            // Get current sticky notes for this box
-            var olderBoxDatas = DataStorageService.getOlderBoxDatas(_allMonitorData, _appSettings.CurrentlyVisibleMonitor, _currentBoxName);
-            string stickyNotesString = DataStorageService.getStickyNotes(olderBoxDatas);
-            var currentNotes = new List<string>();
-            if (!string.IsNullOrWhiteSpace(stickyNotesString))
-            {
-                currentNotes = stickyNotesString.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-            }
+            string currentNotes = "";
+            if (_boxNotes.TryGetValue(_currentBoxName, out var boxNote))
+                currentNotes = boxNote.PersistentNotes ?? "";
 
-            // Create main container
             var mainLayout = new LinearLayout(this)
             {
                 Orientation = Android.Widget.Orientation.Vertical
             };
             mainLayout.SetPadding(40, 20, 40, 20);
 
-            // Title for current notes
-            var titleText = new TextView(this)
+            var notesInput = new EditText(this)
             {
-                Text = "Current Sticky Notes:",
-                TextSize = 14
+                Text = currentNotes,
+                Hint = "Enter box notes...",
+                InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences,
+                MinLines = 3
             };
-            titleText.SetTextColor(UIFactory.TEXT_PRIMARY);
-            titleText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            titleParams.SetMargins(0, 0, 0, 16);
-            titleText.LayoutParameters = titleParams;
-            mainLayout.AddView(titleText);
+            notesInput.SetTextColor(UIFactory.TEXT_PRIMARY);
+            notesInput.SetHintTextColor(UIFactory.TEXT_SECONDARY);
+            notesInput.SetPadding(16, 16, 16, 16);
+            notesInput.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+            mainLayout.AddView(notesInput);
 
-            // ScrollView for existing notes
-            var notesScrollView = new ScrollView(this);
-            var notesContainer = new LinearLayout(this)
-            {
-                Orientation = Android.Widget.Orientation.Vertical
-            };
-            notesScrollView.AddView(notesContainer);
-            var scrollParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, 0, 1.0f);
-            scrollParams.SetMargins(0, 0, 0, 16);
-            notesScrollView.LayoutParameters = scrollParams;
-
-            // Add existing notes
-            if (currentNotes.Count == 0)
-            {
-                var emptyText = new TextView(this)
-                {
-                    Text = "No sticky notes yet",
-                    TextSize = 14
-                };
-                emptyText.SetTextColor(UIFactory.TEXT_SECONDARY);
-                emptyText.SetPadding(8, 8, 8, 8);
-                notesContainer.AddView(emptyText);
-            }
-            else
-            {
-                foreach (var note in currentNotes)
-                {
-                    var noteLayout = new LinearLayout(this)
-                    {
-                        Orientation = Android.Widget.Orientation.Horizontal
-                    };
-                    var noteLayoutParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                    noteLayoutParams.SetMargins(0, 4, 0, 4);
-                    noteLayout.LayoutParameters = noteLayoutParams;
-
-                    var noteText = new TextView(this)
-                    {
-                        Text = note,
-                        TextSize = 14
-                    };
-                    noteText.SetTextColor(UIFactory.TEXT_PRIMARY);
-                    noteText.SetPadding(12, 12, 12, 12);
-                    noteText.SetBackgroundColor(UIFactory.LIGHTER_GRAY);
-                    var noteTextParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1.0f);
-                    noteTextParams.SetMargins(0, 0, 8, 0);
-                    noteText.LayoutParameters = noteTextParams;
-
-                    var deleteButton = new Button(this)
-                    {
-                        Text = "✕"
-                    };
-                    deleteButton.SetTextColor(Color.White);
-                    deleteButton.SetBackgroundColor(UIFactory.DANGER_RED);
-                    var deleteParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-                    deleteButton.LayoutParameters = deleteParams;
-
-                    string noteToRemove = note;
-                    deleteButton.Click += (s, e) =>
-                    {
-                        // Remove this note by adding l-notename to the notes field
-                        string currentNotesText = _notesEditText?[0].Text ?? "";
-                        if (!currentNotesText.EndsWith(" "))
-                            currentNotesText += " ";
-                        currentNotesText += $"l-{noteToRemove} ";
-                        _notesEditText[0].Text = currentNotesText;
-
-                        SaveCurrentBoxData();
-                        Toast.MakeText(this, $"Removed sticky note: {noteToRemove}", ToastLength.Short)?.Show();
-
-                        // Dismiss current dialog and reopen to refresh
-                        _currentStickyNotesDialog?.Dismiss();
-                        ShowStickyNotesDialog();
-                    };
-
-                    noteLayout.AddView(noteText);
-                    noteLayout.AddView(deleteButton);
-                    notesContainer.AddView(noteLayout);
-                }
-            }
-
-            mainLayout.AddView(notesScrollView);
-
-            // Add new note section
-            var addSectionLayout = new LinearLayout(this)
-            {
-                Orientation = Android.Widget.Orientation.Vertical
-            };
-            var addSectionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            addSectionParams.SetMargins(0, 16, 0, 0);
-            addSectionLayout.LayoutParameters = addSectionParams;
-
-            var addLabel = new TextView(this)
-            {
-                Text = "Add New Sticky Note:",
-                TextSize = 14
-            };
-            addLabel.SetTextColor(UIFactory.TEXT_PRIMARY);
-            addLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var addLabelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            addLabelParams.SetMargins(0, 0, 0, 8);
-            addLabel.LayoutParameters = addLabelParams;
-            addSectionLayout.AddView(addLabel);
-
-            var newNoteInput = new EditText(this)
-            {
-                Hint = "Enter note text...",
-                InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapSentences
-            };
-            newNoteInput.SetTextColor(UIFactory.TEXT_PRIMARY);
-            newNoteInput.SetHintTextColor(UIFactory.TEXT_SECONDARY);
-            newNoteInput.SetPadding(16, 16, 16, 16);
-            newNoteInput.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
-            var inputParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            inputParams.SetMargins(0, 0, 0, 8);
-            newNoteInput.LayoutParameters = inputParams;
-            addSectionLayout.AddView(newNoteInput);
-
-            var addButton = new Button(this)
-            {
-                Text = "Add Note"
-            };
-            addButton.SetTextColor(Color.White);
-            addButton.SetBackgroundColor(UIFactory.PRIMARY_BLUE);
-            addButton.Click += (s, e) =>
-            {
-                string newNote = newNoteInput.Text?.Trim();
-                if (string.IsNullOrWhiteSpace(newNote))
-                {
-                    Toast.MakeText(this, "Please enter a note", ToastLength.Short)?.Show();
-                    return;
-                }
-
-                // Replace spaces with underscores to make it a single token
-                newNote = newNote.Replace(" ", "_");
-
-                // Add this note by appending l=notename to the notes field
-                string currentNotesText = _notesEditText?[0].Text ?? "";
-                if (!currentNotesText.EndsWith(" "))
-                    currentNotesText += " ";
-                currentNotesText += $"l={newNote} ";
-                _notesEditText[0].Text = currentNotesText;
-
-                SaveCurrentBoxData();
-                Toast.MakeText(this, $"Added sticky note: {newNote}", ToastLength.Short)?.Show();
-
-                // Dismiss current dialog and reopen to refresh
-                _currentStickyNotesDialog?.Dismiss();
-                ShowStickyNotesDialog();
-            };
-            addSectionLayout.AddView(addButton);
-
-            mainLayout.AddView(addSectionLayout);
-
-            // Create and show dialog
-            AlertDialog? dialog = null;
-            dialog = new AlertDialog.Builder(this)
-                .SetTitle($"Sticky Notes - Box {_currentBoxName}")
+            var dialog = new AlertDialog.Builder(this)
+                .SetTitle($"Box Notes - Box {_currentBoxName}")
                 .SetView(mainLayout)
-                .SetNegativeButton("Close", (s, e) => { })
+                .SetPositiveButton("Save", (s, e) =>
+                {
+                    string newNotes = notesInput.Text?.Trim() ?? "";
+                    // Update local cache
+                    if (!_boxNotes.ContainsKey(_currentBoxName))
+                    {
+                        _boxNotes[_currentBoxName] = new BoxNoteData { BoxName = _currentBoxName };
+                    }
+                    _boxNotes[_currentBoxName].PersistentNotes = newNotes;
+                    int locationId = _boxNotes[_currentBoxName].LocationId;
+
+                    // Save to API in background
+                    if (locationId > 0)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            bool success = await _dataStorageService.UpdateBoxNotesAsync(locationId, newNotes);
+                            new Handler(Looper.MainLooper).Post(() =>
+                            {
+                                if (success)
+                                    Toast.MakeText(this, "Notes saved", ToastLength.Short)?.Show();
+                                else
+                                    Toast.MakeText(this, "Failed to save notes to server", ToastLength.Short)?.Show();
+                                DrawPageLayouts();
+                            });
+                        });
+                    }
+                    else
+                    {
+                        Toast.MakeText(this, "Box not found on server - notes saved locally only", ToastLength.Short)?.Show();
+                        DrawPageLayouts();
+                    }
+
+                    // Save local cache to disk
+                    var boxNotesJson = Newtonsoft.Json.JsonConvert.SerializeObject(_boxNotes, Newtonsoft.Json.Formatting.Indented);
+                    File.WriteAllText(Path.Combine(FilesDir?.AbsolutePath, DataStorageService.BOX_NOTES_FILENAME), boxNotesJson);
+                })
+                .SetNegativeButton("Cancel", (s, e) => { })
                 .Create();
 
             dialog?.Show();
 
-            // Store reference for dismissing before refresh
-            _currentStickyNotesDialog = dialog;
-
-            // Focus the input field and show keyboard
-            newNoteInput.RequestFocus();
+            notesInput.RequestFocus();
             var inputManager = (InputMethodManager?)GetSystemService(InputMethodService);
-            inputManager?.ShowSoftInput(newNoteInput, ShowFlags.Implicit);
+            inputManager?.ShowSoftInput(notesInput, ShowFlags.Implicit);
         }
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
@@ -3499,6 +3364,7 @@ namespace PenguinMonitor
 
                 // Load remote penguin data.
                 _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+                _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
                 if (_remotePenguinData != null &&  _remoteBreedingDates != null)
                 {
                     Toast.MakeText(this, $"{_remotePenguinData.Count} bird, {_remoteBreedingDates.Count} breeding dates found.", ToastLength.Short)?.Show();
