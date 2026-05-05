@@ -299,6 +299,9 @@ select.ef-input { max-width:140px; }
 .add-scan-search { position:relative; }
 .add-scan-results { position:absolute; top:100%; left:0; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.15); z-index:10; min-width:200px; max-height:200px; overflow-y:auto; }
 .add-scan-option { padding:6px 10px; font-size:13px; }
+.add-scan-option.f { background:#FFE4E1; }
+.add-scan-option.m { background:#E6F3FF; }
+.add-scan-option.chick { background:#FFF9C4; }
 .add-scan-option:hover { background:#e3f2fd; }
 .done-btn { background:#1a5276 !important; color:#fff !important; border-color:#1a5276 !important; }
 .done-btn:hover { background:#2e86c1 !important; }

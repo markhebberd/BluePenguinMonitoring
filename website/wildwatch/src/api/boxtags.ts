@@ -17,15 +17,15 @@ export async function fetchTimeline() {
 }
 
 export async function fetchBoxDetail(name: string) {
-  return (await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(name)}`)).json();
+  return (await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(name)}&_=${Date.now()}`)).json();
 }
 
 export async function fetchAllPenguins() {
-  return (await fetch('/penguin-api/penguins.php')).json();
+  return (await fetch(`/penguin-api/penguins.php?_=${Date.now()}`)).json();
 }
 
 export async function fetchBirdDetail(tag: string) {
-  return (await fetch(`/penguin-api/bird.php?tag=${encodeURIComponent(tag)}`)).json();
+  return (await fetch(`/penguin-api/bird.php?tag=${encodeURIComponent(tag)}&_=${Date.now()}`)).json();
 }
 
 export async function updateRecord(token: string, table: string, id: number, fields: Record<string, any>) {

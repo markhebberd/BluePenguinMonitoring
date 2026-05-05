@@ -60,11 +60,11 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   if (totalMs <= 0) return null;
 
   const sorted = [...observations]
-    .filter(o => { const t = new Date(o.observation_time_utc).getTime(); return t >= seasonStart.getTime() && t <= seasonEnd.getTime(); })
-    .sort((a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime());
+    .filter(o => { const t = parseDate(o.observation_time_utc).getTime(); return t >= seasonStart.getTime() && t <= seasonEnd.getTime(); })
+    .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
 
   // Also consider obs before this season to get the initial status
-  const allSorted = [...observations].sort((a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime());
+  const allSorted = [...observations].sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
 
   // Build status changes from ALL observations (to carry forward pre-season status)
   // Derive status: I=Incubation (eggs, no chicks), G=Guard (chicks present)
@@ -85,10 +85,10 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     // End when eggs+chicks drop to 0
     if ((runningStatus === 'G' || runningStatus === 'I') && obs.eggs === 0 && obs.chicks === 0 && !s) {
       runningStatus = '';
-      changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: '' });
+      changes.push({ time: parseDate(obs.observation_time_utc).getTime(), status: '' });
     } else if (s && s !== runningStatus) {
       runningStatus = s;
-      changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: s });
+      changes.push({ time: parseDate(obs.observation_time_utc).getTime(), status: s });
     }
   }
 
@@ -102,10 +102,10 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   // Find most recent monitor with eggs or chicks
   const mostRecent = reversed.find(o => o.eggs + o.chicks > 0);
   if (mostRecent) {
-    let whenOffspringFound = new Date(mostRecent.observation_time_utc).getTime();
+    let whenOffspringFound = parseDate(mostRecent.observation_time_utc).getTime();
     // Walk backwards through older monitors
     const olderThanRecent = allSorted.filter(o =>
-      new Date(o.observation_time_utc).getTime() < whenOffspringFound
+      parseDate(o.observation_time_utc).getTime() < whenOffspringFound
     ).reverse(); // newest older first
 
     for (const older of olderThanRecent) {
@@ -117,13 +117,13 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
         // Found the empty monitor before eggs appeared
         let adjustedFound = whenOffspringFound;
         if (mostRecent.eggs > 1) adjustedFound -= 2 * 86400000; // 2 days earlier for multiple eggs
-        const whenNotFound = new Date(older.observation_time_utc).getTime();
+        const whenNotFound = parseDate(older.observation_time_utc).getTime();
         const uncertainty = (adjustedFound - whenNotFound) / 2;
         probableLaidTime = whenNotFound + Math.ceil(uncertainty / 86400000) * 86400000;
         break;
       }
       // This older monitor also has eggs/chicks - keep walking back
-      whenOffspringFound = new Date(older.observation_time_utc).getTime();
+      whenOffspringFound = parseDate(older.observation_time_utc).getTime();
     }
   }
 
@@ -188,10 +188,10 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   let prevChicks = 0;
   for (const o of sorted) {
     if (o.eggs > 0 && prevEggs === 0 && firstEggTime === null) {
-      firstEggTime = new Date(o.observation_time_utc).getTime();
+      firstEggTime = parseDate(o.observation_time_utc).getTime();
     }
     if (o.chicks > 0 && prevChicks === 0 && firstChickTime === null) {
-      firstChickTime = new Date(o.observation_time_utc).getTime();
+      firstChickTime = parseDate(o.observation_time_utc).getTime();
     }
     prevEggs = o.eggs;
     prevChicks = o.chicks;
@@ -213,7 +213,7 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   for (let i = 0; i < sorted.length; i++) {
     const o = sorted[i];
     const prev = i > 0 ? sorted[i - 1] : null;
-    const t = new Date(o.observation_time_utc).getTime();
+    const t = parseDate(o.observation_time_utc).getTime();
     const pct = ((t - seasonStart.getTime()) / totalMs) * 100;
 
     // Detect significant events
@@ -294,7 +294,7 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observat
   currentSeasonFullEnd.setFullYear(currentSeasonFullEnd.getFullYear() + 1);
 
   const hasPrevData = observations.some(o => {
-    const t = new Date(o.observation_time_utc).getTime();
+    const t = parseDate(o.observation_time_utc).getTime();
     return t >= prevSeasonStart.getTime() && t < prevSeasonEnd.getTime();
   });
 
@@ -335,23 +335,27 @@ function fmtChipAge(chipDate: string | null, chippedAsAdult: boolean): string | 
   return `${timeStr} old`;
 }
 
-function PenguinBadge({ scan, onClick, observationDate }: { scan: Scan; onClick: () => void; observationDate?: string }) {
+function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
+  const s = (sex || '').toUpperCase();
+  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - (new Date(chipDate).getTime() - 42 * 86400000)) < 180 * 86400000;
+  return isChick && !s ? 'chick' : s === 'F' ? 'f' : s === 'M' ? 'm' : '';
+}
+
+function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
+  const s = (sex || '').toUpperCase();
+  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - (new Date(chipDate).getTime() - 42 * 86400000)) < 180 * 86400000;
+  return isChick && !s ? '\uD83D\uDC23' : s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
+}
+
+function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string }) {
   const sex = (scan.sex || '').toUpperCase();
-  // Chick if chipped as chick AND under 6 months from hatch (hatch = chip_date - 6 weeks)
-  const isChick = (() => {
-    if (scan.chipped_as_adult) return false;
-    if (!scan.chip_date) return false;
-    const hatchTime = new Date(scan.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
-    const obsTime = observationDate ? new Date(observationDate).getTime() : Date.now();
-    return (obsTime - hatchTime) < 180 * 86400000; // 6 months from hatch
-  })();
-  const icon = isChick && !sex ? '\uD83D\uDC23' : sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : '';
-  const sexClass = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
+  const cls = penguinSexClass(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
+  const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.penguin_number ? `#${scan.penguin_number}` : '';
-  const chip = scan.tag_number.slice(-8);
+  const chip = scan.tag_number ? scan.tag_number.slice(-8) : '';
   return (
-    <span className={`scan clickable ${sexClass}`} onClick={onClick}>
-      {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{(num || icon) ? ' ' : ''}{chip}
+    <span className={`scan clickable ${cls}`} onClick={onClick}>
+      {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{(num || icon) && chip ? ' ' : ''}{chip}
     </span>
   );
 }
@@ -362,7 +366,7 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
   const seasonPairs = new Map<string, Map<string, number>>(); // "maleTag|femaleTag" -> count during I/G
 
   for (const obs of observations) {
-    const obsDate = new Date(obs.observation_time_utc);
+    const obsDate = parseDate(obs.observation_time_utc);
     const label = getSeasonLabel(obsDate);
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
     if (!seasonPairs.has(label)) seasonPairs.set(label, new Map());
@@ -461,7 +465,7 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.tag_number.slice(-8)} className="bird-with-count">
-                      <PenguinBadge scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.tag_number)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
@@ -469,7 +473,7 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
               )}
               {others.map(b => (
                 <span key={b.tag_number.slice(-8)} className="bird-with-count">
-                  <PenguinBadge scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                  <PenguinMini scan={b} onClick={() => onBirdClick(b.tag_number)} />
                   <span className="scan-count">{b.scanCount}x</span>
                 </span>
               ))}
@@ -571,7 +575,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
         <div className="obs-edit-birds">
           {localScans.map(s => (
             <span key={s.scan_id || s.tag_number} className="scan-removable">
-              <PenguinBadge scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
+              <PenguinMini scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
               <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
             </span>
           ))}
@@ -580,11 +584,11 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
             {filteredAdd.length > 0 && (
               <div className="add-scan-results">
                 {filteredAdd.map((p: any) => {
-                  const sex = (p.sex || '').toUpperCase();
-                  const bg = sex === 'F' ? '#FFE4E1' : sex === 'M' ? '#E6F3FF' : '#FFF9C4';
+                  const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
+                  const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
                   return (
-                    <div key={p.tag_number} className="add-scan-option clickable" style={{background: bg}} onClick={() => addScan(p)}>
-                      #{p.penguin_number || '?'} {sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : ''} {p.tag_number.slice(-8)}
+                    <div key={p.tag_number} className={`add-scan-option clickable ${cls}`} onClick={() => addScan(p)}>
+                      {p.penguin_number ? `#${p.penguin_number}` : ''}{icon ? ` ${icon}` : ''} {p.tag_number.slice(-8)}
                     </div>
                   );
                 })}
@@ -598,7 +602,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
       {!editing && obs.scans.length>0 && (
         <div className="scans">
           {obs.scans.map((s,j) => (
-            <PenguinBadge key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
+            <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
           ))}
         </div>
       )}
@@ -688,7 +692,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                 <div className="history-meta">
                   <span className={`history-action ${e.action.toLowerCase()}`}>{e.action}</span>
                   <span className="muted">{e.observer_name}</span>
-                  <span className="muted">{new Date(e.change_timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'})}</span>
+                  <span className="muted">{parseDate(e.change_timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'})}</span>
                 </div>
                 {e.action === 'UPDATE' && (
                   <div className="history-fields">
@@ -699,8 +703,20 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                     ))}
                   </div>
                 )}
-                {e.action === 'INSERT' && <div className="history-fields muted">Record created</div>}
-                {e.action === 'DELETE' && <div className="history-fields muted">Record deleted</div>}
+                {e.action === 'INSERT' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
+                  <div className="history-fields">
+                    <span className={`scan ${penguinSexClass(e.penguin_info.sex)}`}>
+                      {e.penguin_info.penguin_number ? `#${e.penguin_info.penguin_number} ` : ''}{penguinSexIcon(e.penguin_info.sex)} {(e.penguin_info.tag_number || '').slice(-8)}
+                    </span> added
+                  </div>
+                ) : <div className="history-fields muted">Record created</div>)}
+                {e.action === 'DELETE' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
+                  <div className="history-fields">
+                    <span className={`scan ${penguinSexClass(e.penguin_info.sex)}`}>
+                      {e.penguin_info.penguin_number ? `#${e.penguin_info.penguin_number} ` : ''}{penguinSexIcon(e.penguin_info.sex)} {(e.penguin_info.tag_number || '').slice(-8)}
+                    </span> removed
+                  </div>
+                ) : <div className="history-fields muted">Record deleted</div>)}
               </div>
             );
           })}
@@ -877,9 +893,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
           {partners.map((pt: any) => (
             <div key={pt.tag} className="partner-card">
               <div className="partner-head">
-                <span className={`bird-chip clickable ${(pt.sex||'').toUpperCase()==='F'?'f':(pt.sex||'').toUpperCase()==='M'?'m':''}`}
+                <span className={`bird-chip clickable ${penguinSexClass(pt.sex)}`}
                       onClick={() => onBirdClick(pt.tag)}>
-                  {pt.tag}{pt.sex ? ` ${pt.sex}` : ''}
+                  {pt.penguin_number ? `#${pt.penguin_number} ` : ''}{penguinSexIcon(pt.sex)} {pt.tag.slice(-8)}
                 </span>
                 <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''}</span>
               </div>
@@ -918,16 +934,12 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
       {filtered.length > 0 && (
         <div className="penguin-results">
           {filtered.slice(0, 20).map((p: any) => {
-            const sex = (p.sex || '').toUpperCase();
-            const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
-            const cls = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
+            const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
+            const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
             return (
               <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }}>
                 <span className="pr-tag">
-                  {(() => {
-                    const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
-                    return isChick && !sex ? '\uD83D\uDC23 ' : sex === 'F' ? '\u2640 ' : sex === 'M' ? '\u2642 ' : '';
-                  })()}{p.penguin_number ? `#${p.penguin_number}` : p.tag_number.slice(-8)}
+                  {p.penguin_number ? `#${p.penguin_number} ` : ''}{icon ? `${icon} ` : ''}{p.tag_number.slice(-8)}
                 </span>
                 <span className="pr-meta">
                   {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
@@ -1105,9 +1117,13 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       return;
     }
 
-    // Check date vs chip date and life stage
+    // Must be a known penguin
     const birdInfo = allPenguins.find((p: any) => p.tag_number.slice(-8) === short || p.tag_number === tag);
-    if (birdInfo && parsedDate) {
+    if (!birdInfo) {
+      setMessage(`Unknown penguin ${short} - not in database`);
+      return;
+    }
+    if (parsedDate) {
       if (birdInfo.chip_date && parsedDate < birdInfo.chip_date) {
         if (!confirm(`WARNING: Observation date ${parsedDate} is before this penguin's chip date ${birdInfo.chip_date}. Continue?`)) return;
       }
@@ -1143,11 +1159,10 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     setBirdSearch('');
 
     // Auto-increment adult or chick count based on bird age at observation date
-    const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === short || p.tag_number === tag);
-    if (bird && parsedDate && bird.chip_date) {
-      const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
+    if (parsedDate && birdInfo.chip_date) {
+      const hatchTime = new Date(birdInfo.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
       const obsTime = new Date(parsedDate).getTime();
-      const isChick = !bird.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
+      const isChick = !birdInfo.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
       if (isChick) setChicks(c => c + 1);
       else setAdults(a => a + 1);
     } else {
@@ -1204,23 +1219,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
       // 3. Create penguin scans
       for (const birdId of scannedBirds) {
-        // Find or create penguin
-        const pRes = await fetch(`/penguin-api/crud.php?action=list&table=penguins&tag_number=${birdId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const pData = await pRes.json();
-        let penguinId: number;
-        if (pData.length > 0) {
-          penguinId = pData[0].penguin_id;
-        } else {
-          const createRes = await fetch('/penguin-api/crud.php?action=create&table=penguins', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ tag_number: birdId })
-          });
-          const createData = await createRes.json();
-          penguinId = createData.id;
+        const knownBird = allPenguins.find((p: any) => p.tag_number.slice(-8) === birdId || p.tag_number === birdId);
+        if (!knownBird) {
+          setMessage(`Unknown penguin ${birdId} - not in database`);
+          continue;
         }
+        const penguinId = knownBird.penguin_id;
 
         await fetch('/penguin-api/crud.php?action=create&table=penguin_scans', {
           method: 'POST',
@@ -1399,11 +1403,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             return seenBirds.size > 0 ? (
               <div className="bird-row" style={{marginTop:'6px'}}>
                 {Array.from(seenBirds.entries()).map(([tag, info]) => {
-                  const cls = (info.sex||'').toUpperCase() === 'F' ? 'f' : (info.sex||'').toUpperCase() === 'M' ? 'm' : '';
+                  const cls = penguinSexClass(info.sex);
+                  const icon = penguinSexIcon(info.sex);
                   const already = scannedBirds.includes(tag);
                   return <span key={tag} className={`bird-chip clickable ${cls} ${already ? 'added' : ''}`}
                     onClick={() => { if (!already) addBird(tag); }}>
-                    {(info.sex||'').toUpperCase() === 'F' ? '\u2640 ' : (info.sex||'').toUpperCase() === 'M' ? '\u2642 ' : ''}{tag}{already ? ' \u2713' : ''}
+                    {icon ? `${icon} ` : ''}{tag}{already ? ' \u2713' : ''}
                   </span>;
                 })}
               </div>
@@ -1411,21 +1416,30 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           })()}
           {filteredBirds.length > 0 && (
             <div className="penguin-results">
-              {filteredBirds.map((p: any, idx: number) => (
-                <div key={p.tag_number} className={`penguin-result clickable ${(p.sex||'').toUpperCase()==='F'?'f':(p.sex||'').toUpperCase()==='M'?'m':''} ${idx === searchIdx ? 'focused' : ''}`}
-                  onClick={() => addBird(p.tag_number)}>
-                  {p.sex === 'F' ? '\u2640 ' : p.sex === 'M' ? '\u2642 ' : ''}{p.penguin_number ? `#${p.penguin_number}` : p.tag_number.slice(-8)}
-                </div>
-              ))}
+              {filteredBirds.map((p: any, idx: number) => {
+                const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
+                const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
+                return (
+                  <div key={p.tag_number} className={`penguin-result clickable ${cls} ${idx === searchIdx ? 'focused' : ''}`}
+                    onClick={() => addBird(p.tag_number)}>
+                    {p.penguin_number ? `#${p.penguin_number}` : ''}{icon ? ` ${icon}` : ''} {p.tag_number.slice(-8)}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
         {scannedBirds.length > 0 && (
           <div className="entry-birds">
-            {scannedBirds.map(b => (
-              <span key={b} className="bird-chip clickable" onClick={() => removeBird(b)}>{b} ✕</span>
-            ))}
+            {scannedBirds.map(b => {
+              const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === b || p.tag_number === b);
+              const cls = bird ? penguinSexClass(bird.sex, bird.chip_date, bird.chipped_as_adult) : '';
+              const icon = bird ? penguinSexIcon(bird.sex, bird.chip_date, bird.chipped_as_adult) : '';
+              return <span key={b} className={`bird-chip clickable ${cls}`} onClick={() => removeBird(b)}>
+                {bird?.penguin_number ? `#${bird.penguin_number} ` : ''}{icon ? `${icon} ` : ''}{b} ✕
+              </span>;
+            })}
           </div>
         )}
 
@@ -1720,7 +1734,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         </header>
         <div className="bird-page">
           <div className="page-header">
-            <h2>Penguin #{birdData?.penguin?.penguin_number || selectedBird}</h2>
+            <h2>Penguin {birdData?.penguin?.penguin_number ? `#${birdData.penguin.penguin_number}` : ''} {selectedBird.slice(-8)}</h2>
             <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
           </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
@@ -1790,7 +1804,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="bird-row">
                       {boxDetail.chipped_here!.map((c: ChippedHere) => (
                         <span key={c.tag_number} className="bird-with-count">
-                          <PenguinBadge scan={{tag_number: c.tag_number, penguin_number: c.penguin_number, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
+                          <PenguinMini scan={{tag_number: c.tag_number, penguin_number: c.penguin_number, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
                           <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
@@ -1814,7 +1828,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 // Group previous observations by season
                 const prevSeasons = new Map<string, Observation[]>();
                 for (const obs of prevObs) {
-                  const label = getSeasonLabel(new Date(obs.observation_time_utc));
+                  const label = getSeasonLabel(parseDate(obs.observation_time_utc));
                   if (!prevSeasons.has(label)) prevSeasons.set(label, []);
                   prevSeasons.get(label)!.push(obs);
                 }
@@ -1850,12 +1864,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   );
 }
 
+function parseDate(d: string): Date {
+  // MySQL "YYYY-MM-DD HH:MM:SS" → ISO format for reliable cross-browser parsing
+  return new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z');
+}
 function fmtDateTime(d:string) {
-  return new Date(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
+  return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
 function fmtDateNZ(d:string) {
-  return new Date(d + (d.includes('T') || d.includes('Z') ? '' : 'T00:00:00Z'))
-    .toLocaleDateString('en-NZ',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'Pacific/Auckland'});
+  return parseDate(d).toLocaleDateString('en-NZ',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'Pacific/Auckland'});
 }
 
 export default App;

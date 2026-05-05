@@ -43,7 +43,7 @@ $stmt->execute([$pid]);
 $biometrics = $stmt->fetchAll();
 
 // Partners
-$stmt = $pdo->prepare("SELECT p2.tag_number AS partner_tag, p2.sex AS partner_sex, p2.life_stage AS partner_life_stage,
+$stmt = $pdo->prepare("SELECT p2.tag_number AS partner_tag, p2.penguin_number AS partner_penguin_number, p2.sex AS partner_sex, p2.life_stage AS partner_life_stage,
     ol.location_name AS box_name, o.observation_time_utc, o.monitor_filename
     FROM penguin_scans ps1
     JOIN observations o ON ps1.observation_id = o.observation_id
@@ -59,7 +59,7 @@ $partners = [];
 foreach ($partnerRows as $row) {
     $ptag = substr($row['partner_tag'], -8);
     if (!isset($partners[$ptag])) {
-        $partners[$ptag] = ['tag'=>$ptag, 'full_tag'=>$row['partner_tag'], 'sex'=>$row['partner_sex'],
+        $partners[$ptag] = ['tag'=>$ptag, 'full_tag'=>$row['partner_tag'], 'penguin_number'=>$row['partner_penguin_number'], 'sex'=>$row['partner_sex'],
             'life_stage'=>$row['partner_life_stage'], 'sightings'=>[]];
     }
     $partners[$ptag]['sightings'][] = ['box'=>$row['box_name'], 'date'=>$row['observation_time_utc'], 'monitor'=>$row['monitor_filename']];

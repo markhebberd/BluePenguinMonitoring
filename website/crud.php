@@ -249,9 +249,55 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
 
 function handleHistory($pdo, $table, $id) {
     if (!$table || !$id) { echo json_encode(['error'=>'table and id required']); return; }
-    $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
-    $stmt->execute([$table, $id]);
-    echo json_encode($stmt->fetchAll());
+
+    if ($table === 'observations') {
+        // Get scan IDs belonging to this observation (current + from audit log)
+        $scanStmt = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ?");
+        $scanStmt->execute([$id]);
+        $scanIds = $scanStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        // Also find scans referenced in audit log for this observation
+        $auditStmt = $pdo->prepare("SELECT record_id FROM audit_log WHERE table_name = 'penguin_scans' AND changed_fields LIKE ?");
+        $auditStmt->execute(['%"observation_id":' . (int)$id . '%']);
+        foreach ($auditStmt->fetchAll(PDO::FETCH_COLUMN) as $sid) $scanIds[] = $sid;
+        // Also match string-encoded observation_id
+        $auditStmt2 = $pdo->prepare("SELECT record_id FROM audit_log WHERE table_name = 'penguin_scans' AND changed_fields LIKE ?");
+        $auditStmt2->execute(['%"observation_id":"' . (int)$id . '"%']);
+        foreach ($auditStmt2->fetchAll(PDO::FETCH_COLUMN) as $sid) $scanIds[] = $sid;
+        $scanIds = array_unique($scanIds);
+
+        if (!empty($scanIds)) {
+            $placeholders = implode(',', array_fill(0, count($scanIds), '?'));
+            $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id
+                WHERE (a.table_name = ? AND a.record_id = ?)
+                   OR (a.table_name = 'penguin_scans' AND a.record_id IN ($placeholders))
+                ORDER BY a.change_timestamp DESC LIMIT 100");
+            $stmt->execute(array_merge([$table, $id], $scanIds));
+        } else {
+            $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
+            $stmt->execute([$table, $id]);
+        }
+
+        // Enrich scan entries with penguin info
+        $results = $stmt->fetchAll();
+        foreach ($results as &$entry) {
+            if ($entry['table_name'] === 'penguin_scans') {
+                $fields = json_decode($entry['changed_fields'], true);
+                $penguinId = $fields['penguin_id'] ?? null;
+                if ($penguinId) {
+                    $pStmt = $pdo->prepare("SELECT penguin_number, tag_number, sex FROM penguins WHERE penguin_id = ?");
+                    $pStmt->execute([$penguinId]);
+                    $penguin = $pStmt->fetch();
+                    if ($penguin) $entry['penguin_info'] = $penguin;
+                }
+            }
+        }
+        echo json_encode($results);
+    } else {
+        $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
+        $stmt->execute([$table, $id]);
+        echo json_encode($stmt->fetchAll());
+    }
 }
 
 function handleChangePassword($pdo, $observer) {
