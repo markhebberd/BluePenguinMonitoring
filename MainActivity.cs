@@ -2400,13 +2400,6 @@ namespace PenguinMonitor
             return filters.Count > 0 ? string.Join(", ", filters) : "none";
         }
 
-        private string GetFilterTextRepresentation()
-        {
-            string show = GetShowFilterText();
-            string hide = GetHideFilterText();
-            if (hide == "none") return "Show " + show;
-            return "Show " + show + " except " + hide;
-        }
         internal void DrawPageLayouts()
         {
             new Handler(Looper.MainLooper).Post(() =>
@@ -2686,6 +2679,21 @@ namespace PenguinMonitor
             _dataCardLockIconView.LayoutParameters = iconParams;
             _singleBoxDataTitleLayout.AddView(_dataCardLockIconView);
 
+            // Edit box notes button in header (visible when unlocked)
+            _editBoxNotesButton = new Button(this)
+            {
+                Text = "Edit Notes",
+                TextSize = 12,
+                Visibility = ViewStates.Gone
+            };
+            _editBoxNotesButton.SetTextColor(UIFactory.PRIMARY_BLUE);
+            _editBoxNotesButton.SetBackgroundColor(Color.Transparent);
+            var editNotesBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            editNotesBtnParams.SetMargins(8, 0, 0, 0);
+            _editBoxNotesButton.LayoutParameters = editNotesBtnParams;
+            _editBoxNotesButton.Click += (s, e) => ShowBoxNotesDialog();
+            _singleBoxDataTitleLayout.AddView(_editBoxNotesButton);
+
             // Add a spacer that expands to fill available space
             var spacer1 = new View(this);
             spacer1.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MatchParent, 1f);
@@ -2858,19 +2866,6 @@ namespace PenguinMonitor
             _notesEditText[0].TextChanged += OnDataChanged;
             _singleBoxDataContentLayout.AddView(_notesEditText[0]);
 
-            // Edit box notes button (visible when box is unlocked)
-            _editBoxNotesButton = new Button(this)
-            {
-                Text = "Edit Notes",
-                Visibility = ViewStates.Gone
-            };
-            _editBoxNotesButton.SetTextColor(Color.White);
-            _editBoxNotesButton.SetBackgroundColor(UIFactory.PRIMARY_BLUE);
-            var editNotesButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            editNotesButtonParams.SetMargins(0, 0, 0, 16);
-            _editBoxNotesButton.LayoutParameters = editNotesButtonParams;
-            _editBoxNotesButton.Click += (s, e) => ShowBoxNotesDialog();
-            _singleBoxDataContentLayout.AddView(_editBoxNotesButton);
             _singleBoxDataOuterLayout.AddView(_singleBoxDataContentLayout);
 
             // Navigation card

@@ -24,8 +24,6 @@ namespace PenguinMonitor.Services
         internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
-        private CsvDataService _csvDataService = new CsvDataService();
-
         // HTTP client for API downloads
         private static readonly HttpClient _httpClient = new HttpClient();
         internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/penguin-api/penguins.php";
@@ -516,34 +514,6 @@ namespace PenguinMonitor.Services
                     lastBreedingStatus = olderBoxDatas.ElementAt(i).BreedingChance;
             }
             return olderBoxDatas;
-        }
-        internal static string getStickyNotes(List<BoxData> olderBoxes)
-        {
-            HashSet<string> removedStickies = new HashSet<string>();
-            HashSet<string> addedStickies = new HashSet<string>();
-            foreach (BoxData boxData in olderBoxes)
-            {
-                foreach (string part in boxData.Notes.Split(" ", StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (part.StartsWith("l-") && part.Length > 2)
-                    {
-                        string sticky = part.Substring(2);
-                        removedStickies.Add(sticky);
-                        addedStickies.Remove(sticky);
-                    }
-                    else if (part.StartsWith("l=") && part.Length > 2)
-                    {
-                        string sticky = part.Substring(2);
-                        if (!removedStickies.Contains(sticky))
-                            addedStickies.Add(sticky);
-                    }
-                    else if (part.StartsWith("l="))
-                    {
-                        return string.Join(" ", addedStickies);
-                    }
-                }
-            }
-            return string.Join(" ", addedStickies);
         }
         internal static string GetBoxBreedingStatusString(string boxName, BoxData? thisBoxData, List<BoxData> olderBoxDatas)
         {
