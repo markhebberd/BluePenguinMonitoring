@@ -3055,9 +3055,9 @@ namespace PenguinMonitor
             {
                 Text = currentNotes,
                 Hint = "Enter box notes...",
-                InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences,
-                MinLines = 3
+                InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences
             };
+            notesInput.SetMinLines(3);
             notesInput.SetTextColor(UIFactory.TEXT_PRIMARY);
             notesInput.SetHintTextColor(UIFactory.TEXT_SECONDARY);
             notesInput.SetPadding(16, 16, 16, 16);
@@ -3102,7 +3102,7 @@ namespace PenguinMonitor
 
                     // Save local cache to disk
                     var boxNotesJson = Newtonsoft.Json.JsonConvert.SerializeObject(_boxNotes, Newtonsoft.Json.Formatting.Indented);
-                    File.WriteAllText(Path.Combine(FilesDir?.AbsolutePath, DataStorageService.BOX_NOTES_FILENAME), boxNotesJson);
+                    File.WriteAllText(System.IO.Path.Combine(FilesDir?.AbsolutePath, DataStorageService.BOX_NOTES_FILENAME), boxNotesJson);
                 })
                 .SetNegativeButton("Cancel", (s, e) => { })
                 .Create();
