@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins } from './api/boxtags';
+import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory } from './api/boxtags';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -7,16 +7,26 @@ import { StatsPanel } from './components/StatsPanel';
 import type { BoxTag } from './types';
 import './App.css';
 
-interface Scan { tag_number:string; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
+interface Scan { scan_id?:number; penguin_id?:number; tag_number:string; penguin_number?:string|null; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
+
+function isChickAtDate(bird: any, dateStr: string): boolean {
+  if (!bird || !bird.chip_date || bird.chipped_as_adult) return false;
+  const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000;
+  const obsTime = new Date(dateStr).getTime();
+  return (obsTime - hatchTime) < 180 * 86400000;
+}
 interface Observation {
+  observation_id?:number;
   observation_time_utc:string; monitor_filename:string;
   adults:number; eggs:number; chicks:number;
   breeding_status:string|null; gate_status:string|null; notes:string;
   scans: Scan[];
 }
+interface ChippedHere { penguin_number:string; tag_number:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; }
 interface BoxDetailData {
-  location: { location_name:string; rfid_tag_number:string|null; } | null;
+  location: { location_id:number; location_name:string; persistent_notes:string|null; rfid_tag_number:string|null; } | null;
   observations: Observation[];
+  chipped_here?: ChippedHere[];
 }
 
 // Color progression: NO → UNL → POT → CON → BR → Guard → PG → Molting. Red = alert only.
@@ -24,11 +34,12 @@ const STATUS_COLORS: Record<string,string> = {
   NO:'#E0E0E0',       // gray
   UNL:'#FFF9C4',      // pale yellow
   POT:'#FFF176',      // yellow
-  CON:'#FFD54F',      // amber-yellow
-  BR:'#66BB6A',       // light green - breeding/eggs
-  G:'#4CAF50',        // green - guard
-  PG:'#8BC34A',       // yellow-green - post guard
-  MOULT:'#FFB74D',    // amber - moulting
+  CON:'#FFD54F',      // amber
+  BR:'#66BB6A',       // light green - breeding confirmed
+  I:'#A5D6A7',        // lightest green - incubation
+  G:'#4CAF50',        // mid green - guard
+  PG:'#2E7D32',       // darkest green - post guard
+  MOULT:'#42A5F5',    // blue - moulting
   ABN:'#F44336',      // red - alert
   DCM:'#795548',      // brown
   '':'#F5F5F5',
@@ -36,7 +47,7 @@ const STATUS_COLORS: Record<string,string> = {
 
 const STATUS_NAMES: Record<string,string> = {
   NO:'No', UNL:'Unlikely', POT:'Potential', CON:'Confident',
-  G:'Guard', PG:'Post-guard', MOULT:'Moulting',
+  I:'Incubation', G:'Guard', PG:'Post-guard', MOULT:'Moulting',
   DCM:'DCM',
 };
 
@@ -56,21 +67,23 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   const allSorted = [...observations].sort((a, b) => new Date(a.observation_time_utc).getTime() - new Date(b.observation_time_utc).getTime());
 
   // Build status changes from ALL observations (to carry forward pre-season status)
-  // BR maps to G (Guard). Also: if eggs/chicks present but no status set, infer Guard.
+  // Derive status: I=Incubation (eggs, no chicks), G=Guard (chicks present)
   const changes: { time: number; status: string }[] = [];
   let runningStatus = '';
   for (const obs of allSorted) {
     let s = obs.breeding_status;
-    // BR only maps to Guard when eggs or chicks are present
+    // BR maps to incubation or guard based on egg/chick state
     if (s === 'BR') {
-      s = (obs.eggs > 0 || obs.chicks > 0) ? 'G' : null;
+      s = obs.chicks > 0 ? 'G' : obs.eggs > 0 ? 'I' : null;
     }
-    // Infer Guard from egg/chick presence even without explicit status
-    if (!s && (obs.eggs > 0 || obs.chicks > 0) && runningStatus !== 'G') {
+    // Infer from egg/chick presence even without explicit status
+    if (!s && obs.chicks > 0) {
       s = 'G';
+    } else if (!s && obs.eggs > 0 && runningStatus !== 'I' && runningStatus !== 'G') {
+      s = 'I';
     }
-    // End Guard when eggs+chicks drop to 0
-    if (runningStatus === 'G' && obs.eggs === 0 && obs.chicks === 0 && !s) {
+    // End when eggs+chicks drop to 0
+    if ((runningStatus === 'G' || runningStatus === 'I') && obs.eggs === 0 && obs.chicks === 0 && !s) {
       runningStatus = '';
       changes.push({ time: new Date(obs.observation_time_utc).getTime(), status: '' });
     } else if (s && s !== runningStatus) {
@@ -334,37 +347,59 @@ function PenguinBadge({ scan, onClick, observationDate }: { scan: Scan; onClick:
   })();
   const icon = isChick && !sex ? '\uD83D\uDC23' : sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : '';
   const sexClass = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
-  const ageStr = fmtChipAge(scan.chip_date, !!scan.chipped_as_adult);
-
+  const num = scan.penguin_number ? `#${scan.penguin_number}` : '';
+  const chip = scan.tag_number.slice(-8);
   return (
     <span className={`scan clickable ${sexClass}`} onClick={onClick}>
-      {icon && <span className="sex-icon">{icon}</span>}
-      {scan.tag_number.slice(-8)}
-      {ageStr && <span className="age-info">{ageStr}</span>}
+      {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{(num || icon) ? ' ' : ''}{chip}
     </span>
   );
 }
 
 function AllScannedBirds({ observations, onBirdClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void }) {
-  // Group birds by season
-  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string }>>();
+  // Group birds by season, track co-sightings during incubation/guard
+  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
+  const seasonPairs = new Map<string, Map<string, number>>(); // "maleTag|femaleTag" -> count during I/G
 
   for (const obs of observations) {
     const obsDate = new Date(obs.observation_time_utc);
     const label = getSeasonLabel(obsDate);
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
+    if (!seasonPairs.has(label)) seasonPairs.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
+    const pairMap = seasonPairs.get(label)!;
+
+    const isIG = obs.eggs > 0 || obs.chicks > 0;
 
     for (const scan of obs.scans) {
       const key = scan.tag_number.slice(-8);
       const existing = birdMap.get(key);
-      if (!existing || obs.observation_time_utc > existing.lastSeen) {
-        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc });
+      if (!existing) {
+        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, igCount: isIG ? 1 : 0, scanCount: 1 });
+      } else {
+        existing.scanCount++;
+        if (isIG) existing.igCount++;
+        if (obs.observation_time_utc > existing.lastSeen) {
+          existing.lastSeen = obs.observation_time_utc;
+          existing.sex = scan.sex;
+          existing.life_stage = scan.life_stage;
+        }
+      }
+    }
+
+    // Track M+F pairs during I/G phases
+    if (isIG && obs.scans.length >= 2) {
+      const males = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'M');
+      const females = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'F');
+      for (const m of males) {
+        for (const f of females) {
+          const pairKey = m.tag_number.slice(-8) + '|' + f.tag_number.slice(-8);
+          pairMap.set(pairKey, (pairMap.get(pairKey) || 0) + 1);
+        }
       }
     }
   }
 
-  // Sort seasons newest first
   const seasons = Array.from(seasonBirds.entries())
     .sort((a, b) => b[0].localeCompare(a[0]));
 
@@ -373,14 +408,70 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
   return (
     <div className="all-birds">
       {seasons.map(([label, birdMap]) => {
-        const birds = Array.from(birdMap.values()).sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+        const birds = Array.from(birdMap.values());
         if (birds.length === 0) return null;
+
+        // Find breeding pair: M+F with most I/G co-sightings
+        // If no I/G data, fall back to most common M+F pair by total co-sightings
+        const pairMap = seasonPairs.get(label) || new Map();
+        let breedingMale = '';
+        let breedingFemale = '';
+        let maxPairCount = 0;
+        for (const [key, count] of pairMap.entries()) {
+          if (count > maxPairCount) {
+            maxPairCount = count;
+            [breedingMale, breedingFemale] = key.split('|');
+          }
+        }
+
+        // Only show breeding pair if there were actual eggs or chicks (I/G observations)
+        if (maxPairCount === 0) {
+          breedingMale = '';
+          breedingFemale = '';
+        }
+
+        // Sort: breeding M (0), breeding F (1), other M (2), other F (3), unsexed (4)
+        // Within same group, sort by scan count descending
+        const sorted = birds.sort((a, b) => {
+          const aKey = a.tag_number.slice(-8);
+          const bKey = b.tag_number.slice(-8);
+          const aSex = (a.sex || '').toUpperCase();
+          const bSex = (b.sex || '').toUpperCase();
+
+          const aOrder = aKey === breedingMale ? 0 : aKey === breedingFemale ? 1 : aSex === 'M' ? 2 : aSex === 'F' ? 3 : 4;
+          const bOrder = bKey === breedingMale ? 0 : bKey === breedingFemale ? 1 : bSex === 'M' ? 2 : bSex === 'F' ? 3 : 4;
+          if (aOrder !== bOrder) return aOrder - bOrder;
+          return b.scanCount - a.scanCount;
+        });
+
+        const pair = sorted.filter(b => {
+          const k = b.tag_number.slice(-8);
+          return k === breedingMale || k === breedingFemale;
+        });
+        const others = sorted.filter(b => {
+          const k = b.tag_number.slice(-8);
+          return k !== breedingMale && k !== breedingFemale;
+        });
+
         return (
           <div key={label} className="season-birds">
             <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
             <div className="bird-row">
-              {birds.map(b => (
-                <PenguinBadge key={b.tag_number.slice(-8)} scan={b} onClick={() => onBirdClick(b.tag_number)} />
+              {pair.length === 2 && (
+                <span className="breeding-pair">
+                  {pair.map(b => (
+                    <span key={b.tag_number.slice(-8)} className="bird-with-count">
+                      <PenguinBadge scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                      <span className="scan-count">{b.scanCount}x</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {others.map(b => (
+                <span key={b.tag_number.slice(-8)} className="bird-with-count">
+                  <PenguinBadge scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                  <span className="scan-count">{b.scanCount}x</span>
+                </span>
               ))}
             </div>
           </div>
@@ -390,39 +481,236 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
   );
 }
 
-function ObsCard({ obs, onBirdClick, highlight, scrollTo }: { obs: Observation; onBirdClick?: (tag:string)=>void; highlight?: boolean; scrollTo?: boolean }) {
+function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPenguins }: { obs: Observation; onBirdClick?: (tag:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [flashing, setFlashing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [editCount, setEditCount] = useState(0);
+  const trackEdit = (field: string) => async (val: any) => {
+    const result = await saveObs(field)(val);
+    if (result?.changed) setEditCount(c => c + 1);
+    return result;
+  };
   useEffect(() => {
     if (scrollTo && ref.current) {
       ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashing(true);
+      const timer = setTimeout(() => setFlashing(false), 1500);
+      return () => clearTimeout(timer);
     }
   }, [highlight]);
+  const obsId = obs.observation_id;
+  const saveObs = (field: string) => (val: any) => obsId ? updateRecord(token || '', 'observations', obsId, {[field]: val}) : Promise.resolve();
+  const [editing, setEditing] = useState(false);
+  const [birdSearch, setBirdSearch] = useState('');
+  const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
+
+  const filteredAdd = birdSearch.length > 0 && allPenguins
+    ? allPenguins.filter((p: any) =>
+        (p.penguin_number === birdSearch || p.tag_number.includes(birdSearch))
+        && !localScans.some(s => s.tag_number === p.tag_number)
+      ).slice(0, 8)
+    : [];
+
+  const addScan = async (p: any) => {
+    if (!obsId || !token) return;
+    const result = await createRecord(token, 'penguin_scans', {
+      observation_id: obsId, penguin_id: p.penguin_id, scan_time_utc: obs.observation_time_utc
+    });
+    if (result?.id) {
+      const newScan: Scan = { scan_id: result.id, penguin_id: p.penguin_id, tag_number: p.tag_number, penguin_number: p.penguin_number, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
+      setLocalScans([...localScans, newScan]);
+      obs.scans.push(newScan);
+      const isChick = isChickAtDate(p, obs.observation_time_utc);
+      if (isChick) await trackEdit('chicks')(obs.chicks + 1);
+      else await trackEdit('adults')(obs.adults + 1);
+    }
+    setBirdSearch('');
+  };
+
+  const removeScan = async (scan: Scan) => {
+    if (!scan.scan_id || !token) return;
+    await deleteRecord(token, 'penguin_scans', scan.scan_id);
+    const updated = localScans.filter(s => s.scan_id !== scan.scan_id);
+    setLocalScans(updated);
+    obs.scans.splice(obs.scans.indexOf(scan), 1);
+    const bird = allPenguins?.find((p: any) => p.tag_number === scan.tag_number);
+    const isChick = isChickAtDate(bird || scan, obs.observation_time_utc);
+    if (isChick) await trackEdit('chicks')(Math.max(0, obs.chicks - 1));
+    else await trackEdit('adults')(Math.max(0, obs.adults - 1));
+  };
+
   return (
-    <div ref={ref} className={`obs-card ${highlight ? 'highlighted' : ''}`}>
+    <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`}>
       <div className="obs-top">
-        <b>{fmtDateTime(obs.observation_time_utc)}</b>
-        <span className="muted small">{obs.monitor_filename}</span>
+        <span><b>{fmtDateTime(obs.observation_time_utc)}</b> <span className="muted small">{obs.monitor_filename}</span></span>
+        {canEdit && obsId && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+        {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
       </div>
-      <div className="obs-nums">
-        {obs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(obs.adults, 6))}</span>}
-        {obs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(obs.eggs, 6))}</span>}
-        {obs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(obs.chicks, 6))}</span>}
-        {obs.breeding_status && <span className="badge" style={{background:STATUS_COLORS[obs.breeding_status]||'#ccc'}}>{obs.breeding_status}</span>}
-        {obs.gate_status && <span className="gate">{obs.gate_status}</span>}
-      </div>
-      {obs.notes && <div className="obs-notes">{obs.notes}</div>}
-      {obs.scans.length>0 && (
+      {!editing ? (
+        <>
+          <div className="obs-nums">
+            {obs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(obs.adults, 6))}</span>}
+            {obs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(obs.eggs, 6))}</span>}
+            {obs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(obs.chicks, 6))}</span>}
+            {obs.breeding_status && <span className="badge" style={{background:STATUS_COLORS[obs.breeding_status]||'#ccc'}}>{obs.breeding_status}</span>}
+            {obs.gate_status && <span className="gate">{obs.gate_status}</span>}
+          </div>
+          {obs.notes && <div className="obs-notes">{obs.notes}</div>}
+        </>
+      ) : (
+        <>
+        <div className="obs-edit-row">
+          <label>{'\uD83D\uDC27'}</label><EditableField value={obs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} />
+          <label>{'\uD83E\uDD5A'}</label><EditableField value={obs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} />
+          <label>{'\uD83D\uDC23'}</label><EditableField value={obs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} />
+          <EditableField value={obs.breeding_status || ''} type="select" options={['','BR','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
+          <EditableField value={obs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} />
+          <EditableField value={obs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
+        </div>
+        <div className="obs-edit-birds">
+          {localScans.map(s => (
+            <span key={s.scan_id || s.tag_number} className="scan-removable">
+              <PenguinBadge scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
+              <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
+            </span>
+          ))}
+          <div className="add-scan-search">
+            <input className="ef-input" placeholder="Add penguin #..." value={birdSearch} onChange={e => setBirdSearch(e.target.value)} />
+            {filteredAdd.length > 0 && (
+              <div className="add-scan-results">
+                {filteredAdd.map((p: any) => {
+                  const sex = (p.sex || '').toUpperCase();
+                  const bg = sex === 'F' ? '#FFE4E1' : sex === 'M' ? '#E6F3FF' : '#FFF9C4';
+                  return (
+                    <div key={p.tag_number} className="add-scan-option clickable" style={{background: bg}} onClick={() => addScan(p)}>
+                      #{p.penguin_number || '?'} {sex === 'F' ? '\u2640' : sex === 'M' ? '\u2642' : ''} {p.tag_number.slice(-8)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        </>
+      )}
+      {editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
+      {!editing && obs.scans.length>0 && (
         <div className="scans">
           {obs.scans.map((s,j) => (
             <PenguinBadge key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
           ))}
         </div>
       )}
+      {showHistory && token && obsId && <HistoryPanel token={token} table="observations" id={obsId} onClose={() => setShowHistory(false)} />}
     </div>
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void }) {
+function EditableField({ value, type, options, onSave, placeholder, canEdit }: {
+  value: any; type?: 'text'|'number'|'select'|'date'; options?: string[];
+  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const ref = useRef<HTMLInputElement|HTMLSelectElement>(null);
+
+  useEffect(() => { if (editing && ref.current) ref.current.focus(); }, [editing]);
+  useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+
+  const display = value !== null && value !== undefined && value !== '' ? String(value) : null;
+
+  if (!canEdit) return <span className="ef-value">{display ?? <span className="muted">{placeholder || '-'}</span>}</span>;
+
+  if (!editing) {
+    return (
+      <span className="ef-value clickable" onClick={() => setEditing(true)}>
+        {display ?? <span className="muted">{placeholder || '-'}</span>}
+        {saved && <span className="ef-saved">&#10003;</span>}
+        <span className="ef-pencil">&#9998;</span>
+      </span>
+    );
+  }
+
+  const save = async () => {
+    setSaving(true);
+    const val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
+    await onSave(val);
+    setSaving(false);
+    setEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const cancel = () => { setDraft(String(value ?? '')); setEditing(false); };
+
+  if (type === 'select') {
+    return (
+      <select ref={ref as any} className="ef-input" value={draft} disabled={saving}
+        onChange={e => { setDraft(e.target.value); }}
+        onBlur={save} onKeyDown={e => { if (e.key === 'Escape') cancel(); }}>
+        {(options || []).map(o => <option key={o} value={o}>{o || '(none)'}</option>)}
+      </select>
+    );
+  }
+
+  return (
+    <input ref={ref as any} className="ef-input" type={type || 'text'} value={draft} disabled={saving}
+      placeholder={placeholder}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={save}
+      onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }} />
+  );
+}
+
+function HistoryPanel({ token, table, id, onClose }: { token: string; table: string; id: number; onClose: () => void }) {
+  const [entries, setEntries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchHistory(token, table, id).then(d => { setEntries(Array.isArray(d) ? d : []); setLoading(false); });
+  }, [token, table, id]);
+
+  return (
+    <div className="history-panel">
+      <div className="history-header">
+        <b>Change history</b>
+        <button className="page-back" onClick={onClose}>&times;</button>
+      </div>
+      {loading ? <p className="muted">Loading...</p> : entries.length === 0 ? <p className="muted">No changes recorded</p> : (
+        <div className="history-entries">
+          {entries.map((e: any, i: number) => {
+            const fields = typeof e.changed_fields === 'string' ? JSON.parse(e.changed_fields) : e.changed_fields;
+            return (
+              <div key={i} className="history-entry">
+                <div className="history-meta">
+                  <span className={`history-action ${e.action.toLowerCase()}`}>{e.action}</span>
+                  <span className="muted">{e.observer_name}</span>
+                  <span className="muted">{new Date(e.change_timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'})}</span>
+                </div>
+                {e.action === 'UPDATE' && (
+                  <div className="history-fields">
+                    {Object.entries(fields).map(([k, v]: [string, any]) => (
+                      <div key={k} className="history-field">
+                        <span className="muted">{k}:</span> <s>{String(v.old ?? '')}</s> &rarr; {String(v.new ?? '')}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {e.action === 'INSERT' && <div className="history-fields muted">Record created</div>}
+                {e.action === 'DELETE' && <div className="history-fields muted">Record deleted</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
   const scans: any[] = data.scans || [];
   const biometrics: any[] = data.biometrics || [];
@@ -434,18 +722,99 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick }: { data: an
   const ageStr = fmtChipAge(p.chip_date, isAdult);
   const boxes = Array.from(new Set(scans.map((s: any) => s.box_name)));
 
+  const chips: any[] = p.chips || [];
+  const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
+  const [editing, setEditing] = useState(false);
+  const savePenguin = (field: string) => (val: any) => updateRecord(token || '', 'penguins', p.penguin_id, {[field]: val});
+  const saveChip = (chipId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_chips', chipId, {[field]: val});
+  const saveBio = (bioId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val});
+
   return (
     <div className="bird-detail">
       <div className="bird-header" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
-        <h2>Penguin {p.tag_number.slice(-8)}</h2>
-        <div className="bird-meta">
-          {p.sex && <span className="bird-badge" style={{ background: sexColor }}>{p.sex === 'F' ? 'Female' : p.sex === 'M' ? 'Male' : p.sex}</span>}
-          {p.life_stage && <span className="bird-badge">{p.life_stage}</span>}
-          {ageStr && <span className="bird-badge">{ageStr}</span>}
-          {p.chip_date && <span className="muted">Chipped: {p.chip_date}</span>}
-          {p.vid_for_scanner && <span className="muted">VID: {p.vid_for_scanner}</span>}
+        <div className="obs-top">
+          <span className="bird-meta">
+            {p.sex && <span className="bird-badge" style={{ background: sexColor }}>{p.sex === 'F' ? 'Female' : p.sex === 'M' ? 'Male' : p.sex}</span>}
+            {p.life_stage && <span className="bird-badge">{p.life_stage}</span>}
+            {ageStr && <span className="bird-badge">{ageStr}</span>}
+            {p.chick_size_sex && <span className="bird-badge">{p.chick_size_sex}</span>}
+          </span>
+          {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+          {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
         </div>
-        <div className="muted">Full tag: {p.tag_number}</div>
+        {!editing ? (
+          <>
+            {p.vid_for_scanner && <div className="muted">VID: {p.vid_for_scanner}</div>}
+            {p.kommentar && <div className="bird-notes">{p.kommentar}</div>}
+          </>
+        ) : (
+          <div className="obs-edit">
+            <div className="obs-edit-row">
+              <label>Sex</label><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />
+              <label>Stage</label><EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />
+              <label>Size</label><EditableField value={p.chick_size_sex} onSave={savePenguin('chick_size_sex')} placeholder="-" canEdit={true} />
+            </div>
+            <div className="obs-edit-row">
+              <label>VID</label><EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />
+              <label>Notes</label><EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />
+            </div>
+          </div>
+        )}
+        {canEdit && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.penguin_id})}>History</button>}
+      </div>
+
+      {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
+
+      {/* Chip & biometric info */}
+      <div className="bird-section">
+        <table className="bird-table">
+          <tbody>
+            {chips.map((c: any, i: number) => (
+              <tr key={`chip${i}`}>
+                <td className="muted">Chip</td>
+                <td>
+                  {c.chip_number.slice(-8)}
+                  {!editing ? (
+                    <>
+                      {c.chip_date && <span className="muted"> &middot; {c.chip_date}</span>}
+                      {c.chip_box && <span className="muted"> &middot; box <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span></span>}
+                      {c.chip_by && <span className="muted"> &middot; by {c.chip_by}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="muted"> &middot; </span><EditableField value={c.chip_date} type="date" onSave={saveChip(c.chip_id, 'chip_date')} placeholder="date" canEdit={true} />
+                      <span className="muted"> &middot; box </span><EditableField value={c.chip_box} onSave={saveChip(c.chip_id, 'chip_box')} placeholder="box" canEdit={true} />
+                      <span className="muted"> &middot; by </span><EditableField value={c.chip_by} onSave={saveChip(c.chip_id, 'chip_by')} placeholder="who" canEdit={true} />
+                    </>
+                  )}
+                  {!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}
+                </td>
+              </tr>
+            ))}
+            {biometrics.map((b: any, i: number) => (
+              <tr key={`bio${i}`}>
+                <td className="muted">Measured</td>
+                <td>
+                  {!editing ? (
+                    <>
+                      {b.weight && <span>{parseFloat(b.weight).toFixed(0)}g</span>}
+                      {b.right_flipper_length && <span className="muted"> &middot; </span>}
+                      {b.right_flipper_length && <span>flipper {parseFloat(b.right_flipper_length).toFixed(0)}mm</span>}
+                      {b.observation_date && <span className="muted"> &middot; {b.observation_date}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span>
+                      <span className="muted"> &middot; flipper </span>
+                      <EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span>
+                      <span className="muted"> &middot; </span><EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {/* Breeding history by season */}
@@ -458,8 +827,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick }: { data: an
               <div className="obs-nums">
                 <span>{bs.scans} scan{bs.scans!==1?'s':''}</span>
                 <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
-                {bs.max_eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(bs.max_eggs,4))} max</span>}
-                {bs.max_chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(bs.max_chicks,4))} max</span>}
+                {bs.max_eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(bs.max_eggs,4))}</span>}
+                {bs.max_chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(bs.max_chicks,4))}</span>}
                 {bs.statuses.map((s:string) => <span key={s} className="badge" style={{background:STATUS_COLORS[s]||'#ccc'}}>{s}</span>)}
               </div>
             </div>
@@ -499,22 +868,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick }: { data: an
         ))}
       </div>
 
-      {/* Biometrics */}
-      {biometrics.length > 0 && (
-        <div className="bird-section">
-          <h3>Biometric data</h3>
-          {biometrics.map((b: any, i: number) => (
-            <div key={i} className="obs-card">
-              <b>{b.observation_date}</b>
-              {b.weight && <span> Weight: {b.weight}g</span>}
-              {b.left_flipper_length && <span> Flipper L: {b.left_flipper_length}mm</span>}
-              {b.right_flipper_length && <span> Flipper R: {b.right_flipper_length}mm</span>}
-              {b.body_length && <span> Body: {b.body_length}mm</span>}
-              {b.notes && <div className="obs-notes">{b.notes}</div>}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Partners */}
       {partners.length > 0 && (
@@ -550,7 +903,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   penguins: any[]; search: string; onSearchChange: (s:string)=>void; onBirdClick: (tag:string)=>void;
 }) {
   const filtered = search.length > 0
-    ? penguins.filter(p => p.tag_number.includes(search))
+    ? penguins.filter(p => p.tag_number.includes(search) || (p.penguin_number && p.penguin_number === search))
     : [];
 
   return (
@@ -568,17 +921,15 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
             const sex = (p.sex || '').toUpperCase();
             const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
             const cls = isChick && !sex ? 'chick' : sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
-            const age = fmtChipAge(p.chip_date, !!p.chipped_as_adult);
             return (
               <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }}>
                 <span className="pr-tag">
                   {(() => {
                     const isChick = !p.chipped_as_adult && p.chip_date && (Date.now() - (new Date(p.chip_date).getTime() - 42 * 86400000)) < 180 * 86400000;
                     return isChick && !sex ? '\uD83D\uDC23 ' : sex === 'F' ? '\u2640 ' : sex === 'M' ? '\u2642 ' : '';
-                  })()}{p.tag_number}
+                  })()}{p.penguin_number ? `#${p.penguin_number}` : p.tag_number.slice(-8)}
                 </span>
                 <span className="pr-meta">
-                  {age && <span className="pr-age">{age}</span>}
                   {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
                   {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
                   <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
@@ -596,13 +947,14 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, observerId?: number | string) => void }) {
+function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, observerId?: number | string, role?: string) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -626,7 +978,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
             body: JSON.stringify({ email, password })
           });
           const d2 = await r2.json();
-          if (d2.token) onLogin(d2.token, d2.name);
+          if (d2.token) onLogin(d2.token, d2.name, d2.observer_id, d2.role);
           else setError('Registered but login failed');
         } else {
           setError(data.error || 'Registration failed');
@@ -637,12 +989,17 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
         });
-        const data = await r.json();
-        if (data.token) onLogin(data.token, data.name, data.observer_id);
-        else setError(data.error || 'Login failed');
+        const text = await r.text();
+        try {
+          const data = JSON.parse(text);
+          if (data.token) onLogin(data.token, data.name, data.observer_id, data.role);
+          else setError(data.error || 'Login failed');
+        } catch {
+          setError('Server returned unexpected response: ' + text.substring(0, 100));
+        }
       }
-    } catch {
-      setError('Connection failed');
+    } catch (e: any) {
+      setError('Connection failed: ' + (e.message || ''));
     }
     setSubmitting(false);
   };
@@ -655,7 +1012,10 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
         <form onSubmit={handleSubmit}>
           {isRegister && <input type="text" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />}
           <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required />
-          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+          <div className="password-field">
+            <input type={showPassword ? 'text' : 'password'} placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+            <button type="button" className="toggle-pw" onClick={() => setShowPassword(!showPassword)}>{showPassword ? '\u{1F441}' : '\u{1F441}'}</button>
+          </div>
           {error && <div className="login-error">{error}</div>}
           <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Register' : 'Log in'}</button>
         </form>
@@ -723,7 +1083,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   }, [dateInput, season, dateMappings]);
 
   const filteredBirds = birdSearch.length > 0
-    ? allPenguins.filter((p: any) => p.tag_number.includes(birdSearch) && !p.tag_number.startsWith('LA900025') && !p.tag_number.startsWith('9130')).slice(0, 10)
+    ? allPenguins.filter((p: any) => (p.tag_number.includes(birdSearch) || (p.penguin_number && p.penguin_number === birdSearch)) && !p.tag_number.startsWith('LA900025') && !p.tag_number.startsWith('9130')).slice(0, 10)
     : [];
   const [searchIdx, setSearchIdx] = useState(-1);
   useEffect(() => { setSearchIdx(-1); }, [birdSearch]);
@@ -1054,7 +1414,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {filteredBirds.map((p: any, idx: number) => (
                 <div key={p.tag_number} className={`penguin-result clickable ${(p.sex||'').toUpperCase()==='F'?'f':(p.sex||'').toUpperCase()==='M'?'m':''} ${idx === searchIdx ? 'focused' : ''}`}
                   onClick={() => addBird(p.tag_number)}>
-                  {p.sex === 'F' ? '\u2640 ' : p.sex === 'M' ? '\u2642 ' : ''}{p.tag_number}
+                  {p.sex === 'F' ? '\u2640 ' : p.sex === 'M' ? '\u2642 ' : ''}{p.penguin_number ? `#${p.penguin_number}` : p.tag_number.slice(-8)}
                 </div>
               ))}
             </div>
@@ -1136,27 +1496,32 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean } {
 function App() {
   const [authToken, setAuthToken] = useState<string|null>(localStorage.getItem('ww_token'));
   const [userName, setUserName] = useState<string|null>(localStorage.getItem('ww_user'));
+  const [userRole, setUserRole] = useState<string>(localStorage.getItem('ww_role') || 'viewer');
 
-  const handleLogin = (token: string, name: string, observerId?: number | string) => {
+  const handleLogin = (token: string, name: string, observerId?: number | string, role?: string) => {
     localStorage.setItem('ww_token', token);
     localStorage.setItem('ww_user', name);
+    localStorage.setItem('ww_role', role || 'viewer');
     if (observerId) localStorage.setItem('ww_observer_id', String(observerId));
     setAuthToken(token);
     setUserName(name);
+    setUserRole(role || 'viewer');
   };
 
   const handleLogout = () => {
     localStorage.removeItem('ww_token');
     localStorage.removeItem('ww_user');
+    localStorage.removeItem('ww_role');
     setAuthToken(null);
     setUserName(null);
+    setUserRole('viewer');
   };
 
   if (!authToken) {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
-  return <AuthenticatedApp token={authToken} userName={userName || ''} onLogout={handleLogout} />;
+  return <AuthenticatedApp token={authToken} userName={userName || ''} userRole={userRole} onLogout={handleLogout} />;
 }
 
 function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () => void }) {
@@ -1164,6 +1529,8 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   const [newPass, setNewPass] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1186,8 +1553,14 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
       <div className="login-card" onClick={e => e.stopPropagation()}>
         <h2>Change Password</h2>
         <form onSubmit={handleSubmit}>
-          <input type="password" placeholder="Current password" value={current} onChange={e => setCurrent(e.target.value)} required />
-          <input type="password" placeholder="New password (6+ chars)" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={6} />
+          <div className="password-field">
+            <input type={showCurrent ? 'text' : 'password'} placeholder="Current password" value={current} onChange={e => setCurrent(e.target.value)} required />
+            <button type="button" className="toggle-pw" onClick={() => setShowCurrent(!showCurrent)}>{'\u{1F441}'}</button>
+          </div>
+          <div className="password-field">
+            <input type={showNew ? 'text' : 'password'} placeholder="New password (6+ chars)" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={6} />
+            <button type="button" className="toggle-pw" onClick={() => setShowNew(!showNew)}>{'\u{1F441}'}</button>
+          </div>
           {msg && <div className={msg === 'Password changed' ? 'entry-success' : 'login-error'}>{msg}</div>}
           <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Change password'}</button>
         </form>
@@ -1197,7 +1570,7 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   );
 }
 
-function AuthenticatedApp({ token, userName, onLogout }: { token: string; userName: string; onLogout: () => void }) {
+function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const initial = parseUrl();
   const [boxTags, setBoxTags] = useState<Record<string, BoxTag>>({});
@@ -1214,6 +1587,8 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
   const [allPenguins, setAllPenguins] = useState<any[]>([]);
   const [penguinSearch, setPenguinSearch] = useState('');
   const [showEntry, setShowEntry] = useState(initial.enter || false);
+  const [scrollToBox, setScrollToBox] = useState<string|null>(null);
+  const [previousBox, setPreviousBox] = useState<string|null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -1257,7 +1632,7 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
           allScans.push({ tag: s.tag_number.slice(-8), time: obs.observation_time_utc });
         }
       }
-      if (allScans.length > 0) {
+      if (allScans.length > 0 && window.innerWidth >= 900) {
         allScans.sort((a,b) => b.time.localeCompare(a.time));
         setSelectedBird(allScans[0].tag);
       } else {
@@ -1273,6 +1648,11 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
   }, [selectedBird]);
 
   const openBird = (tag: string) => {
+    // On mobile, navigate to bird page (clears box). On desktop, show side panel.
+    if (window.innerWidth < 900 && selectedBox) {
+      setPreviousBox(selectedBox);
+      setSelectedBox(null);
+    }
     setSelectedBird(tag.slice(-8));
   };
 
@@ -1339,9 +1719,12 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
           <span className="sub">Tarakohe Penguin Colony</span>
         </header>
         <div className="bird-page">
-          <button className="back-btn" onClick={closeBird}>&larr; Back</button>
+          <div className="page-header">
+            <h2>Penguin #{birdData?.penguin?.penguin_number || selectedBird}</h2>
+            <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
+          </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
-            <BirdPage data={birdData} onBirdClick={openBird}
+            <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
           ) : <p className="muted">Bird not found</p>}
@@ -1379,7 +1762,7 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
       <div className={selectedBox ? 'split-view' : ''}>
         {/* Box grid - always visible */}
         <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
-          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} boxInfo={stats?.box_info} />
+          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} />
         </div>
 
         {/* Box detail */}
@@ -1387,15 +1770,33 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
         <div className="detail-area">
           {/* Header + status bar full width */}
           <div className="detail-full">
-            <div className="detail-head">
+            <div className="page-header">
               <h2>Box {selectedBox}</h2>
-              <button onClick={() => setSelectedBox(null)}>&times;</button>
+              <button className="page-back" onClick={() => { setScrollToBox(selectedBox); setSelectedBox(null); }}>&larr; Overview</button>
             </div>
             {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
                 {boxDetail.location?.rfid_tag_number && <div className="tag-info">Tag: {boxDetail.location.rfid_tag_number.slice(-8)}</div>}
-                <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(d); setScrollToObs(d); }} />
+                {boxDetail.location && (
+                  <div className="persistent-notes">
+                    <EditableField value={boxDetail.location.persistent_notes || ''} onSave={(val) => updateRecord(token, 'observation_locations', boxDetail.location!.location_id, {persistent_notes: val})} placeholder="Box notes (persistent)" canEdit={userRole !== 'viewer'} />
+                  </div>
+                )}
+                <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} />
+                {(boxDetail.chipped_here?.length ?? 0) > 0 && (
+                  <div className="chipped-here">
+                    <div className="muted">Chipped in this box: {boxDetail.chipped_here!.length}</div>
+                    <div className="bird-row">
+                      {boxDetail.chipped_here!.map((c: ChippedHere) => (
+                        <span key={c.tag_number} className="bird-with-count">
+                          <PenguinBadge scan={{tag_number: c.tag_number, penguin_number: c.penguin_number, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
+                          <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             ) : null}
           </div>
@@ -1422,11 +1823,11 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
                 return (<>
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})</h3>
                   {thisSeason.length === 0 && <p className="muted">No observations this season</p>}
-                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} />)}
+                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />)}
                   {sortedPrev.map(([label, obs]) => (
                     <div key={label}>
                       <div className="season-divider"><hr/><span>{label} ({obs.length})</span><hr/></div>
-                      {obs.map((o,i) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={openBird} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} />)}
+                      {obs.map((o,i) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={openBird} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />)}
                     </div>
                   ))}
                 </>);
@@ -1434,7 +1835,7 @@ function AuthenticatedApp({ token, userName, onLogout }: { token: string; userNa
             </div>
             <div className="detail-bird">
               {birdData?.penguin ? (
-                <BirdPage data={birdData} onBirdClick={openBird}
+                <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
               ) : birdLoading ? <p className="muted">Loading bird...</p> : <p className="muted">Select a bird</p>}

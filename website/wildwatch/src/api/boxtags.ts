@@ -27,3 +27,36 @@ export async function fetchAllPenguins() {
 export async function fetchBirdDetail(tag: string) {
   return (await fetch(`/penguin-api/bird.php?tag=${encodeURIComponent(tag)}`)).json();
 }
+
+export async function updateRecord(token: string, table: string, id: number, fields: Record<string, any>) {
+  const r = await fetch(`/penguin-api/crud.php?action=update&table=${table}&id=${id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(fields)
+  });
+  return r.json();
+}
+
+export async function createRecord(token: string, table: string, fields: Record<string, any>) {
+  const r = await fetch(`/penguin-api/crud.php?action=create&table=${table}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(fields)
+  });
+  return r.json();
+}
+
+export async function deleteRecord(token: string, table: string, id: number) {
+  const r = await fetch(`/penguin-api/crud.php?action=delete&table=${table}&id=${id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+  });
+  return r.json();
+}
+
+export async function fetchHistory(token: string, table: string, id: number) {
+  const r = await fetch(`/penguin-api/crud.php?action=history&table=${table}&id=${id}`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  return r.json();
+}

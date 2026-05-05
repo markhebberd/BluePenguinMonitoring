@@ -52,8 +52,7 @@ $sql = "SELECT
         LEFT JOIN observations o ON ps.observation_id = o.observation_id AND o.is_deleted = FALSE
         LEFT JOIN observation_locations ol ON o.location_id = ol.location_id
         GROUP BY p.penguin_id
-        HAVING total_scans > 0
-        ORDER BY last_seen DESC";
+        ORDER BY last_seen DESC, p.penguin_number + 0 ASC";
 
 $stmt = $pdo->query($sql);
 $penguins = $stmt->fetchAll();

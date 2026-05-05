@@ -20,7 +20,7 @@ if (!$penguin) {
 }
 if (!$penguin) { echo json_encode(['error'=>'penguin not found']); exit; }
 // Include chips in response
-$chipsStmt = $pdo->prepare("SELECT chip_number, chip_date, is_active FROM penguin_chips WHERE penguin_id = ? ORDER BY chip_date");
+$chipsStmt = $pdo->prepare("SELECT chip_number, chip_date, is_active, chip_box, chip_by, chip_ok, rechip_by, solo, full_iso FROM penguin_chips WHERE penguin_id = ? ORDER BY chip_date");
 $chipsStmt->execute([$penguin['penguin_id']]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 $pid = $penguin['penguin_id'];

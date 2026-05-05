@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { BoxTag } from '../types';
 
 const STATUS_COLORS: Record<string,string> = {
@@ -12,9 +13,23 @@ interface BoxGridProps {
   selectedBox: string | null;
   onBoxSelect: (boxId: string) => void;
   boxInfo?: Record<string, BoxInfo>;
+  scrollToBox?: string | null;
 }
 
-export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo }: BoxGridProps) {
+export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBox }: BoxGridProps) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [flashBox, setFlashBox] = useState<string|null>(null);
+  useEffect(() => {
+    if (scrollToBox && gridRef.current) {
+      const el = gridRef.current.querySelector(`[data-box="${scrollToBox}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFlashBox(scrollToBox);
+        const timer = setTimeout(() => setFlashBox(null), 1500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [scrollToBox]);
   // Show all boxes from both tags and observations
   const allIds = new Set([...Object.keys(boxTags), ...Object.keys(boxInfo || {})]);
   const sorted = Array.from(allIds).sort((a, b) => {
@@ -26,7 +41,7 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo }: BoxGridP
   return (
     <div className="box-grid">
       <h3>Nest Boxes ({sorted.length})</h3>
-      <div className="grid">
+      <div className="grid" ref={gridRef}>
         {sorted.map(boxId => {
           const info = boxInfo?.[boxId];
           const status = info?.s || '';
@@ -39,7 +54,8 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo }: BoxGridP
           return (
             <div
               key={boxId}
-              className={`box-card ${boxId === selectedBox ? 'selected' : ''}`}
+              data-box={boxId}
+              className={`box-card ${boxId === selectedBox ? 'selected' : ''} ${boxId === flashBox ? 'flash-highlight' : ''}`}
               style={{ backgroundColor: bg, color: darkText ? '#fff' : undefined }}
               onClick={() => onBoxSelect(boxId)}
             >

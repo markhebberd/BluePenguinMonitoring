@@ -91,7 +91,7 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
 
     // Get scans for each observation
     foreach ($observations as &$obs) {
-        $scanSql = "SELECT ps.scan_time_utc, p.tag_number, p.sex, p.life_stage, p.vid_for_scanner
+        $scanSql = "SELECT ps.scan_time_utc, p.penguin_number, p.tag_number, p.sex, p.life_stage, p.vid_for_scanner
                     FROM penguin_scans ps
                     JOIN penguins p ON ps.penguin_id = p.penguin_id
                     WHERE ps.observation_id = ?

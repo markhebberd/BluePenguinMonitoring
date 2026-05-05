@@ -1,16 +1,17 @@
 <?php
 /**
- * Audited CRUD API with session-based observer auth.
+ * Audited CRUD API with session-based observer auth and role-based access.
  *
- * POST ?action=login     - {email, password} -> token
+ * POST ?action=login     - {email, password} -> token, role
  * POST ?action=register  - {name, email, password} (restricted emails only)
  *
  * All other actions require Authorization: Bearer <token>
  * GET    ?action=list&table=X[&field=val]
  * GET    ?action=get&table=X&id=N
- * POST   ?action=create&table=X  (JSON body)
- * POST   ?action=update&table=X&id=N  (JSON body)
- * POST   ?action=delete&table=X&id=N
+ * GET    ?action=history&table=X&id=N  - audit log for a record
+ * POST   ?action=create&table=X  (JSON body) [editor+]
+ * POST   ?action=update&table=X&id=N  (JSON body) [editor+]
+ * POST   ?action=delete&table=X&id=N  [editor+, soft delete for observations]
  */
 require_once 'config.php';
 
@@ -49,19 +50,39 @@ $tables = [
     'penguins' => 'penguin_id',
     'penguin_scans' => 'scan_id',
     'penguin_biometric_data' => 'biometric_id',
+    'penguin_chips' => 'chip_id',
+    'observation_locations' => 'location_id',
 ];
+
+if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
 
 if (!in_array($action, ['list','get','create','update','delete'])) { echo json_encode(['error'=>'Invalid action']); exit; }
 if (!isset($tables[$table])) { echo json_encode(['error'=>'Invalid table']); exit; }
 
 $pk = $tables[$table];
+$role = $observer['role'] ?? 'viewer';
+
+// API role: can only read penguins, read/write observation_locations
+$apiWriteTables = ['observation_locations'];
+$apiReadTables = ['penguins', 'penguin_chips', 'observation_locations'];
+
+$canRead = ($role !== 'api') || in_array($table, $apiReadTables);
+$canWrite = ($role === 'admin' || $role === 'editor') || ($role === 'api' && in_array($table, $apiWriteTables));
 
 switch ($action) {
-    case 'list': handleList($pdo, $table); break;
-    case 'get': handleGet($pdo, $table, $pk, $id); break;
-    case 'create': handleCreate($pdo, $table, $pk, $observer); break;
-    case 'update': handleUpdate($pdo, $table, $pk, $id, $observer); break;
-    case 'delete': handleDelete($pdo, $table, $pk, $id, $observer); break;
+    case 'list':
+    case 'get':
+        if (!$canRead) { http_response_code(403); echo json_encode(['error'=>'Access denied']); break; }
+        $action === 'list' ? handleList($pdo, $table) : handleGet($pdo, $table, $pk, $id);
+        break;
+    case 'create':
+    case 'update':
+    case 'delete':
+        if (!$canWrite) { http_response_code(403); echo json_encode(['error'=>'Editors only']); break; }
+        if ($action === 'create') handleCreate($pdo, $table, $pk, $observer);
+        elseif ($action === 'update') handleUpdate($pdo, $table, $pk, $id, $observer);
+        else handleDelete($pdo, $table, $pk, $id, $observer);
+        break;
 }
 
 function handleLogin($pdo) {
@@ -84,7 +105,13 @@ function handleLogin($pdo) {
     $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
         ->execute([$token, $observer['observer_id'], $expires]);
 
-    echo json_encode(['token'=>$token, 'observer_id'=>$observer['observer_id'], 'name'=>$observer['observer_name'], 'expires'=>$expires]);
+    echo json_encode([
+        'token'=>$token,
+        'observer_id'=>$observer['observer_id'],
+        'name'=>$observer['observer_name'],
+        'role'=>$observer['role'] ?? 'viewer',
+        'expires'=>$expires
+    ]);
 }
 
 function handleRegister($pdo) {
@@ -103,7 +130,7 @@ function handleRegister($pdo) {
 
     $hash = password_hash($password, PASSWORD_BCRYPT);
     try {
-        $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash) VALUES (?, ?, ?)")
+        $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash, role) VALUES (?, ?, ?, 'editor')")
             ->execute([$name, $email, $hash]);
         echo json_encode(['success'=>true, 'observer_id'=>$pdo->lastInsertId()]);
     } catch (Exception $e) {
@@ -113,10 +140,24 @@ function handleRegister($pdo) {
 
 function authenticate($pdo) {
     $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) return null;
-    $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
-    $stmt->execute([$m[1]]);
-    return $stmt->fetch() ?: null;
+
+    // Try Bearer token (session auth)
+    if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
+        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt->execute([$m[1]]);
+        $result = $stmt->fetch();
+        if ($result) return $result;
+    }
+
+    // Try X-API-Key (for API users)
+    $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? getallheaders()['X-API-Key'] ?? getallheaders()['x-api-key'] ?? '';
+    if (!empty($apiKey)) {
+        $stmt = $pdo->prepare("SELECT * FROM observers WHERE api_key = ?");
+        $stmt->execute([$apiKey]);
+        return $stmt->fetch() ?: null;
+    }
+
+    return null;
 }
 
 function handleList($pdo, $table) {
@@ -192,12 +233,25 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
 
     $pdo->beginTransaction();
     try {
-        $pdo->prepare("DELETE FROM $table WHERE $pk = ?")->execute([$id]);
+        if ($table === 'observations') {
+            // Soft delete for observations
+            $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
+                ->execute([$observer['observer_id'], $id]);
+        } else {
+            $pdo->prepare("DELETE FROM $table WHERE $pk = ?")->execute([$id]);
+        }
         $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'DELETE', ?, ?)")
             ->execute([$table, $id, $observer['observer_id'], json_encode($old)]);
         $pdo->commit();
         echo json_encode(['success'=>true]);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
+}
+
+function handleHistory($pdo, $table, $id) {
+    if (!$table || !$id) { echo json_encode(['error'=>'table and id required']); return; }
+    $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
+    $stmt->execute([$table, $id]);
+    echo json_encode($stmt->fetchAll());
 }
 
 function handleChangePassword($pdo, $observer) {

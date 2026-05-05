@@ -58,6 +58,8 @@ header h1:hover { opacity:.8; }
 .box-card { padding:8px 6px; text-align:center; background:#f8f9fa; border:2px solid transparent; border-radius:6px; cursor:pointer; transition:all .15s; }
 .box-card:hover { border-color:#2e86c1; background:#eaf2f8; }
 .box-card.selected { border-color:#1a5276; background:#d4e6f1; }
+.box-card.flash-highlight { animation: box-flash 0.5s ease-in-out 3; }
+@keyframes box-flash { 0%,100% { border-color:transparent; } 50% { border-color:#FDD835; box-shadow:0 0 8px rgba(253,216,53,.5); } }
 .box-number { font-size:16px; font-weight:700; color:#1a5276; }
 .box-icons { font-size:11px; line-height:1; margin-top:1px; }
 .box-tag { font-size:9px; color:#888; font-family:monospace; margin-top:1px; }
@@ -115,10 +117,10 @@ header h1:hover { opacity:.8; }
 .status-future { position:absolute; top:0; height:100%; background:#fff; opacity:.85; }
 .status-bar-legend { display:flex; gap:10px; margin-top:6px; font-size:10px; color:#666; flex-wrap:wrap; }
 .status-bar-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:2px; vertical-align:middle; border:1px solid rgba(0,0,0,.1); }
-.detail-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-.detail-head h2 { font-size:18px; color:#1a5276; }
-.detail-head button { background:none; border:none; font-size:22px; cursor:pointer; color:#888; padding:2px 6px; border-radius:4px; }
-.detail-head button:hover { background:#f0f0f0; }
+.page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.page-header h2 { font-size:18px; color:#1a5276; }
+.page-back { background:none; border:none; font-size:13px; cursor:pointer; color:#999; padding:4px 8px; }
+.page-back:hover { color:#666; }
 .tag-info { font-size:11px; color:#666; background:#f5f5f5; padding:4px 8px; border-radius:4px; margin-bottom:6px; font-family:monospace; }
 .muted { font-size:12px; color:#888; margin-bottom:8px; }
 .small { font-size:10px; }
@@ -126,7 +128,8 @@ header h1:hover { opacity:.8; }
 .season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
 .season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
 .season-divider span { font-size:13px; color:#888; white-space:nowrap; }
-.obs-card.highlighted { background:#FFF9C4; border-left-color:#FDD835; box-shadow:0 0 8px rgba(253,216,53,.4); }
+.obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
+@keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
 .obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
 .obs-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
 .obs-top b { font-size:12px; }
@@ -151,13 +154,19 @@ header h1:hover { opacity:.8; }
 
 /* Bird page */
 .bird-page { max-width:800px; margin:0 auto; padding:16px 20px; }
-.back-btn { background:none; border:1px solid #ccc; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:12px; }
-.back-btn:hover { background:#f0f0f0; }
 .bird-detail {}
 .bird-header { border-left:4px solid #2196F3; padding-left:12px; margin-bottom:16px; }
 .bird-header h2 { font-size:20px; color:#1a5276; }
 .bird-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }
 .bird-badge { font-size:12px; padding:2px 8px; border-radius:10px; border:1px solid rgba(0,0,0,.1); }
+.bird-table { width:100%; font-size:13px; border-collapse:collapse; }
+.bird-table td { padding:4px 8px 4px 0; vertical-align:top; }
+.bird-table td:first-child { white-space:nowrap; width:70px; color:#999; }
+.bird-notes { font-style:italic; color:#666; font-size:13px; margin-top:4px; }
+.bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
+.scan-count { font-size:10px; color:#999; margin-top:1px; }
+.breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
+.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
 .bird-section h3 { font-size:15px; color:#1a5276; margin-bottom:8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
 .partner-card { background:#f8f9fa; border-radius:6px; padding:10px; margin-bottom:8px; }
@@ -166,16 +175,20 @@ header h1:hover { opacity:.8; }
 .partner-row { display:flex; gap:10px; align-items:center; font-size:12px; padding:2px 0; }
 
 /* Login */
-.login-page { height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1a5276,#2e86c1); }
+.login-page { height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1a5276,#2e86c1); position:fixed; top:0; left:0; width:100%; z-index:1000; }
 .login-card { background:#fff; padding:40px; border-radius:16px; width:340px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,.2); text-align:center; }
 .login-card h1 { font-size:28px; color:#1a5276; margin-bottom:4px; }
 .login-sub { color:#888; font-size:14px; margin-bottom:24px; }
 .login-card input { width:100%; padding:10px 14px; margin-bottom:12px; border:2px solid #ddd; border-radius:8px; font-size:15px; outline:none; }
 .login-card input:focus { border-color:#2196F3; }
-.login-card button { width:100%; padding:10px; background:#1a5276; color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer; }
-.login-card button:hover { background:#2e86c1; }
+.login-card button[type="submit"], .login-card form > button { width:100%; padding:10px; background:#1a5276; color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer; }
+.login-card button[type="submit"]:hover, .login-card form > button:hover { background:#2e86c1; }
 .login-card button:disabled { background:#999; }
 .login-error { color:#F44336; font-size:13px; margin-bottom:8px; }
+.password-field { position:relative; margin-bottom:12px; }
+.password-field input { padding-right:40px; margin-bottom:0; }
+.toggle-pw { position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; cursor:pointer; padding:0; width:auto; line-height:1; opacity:.6; }
+.toggle-pw:hover { opacity:1; }
 
 /* Header user/logout */
 .header-user { margin-left:auto; font-size:12px; display:flex; align-items:center; gap:8px; }
@@ -222,9 +235,9 @@ header h1:hover { opacity:.8; }
   .top-row { grid-template-columns:1fr; padding:8px; gap:8px; }
   .map-container { height:250px; }
   .split-view { flex-direction:column; }
-  .grid-sidebar { width:100%; max-height:120px; border-right:none; border-bottom:1px solid #ddd; }
+  .grid-sidebar { display:none; }
   .detail-split { flex-direction:column; }
-  .detail-bird { width:100%; border-left:none; border-top:1px solid #ddd; }
+  .detail-bird { display:none; }
   .detail-full { padding:8px; }
   .entry-split { flex-direction:column; }
   .entry-right { width:100%; }
@@ -243,3 +256,51 @@ header h1:hover { opacity:.8; }
   .obs-card { padding:6px 8px; }
   .obs-top { flex-direction:column; gap:2px; }
 }
+
+/* Editable fields */
+.ef-value { cursor:default; }
+.ef-value.clickable { cursor:pointer; }
+.ef-value.clickable:hover { background:#f0f0f0; border-radius:4px; padding:0 4px; }
+.ef-pencil { display:none; font-size:10px; color:#bbb; margin-left:2px; }
+.ef-value.clickable:hover .ef-pencil { display:inline; }
+.ef-saved { color:#4CAF50; font-size:12px; margin-left:4px; }
+.ef-input { font-size:13px; padding:2px 6px; border:1px solid #2196F3; border-radius:4px; outline:none; max-width:120px; }
+select.ef-input { max-width:140px; }
+
+/* History */
+.history-btn { background:none; border:1px solid #ddd; color:#999; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer; margin-top:4px; }
+.history-btn:hover { color:#333; border-color:#999; }
+.history-btn-sm { background:none; border:none; color:#ccc; font-size:10px; cursor:pointer; margin-left:4px; }
+.history-btn-sm:hover { color:#666; }
+.history-panel { background:#fff; border:1px solid #ddd; border-radius:8px; padding:12px; margin:8px 0; max-height:300px; overflow-y:auto; }
+.history-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.history-entries { font-size:12px; }
+.history-entry { border-bottom:1px solid #eee; padding:6px 0; }
+.history-entry:last-child { border-bottom:none; }
+.history-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.history-action { font-weight:600; font-size:11px; padding:1px 6px; border-radius:3px; }
+.history-action.insert { background:#C8E6C9; color:#2E7D32; }
+.history-action.update { background:#BBDEFB; color:#1565C0; }
+.history-action.delete { background:#FFCDD2; color:#C62828; }
+.history-fields { margin-top:4px; padding-left:8px; }
+.history-field { margin:2px 0; }
+.history-field s { color:#999; }
+.edit-badge { font-size:11px; color:#999; cursor:pointer; margin-top:2px; display:inline-block; }
+.edit-badge:hover { color:#666; text-decoration:underline; }
+.edit-btn { background:none; border:1px solid #ddd; color:#999; font-size:11px; padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:auto; }
+.edit-btn:hover { color:#333; border-color:#999; }
+.obs-edit { padding:4px 0; }
+.obs-edit-row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
+.obs-edit-row label { font-size:13px; min-width:20px; }
+.obs-edit-birds { margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; align-items:flex-start; }
+.scan-removable { display:inline-flex; align-items:center; gap:1px; }
+.remove-scan { background:none; border:none; color:#e53935; font-size:16px; cursor:pointer; padding:0 2px; line-height:1; }
+.remove-scan:hover { color:#b71c1c; }
+.add-scan-search { position:relative; }
+.add-scan-results { position:absolute; top:100%; left:0; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.15); z-index:10; min-width:200px; max-height:200px; overflow-y:auto; }
+.add-scan-option { padding:6px 10px; font-size:13px; }
+.add-scan-option:hover { background:#e3f2fd; }
+.done-btn { background:#1a5276 !important; color:#fff !important; border-color:#1a5276 !important; }
+.done-btn:hover { background:#2e86c1 !important; }
+.edit-btns { display:flex; gap:4px; margin-left:auto; }
+.persistent-notes { font-size:13px; color:#666; font-style:italic; margin:4px 0; }

@@ -38,12 +38,17 @@ function handleBox($pdo, $colonyId, $boxName) {
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = FALSE ORDER BY o.observation_time_utc DESC";
     $stmt = $pdo->prepare($sql); $stmt->execute([$colonyId, $boxName]); $observations = $stmt->fetchAll();
     foreach ($observations as &$obs) {
-        $s = $pdo->prepare("SELECT p.tag_number, p.sex, p.life_stage, p.chip_date, p.chipped_as_adult FROM penguin_scans ps JOIN penguins p ON ps.penguin_id = p.penguin_id WHERE ps.observation_id = ?");
-        $s->execute([$obs['observation_id']]); $obs['scans'] = $s->fetchAll(); unset($obs['observation_id']);
+        $s = $pdo->prepare("SELECT ps.scan_id, ps.penguin_id, p.penguin_number, p.tag_number, p.sex, p.life_stage, p.chip_date, p.chipped_as_adult FROM penguin_scans ps JOIN penguins p ON ps.penguin_id = p.penguin_id WHERE ps.observation_id = ?");
+        $s->execute([$obs['observation_id']]); $obs['scans'] = $s->fetchAll();
     }
-    $l = $pdo->prepare("SELECT location_id, location_name, rfid_tag_number, rfid_latitude, rfid_longitude, rfid_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+    $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, rfid_tag_number, rfid_latitude, rfid_longitude, rfid_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $l->execute([$colonyId, $boxName]);
-    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations]);
+
+    // Penguins chipped in this box
+    $c = $pdo->prepare("SELECT p.penguin_number, p.tag_number, p.sex, p.life_stage, p.chipped_as_adult, pc.chip_date, pc.chip_by FROM penguin_chips pc JOIN penguins p ON pc.penguin_id = p.penguin_id WHERE pc.chip_box = ? ORDER BY pc.chip_date");
+    $c->execute([$boxName]);
+
+    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'chipped_here'=>$c->fetchAll()]);
 }
 
 function handleOverview($pdo, $colonyId) {
