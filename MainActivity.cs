@@ -33,7 +33,7 @@ namespace PenguinMonitor
     public class MainActivity : Activity, ILocationListener
     {
         //Lazy versioning.
-        private static string version = "37.28";
+        private static string version = "37.34";
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
 
@@ -126,6 +126,7 @@ namespace PenguinMonitor
 
         //multibox View
         private LinearLayout? _multiBoxViewCard;
+        private LinearLayout? _breedingDatesCard;
 
         protected override void OnCreate(Bundle? savedInstanceState)
         {
@@ -363,6 +364,14 @@ namespace PenguinMonitor
                 ;// new Handler(Looper.MainLooper).Post(() => Toast.MakeText(this, "EID length " + eidData.Length + ", '" + eidData + "'", ToastLength.Long)?.Show());
 
             var cleanEid = new String(eidData.Where(char.IsLetterOrDigit).ToArray());
+
+            // If viewing historical data, switch to today's monitor first
+            if (_currentHistoricalDataIndex > 0 || _appSettings.CurrentlyVisibleMonitor != 0)
+            {
+                _currentHistoricalDataIndex = 0;
+                _appSettings.CurrentlyVisibleMonitor = 0;
+                _appSettings.ActiveSessionTimeStampActive = false;
+            }
 
             // Don't auto-unlock for box tag scans - let HandleBoxTagScan manage the lock state
             bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
@@ -753,15 +762,17 @@ namespace PenguinMonitor
                     child.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
                     _ = Task.Run(async () =>
                     {
-                        await _dataStorageService.DownloadRemoteData(this, _allMonitorData);
+                        // DownloadRemoteData handles bird data, monitor data, AND box tag sync in parallel
+                        var result = await _dataStorageService.DownloadRemoteData(this, _allMonitorData, _boxTags, _boxNamesAndIndexes?.Keys);
+
+                        // Process results
                         _allMonitorData = _dataStorageService.LoadAllMonitorDataFromDisk(this);
                         _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
                         _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
 
-                        // Sync box tags with remote API
-                        if (BoxTagService.IsApiConfigured && FilesDir?.AbsolutePath != null)
+                        if (result.BoxTags != null)
                         {
-                            _boxTags = await BoxTagService.SyncWithApiAsync(_boxTags, FilesDir.AbsolutePath);
+                            _boxTags = result.BoxTags;
                         }
 
                         new Handler(Looper.MainLooper).Post(() =>
@@ -772,7 +783,21 @@ namespace PenguinMonitor
                             if (!_allMonitorData.ContainsKey(_appSettings.CurrentlyVisibleMonitor))
                                 _appSettings.CurrentlyVisibleMonitor = 0;
                             DrawPageLayouts();
+
+                            // Rebuild scanned IDs layout now that penguin data is loaded
+                            if (_allMonitorData.ContainsKey(_appSettings.CurrentlyVisibleMonitor) &&
+                                _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData.ContainsKey(_currentBoxName))
+                            {
+                                var boxData = _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData[_currentBoxName];
+                                buildScannedIdsLayout(boxData.ScannedIds);
+                            }
+
                             SetEnabledRecursive(child, true, 1.0f);
+
+                            if (!string.IsNullOrEmpty(result.BoxTagError))
+                            {
+                                Toast.MakeText(this, "Box tags failed to sync: " + result.BoxTagError, ToastLength.Long)?.Show();
+                            }
                         });
                     });
                 }
@@ -887,8 +912,13 @@ namespace PenguinMonitor
             _multiBoxViewCard = _uiFactory.CreateCard();
             _multiBoxViewCard.Visibility = ViewStates.Visible;
 
+            //Create Breeding dates card
+            _breedingDatesCard = _uiFactory.CreateCard();
+            _breedingDatesCard.Visibility = ViewStates.Visible;
+
             parentLinearLayout.AddView(_singleBoxDataOuterLayout);
             parentLinearLayout.AddView(_multiBoxViewCard);
+            parentLinearLayout.AddView(_breedingDatesCard);
 
             _rootScrollView.AddView(parentLinearLayout);
             SetContentView(_rootScrollView);
@@ -1217,26 +1247,26 @@ namespace PenguinMonitor
 
             CheckBox showBoxesWithDataInMultiboxView = new CheckBox(this) { Text = "With data", Checked = _appSettings.ShowBoxesWithDataInMultiBoxView };
             showBoxesWithDataInMultiboxView.SetTextColor(Color.Black);
-            showBoxesWithDataInMultiboxView.Click += (s, e) => { _appSettings.ShowBoxesWithDataInMultiBoxView = showBoxesWithDataInMultiboxView.Checked; if (_appSettings.ShowBoxesWithDataInMultiBoxView) _appSettings.HideBoxesWithDataInMultiBoxView = false; DrawPageLayouts(); };
+            showBoxesWithDataInMultiboxView.Click += (s, e) => { _appSettings.ShowBoxesWithDataInMultiBoxView = showBoxesWithDataInMultiboxView.Checked; if (_appSettings.ShowBoxesWithDataInMultiBoxView) { _appSettings.ShowAllBoxesInMultiBoxView = false; _appSettings.HideBoxesWithDataInMultiBoxView = false; } DrawPageLayouts(); };
             showRow1.AddView(showBoxesWithDataInMultiboxView);
 
             CheckBox showNoBoxesInMultiboxView = new CheckBox(this) { Text = "NO", Checked = _appSettings.ShowNoBoxesInMultiBoxView };
             showNoBoxesInMultiboxView.SetTextColor(Color.Black);
             showNoBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowNoBoxesInMultiBoxView = showNoBoxesInMultiboxView.Checked; if (_appSettings.ShowNoBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
             showRow1.AddView(showNoBoxesInMultiboxView);
-            showFiltersCheckboxLayout.AddView(showRow1);
 
-            var showRow2 = new LinearLayout(this);
             CheckBox showUnlikelyBoxesInMultiboxView = new CheckBox(this) { Text = "UNL", Checked = _appSettings.ShowUnlikleyBoxesInMultiBoxView };
             showUnlikelyBoxesInMultiboxView.SetTextColor(Color.Black);
             showUnlikelyBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowUnlikleyBoxesInMultiBoxView = showUnlikelyBoxesInMultiboxView.Checked; if (_appSettings.ShowUnlikleyBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
-            showRow2.AddView(showUnlikelyBoxesInMultiboxView);
+            showRow1.AddView(showUnlikelyBoxesInMultiboxView);
 
             CheckBox showPotentialBoxesInMultiboxView = new CheckBox(this) { Text = "POT", Checked = _appSettings.ShowPotentialBoxesInMultiBoxView };
             showPotentialBoxesInMultiboxView.SetTextColor(Color.Black);
             showPotentialBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowPotentialBoxesInMultiBoxView = showPotentialBoxesInMultiboxView.Checked; if (_appSettings.ShowPotentialBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
-            showRow2.AddView(showPotentialBoxesInMultiboxView);
+            showRow1.AddView(showPotentialBoxesInMultiboxView);
+            showFiltersCheckboxLayout.AddView(showRow1);
 
+            var showRow2 = new LinearLayout(this);
             CheckBox showConfidentBoxesInMultiboxView = new CheckBox(this) { Text = "CON", Checked = _appSettings.ShowConfidentBoxesInMultiBoxView };
             showConfidentBoxesInMultiboxView.SetTextColor(Color.Black);
             showConfidentBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowConfidentBoxesInMultiBoxView = showConfidentBoxesInMultiboxView.Checked; if (_appSettings.ShowConfidentBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
@@ -1246,6 +1276,11 @@ namespace PenguinMonitor
             showBreedingBoxesInMultiboxView.SetTextColor(Color.Black);
             showBreedingBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowBreedingBoxesInMultiBoxView = showBreedingBoxesInMultiboxView.Checked; if (_appSettings.ShowBreedingBoxesInMultiBoxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
             showRow2.AddView(showBreedingBoxesInMultiboxView);
+
+            CheckBox showABNBoxesInMultiboxView = new CheckBox(this) { Text = "ABN", Checked = _appSettings.ShowABNBoxesInMultiboxView };
+            showABNBoxesInMultiboxView.SetTextColor(Color.Black);
+            showABNBoxesInMultiboxView.Click += (s, e) => { _appSettings.ShowABNBoxesInMultiboxView = showABNBoxesInMultiboxView.Checked; if (_appSettings.ShowABNBoxesInMultiboxView) _appSettings.ShowAllBoxesInMultiBoxView = false; DrawPageLayouts(); };
+            showRow2.AddView(showABNBoxesInMultiboxView);
 
             CheckBox showDCMBoxesInMultiboxView = new CheckBox(this) { Text = "DCM", Checked = _appSettings.ShowDCMBoxesInMultiboxView };
             showDCMBoxesInMultiboxView.SetTextColor(Color.Black);
@@ -1308,14 +1343,14 @@ namespace PenguinMonitor
             hideUnlikelyBoxesInMultiBoxView.SetTextColor(Color.Black);
             hideUnlikelyBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HideUnlikelyBoxesInMultiBoxView = hideUnlikelyBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
             hideRow1.AddView(hideUnlikelyBoxesInMultiBoxView);
-            hideFiltersCheckboxLayout.AddView(hideRow1);
 
-            var hideRow2 = new LinearLayout(this);
             CheckBox hidePotentialBoxesInMultiBoxView = new CheckBox(this) { Text = "POT", Checked = _appSettings.HidePotentialBoxesInMultiBoxView };
             hidePotentialBoxesInMultiBoxView.SetTextColor(Color.Black);
             hidePotentialBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HidePotentialBoxesInMultiBoxView = hidePotentialBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
-            hideRow2.AddView(hidePotentialBoxesInMultiBoxView);
+            hideRow1.AddView(hidePotentialBoxesInMultiBoxView);
+            hideFiltersCheckboxLayout.AddView(hideRow1);
 
+            var hideRow2 = new LinearLayout(this);
             CheckBox hideConfidentBoxesInMultiBoxView = new CheckBox(this) { Text = "CON", Checked = _appSettings.HideConfidentBoxesInMultiBoxView };
             hideConfidentBoxesInMultiBoxView.SetTextColor(Color.Black);
             hideConfidentBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HideConfidentBoxesInMultiBoxView = hideConfidentBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
@@ -1325,6 +1360,11 @@ namespace PenguinMonitor
             hideBreedingBoxesInMultiBoxView.SetTextColor(Color.Black);
             hideBreedingBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HideBreedingBoxesInMultiBoxView = hideBreedingBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
             hideRow2.AddView(hideBreedingBoxesInMultiBoxView);
+
+            CheckBox hideABNInMultiboxView = new CheckBox(this) { Text = "ABN", Checked = _appSettings.HideABNInMultiBoxView };
+            hideABNInMultiboxView.SetTextColor(Color.Black);
+            hideABNInMultiboxView.Click += (s, e) => { _appSettings.HideABNInMultiBoxView = hideABNInMultiboxView.Checked; DrawPageLayouts(); };
+            hideRow2.AddView(hideABNInMultiboxView);
 
             CheckBox hideDCMInMultiboxView = new CheckBox(this) { Text = "DCM", Checked = _appSettings.HideDCMInMultiBoxView };
             hideDCMInMultiboxView.SetTextColor(Color.Black);
@@ -1343,22 +1383,22 @@ namespace PenguinMonitor
             hideSpecialBoxesInMultiBoxView.Click += (s, e) => { _appSettings.HideInterestingBoxesInMultiBoxView = hideSpecialBoxesInMultiBoxView.Checked; DrawPageLayouts(); };
             hideRow3.AddView(hideSpecialBoxesInMultiBoxView);
 
-            CheckBox hideSingleEggBoxesInMultiboxView = new CheckBox(this) { Text = "Single egg", Checked = _appSettings.HideSingleEggBoxesInMultiboxView };
-            hideSingleEggBoxesInMultiboxView.SetTextColor(Color.Black);
-            hideSingleEggBoxesInMultiboxView.Click += (s, e) => { _appSettings.HideSingleEggBoxesInMultiboxView = hideSingleEggBoxesInMultiboxView.Checked; DrawPageLayouts(); };
-            hideRow3.AddView(hideSingleEggBoxesInMultiboxView);
+            CheckBox hideBeforeCurrentCheckbox = new CheckBox(this) { Text = "< current", Checked = _appSettings.HideBeforeCurrentInMultiBoxView };
+            hideBeforeCurrentCheckbox.SetTextColor(Color.Black);
+            hideBeforeCurrentCheckbox.Click += (s, e) => { _appSettings.HideBeforeCurrentInMultiBoxView = hideBeforeCurrentCheckbox.Checked; DrawPageLayouts(); };
+            hideRow3.AddView(hideBeforeCurrentCheckbox);
             hideFiltersCheckboxLayout.AddView(hideRow3);
 
             var hideRow4 = new LinearLayout(this);
+            CheckBox hideSingleEggBoxesInMultiboxView = new CheckBox(this) { Text = "Single egg", Checked = _appSettings.HideSingleEggBoxesInMultiboxView };
+            hideSingleEggBoxesInMultiboxView.SetTextColor(Color.Black);
+            hideSingleEggBoxesInMultiboxView.Click += (s, e) => { _appSettings.HideSingleEggBoxesInMultiboxView = hideSingleEggBoxesInMultiboxView.Checked; DrawPageLayouts(); };
+            hideRow4.AddView(hideSingleEggBoxesInMultiboxView);
+
             CheckBox hideDoubleEggBoxesInMultiboxView = new CheckBox(this) { Text = "Double egg", Checked = _appSettings.HideDoubleEggBoxesInMultiboxView };
             hideDoubleEggBoxesInMultiboxView.SetTextColor(Color.Black);
             hideDoubleEggBoxesInMultiboxView.Click += (s, e) => { _appSettings.HideDoubleEggBoxesInMultiboxView = hideDoubleEggBoxesInMultiboxView.Checked; DrawPageLayouts(); };
             hideRow4.AddView(hideDoubleEggBoxesInMultiboxView);
-
-            CheckBox hideBeforeCurrentCheckbox = new CheckBox(this) { Text = "< current", Checked = _appSettings.HideBeforeCurrentInMultiBoxView };
-            hideBeforeCurrentCheckbox.SetTextColor(Color.Black);
-            hideBeforeCurrentCheckbox.Click += (s, e) => { _appSettings.HideBeforeCurrentInMultiBoxView = hideBeforeCurrentCheckbox.Checked; DrawPageLayouts(); };
-            hideRow4.AddView(hideBeforeCurrentCheckbox);
             hideFiltersCheckboxLayout.AddView(hideRow4);
 
             _overviewFiltersLayout.AddView(hideFiltersCheckboxLayout);
@@ -1476,10 +1516,12 @@ namespace PenguinMonitor
                             || _appSettings.ShowInterestingBoxesInMultiBoxView && hasBoxNotes
                             || _appSettings.ShowSingleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 1)
                             || _appSettings.ShowDoubleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 2)
-                            || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("DCM");
+                            || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("DCM")
+                            || _appSettings.ShowABNBoxesInMultiboxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("ABN");
 
                 bool hideBoxWithData = _appSettings.HideBoxesWithDataInMultiBoxView && _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData.ContainsKey(boxName);
                 bool hideDCM = _appSettings.HideDCMInMultiBoxView && ((mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance == "DCM"));
+                bool hideABN = _appSettings.HideABNInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("ABN");
                 bool hideBeforeCurrent = _appSettings.HideBeforeCurrentInMultiBoxView && _currentBoxIndex > _boxNamesAndIndexes[boxName];
                 bool hideNo = _appSettings.HideNoBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("NO");
                 bool hideUnlikely = _appSettings.HideUnlikelyBoxesInMultiBoxView && mostRecentBoxData.BreedingChance != null && mostRecentBoxData.BreedingChance.Equals("UNL");
@@ -1493,7 +1535,7 @@ namespace PenguinMonitor
 
                 // In Edit Box Tags mode, show all boxes regardless of filters
                 bool shouldShow = _appSettings.EditBoxTagsMode ||
-                    (showBox && !hideBoxWithData && !hideDCM && !hideBeforeCurrent && !hideNo && !hideUnlikely && !hidePotential && !hideConfident && !hideBreeding && !hideNotes && !hideInteresting && !hideSingleEgg && !hideDoubleEgg);
+                    (showBox && !hideBoxWithData && !hideDCM && !hideABN && !hideBeforeCurrent && !hideNo && !hideUnlikely && !hidePotential && !hideConfident && !hideBreeding && !hideNotes && !hideInteresting && !hideSingleEgg && !hideDoubleEgg);
 
                 if (shouldShow)
                 {
@@ -1516,6 +1558,12 @@ namespace PenguinMonitor
                 var empty = new TextView(this) { Text = "No boxes to show." };
                 _multiBoxViewCard.AddView(empty);
             }
+        }
+        private void createBreedingDatesCard()
+        {
+            _breedingDatesCard.RemoveAllViews();
+            var breedingDatesContent = createBreedingDatesTimelineSection();
+            _breedingDatesCard.AddView(breedingDatesContent);
         }
         private DateTime getLocalDateTime(MonitorDetails monitorDetails)
         {
@@ -1676,6 +1724,139 @@ namespace PenguinMonitor
             if(!string.IsNullOrEmpty(summary.Text)) boxOverviewCard.AddView(summary);
             if(!string.IsNullOrEmpty(gate_and_notes.Text)) boxOverviewCard.AddView(gate_and_notes);
             return boxOverviewCard;
+        }
+
+        /// <summary>
+        /// Creates the breeding dates timeline section showing upcoming milestones grouped by date
+        /// </summary>
+        private LinearLayout createBreedingDatesTimelineSection()
+        {
+            var container = _uiFactory.CreateCard(Android.Widget.Orientation.Vertical);
+
+            // Header with title
+            var headerRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var title = new TextView(this)
+            {
+                Text = "Next breeding dates",
+                TextSize = 24,
+                Gravity = GravityFlags.Left
+            };
+            title.SetTextColor(Color.Black);
+            title.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Normal);
+            headerRow.AddView(title);
+            container.AddView(headerRow);
+
+            // Filter checkboxes row
+            var filtersRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            filtersRow.SetPadding(0, 8, 0, 8);
+
+            CheckBox hatchingCheckbox = new CheckBox(this) { Text = "Hatching", Checked = _appSettings.ShowHatchingDatesInTimeline };
+            hatchingCheckbox.SetTextColor(Color.Black);
+            hatchingCheckbox.Click += (s, e) => { _appSettings.ShowHatchingDatesInTimeline = hatchingCheckbox.Checked; DrawPageLayouts(); };
+            filtersRow.AddView(hatchingCheckbox);
+
+            CheckBox pgCheckbox = new CheckBox(this) { Text = "PG", Checked = _appSettings.ShowPGDatesInTimeline };
+            pgCheckbox.SetTextColor(Color.Black);
+            pgCheckbox.Click += (s, e) => { _appSettings.ShowPGDatesInTimeline = pgCheckbox.Checked; DrawPageLayouts(); };
+            filtersRow.AddView(pgCheckbox);
+
+            CheckBox chippingCheckbox = new CheckBox(this) { Text = "Chipping", Checked = _appSettings.ShowChippingDatesInTimeline };
+            chippingCheckbox.SetTextColor(Color.Black);
+            chippingCheckbox.Click += (s, e) => { _appSettings.ShowChippingDatesInTimeline = chippingCheckbox.Checked; DrawPageLayouts(); };
+            filtersRow.AddView(chippingCheckbox);
+
+            CheckBox fledgingCheckbox = new CheckBox(this) { Text = "Fledging", Checked = _appSettings.ShowFledgingDatesInTimeline };
+            fledgingCheckbox.SetTextColor(Color.Black);
+            fledgingCheckbox.Click += (s, e) => { _appSettings.ShowFledgingDatesInTimeline = fledgingCheckbox.Checked; DrawPageLayouts(); };
+            filtersRow.AddView(fledgingCheckbox);
+
+            container.AddView(filtersRow);
+
+            // Collect all breeding dates from local calculations
+            var milestones = new List<(DateTime date, string boxName, string milestone)>();
+
+            foreach (string boxName in _boxNamesAndIndexes.Keys)
+            {
+                var olderBoxDatas = DataStorageService.getOlderBoxDatas(_allMonitorData, _appSettings.CurrentlyVisibleMonitor, boxName);
+                BoxData? currentBoxData = null;
+                _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData.TryGetValue(boxName, out currentBoxData);
+
+                var estimatedDates = DataStorageService.GetEstimatedBreedingDates(boxName, currentBoxData, olderBoxDatas);
+                if (estimatedDates != null)
+                {
+                    var dates = estimatedDates.Value;
+                    if (_appSettings.ShowHatchingDatesInTimeline && dates.hatch.HasValue)
+                        milestones.Add((dates.hatch.Value, boxName, "Hatches"));
+                    if (_appSettings.ShowPGDatesInTimeline && dates.pg.HasValue)
+                        milestones.Add((dates.pg.Value, boxName, "PG"));
+                    if (_appSettings.ShowChippingDatesInTimeline && dates.chipStart.HasValue)
+                        milestones.Add((dates.chipStart.Value, boxName, "Chipping starts"));
+                    if (_appSettings.ShowFledgingDatesInTimeline && dates.fledge.HasValue)
+                        milestones.Add((dates.fledge.Value, boxName, "Fledges"));
+                }
+            }
+
+            // Filter to only future dates (including today), then sort
+            var today = DateTime.Today;
+            var sortedMilestones = milestones
+                .Where(m => m.date >= today)
+                .OrderBy(m => m.date)
+                .ToList();
+
+            // Group by date and render
+            var groupedByDate = sortedMilestones.GroupBy(m => m.date.Date);
+
+            foreach (var dateGroup in groupedByDate)
+            {
+                var dateHeader = new TextView(this)
+                {
+                    Text = dateGroup.Key.ToString("d MMM"),
+                    TextSize = 18,
+                    Gravity = GravityFlags.Left
+                };
+                dateHeader.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Normal);
+                dateHeader.SetPadding(0, 16, 0, 4);
+                dateHeader.SetTextColor(Color.Black);
+
+                container.AddView(dateHeader);
+
+                foreach (var milestone in dateGroup.OrderBy(m => m.boxName))
+                {
+                    var entryRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+                    entryRow.SetPadding(24, 2, 0, 2);
+
+                    var entryText = new TextView(this)
+                    {
+                        Text = $"Box {milestone.boxName}: {milestone.milestone}",
+                        TextSize = 16
+                    };
+                    entryText.SetTextColor(Color.Black);
+
+                    // Make clickable to jump to box
+                    entryRow.Click += (s, e) =>
+                    {
+                        JumpToBox(milestone.boxName);
+                        ScrollToTop();
+                    };
+
+                    entryRow.AddView(entryText);
+                    container.AddView(entryRow);
+                }
+            }
+
+            if (milestones.Count == 0)
+            {
+                var noDataText = new TextView(this)
+                {
+                    Text = "No breeding dates available. Dates are calculated from boxes with eggs/chicks.",
+                    TextSize = 14
+                };
+                noDataText.SetTextColor(UIFactory.TEXT_SECONDARY);
+                noDataText.SetPadding(0, 16, 0, 8);
+                container.AddView(noDataText);
+            }
+
+            return container;
         }
 
         /// <summary>
@@ -1971,15 +2152,6 @@ namespace PenguinMonitor
             };
             _settingsCard.AddView(_setTimeActiveSessionCheckBox);
 
-            Button toggleOverview = _uiFactory.CreateStyledButton(_multiBoxViewCard?.Visibility == ViewStates.Visible ? "Hide overview" : "Show overview", UIFactory.PRIMARY_BLUE);
-            toggleOverview.Click += (s, e) =>
-            {
-                if (_multiBoxViewCard == null) return;
-                _multiBoxViewCard.Visibility = _multiBoxViewCard.Visibility.Equals(ViewStates.Visible) ? ViewStates.Gone : ViewStates.Visible;
-                toggleOverview.Text = _multiBoxViewCard.Visibility == ViewStates.Visible ? "Hide overview" : "Show overview";
-            };
-            _settingsCard.AddView(toggleOverview);
-
             // Box tag delete button visibility setting
             var showBoxTagDeleteCheckBox = new CheckBox(this)
             {
@@ -2199,6 +2371,7 @@ namespace PenguinMonitor
             if (_appSettings.ShowConfidentBoxesInMultiBoxView) filters.Add("CON");
             if (_appSettings.ShowBreedingBoxesInMultiBoxView) filters.Add("BR");
             if (_appSettings.ShowDCMBoxesInMultiboxView) filters.Add("DCM");
+            if (_appSettings.ShowABNBoxesInMultiboxView) filters.Add("ABN");
             if (_appSettings.showBoxesWithNotesInMultiboxView) filters.Add("notes");
             if (_appSettings.ShowInterestingBoxesInMultiBoxView) filters.Add("box notes");
             if (_appSettings.ShowSingleEggBoxesInMultiboxView) filters.Add("1 egg");
@@ -2217,6 +2390,7 @@ namespace PenguinMonitor
             if (_appSettings.HideConfidentBoxesInMultiBoxView) filters.Add("CON");
             if (_appSettings.HideBreedingBoxesInMultiBoxView) filters.Add("BR");
             if (_appSettings.HideDCMInMultiBoxView) filters.Add("DCM");
+            if (_appSettings.HideABNInMultiBoxView) filters.Add("ABN");
             if (_appSettings.HideBoxesWithNotesInMultiboxView) filters.Add("notes");
             if (_appSettings.HideInterestingBoxesInMultiBoxView) filters.Add("box notes");
             if (_appSettings.HideSingleEggBoxesInMultiboxView) filters.Add("1 egg");
@@ -2397,6 +2571,7 @@ namespace PenguinMonitor
                         _editBoxNotesButton.Visibility = !_isBoxLocked ? ViewStates.Visible : ViewStates.Gone;
 
                     createMultiBoxViewCard();
+                    createBreedingDatesCard();
                 });
         }
         private bool dataCardHasZeroData()
@@ -2601,7 +2776,7 @@ namespace PenguinMonitor
             spinnerParams.SetMargins(4, 0, 4, 0);
             _breedingChanceSpinner[0].LayoutParameters = spinnerParams;
             _breedingChanceSpinner[0].SetGravity(GravityFlags.Center);
-            List<string> items = new List<string> { "", "NO", "UNL", "POT", "CON", "BR", "DCM" };
+            List<string> items = new List<string> { "", "NO", "UNL", "POT", "CON", "BR", "ABN", "DCM" };
             ArrayAdapter<string> adapter = new(this, Android.Resource.Layout.SimpleSpinnerItem, items);
             adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
             _breedingChanceSpinner[0].Adapter = adapter;
@@ -3112,26 +3287,39 @@ namespace PenguinMonitor
             
             if (null != _remotePenguinData && _remotePenguinData.TryGetValue(scan.BirdId, out var penguinData))
             {
-                // Penguin found in remote data - prioritize life stage over sex
-                if (penguinData.LastKnownLifeStage == LifeStage.Chick)
+                // Penguin found in remote data - check for returning birds
+                // Check if ChipAs contains "chick" (case insensitive)
+                bool isReturning = penguinData.LastKnownLifeStage == LifeStage.Returnee ||
+                                   (!string.IsNullOrEmpty(penguinData.ChipAs) &&
+                                    penguinData.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                // Check if it's a recent chick (< 3 months old)
+                bool isRecentChick = penguinData.LastKnownLifeStage == LifeStage.Chick &&
+                                     !(penguinData.ChipDate > DateTime.Today.AddYears(-20) &&
+                                       DateTime.Today > penguinData.ChipDate.AddMonths(3));
+
+                if (isRecentChick)
                 {
+                    // Still a chick
                     backgroundColor = UIFactory.CHICK_BACKGROUND;
-                    additionalInfo = " 🐣";
+                    additionalInfo = isReturning ? " 🐣🔄" : " 🐣";
                 }
+                // Adult - check sex
                 else if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
                 {
                     backgroundColor = UIFactory.FEMALE_BACKGROUND;
-                    additionalInfo = " ♀";
+                    additionalInfo = isReturning ? " 🐧♀🔄" : " 🐧♀";
                 }
                 else if (penguinData.Sex.Equals("M", StringComparison.OrdinalIgnoreCase))
                 {
                     backgroundColor = UIFactory.MALE_BACKGROUND;
-                    additionalInfo = " ♂";
+                    additionalInfo = isReturning ? " 🐧♂🔄" : " 🐧♂";
                 }
                 else
                 {
-                    // Unknown sex, use alternating colors
+                    // Unknown sex - gray background
                     backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
+                    additionalInfo = isReturning ? " 🐧🔄" : " 🐧";
                 }
             }
             else
@@ -3356,12 +3544,6 @@ namespace PenguinMonitor
                 // Load box tags from local storage
                 _boxTags = BoxTagService.LoadBoxTags(internalPath);
 
-                // Sync with remote API if configured (runs in background)
-                if (BoxTagService.IsApiConfigured)
-                {
-                    _ = SyncBoxTagsInBackgroundAsync(internalPath);
-                }
-
                 // Load remote penguin data.
                 _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
                 _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
@@ -3452,22 +3634,6 @@ namespace PenguinMonitor
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to clear auto-save file: {ex.Message}");
-            }
-        }
-
-        private async Task SyncBoxTagsInBackgroundAsync(string internalPath)
-        {
-            try
-            {
-                _boxTags = await BoxTagService.SyncWithApiAsync(_boxTags, internalPath);
-                RunOnUiThread(() =>
-                {
-                    Toast.MakeText(this, $"📡 Box tags synced ({_boxTags.Count} tags)", ToastLength.Short)?.Show();
-                });
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Box tags sync failed: {ex.Message}");
             }
         }
 
@@ -3578,15 +3744,35 @@ namespace PenguinMonitor
                 RunOnUiThread(() =>
                 {
                     // Enhanced toast message with life stage info
-                    string toastMessage = $"🐧 Bird {shortId} added to Box {_currentBoxIndex}";
+                    bool isReturning = false;
+                    if (_remotePenguinData != null && _remotePenguinData.TryGetValue(shortId, out var penguinCheck))
+                    {
+                        // Check if ChipAs contains "chick" (case insensitive)
+                        isReturning = penguinCheck.LastKnownLifeStage == LifeStage.Returnee ||
+                                      (!string.IsNullOrEmpty(penguinCheck.ChipAs) &&
+                                       penguinCheck.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
+                    }
+                    string birdIcon = isReturning ? "🔄🐧" : "🐧";
+                    string toastMessage = $"{birdIcon} Bird {shortId} added to Box {_currentBoxIndex}";
                     if (_remotePenguinData != null && _remotePenguinData.TryGetValue(shortId, out var penguin))
                     {
-                        if (penguin.LastKnownLifeStage == LifeStage.Adult || 
+                        if (penguin.LastKnownLifeStage == LifeStage.Adult ||
                             penguin.LastKnownLifeStage == LifeStage.Returnee)
                         {
                             _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
                             SaveCurrentBoxData();
-                            if (!penguin.Sex.Equals("f", StringComparison.OrdinalIgnoreCase) && !penguin.Sex.Equals("m", StringComparison.OrdinalIgnoreCase))
+
+                            // Check for returning bird FIRST (chipped as chick)
+                            // Check if ChipAs contains "chick" (case insensitive)
+                            bool isReturningBird = penguin.LastKnownLifeStage == LifeStage.Returnee ||
+                                                   (!string.IsNullOrEmpty(penguin.ChipAs) &&
+                                                    penguin.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
+                            if (isReturningBird)
+                            {
+                                triggerAlertAsync();
+                                toastMessage += $" RETURNING BIRD";
+                            }
+                            else if (!penguin.Sex.Equals("f", StringComparison.OrdinalIgnoreCase) && !penguin.Sex.Equals("m", StringComparison.OrdinalIgnoreCase))
                             {
                                 triggerAlertAsync();
                                 toastMessage += $" unsexed";
@@ -3841,9 +4027,10 @@ namespace PenguinMonitor
                 .SetView(input)
                 .SetPositiveButton("Go", (s, e) =>
                 {
-                    if (_boxNamesAndIndexes.ContainsKey(input.Text) )
+                    var matchingKey = _boxNamesAndIndexes.Keys.FirstOrDefault(k => string.Equals(k, input.Text, StringComparison.OrdinalIgnoreCase));
+                    if (matchingKey != null)
                     {
-                        JumpToBox(input.Text); 
+                        JumpToBox(matchingKey);
                     }
                     else
                     {

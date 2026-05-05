@@ -401,3 +401,4 @@ FodyWeavers.xsd
 *.sln.iml
 /secrets.props
 my-release-key.keystore
+.env

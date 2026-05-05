@@ -259,6 +259,19 @@ namespace PenguinMonitor.Models
                 }
             }
         }
+        private bool showABNBoxesInMultiboxView;
+        public bool ShowABNBoxesInMultiboxView
+        {
+            get => showABNBoxesInMultiboxView;
+            set
+            {
+                if (showABNBoxesInMultiboxView != value)
+                {
+                    showABNBoxesInMultiboxView = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
         private bool hideBoxesWithDataInMultiBoxView;  
         public bool HideBoxesWithDataInMultiBoxView
         {
@@ -281,6 +294,19 @@ namespace PenguinMonitor.Models
                 if (hideDCMInMultiBoxView != value)
                 {
                     hideDCMInMultiBoxView = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private bool hideABNInMultiBoxView;
+        public bool HideABNInMultiBoxView
+        {
+            get => hideABNInMultiBoxView;
+            set
+            {
+                if (hideABNInMultiBoxView != value)
+                {
+                    hideABNInMultiBoxView = value;
                     OnAnyPropertyChanged();
                 }
             }
@@ -462,6 +488,73 @@ namespace PenguinMonitor.Models
                 if (showBoxTagDeleteButton != value)
                 {
                     showBoxTagDeleteButton = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
+        // Breeding dates timeline settings
+        private bool showBreedingDatesTimeline;
+        public bool ShowBreedingDatesTimeline
+        {
+            get => showBreedingDatesTimeline;
+            set
+            {
+                if (showBreedingDatesTimeline != value)
+                {
+                    showBreedingDatesTimeline = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private bool showHatchingDatesInTimeline = true;
+        public bool ShowHatchingDatesInTimeline
+        {
+            get => showHatchingDatesInTimeline;
+            set
+            {
+                if (showHatchingDatesInTimeline != value)
+                {
+                    showHatchingDatesInTimeline = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private bool showPGDatesInTimeline = true;
+        public bool ShowPGDatesInTimeline
+        {
+            get => showPGDatesInTimeline;
+            set
+            {
+                if (showPGDatesInTimeline != value)
+                {
+                    showPGDatesInTimeline = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private bool showChippingDatesInTimeline = true;
+        public bool ShowChippingDatesInTimeline
+        {
+            get => showChippingDatesInTimeline;
+            set
+            {
+                if (showChippingDatesInTimeline != value)
+                {
+                    showChippingDatesInTimeline = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private bool showFledgingDatesInTimeline = true;
+        public bool ShowFledgingDatesInTimeline
+        {
+            get => showFledgingDatesInTimeline;
+            set
+            {
+                if (showFledgingDatesInTimeline != value)
+                {
+                    showFledgingDatesInTimeline = value;
                     OnAnyPropertyChanged();
                 }
             }

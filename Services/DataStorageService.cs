@@ -199,19 +199,72 @@ namespace PenguinMonitor.Services
                 return null;
             }
         }
-        internal async Task DownloadRemoteData(Android.Content.Context? context, Dictionary<int, MonitorDetails> allMonitorData)
+        /// <summary>
+        /// Result of DownloadRemoteData including box tag sync info
+        /// </summary>
+        public class DownloadResult
         {
+            public Dictionary<string, BoxTag>? BoxTags { get; set; }
+            public BoxTagService.SyncResult? TagSyncResult { get; set; }
+            public string? BoxTagError { get; set; }
+        }
+
+        internal async Task<DownloadResult> DownloadRemoteData(Android.Content.Context? context, Dictionary<int, MonitorDetails> allMonitorData, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null)
+        {
+            var downloadResult = new DownloadResult();
             try
             {
-                Task<HttpResponseMessage> responseBirdsTask = _httpClient.GetAsync(WILDWATCH_PENGUINS_URL);
-                Task saveMonitorDataToDiskTask = SaveAllMonitorDataToDisk(context, allMonitorData, reportHome:false, downloadRemoteMonitorData: true);
+                var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-                // Fetch box notes in parallel
+                // Fetch penguins from WildWatch API
+                var birdsStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                Task<HttpResponseMessage> responseBirdsTask = _httpClient.GetAsync(WILDWATCH_PENGUINS_URL)
+                    .ContinueWith(t => { birdsStopwatch.Stop(); return t.Result; });
+
+                // Save monitor data
+                var monitorStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                Task saveMonitorDataToDiskTask = Task.Run(async () => {
+                    await SaveAllMonitorDataToDisk(context, allMonitorData, reportHome:false, downloadRemoteMonitorData: true);
+                    monitorStopwatch.Stop();
+                });
+
+                // Box tag sync task
+                var tagSyncStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                Task<BoxTagService.SyncResult?> tagSyncTask;
+                if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)
+                {
+                    tagSyncTask = BoxTagService.SyncWithApiAsync(boxTags, context.FilesDir.AbsolutePath, validBoxIds)
+                        .ContinueWith(t => { tagSyncStopwatch.Stop(); return (BoxTagService.SyncResult?)t.Result; });
+                }
+                else
+                {
+                    tagSyncStopwatch.Stop();
+                    tagSyncTask = Task.FromResult<BoxTagService.SyncResult?>(null);
+                }
+
+                // Fetch box notes from WildWatch API
                 var notesRequest = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_API_URL}?action=list&table=observation_locations");
                 notesRequest.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
                 Task<HttpResponseMessage> responseLocationsTask = _httpClient.SendAsync(notesRequest);
 
-                await Task.WhenAll(responseBirdsTask, saveMonitorDataToDiskTask, responseLocationsTask);
+                // Await all in parallel
+                await Task.WhenAll(responseBirdsTask, saveMonitorDataToDiskTask, tagSyncTask, responseLocationsTask);
+                overallStopwatch.Stop();
+
+                // Log timing info
+                System.Diagnostics.Debug.WriteLine($"responseBirdsTask: {birdsStopwatch.ElapsedMilliseconds}ms");
+                System.Diagnostics.Debug.WriteLine($"saveMonitorDataToDiskTask: {monitorStopwatch.ElapsedMilliseconds}ms");
+                System.Diagnostics.Debug.WriteLine($"tagSyncTask: {tagSyncStopwatch.ElapsedMilliseconds}ms");
+                System.Diagnostics.Debug.WriteLine($"DownloadRemoteData total: {overallStopwatch.ElapsedMilliseconds}ms");
+
+                // Retrieve box tag sync results
+                var tagSyncResult = await tagSyncTask;
+                downloadResult.TagSyncResult = tagSyncResult;
+                if (tagSyncResult != null)
+                {
+                    downloadResult.BoxTags = tagSyncResult.Tags;
+                    downloadResult.BoxTagError = tagSyncResult.Error;
+                }
 
                 // Parse penguins from JSON API
                 HttpResponseMessage responseBirds = await responseBirdsTask;
@@ -243,7 +296,8 @@ namespace PenguinMonitor.Services
                         LastKnownLifeStage = lifeStage,
                         Sex = record.sex ?? "",
                         VidForScanner = record.vid_for_scanner ?? "",
-                        ChipDate = DateTime.TryParse(record.chip_date, out DateTime chipDateFound) ? chipDateFound : DateTime.MinValue
+                        ChipDate = DateTime.TryParse(record.chip_date, out DateTime chipDateFound) ? chipDateFound : DateTime.MinValue,
+                        ChipAs = record.chipped_as_adult == 1 ? "Adult" : ""
                     };
                 }
 
@@ -277,9 +331,31 @@ namespace PenguinMonitor.Services
                 foreach (MonitorDetails monitorDetails in allMonitorData.Values)
                     boxDataCount += monitorDetails.BoxData.Count;
 
+                // Build toast message with box tag sync info
+                string tagSyncInfo = "";
+                if (tagSyncResult != null)
+                {
+                    if (tagSyncResult.Error != null)
+                    {
+                        tagSyncInfo = ", box tags sync failed";
+                    }
+                    else
+                    {
+                        int total = tagSyncResult.Tags.Count;
+                        if (tagSyncResult.Uploaded > 0 && tagSyncResult.Downloaded > 0)
+                            tagSyncInfo = $", boxTags: {tagSyncResult.Uploaded} up, {tagSyncResult.Downloaded} down.";
+                        else if (tagSyncResult.Uploaded > 0)
+                            tagSyncInfo = $", boxTags: {tagSyncResult.Uploaded} uploaded.";
+                        else if (tagSyncResult.Downloaded > 0)
+                            tagSyncInfo = $", boxTags: {tagSyncResult.Downloaded} downloaded.";
+                        else
+                            tagSyncInfo = $", {total} box tags synced.";
+                    }
+                }
+
                 new Handler(Looper.MainLooper).Post(() =>
                 {
-                    Toast.MakeText(context, $"Got {boxDataCount} box monitor, {remotePenguinData.Count} remote bird infos", ToastLength.Long)?.Show();
+                    Toast.MakeText(context, $"Got {boxDataCount} box monitor, {remotePenguinData.Count} remote bird infos{tagSyncInfo}", ToastLength.Long)?.Show();
                 });
             }
             catch (Exception ex)
@@ -289,6 +365,7 @@ namespace PenguinMonitor.Services
                       Toast.MakeText(context, $"❌ Download failed: {ex.Message}", ToastLength.Long)?.Show();
                   });
             }
+            return downloadResult;
         }
         public static void saveApplicationSettings(AppSettings appSettings)
         {
@@ -482,6 +559,9 @@ namespace PenguinMonitor.Services
             }
             if (boxName == "49")
                 ;
+            // Check if current box is abandoned
+            if (thisBoxData?.BreedingChance == "ABN")
+                return "Abandoned";
             if (thisBoxData == null || thisBoxData.Eggs + thisBoxData.Chicks == 0 || olderBoxDatas == null || olderBoxDatas.Count==0)
                 return "";
             string breedingStatusString = "";
@@ -489,8 +569,14 @@ namespace PenguinMonitor.Services
             DateTime whenOffspringNotFound = DateTime.MinValue;
             foreach (BoxData olderBoxData in olderBoxDatas.Skip(skip))
             {
+                // If we hit an ABN when going back in time (while eggs/chicks still present), the nest was abandoned
+                if (olderBoxData.BreedingChance == "ABN" && olderBoxData.Eggs + olderBoxData.Chicks > 0)
+                    return "Abandoned";
                 if (olderBoxData.Eggs + olderBoxData.Chicks == 0)
                 {
+                    // Also check if ABN was set on the record when eggs/chicks went to 0
+                    if (olderBoxData.BreedingChance == "ABN")
+                        return "Abandoned";
                     if (thisBoxData.Eggs > 1) //in case of multiple eggs, assume first one was laid 2 days before found
                         whenOffspringFound = whenOffspringFound.AddDays(-2);
                     whenOffspringNotFound = olderBoxData.whenDataCollectedUtc.ToLocalTime().Date;
@@ -521,6 +607,63 @@ namespace PenguinMonitor.Services
             if (estFledge.AddDays(3) >= DateTime.Today)
                 return "Fledge" + getDateString(estFledge);
             return "Fail detecting laid date?";
+        }
+
+        /// <summary>
+        /// Gets estimated breeding dates for a box based on local data.
+        /// Returns null if dates cannot be calculated.
+        /// </summary>
+        internal static (DateTime? hatch, DateTime? pg, DateTime? chipStart, DateTime? fledge)? GetEstimatedBreedingDates(string boxName, BoxData? thisBoxData, List<BoxData> olderBoxDatas)
+        {
+            if(olderBoxDatas.Count == 0)
+                return null;
+            int skip = 0;
+            if (thisBoxData == null)
+            {
+                if (olderBoxDatas.Count == 1)
+                    return null;
+                thisBoxData = olderBoxDatas[0];
+                skip = 1;
+            }
+            if (thisBoxData?.BreedingChance == "ABN")
+                return null;
+            if (thisBoxData == null || thisBoxData.Eggs + thisBoxData.Chicks == 0 || olderBoxDatas == null || olderBoxDatas.Count == 0)
+                return null;
+
+            // Track whether we ever saw eggs in the history (needed to calculate hatch date)
+            bool sawEggsInHistory = thisBoxData.Eggs > 0;
+
+            DateTime whenOffspringFound = thisBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+            foreach (BoxData olderBoxData in olderBoxDatas.Skip(skip))
+            {
+                if (olderBoxData.Eggs > 0)
+                    sawEggsInHistory = true;
+
+                if (olderBoxData.BreedingChance == "ABN" && olderBoxData.Eggs + olderBoxData.Chicks > 0)
+                    return null;
+                if (olderBoxData.Eggs + olderBoxData.Chicks == 0)
+                {
+                    if (olderBoxData.BreedingChance == "ABN")
+                        return null;
+                    if (thisBoxData.Eggs > 1)
+                        whenOffspringFound = whenOffspringFound.AddDays(-2);
+                    DateTime whenOffspringNotFound = olderBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+                    TimeSpan uncertainty = (whenOffspringFound - whenOffspringNotFound) / 2;
+                    DateTime probableLaidDate = whenOffspringNotFound.AddDays(Math.Ceiling(uncertainty.TotalDays));
+                    int daysSinceLaid = (int)(DateTime.UtcNow.ToLocalTime().Date - probableLaidDate).TotalDays;
+
+                    // Only show hatch date if we saw eggs in history (otherwise we don't know when egg was laid)
+                    // Also don't show if chicks already present (hatching already occurred)
+                    DateTime? estHatch = (sawEggsInHistory && thisBoxData.Chicks == 0) ? DateTime.Today.AddDays(38 - daysSinceLaid) : null;
+                    DateTime estPG = DateTime.Today.AddDays(52 - daysSinceLaid);
+                    DateTime chipStart = DateTime.Today.AddDays(80 - daysSinceLaid);
+                    DateTime estFledge = DateTime.Today.AddDays(87 - daysSinceLaid);
+
+                    return (estHatch, estPG, chipStart, estFledge);
+                }
+                whenOffspringFound = olderBoxData.whenDataCollectedUtc;
+            }
+            return null;
         }
         private static string getDateString(DateTime expectedDate)
         {

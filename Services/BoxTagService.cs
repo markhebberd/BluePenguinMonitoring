@@ -148,61 +148,111 @@ namespace PenguinMonitor.Services
         public static bool IsApiConfigured => _apiService != null;
 
         /// <summary>
+        /// Result of a box tag sync operation
+        /// </summary>
+        public class SyncResult
+        {
+            public Dictionary<string, BoxTag> Tags { get; set; } = new();
+            public int Uploaded { get; set; }
+            public int Downloaded { get; set; }
+            public int Failed { get; set; }
+            public bool ApiAvailable { get; set; }
+            public string? Error { get; set; }
+        }
+
+        /// <summary>
         /// Sync box tags with remote API
         /// Downloads remote tags and merges with local (remote wins for conflicts)
+        /// Only syncs tags for boxes that exist in validBoxIds
         /// </summary>
-        public static async Task<Dictionary<string, BoxTag>> SyncWithApiAsync(
+        public static async Task<SyncResult> SyncWithApiAsync(
             Dictionary<string, BoxTag> localTags,
-            string filesDir)
+            string filesDir,
+            ICollection<string>? validBoxIds = null)
         {
+            var result = new SyncResult { Tags = localTags };
+
             if (_apiService == null)
             {
                 System.Diagnostics.Debug.WriteLine("BoxTagService.SyncWithApiAsync: API not configured");
-                return localTags;
+                result.Error = "API not configured";
+                return result;
             }
 
             try
             {
-                // Check if API is reachable
-                if (!await _apiService.IsApiAvailableAsync())
-                {
-                    System.Diagnostics.Debug.WriteLine("BoxTagService.SyncWithApiAsync: API not available");
-                    return localTags;
-                }
-
-                // Get remote tags
+                // Get remote tags (skip IsApiAvailableAsync - if it fails, GetAllBoxTagsAsync will throw)
+                result.ApiAvailable = true;
                 var remoteTags = await _apiService.GetAllBoxTagsAsync();
                 System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Got {remoteTags.Count} remote tags");
 
-                // Upload any local tags that don't exist remotely or are newer
+                // Filter to only valid box IDs if specified
+                bool IsValidBox(string boxId) => validBoxIds == null || validBoxIds.Contains(boxId);
+
+                // Download remote tags that are valid and don't exist locally
+                foreach (var kvp in remoteTags)
+                {
+                    if (IsValidBox(kvp.Key) && !localTags.ContainsKey(kvp.Key))
+                    {
+                        result.Downloaded++;
+                    }
+                }
+
+                // Upload any local tags that are valid and don't exist remotely or are newer
                 foreach (var kvp in localTags)
                 {
-                    if (!remoteTags.ContainsKey(kvp.Key) ||
-                        kvp.Value.ScanTimeUTC > remoteTags[kvp.Key].ScanTimeUTC)
+                    if (!IsValidBox(kvp.Key))
+                        continue;
+
+                    bool shouldUpload = false;
+                    if (!remoteTags.ContainsKey(kvp.Key))
+                    {
+                        shouldUpload = true;
+                    }
+                    else
+                    {
+                        // Compare with 1 second tolerance to handle datetime precision differences
+                        var diff = kvp.Value.ScanTimeUTC - remoteTags[kvp.Key].ScanTimeUTC;
+                        shouldUpload = diff.TotalSeconds > 1;
+                    }
+
+                    if (shouldUpload)
                     {
                         try
                         {
                             await _apiService.SaveBoxTagAsync(kvp.Value);
                             remoteTags[kvp.Key] = kvp.Value;
+                            result.Uploaded++;
                             System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Uploaded {kvp.Key}");
                         }
                         catch (Exception ex)
                         {
+                            result.Failed++;
                             System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Failed to upload {kvp.Key}: {ex.Message}");
                         }
                     }
                 }
 
-                // Save merged result locally
-                SaveBoxTags(remoteTags, filesDir);
+                // Merge: keep only valid tags from remote, plus existing local tags for valid boxes
+                var mergedTags = new Dictionary<string, BoxTag>();
+                foreach (var kvp in remoteTags)
+                {
+                    if (IsValidBox(kvp.Key))
+                        mergedTags[kvp.Key] = kvp.Value;
+                }
 
-                System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Sync complete, {remoteTags.Count} total tags");
-                return remoteTags;
+                // Save merged result locally
+                SaveBoxTags(mergedTags, filesDir);
+
+                result.Tags = mergedTags;
+                System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Sync complete, {mergedTags.Count} total tags, {result.Uploaded} uploaded, {result.Downloaded} downloaded");
+                return result;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync failed: {ex.Message}");
-                return localTags;
+                result.Error = ex.Message;
+                return result;
             }
         }
 

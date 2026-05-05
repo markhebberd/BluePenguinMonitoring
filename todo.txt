@@ -5,13 +5,39 @@ TODO
 	- show all known data about the bird 
 	- prompt to enter optional information connected with the scan result, i.e. Sex, weight, etc.
 	- Scanned entries should be bigger and easier to click
-- The app should be able to sort by next relevant date. IE show the next chicks that need chipping
 - penguin reporting under specific name to seperate britta from alternate locations (i.e. wellington?)
-- note from britta "nest status ABN - a definite point in time when nest has been declared abandoned and failed, this would be perfect as a prediction status, so those nests can be Specifically filtered for"
 - Performance tweak: create multibox view card different from draw multibox view card.
-- on going discussion about how to retire an egg - egg removed action? 
+- lock without saving -> discard wording. save/edit
+- if a new breeding session was STARTED with a CHICK (unusual, as one would normally sight eggs first, but possible to imagine in a very low monitor environment), then the system would need to back-calculate likely egg laying dates, as the chicks had already hatched. This made me think of something that I will explain sometime about your automatic calculations/guesses. I think I can explain well when we get the next opportunity.
+
 
 DONE
+
+37.34
+- handling scans when in box history and in monitor history, scanning a box/bird takes you to latest. (untested)
+- View for list of interesting datas: Hatching, PG, Chip start, Fledging.
+- Jump to box case invariant. 
+
+37.33
+- returner icon for all birds
+- detect returner before chick. 
+
+37.32
+- ABN breeding status for abandoned nests, displays "Abandoned" in breeding status string
+- Rearranged show/hide filter checkboxes (NO, UNL, POT on same row; ABN before DCM)
+
+37.31
+- Update box filter checkboxes and visible boxes string
+
+37.30
+- Filter box tag sync to valid box sets only
+
+37.29
+- Box tags sync in DownloadRemoteData (parallel with other downloads)
+- Readable box tag sync results in toast
+
+37.28
+- Boxtags on the server. Untested. 
 
 37.27
 - Removed the requirement that entries need to be on the same date
