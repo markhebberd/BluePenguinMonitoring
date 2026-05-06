@@ -439,20 +439,34 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
           const k = b.pit_id.slice(-8);
           return k === breedingMale || k === breedingFemale;
         });
+        // Chicks: chipped as chick, seen during this season
+        const chicks = sorted.filter(b => {
+          const k = b.pit_id.slice(-8);
+          if (k === breedingMale || k === breedingFemale) return false;
+          return !b.chipped_as_adult && b.chip_date;
+        });
         const others = sorted.filter(b => {
           const k = b.pit_id.slice(-8);
-          return k !== breedingMale && k !== breedingFemale;
+          if (k === breedingMale || k === breedingFemale) return false;
+          if (!b.chipped_as_adult && b.chip_date) return false;
+          return true;
         });
 
         return (
           <div key={label} className="season-birds">
             <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
             <div className="bird-row">
-              {pair.length === 2 && (
+              {(pair.length === 2 || chicks.length > 0) && (
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
                       <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                      <span className="scan-count">{b.scanCount}x</span>
+                    </span>
+                  ))}
+                  {chicks.map(b => (
+                    <span key={b.pit_id.slice(-8)} className="bird-with-count">
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={b.lastSeen} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
