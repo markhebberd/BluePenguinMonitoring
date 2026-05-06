@@ -21,6 +21,7 @@ interface Observation {
   adults:number; eggs:number; chicks:number;
   breeding_status:string|null; gate_status:string|null; notes:string;
   scans: Scan[];
+  edit_count?:string|number;
 }
 interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; chick_size_code?:string|null; }
 interface BoxDetailData {
@@ -504,7 +505,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
   const ref = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [editCount, setEditCount] = useState(0);
+  const [editCount, setEditCount] = useState(parseInt(String(obs.edit_count || '0')) || 0);
   const trackEdit = (field: string) => async (val: any) => {
     const result = await saveObs(field)(val);
     if (result?.changed) setEditCount(c => c + 1);

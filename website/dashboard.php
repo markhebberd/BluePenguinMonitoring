@@ -33,7 +33,8 @@ function handleTimeline($pdo, $colonyId) {
 
 function handleBox($pdo, $colonyId, $boxName) {
     if (empty($boxName)) { echo json_encode(['error'=>'name required']); return; }
-    $sql = "SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
+    $sql = "SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes,
+            (SELECT COUNT(*) FROM audit_log a WHERE a.table_name = 'observations' AND a.record_id = o.observation_id AND a.action = 'UPDATE') as edit_count
             FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = FALSE ORDER BY o.observation_time_utc DESC";
     $stmt = $pdo->prepare($sql); $stmt->execute([$colonyId, $boxName]); $observations = $stmt->fetchAll();
