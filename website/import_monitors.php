@@ -25,10 +25,14 @@ foreach ($stmt->fetchAll() as $row) {
     $chipLookup[strtoupper($row['pit_id'])] = $row['pit_id'];
 }
 
-foreach ($monitors as $monitor) {
+echo "Monitors count: " . count($monitors) . "\n";
+echo "Chips lookup count: " . count($chipLookup) . "\n";
+
+foreach ($monitors as $mi => $monitor) {
     if ($monitor['IsDeleted'] ?? false) continue;
     $filename = $monitor['filename'] ?? 'unknown';
-    
+    $boxCount = count($monitor['BoxData'] ?? []);
+
     foreach ($monitor['BoxData'] ?? [] as $boxName => $boxData) {
         try {
             $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
