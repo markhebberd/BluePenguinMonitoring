@@ -445,7 +445,7 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.tag_number.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.tag_number)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
@@ -453,7 +453,7 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
               )}
               {others.map(b => (
                 <span key={b.tag_number.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.tag_number)} />
+                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.tag_number)} />
                   <span className="scan-count">{b.scanCount}x</span>
                 </span>
               ))}
@@ -555,7 +555,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
         <div className="obs-edit-birds">
           {localScans.map(s => (
             <span key={s.scan_id || s.tag_number} className="scan-removable">
-              <PenguinMini scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
+              <PenguinMini scan={s} onClick={() => onBirdClick?.(s.peng_num || s.tag_number)} observationDate={obs.observation_time_utc} />
               <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
             </span>
           ))}
@@ -578,7 +578,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
       {!editing && obs.scans.length>0 && (
         <div className="scans">
           {obs.scans.map((s,j) => (
-            <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.tag_number)} observationDate={obs.observation_time_utc} />
+            <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.tag_number)} observationDate={obs.observation_time_utc} />
           ))}
         </div>
       )}
@@ -821,7 +821,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
           {partners.map((pt: any) => (
             <div key={pt.tag} className="partner-card">
               <div className="partner-head">
-                <PenguinMini scan={{peng_num: pt.peng_num, tag_number: pt.full_tag || pt.tag, sex: pt.sex}} onClick={() => onBirdClick(pt.tag)} />
+                <PenguinMini scan={{peng_num: pt.peng_num, tag_number: pt.full_tag || pt.tag, sex: pt.sex}} onClick={() => onBirdClick(pt.peng_num || pt.tag)} />
                 <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''}</span>
               </div>
               <div className="partner-sightings">
@@ -861,9 +861,9 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
           {filtered.slice(0, 20).map((p: any) => {
             const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
             return (
-              <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }}>
+              <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.peng_num || p.tag_number); onSearchChange(''); }}>
                 <span className="pr-tag">
-                  <PenguinMini scan={p} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }} />
+                  <PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num || p.tag_number); onSearchChange(''); }} />
                 </span>
                 <span className="pr-meta">
                   {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
@@ -1574,20 +1574,12 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     fetchBirdDetail(selectedBird).then(d => { setBirdData(d); setBirdLoading(false); });
   }, [selectedBird]);
 
-  const openBird = (pengNumOrTag: string) => {
-    // Resolve peng_num from allPenguins if a tag was passed
-    let num = pengNumOrTag;
-    if (pengNumOrTag.length > 4) {
-      // Looks like a tag, find the peng_num
-      const bird = allPenguins.find((p: any) => p.tag_number === pengNumOrTag || p.tag_number.slice(-8) === pengNumOrTag || p.tag_number.slice(-8) === pengNumOrTag.slice(-8));
-      if (bird) num = bird.peng_num;
-    }
-    // On mobile, navigate to bird page (clears box). On desktop, show side panel.
+  const openBird = (pengNum: string) => {
     if (window.innerWidth < 900 && selectedBox) {
       setPreviousBox(selectedBox);
       setSelectedBox(null);
     }
-    setSelectedBird(num);
+    setSelectedBird(pengNum);
   };
 
   const closeBird = () => {
@@ -1723,7 +1715,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="bird-row">
                       {boxDetail.chipped_here!.map((c: ChippedHere) => (
                         <span key={c.tag_number} className="bird-with-count">
-                          <PenguinMini scan={{tag_number: c.tag_number, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
+                          <PenguinMini scan={{tag_number: c.tag_number, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.peng_num)} />
                           <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
