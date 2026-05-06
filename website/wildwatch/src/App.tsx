@@ -484,7 +484,13 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
     }
   }, [highlight]);
   const obsId = obs.observation_id;
-  const saveObs = (field: string) => (val: any) => obsId ? updateRecord(token || '', 'observations', obsId, {[field]: val}) : Promise.resolve();
+  const [localObs, setLocalObs] = useState(obs);
+  const saveObs = (field: string) => async (val: any) => {
+    if (!obsId) return;
+    const result = await updateRecord(token || '', 'observations', obsId, {[field]: val});
+    if (result?.changed) setLocalObs((o: any) => ({...o, [field]: val}));
+    return result;
+  };
   const [editing, setEditing] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
   const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
@@ -537,23 +543,23 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
       {!editing ? (
         <>
           <div className="obs-nums">
-            {obs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(obs.adults, 6))}</span>}
-            {obs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(obs.eggs, 6))}</span>}
-            {obs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(obs.chicks, 6))}</span>}
-            {obs.breeding_status && <span className="badge" style={{background:STATUS_COLORS[obs.breeding_status]||'#ccc'}}>{obs.breeding_status}</span>}
-            {obs.gate_status && <span className="gate">{obs.gate_status}</span>}
+            {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
+            {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
+            {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
+            {localObs.breeding_status && <span className="badge" style={{background:STATUS_COLORS[localObs.breeding_status]||'#ccc'}}>{localObs.breeding_status}</span>}
+            {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
           </div>
-          {obs.notes && <div className="obs-notes">{obs.notes}</div>}
+          {localObs.notes && <div className="obs-notes">{localObs.notes}</div>}
         </>
       ) : (
         <>
         <div className="obs-edit-row">
-          <label>{'\uD83D\uDC27'}</label><EditableField value={obs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} />
-          <label>{'\uD83E\uDD5A'}</label><EditableField value={obs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} />
-          <label>{'\uD83D\uDC23'}</label><EditableField value={obs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} />
-          <EditableField value={obs.breeding_status || ''} type="select" options={['','BR','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
-          <EditableField value={obs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} />
-          <EditableField value={obs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
+          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} />
+          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} />
+          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} />
+          <EditableField value={localObs.breeding_status || ''} type="select" options={['','BR','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
+          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} />
+          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
         </div>
         <div className="obs-edit-birds">
           {localScans.map(s => (
