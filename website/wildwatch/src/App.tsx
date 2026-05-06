@@ -740,7 +740,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
     <div className="bird-detail">
       <div className="bird-title-row">
         <span className="bird-title-peng">
-          <PenguinMini scan={{peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
+          <PenguinMini scan={{peng_num: p.peng_num, pit_id: (chips.find((c: any) => c.is_active) || chips[0])?.pit_id, sex: p.sex, chip_date: (chips.find((c: any) => c.is_active) || chips[0])?.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
         </span>
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -757,16 +757,20 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
           <tbody>
             <tr><td className="muted">Sex</td><td>{!editing ? (p.sex || <span className="muted">-</span>) : <EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />}</td></tr>
             <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>
-            <tr><td className="muted">Initial Chip Date</td><td>{p.initial_chip_date || p.chip_date || <span className="muted">-</span>}</td></tr>
+            <tr><td className="muted">Initial Chip Date</td><td>{chips.length > 0 ? chips[0].chip_date || <span className="muted">-</span> : <span className="muted">-</span>}</td></tr>
             <tr><td className="muted">Chick Size Code</td><td>{!editing ? (p.chick_size_code || <span className="muted">-</span>) : <EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
-            {chips.map((c: any, i: number) => (<Fragment key={`chip${i}`}>
-              <tr><td className="muted">Chip ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
-              <tr><td className="muted">Chip Date</td><td>{!editing ? (c.chip_date || <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
-              <tr><td className="muted">Chip Box</td><td>{!editing ? (c.chip_box ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
-              <tr><td className="muted">Chipped By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
-            </Fragment>))}
+            {chips.map((c: any, i: number) => {
+              const re = 'Re'.repeat(i);
+              const prefix = i === 0 ? '' : re.toLowerCase();
+              return (<Fragment key={`chip${i}`}>
+              <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
+              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>{!editing ? (c.chip_date || <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
+              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td>{!editing ? (c.chip_box ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
+              <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
+            </Fragment>);
+            })}
             <tr><td className="muted">Last Known Life Stage</td><td>{!editing ? (p.life_stage || <span className="muted">-</span>) : <EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />}</td></tr>
             {biometrics.map((b: any, i: number) => (<Fragment key={`bio${i}`}>
               <tr><td className="muted">Measured</td><td>{!editing ? (b.observation_date || <span className="muted">-</span>) : <EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />}</td></tr>
