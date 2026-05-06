@@ -1852,7 +1852,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       {boxDetail.chipped_here!.map((c: ChippedHere) => (
                         <span key={c.pit_id} className="bird-with-count">
                           <PenguinMini scan={{pit_id: c.pit_id, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult, chick_size_code: c.chick_size_code}} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date} />
-                          <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
+                          <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
                     </div>
