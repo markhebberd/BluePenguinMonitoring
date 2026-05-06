@@ -24,8 +24,8 @@ export async function fetchAllPenguins() {
   return (await fetch(`/penguin-api/penguins.php?_=${Date.now()}`)).json();
 }
 
-export async function fetchBirdDetail(tag: string) {
-  return (await fetch(`/penguin-api/bird.php?tag=${encodeURIComponent(tag)}&_=${Date.now()}`)).json();
+export async function fetchBirdDetail(pengNum: string) {
+  return (await fetch(`/penguin-api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`)).json();
 }
 
 export async function updateRecord(token: string, table: string, id: number, fields: Record<string, any>) {

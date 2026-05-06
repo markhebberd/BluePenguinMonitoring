@@ -7,16 +7,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $pdo = getDbConnection();
 $tag = $_GET['tag'] ?? '';
-if (empty($tag)) { echo json_encode(['error'=>'tag required']); exit; }
+$num = $_GET['num'] ?? '';
+if (empty($tag) && empty($num)) { echo json_encode(['error'=>'tag or num required']); exit; }
 
-// Look up by penguin_chips first, then fall back to tag_number
-$stmt = $pdo->prepare("SELECT p.* FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num WHERE pc.chip_number = ? OR pc.chip_number LIKE ?");
-$stmt->execute([$tag, '%'.$tag]);
-$penguin = $stmt->fetch();
-if (!$penguin) {
-    $stmt = $pdo->prepare("SELECT * FROM penguins WHERE tag_number = ? OR tag_number LIKE ?");
+if (!empty($num)) {
+    // Lookup by peng_num directly
+    $stmt = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ?");
+    $stmt->execute([$num]);
+    $penguin = $stmt->fetch();
+} else {
+    // Look up by penguin_chips first, then fall back to tag_number
+    $stmt = $pdo->prepare("SELECT p.* FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num WHERE pc.chip_number = ? OR pc.chip_number LIKE ?");
     $stmt->execute([$tag, '%'.$tag]);
     $penguin = $stmt->fetch();
+    if (!$penguin) {
+        $stmt = $pdo->prepare("SELECT * FROM penguins WHERE tag_number = ? OR tag_number LIKE ?");
+        $stmt->execute([$tag, '%'.$tag]);
+        $penguin = $stmt->fetch();
+    }
 }
 if (!$penguin) { echo json_encode(['error'=>'penguin not found']); exit; }
 // Include chips in response

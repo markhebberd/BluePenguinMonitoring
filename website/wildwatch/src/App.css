@@ -155,7 +155,10 @@ header h1:hover { opacity:.8; }
 /* Bird page */
 .bird-page { max-width:800px; margin:0 auto; padding:16px 20px; }
 .bird-detail {}
-.bird-title { font-size:16px; color:#1a5276; margin:0 0 8px; padding-left:8px; border-left:3px solid #2196F3; }
+.bird-title-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.bird-title-peng .scan { font-size:20px; padding:6px 12px; cursor:default; }
+.bird-title-peng .scan .sex-icon { font-size:20px; }
+.bird-title-actions { display:flex; gap:6px; align-items:center; }
 .bird-header { border-left:4px solid #2196F3; padding-left:12px; margin-bottom:16px; }
 .bird-header h2 { font-size:20px; color:#1a5276; }
 .bird-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }

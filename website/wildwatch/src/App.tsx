@@ -705,12 +705,17 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
   const partners: any[] = data.partners || [];
   const breedingStats: any[] = data.breeding_stats || [];
 
-  const sexColor = (p.sex||'').toUpperCase() === 'F' ? '#FFE4E1' : (p.sex||'').toUpperCase() === 'M' ? '#E6F3FF' : '#f5f5f5';
   const boxes = Array.from(new Set(scans.map((s: any) => s.box_name)));
 
   const chips: any[] = p.chips || [];
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
+  const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (token && p.peng_num) {
+      fetchHistory(token, 'penguins', p.peng_num).then(d => setHasHistory(Array.isArray(d) && d.length > 0));
+    }
+  }, [token, p.peng_num]);
   const savePenguin = (field: string) => (val: any) => updateRecord(token || '', 'penguins', p.peng_num, {[field]: val});
   const saveChip = (chipId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_chips', chipId, {[field]: val});
   const saveBio = (bioId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val});
@@ -718,15 +723,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
 
   return (
     <div className="bird-detail">
-      <h3 className="bird-title" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
-        <PenguinMini scan={{peng_num: p.peng_num, tag_number: p.tag_number, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
-      </h3>
-      <div className="bird-header" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
-        <div className="obs-top">
+      <div className="bird-title-row">
+        <span className="bird-title-peng">
+          <PenguinMini scan={{peng_num: p.peng_num, tag_number: p.tag_number, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
+        </span>
+        <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
-          {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
-        </div>
-        {canEdit && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
+          {editing && <><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></>}
+          {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
+        </span>
       </div>
 
       {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
@@ -1569,13 +1574,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     fetchBirdDetail(selectedBird).then(d => { setBirdData(d); setBirdLoading(false); });
   }, [selectedBird]);
 
-  const openBird = (tag: string) => {
+  const openBird = (pengNumOrTag: string) => {
+    // Resolve peng_num from allPenguins if a tag was passed
+    let num = pengNumOrTag;
+    if (pengNumOrTag.length > 4) {
+      // Looks like a tag, find the peng_num
+      const bird = allPenguins.find((p: any) => p.tag_number === pengNumOrTag || p.tag_number.slice(-8) === pengNumOrTag || p.tag_number.slice(-8) === pengNumOrTag.slice(-8));
+      if (bird) num = bird.peng_num;
+    }
     // On mobile, navigate to bird page (clears box). On desktop, show side panel.
     if (window.innerWidth < 900 && selectedBox) {
       setPreviousBox(selectedBox);
       setSelectedBox(null);
     }
-    setSelectedBird(tag.slice(-8));
+    setSelectedBird(num);
   };
 
   const closeBird = () => {
