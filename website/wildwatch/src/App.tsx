@@ -814,14 +814,42 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
         </div>
       )}
 
-      {/* Locations */}
+      {/* Locations with sightings */}
       <div className="bird-section">
         <h3>Seen in {boxes.length} box{boxes.length !== 1 ? 'es' : ''}</h3>
-        <div className="bird-row">
-          {boxes.map((b: string) => (
-            <span key={b} className="bird-chip clickable" onClick={() => onBoxClick(b)}>Box {b}</span>
-          ))}
-        </div>
+        {boxes.map((b: string) => {
+          // Collect sightings for this box: from scans + chip date
+          const boxScans = scans.filter((s: any) => s.box_name === b);
+          const chippedHere = chips.find((c: any) => c.chip_box === b);
+          // Deduplicate by date
+          const sightings = new Map<string, { date: string; seenWith: any[] }>();
+          if (chippedHere) {
+            sightings.set(chippedHere.chip_date, { date: chippedHere.chip_date, seenWith: [] });
+          }
+          for (const s of boxScans) {
+            const date = s.observation_time_utc.slice(0, 10);
+            if (!sightings.has(date)) {
+              sightings.set(date, { date: s.observation_time_utc, seenWith: s.seen_with || [] });
+            } else if ((s.seen_with || []).length > (sightings.get(date)!.seenWith.length)) {
+              sightings.get(date)!.seenWith = s.seen_with;
+            }
+          }
+          const sorted = Array.from(sightings.values()).sort((a, b) => b.date.localeCompare(a.date));
+          return (
+            <div key={b} className="obs-card" style={{marginBottom:6}}>
+              <div className="obs-top"><b className="clickable" onClick={() => onBoxClick(b)}>Box {b}</b> <span className="muted">{sorted.length} visit{sorted.length !== 1 ? 's' : ''}</span></div>
+              {sorted.slice(0, 5).map((sg, i) => (
+                <div key={i} className="obs-nums" style={{fontSize:11}}>
+                  <span>{fmtDateTime(sg.date)}</span>
+                  {sg.seenWith.map((sw: any) => (
+                    <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
+                  ))}
+                </div>
+              ))}
+              {sorted.length > 5 && <div className="muted small">+{sorted.length - 5} more</div>}
+            </div>
+          );
+        })}
       </div>
 
       {/* Scan history */}
@@ -1709,7 +1737,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="bird-nav">
               <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) <= 1} onClick={() => setSelectedBird(String(parseInt(selectedBird!) - 1))}>&lsaquo; Prev</button>
               <input className="bird-nav-input" type="text" value={selectedBird || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); if (v) setSelectedBird(v); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) >= 1004} onClick={() => setSelectedBird(String(parseInt(selectedBird!) + 1))}>Next &rsaquo;</button>
+              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) >= allPenguins.length} onClick={() => setSelectedBird(String(parseInt(selectedBird!) + 1))}>Next &rsaquo;</button>
             </div>
           </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (

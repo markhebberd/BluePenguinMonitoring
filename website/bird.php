@@ -30,7 +30,7 @@ $chipsStmt->execute([$pid]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 
 // All scans with observation context (JOIN through penguin_chips)
-$stmt = $pdo->prepare("SELECT ps.scan_time_utc, ps.pit_id,
+$stmt = $pdo->prepare("SELECT ps.scan_time_utc, ps.pit_id, o.observation_id,
     ol.location_name AS box_name, o.observation_time_utc, o.monitor_filename,
     o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
     FROM penguin_scans ps
@@ -41,6 +41,26 @@ $stmt = $pdo->prepare("SELECT ps.scan_time_utc, ps.pit_id,
     ORDER BY ps.scan_time_utc DESC");
 $stmt->execute([$pid]);
 $scans = $stmt->fetchAll();
+
+// Get co-scanned birds for each observation
+$obsIds = array_unique(array_column($scans, 'observation_id'));
+$coScans = [];
+if (!empty($obsIds)) {
+    $placeholders = implode(',', array_fill(0, count($obsIds), '?'));
+    $coStmt = $pdo->prepare("SELECT ps.observation_id, pc.peng_num, p.sex, p.chipped_as_adult, pc.pit_id, pc.chip_date
+        FROM penguin_scans ps
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+        JOIN penguins p ON pc.peng_num = p.peng_num
+        WHERE ps.observation_id IN ($placeholders) AND pc.peng_num != ?
+        ORDER BY pc.peng_num + 0");
+    $coStmt->execute(array_merge($obsIds, [$pid]));
+    foreach ($coStmt->fetchAll() as $row) {
+        $coScans[$row['observation_id']][] = $row;
+    }
+}
+foreach ($scans as &$s) {
+    $s['seen_with'] = $coScans[$s['observation_id']] ?? [];
+}
 
 // Biometrics
 $stmt = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? ORDER BY observation_date DESC");
