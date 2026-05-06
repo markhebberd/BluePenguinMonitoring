@@ -135,7 +135,7 @@ header h1:hover { opacity:.8; }
 .obs-top-right { display:flex; gap:6px; align-items:center; }
 .obs-top b { font-size:12px; }
 .obs-nums { display:flex; gap:8px; font-size:13px; align-items:center; flex-wrap:wrap; }
-.badge { font-size:10px; padding:1px 6px; border-radius:8px; color:#fff; font-weight:600; }
+.badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; }
 .gate { font-size:10px; color:#666; background:#e8e8e8; padding:1px 5px; border-radius:3px; }
 .obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
 .scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }

@@ -39,6 +39,8 @@ function displayStatus(status: string|null, eggs: number, chicks: number): strin
   return status;
 }
 
+const DARK_TEXT_STATUSES = new Set(['NO','UNL','POT','CON','I','']);
+
 // Color progression: NO → UNL → POT → CON → BR → Guard → PG → Molting. Red = alert only.
 const STATUS_COLORS: Record<string,string> = {
   NO:'#E0E0E0',       // gray
@@ -595,7 +597,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
-            {(() => { const ds = displayStatus(localObs.breeding_status, localObs.eggs, localObs.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
+            {(() => { const ds = displayStatus(localObs.breeding_status, localObs.eggs, localObs.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
           </div>
           {localObs.notes && <div className="obs-notes">{localObs.notes}</div>}
@@ -849,7 +851,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
                 <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
                 {bs.max_eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(bs.max_eggs,4))}</span>}
                 {bs.max_chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(bs.max_chicks,4))}</span>}
-                {bs.statuses.map((s:string) => <span key={s} className="badge" style={{background:STATUS_COLORS[s]||'#ccc'}}>{s}</span>)}
+                {bs.statuses.map((s:string) => <span key={s} className="badge" style={{background:STATUS_COLORS[s]||'#ccc',color:DARK_TEXT_STATUSES.has(s)?'#333':'#fff'}}>{s}</span>)}
               </div>
             </div>
           ))}
@@ -907,7 +909,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
               {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
-              {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
+              {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {s.gate_status && <span className="gate">{s.gate_status}</span>}
             </div>
             {s.notes && <div className="obs-notes">{s.notes}</div>}
@@ -1386,7 +1388,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             <div key={i} className="entry-existing-row">
               <span>{fmtDateNZ(o.observation_time_utc)}</span>
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
-              {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
+              {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
               {(o.scans || []).map((s: any, j: number) => (
                 <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} />
