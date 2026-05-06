@@ -333,10 +333,15 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.pit_id ? scan.pit_id.slice(-8) : '';
-  const chipAs = scan.chipped_as_adult ? 'chipped-adult' : 'chipped-chick';
+  // Chipped as chick: yellow bar. If no observation date and chick is now >3 months old, show as unproven adult (gray + yellow bar)
+  const wasChippedAsChick = !scan.chipped_as_adult;
+  const isChickNow = wasChippedAsChick && scan.chip_date && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(scan.chip_date).getTime()) < 90 * 86400000;
+  const unprovenAdult = wasChippedAsChick && !isChickNow && !sex;
+  const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
+  const grayCls = unprovenAdult && !observationDate ? 'unproven' : '';
   const sizeCode = scan.chick_size_code || '';
   return (
-    <span className={`scan clickable ${cls} ${chipAs}`} onClick={onClick}>
+    <span className={`scan clickable ${cls} ${chipCls} ${grayCls}`} onClick={onClick}>
       {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{sizeCode ? ` ${sizeCode} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </span>
   );
