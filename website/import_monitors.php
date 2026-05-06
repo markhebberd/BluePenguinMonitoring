@@ -16,18 +16,13 @@ $scansSkipped = 0;
 $boxTagsSkipped = 0;
 $unknownPenguins = [];
 
-// Build lookup: chip_number -> peng_num (from penguin_chips, then tag_number fallback)
-$penguinLookup = [];
-$stmt = $pdo->query("SELECT peng_num, chip_number FROM penguin_chips");
+// Build lookup: last8 of pit_id -> full pit_id (from penguin_chips)
+$chipLookup = [];
+$stmt = $pdo->query("SELECT pit_id FROM penguin_chips");
 foreach ($stmt->fetchAll() as $row) {
-    $penguinLookup[strtoupper($row['chip_number'])] = $row['peng_num'];
-}
-$stmt = $pdo->query("SELECT peng_num, tag_number FROM penguins WHERE tag_number IS NOT NULL");
-foreach ($stmt->fetchAll() as $row) {
-    $short = strtoupper(substr($row['tag_number'], -8));
-    if (!isset($penguinLookup[$short])) {
-        $penguinLookup[$short] = $row['peng_num'];
-    }
+    $short = strtoupper(substr($row['pit_id'], -8));
+    $chipLookup[$short] = $row['pit_id'];
+    $chipLookup[strtoupper($row['pit_id'])] = $row['pit_id'];
 }
 
 foreach ($monitors as $monitor) {
@@ -75,14 +70,13 @@ foreach ($monitors as $monitor) {
                     continue;
                 }
                 
-                if (isset($penguinLookup[$short8])) {
-                    $penguinId = $penguinLookup[$short8];
+                if (isset($chipLookup[$short8])) {
+                    $pitId = $chipLookup[$short8];
                     $scanTime = $scan['Timestamp'] ?? $obsTimeParsed;
                     $scanTimeParsed = date('Y-m-d H:i:s', strtotime($scanTime));
-                    
-                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, peng_num, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
-                        ->execute([$observationId, $penguinId, $scanTimeParsed,
-                            $scan['Latitude'] ?? null, $scan['Longitude'] ?? null, $scan['Accuracy'] ?? null]);
+
+                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
+                        ->execute([$observationId, $pitId, $scanTimeParsed]);
                     $scansCreated++;
                 } else {
                     $unknownPenguins[$short8] = ($unknownPenguins[$short8] ?? 0) + 1;

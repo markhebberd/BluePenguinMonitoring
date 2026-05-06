@@ -28,7 +28,7 @@ export async function fetchBirdDetail(pengNum: string) {
   return (await fetch(`/penguin-api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`)).json();
 }
 
-export async function updateRecord(token: string, table: string, id: number, fields: Record<string, any>) {
+export async function updateRecord(token: string, table: string, id: number | string, fields: Record<string, any>) {
   const r = await fetch(`/penguin-api/crud.php?action=update&table=${table}&id=${id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

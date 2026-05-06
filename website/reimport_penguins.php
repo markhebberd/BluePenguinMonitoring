@@ -105,16 +105,14 @@ try {
         elseif (strtoupper($sex) === 'M' || stripos($sex, 'male') !== false) $sexNorm = 'M';
 
         // Insert penguin
-        $pdo->prepare("INSERT INTO penguins (peng_num, tag_number, sex, initial_chip_date, chip_date, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$number, $shortId, $sexNorm, $parsedDate, $parsedDate, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
-        
+        $pdo->prepare("INSERT INTO penguins (peng_num, sex, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$number, $sexNorm, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
         $created++;
 
         // Insert original chip
         $isActive = empty($reChipFlag) ? 1 : 0;
-        $chipFullIso = empty($reChipFlag) ? ($fullIso ?: null) : null;
-        $pdo->prepare("INSERT INTO penguin_chips (peng_num, chip_number, chip_date, is_active, chip_box, chip_by, chip_ok, full_iso, solo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$penguinId, $shortId, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $chipOk ?: null, $chipFullIso, $solo ?: null]);
+        $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, chip_box, chip_by, solo) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$shortId, $number, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $solo ?: null]);
         $chipsCreated++;
 
         // Insert rechip if present
@@ -125,8 +123,8 @@ try {
                 $rechipDate = null;
                 if (!empty($rechipDateRaw)) { $ts = strtotime($rechipDateRaw); if ($ts) $rechipDate = date('Y-m-d', $ts); }
 
-                $pdo->prepare("INSERT INTO penguin_chips (peng_num, chip_number, chip_date, is_active, rechip_by, full_iso) VALUES (?, ?, ?, TRUE, ?, ?)")
-                    ->execute([$penguinId, $rechipFullId, $rechipDate, $rechipBy ?: null, $fullIso ?: null]);
+                $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, rechip_by) VALUES (?, ?, ?, TRUE, ?)")
+                    ->execute([$rechipFullId, $number, $rechipDate, $rechipBy ?: null]);
                 $rechips++;
                 $chipsCreated++;
             }
@@ -142,23 +140,19 @@ try {
 
     // Sanity check
     $total = $pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn();
-    $withNumber = $pdo->query("SELECT COUNT(*) FROM penguins WHERE peng_num IS NOT NULL")->fetchColumn();
     $withSex = $pdo->query("SELECT COUNT(*) FROM penguins WHERE sex IS NOT NULL")->fetchColumn();
-    $withDate = $pdo->query("SELECT COUNT(*) FROM penguins WHERE chip_date IS NOT NULL")->fetchColumn();
     $chipCount = $pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn();
 
     echo "\n=== SANITY CHECK ===\n";
     echo "Total penguins: $total\n";
-    echo "With peng_num: $withNumber\n";
     echo "With sex: $withSex\n";
-    echo "With chip_date: $withDate\n";
     echo "Total chips: $chipCount\n";
 
     // Show sample
-    $sample = $pdo->query("SELECT peng_num, peng_num, tag_number, sex, chip_date, life_stage FROM penguins ORDER BY peng_num + 0 LIMIT 5")->fetchAll();
+    $sample = $pdo->query("SELECT p.peng_num, pc.pit_id, p.sex, pc.chip_date, p.life_stage FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num WHERE pc.is_active = 1 ORDER BY p.peng_num + 0 LIMIT 5")->fetchAll();
     echo "\nSample:\n";
     foreach ($sample as $s) {
-        echo "  #{$s['peng_num']} | {$s['tag_number']} | {$s['sex']} | {$s['chip_date']} | {$s['life_stage']}\n";
+        echo "  #{$s['peng_num']} | {$s['pit_id']} | {$s['sex']} | {$s['chip_date']} | {$s['life_stage']}\n";
     }
 
 } catch (Exception $e) {
