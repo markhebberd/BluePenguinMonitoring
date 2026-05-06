@@ -47,7 +47,7 @@ $id = $_GET['id'] ?? null;
 
 $tables = [
     'observations' => 'observation_id',
-    'penguins' => 'penguin_id',
+    'penguins' => 'peng_num',
     'penguin_scans' => 'scan_id',
     'penguin_biometric_data' => 'biometric_id',
     'penguin_chips' => 'chip_id',
@@ -283,10 +283,10 @@ function handleHistory($pdo, $table, $id) {
         foreach ($results as &$entry) {
             if ($entry['table_name'] === 'penguin_scans') {
                 $fields = json_decode($entry['changed_fields'], true);
-                $penguinId = $fields['penguin_id'] ?? null;
-                if ($penguinId) {
-                    $pStmt = $pdo->prepare("SELECT penguin_number, tag_number, sex FROM penguins WHERE penguin_id = ?");
-                    $pStmt->execute([$penguinId]);
+                $pengNum = $fields['peng_num'] ?? null;
+                if ($pengNum) {
+                    $pStmt = $pdo->prepare("SELECT peng_num, tag_number, sex FROM penguins WHERE peng_num = ?");
+                    $pStmt->execute([$pengNum]);
                     $penguin = $pStmt->fetch();
                     if ($penguin) $entry['penguin_info'] = $penguin;
                 }

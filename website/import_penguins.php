@@ -90,41 +90,39 @@ try {
         elseif (strtoupper($sex) === 'M' || stripos($sex, 'male') !== false) $sexNorm = 'M';
 
         // Find existing penguin by chip_number (full or short) or tag_number
-        $stmt = $pdo->prepare("SELECT penguin_id FROM penguin_chips WHERE chip_number = ?");
+        $stmt = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE chip_number = ?");
         $stmt->execute([$shortId]);
         $existing = $stmt->fetchColumn();
 
         if (!$existing) {
             // Try matching by last 8 digits (legacy short IDs in DB)
             $last8 = substr(preg_replace('/[^0-9]/', '', $shortId), -8);
-            $stmt = $pdo->prepare("SELECT penguin_id FROM penguin_chips WHERE chip_number LIKE ?");
+            $stmt = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE chip_number LIKE ?");
             $stmt->execute(['%' . $last8]);
             $existing = $stmt->fetchColumn();
         }
 
         if (!$existing) {
-            $stmt = $pdo->prepare("SELECT penguin_id FROM penguins WHERE tag_number = ? OR tag_number LIKE ?");
+            $stmt = $pdo->prepare("SELECT peng_num FROM penguins WHERE tag_number = ? OR tag_number LIKE ?");
             $stmt->execute([$shortId, '%' . substr($shortId, -8)]);
             $existing = $stmt->fetchColumn();
         }
 
         if ($existing) {
-            $pdo->prepare("UPDATE penguins SET penguin_number = ?, tag_number = ?, sex = COALESCE(?, sex), initial_chip_date = COALESCE(?, initial_chip_date), chip_date = COALESCE(?, chip_date), chipped_as_adult = ?, life_stage = COALESCE(?, life_stage), vid_for_scanner = COALESCE(?, vid_for_scanner), chick_size_sex = COALESCE(?, chick_size_sex), kommentar = COALESCE(?, kommentar) WHERE penguin_id = ?")
+            $pdo->prepare("UPDATE penguins SET peng_num = ?, tag_number = ?, sex = COALESCE(?, sex), initial_chip_date = COALESCE(?, initial_chip_date), chip_date = COALESCE(?, chip_date), chipped_as_adult = ?, life_stage = COALESCE(?, life_stage), vid_for_scanner = COALESCE(?, vid_for_scanner), chick_size_code = COALESCE(?, chick_size_code), kommentar = COALESCE(?, kommentar) WHERE peng_num = ?")
                 ->execute([$number, $shortId, $sexNorm, $parsedDate, $parsedDate, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null, $existing]);
-            $penguinId = $existing;
             $updated++;
         } else {
-            $pdo->prepare("INSERT INTO penguins (penguin_number, tag_number, sex, initial_chip_date, chip_date, chipped_as_adult, life_stage, vid_for_scanner, chick_size_sex, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            $pdo->prepare("INSERT INTO penguins (peng_num, tag_number, sex, initial_chip_date, chip_date, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 ->execute([$number, $shortId, $sexNorm, $parsedDate, $parsedDate, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
-            $penguinId = $pdo->lastInsertId();
             $created++;
         }
 
         // Insert original chip
         $isActive = empty($reChipFlag) ? 1 : 0;
         $chipFullIso = empty($reChipFlag) ? ($fullIso ?: null) : null;
-        $pdo->prepare("INSERT INTO penguin_chips (penguin_id, chip_number, chip_date, is_active, chip_box, chip_by, chip_ok, full_iso, solo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE chip_date = VALUES(chip_date), is_active = VALUES(is_active), chip_box = VALUES(chip_box), chip_by = VALUES(chip_by), chip_ok = VALUES(chip_ok), full_iso = VALUES(full_iso), solo = VALUES(solo)")
-            ->execute([$penguinId, $shortId, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $chipOk ?: null, $chipFullIso, $solo ?: null]);
+        $pdo->prepare("INSERT INTO penguin_chips (peng_num, chip_number, chip_date, is_active, chip_box, chip_by, chip_ok, full_iso, solo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE chip_date = VALUES(chip_date), is_active = VALUES(is_active), chip_box = VALUES(chip_box), chip_by = VALUES(chip_by), chip_ok = VALUES(chip_ok), full_iso = VALUES(full_iso), solo = VALUES(solo)")
+            ->execute([$number, $shortId, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $chipOk ?: null, $chipFullIso, $solo ?: null]);
         $chipsCreated++;
 
         // Insert rechip if present
@@ -135,8 +133,8 @@ try {
                 $rechipDate = null;
                 if (!empty($rechipDateRaw)) { $ts = strtotime($rechipDateRaw); if ($ts) $rechipDate = date('Y-m-d', $ts); }
 
-                $pdo->prepare("INSERT INTO penguin_chips (penguin_id, chip_number, chip_date, is_active, rechip_by, full_iso) VALUES (?, ?, ?, TRUE, ?, ?) ON DUPLICATE KEY UPDATE chip_date = VALUES(chip_date), is_active = VALUES(is_active), rechip_by = VALUES(rechip_by), full_iso = VALUES(full_iso)")
-                    ->execute([$penguinId, $rechipFullId, $rechipDate, $rechipBy ?: null, $fullIso ?: null]);
+                $pdo->prepare("INSERT INTO penguin_chips (peng_num, chip_number, chip_date, is_active, rechip_by, full_iso) VALUES (?, ?, ?, TRUE, ?, ?) ON DUPLICATE KEY UPDATE chip_date = VALUES(chip_date), is_active = VALUES(is_active), rechip_by = VALUES(rechip_by), full_iso = VALUES(full_iso)")
+                    ->execute([$number, $rechipFullId, $rechipDate, $rechipBy ?: null, $fullIso ?: null]);
                 $rechips++;
                 $chipsCreated++;
             }

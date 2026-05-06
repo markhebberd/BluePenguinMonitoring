@@ -91,9 +91,9 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
 
     // Get scans for each observation
     foreach ($observations as &$obs) {
-        $scanSql = "SELECT ps.scan_time_utc, p.penguin_number, p.tag_number, p.sex, p.life_stage, p.vid_for_scanner
+        $scanSql = "SELECT ps.scan_time_utc, p.peng_num, p.tag_number, p.sex, p.life_stage, p.vid_for_scanner
                     FROM penguin_scans ps
-                    JOIN penguins p ON ps.penguin_id = p.penguin_id
+                    JOIN penguins p ON ps.peng_num = p.peng_num
                     WHERE ps.observation_id = ?
                     ORDER BY ps.scan_time_utc";
         $scanStmt = $pdo->prepare($scanSql);
@@ -143,7 +143,7 @@ function handleColonyOverview($pdo, $colonyId) {
     $statsSql = "SELECT
                     COUNT(DISTINCT ol.location_id) as total_locations,
                     COUNT(DISTINCT o.observation_id) as total_observations,
-                    COUNT(DISTINCT ps.penguin_id) as total_penguins,
+                    COUNT(DISTINCT ps.peng_num) as total_penguins,
                     MIN(o.observation_time_utc) as first_observation,
                     MAX(o.observation_time_utc) as last_observation
                  FROM observation_locations ol

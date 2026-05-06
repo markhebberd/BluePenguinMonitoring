@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"c:\\Users\\mark\\src\\PenguinMonitor\" log -3 --oneline)"
+      "Bash(git -C \"c:\\Users\\mark\\src\\PenguinMonitor\" log -3 --oneline)",
+      "Bash(grep:*)",
+      "WebFetch(domain:wildwatch.co.nz)",
+      "Bash(git push:*)",
+      "Bash(npm run:*)",
+      "Bash(ssh -o ConnectTimeout=5 -o BatchMode=yes wildwatch@wildwatch.co.nz 'ls public_html/')",
+      "Bash(ssh -p 2222 -o ConnectTimeout=5 -o BatchMode=yes wildwatch@wildwatch.co.nz 'ls')",
+      "Bash(curl -s 'https://wildwatch.co.nz/penguin-api/deploy_frontend.php?key=deploy2026')",
+      "Bash(curl -s -D - 'https://wildwatch.co.nz/')",
+      "Bash(curl:*)",
+      "Bash(sed -i 's/penguin_id/peng_num/g' bird.php penguins.php dashboard.php observations.php import_monitors.php)",
+      "Bash(sed -i \"s/'penguins' => 'peng_num'/'penguins' => 'peng_num'/g\" crud.php)"
     ]
   }
 }

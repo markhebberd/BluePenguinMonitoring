@@ -16,17 +16,17 @@ $scansSkipped = 0;
 $boxTagsSkipped = 0;
 $unknownPenguins = [];
 
-// Build lookup: chip_number -> penguin_id (from penguin_chips, then tag_number fallback)
+// Build lookup: chip_number -> peng_num (from penguin_chips, then tag_number fallback)
 $penguinLookup = [];
-$stmt = $pdo->query("SELECT penguin_id, chip_number FROM penguin_chips");
+$stmt = $pdo->query("SELECT peng_num, chip_number FROM penguin_chips");
 foreach ($stmt->fetchAll() as $row) {
-    $penguinLookup[strtoupper($row['chip_number'])] = $row['penguin_id'];
+    $penguinLookup[strtoupper($row['chip_number'])] = $row['peng_num'];
 }
-$stmt = $pdo->query("SELECT penguin_id, tag_number FROM penguins WHERE tag_number IS NOT NULL");
+$stmt = $pdo->query("SELECT peng_num, tag_number FROM penguins WHERE tag_number IS NOT NULL");
 foreach ($stmt->fetchAll() as $row) {
     $short = strtoupper(substr($row['tag_number'], -8));
     if (!isset($penguinLookup[$short])) {
-        $penguinLookup[$short] = $row['penguin_id'];
+        $penguinLookup[$short] = $row['peng_num'];
     }
 }
 
@@ -80,7 +80,7 @@ foreach ($monitors as $monitor) {
                     $scanTime = $scan['Timestamp'] ?? $obsTimeParsed;
                     $scanTimeParsed = date('Y-m-d H:i:s', strtotime($scanTime));
                     
-                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, penguin_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
+                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, peng_num, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
                         ->execute([$observationId, $penguinId, $scanTimeParsed,
                             $scan['Latitude'] ?? null, $scan['Longitude'] ?? null, $scan['Accuracy'] ?? null]);
                     $scansCreated++;

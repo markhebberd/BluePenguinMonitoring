@@ -7,7 +7,7 @@ import { StatsPanel } from './components/StatsPanel';
 import type { BoxTag } from './types';
 import './App.css';
 
-interface Scan { scan_id?:number; penguin_id?:number; tag_number:string; penguin_number?:string|null; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
+interface Scan { scan_id?:number; peng_num?:string|null; tag_number:string; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
 
 function isChickAtDate(bird: any, dateStr: string): boolean {
   if (!bird || !bird.chip_date || bird.chipped_as_adult) return false;
@@ -22,7 +22,7 @@ interface Observation {
   breeding_status:string|null; gate_status:string|null; notes:string;
   scans: Scan[];
 }
-interface ChippedHere { penguin_number:string; tag_number:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; }
+interface ChippedHere { peng_num:string; tag_number:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; }
 interface BoxDetailData {
   location: { location_id:number; location_name:string; persistent_notes:string|null; rfid_tag_number:string|null; } | null;
   observations: Observation[];
@@ -313,27 +313,7 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observat
   );
 }
 
-function calcChipAge(chipDate: string | null): { years: number; months: number } | null {
-  if (!chipDate) return null;
-  const chip = new Date(chipDate);
-  if (isNaN(chip.getTime())) return null;
-  const now = new Date();
-  let years = now.getFullYear() - chip.getFullYear();
-  let months = now.getMonth() - chip.getMonth();
-  if (months < 0) { years--; months += 12; }
-  return { years, months };
-}
 
-function fmtChipAge(chipDate: string | null, chippedAsAdult: boolean): string | null {
-  const age = calcChipAge(chipDate);
-  if (!age) return null;
-  const parts = [];
-  if (age.years > 0) parts.push(`${age.years}yr`);
-  if (age.months > 0 || age.years === 0) parts.push(`${age.months}mo`);
-  const timeStr = parts.join(' ');
-  if (chippedAsAdult) return `chipped ${timeStr} ago`;
-  return `${timeStr} old`;
-}
 
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
   const s = (sex || '').toUpperCase();
@@ -351,7 +331,7 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const sex = (scan.sex || '').toUpperCase();
   const cls = penguinSexClass(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
-  const num = scan.penguin_number ? `#${scan.penguin_number}` : '';
+  const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.tag_number ? scan.tag_number.slice(-8) : '';
   return (
     <span className={`scan clickable ${cls}`} onClick={onClick}>
@@ -511,7 +491,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
-        (p.penguin_number === birdSearch || p.tag_number.includes(birdSearch))
+        (p.peng_num === birdSearch || p.tag_number.includes(birdSearch))
         && !localScans.some(s => s.tag_number === p.tag_number)
       ).slice(0, 8)
     : [];
@@ -519,10 +499,10 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
   const addScan = async (p: any) => {
     if (!obsId || !token) return;
     const result = await createRecord(token, 'penguin_scans', {
-      observation_id: obsId, penguin_id: p.penguin_id, scan_time_utc: obs.observation_time_utc
+      observation_id: obsId, peng_num: p.peng_num, scan_time_utc: obs.observation_time_utc
     });
     if (result?.id) {
-      const newScan: Scan = { scan_id: result.id, penguin_id: p.penguin_id, tag_number: p.tag_number, penguin_number: p.penguin_number, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
+      const newScan: Scan = { scan_id: result.id, peng_num: p.peng_num, tag_number: p.tag_number, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
       setLocalScans([...localScans, newScan]);
       obs.scans.push(newScan);
       const isChick = isChickAtDate(p, obs.observation_time_utc);
@@ -583,15 +563,11 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
             <input className="ef-input" placeholder="Add penguin #..." value={birdSearch} onChange={e => setBirdSearch(e.target.value)} />
             {filteredAdd.length > 0 && (
               <div className="add-scan-results">
-                {filteredAdd.map((p: any) => {
-                  const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
-                  const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
-                  return (
-                    <div key={p.tag_number} className={`add-scan-option clickable ${cls}`} onClick={() => addScan(p)}>
-                      {p.penguin_number ? `#${p.penguin_number}` : ''}{icon ? ` ${icon}` : ''} {p.tag_number.slice(-8)}
-                    </div>
-                  );
-                })}
+                {filteredAdd.map((p: any) => (
+                  <div key={p.tag_number} className="add-scan-option" onClick={() => addScan(p)}>
+                    <PenguinMini scan={p} onClick={() => addScan(p)} />
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -705,16 +681,12 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                 )}
                 {e.action === 'INSERT' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
                   <div className="history-fields">
-                    <span className={`scan ${penguinSexClass(e.penguin_info.sex)}`}>
-                      {e.penguin_info.penguin_number ? `#${e.penguin_info.penguin_number} ` : ''}{penguinSexIcon(e.penguin_info.sex)} {(e.penguin_info.tag_number || '').slice(-8)}
-                    </span> added
+                    <PenguinMini scan={e.penguin_info} onClick={() => {}} /> added
                   </div>
                 ) : <div className="history-fields muted">Record created</div>)}
                 {e.action === 'DELETE' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
                   <div className="history-fields">
-                    <span className={`scan ${penguinSexClass(e.penguin_info.sex)}`}>
-                      {e.penguin_info.penguin_number ? `#${e.penguin_info.penguin_number} ` : ''}{penguinSexIcon(e.penguin_info.sex)} {(e.penguin_info.tag_number || '').slice(-8)}
-                    </span> removed
+                    <PenguinMini scan={e.penguin_info} onClick={() => {}} /> removed
                   </div>
                 ) : <div className="history-fields muted">Record deleted</div>)}
               </div>
@@ -734,94 +706,51 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
   const breedingStats: any[] = data.breeding_stats || [];
 
   const sexColor = (p.sex||'').toUpperCase() === 'F' ? '#FFE4E1' : (p.sex||'').toUpperCase() === 'M' ? '#E6F3FF' : '#f5f5f5';
-  const isAdult = !!p.chipped_as_adult || (p.chip_as||'').toLowerCase() === 'adult';
-  const ageStr = fmtChipAge(p.chip_date, isAdult);
   const boxes = Array.from(new Set(scans.map((s: any) => s.box_name)));
 
   const chips: any[] = p.chips || [];
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [editing, setEditing] = useState(false);
-  const savePenguin = (field: string) => (val: any) => updateRecord(token || '', 'penguins', p.penguin_id, {[field]: val});
+  const savePenguin = (field: string) => (val: any) => updateRecord(token || '', 'penguins', p.peng_num, {[field]: val});
   const saveChip = (chipId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_chips', chipId, {[field]: val});
   const saveBio = (bioId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val});
 
-  const mainChip = chips.find((c: any) => c.is_active) || chips[0];
-  const titleChip = mainChip ? mainChip.chip_number.slice(-8) : p.tag_number?.slice(-8) || '';
 
   return (
     <div className="bird-detail">
       <h3 className="bird-title" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
-        Penguin {p.penguin_number ? `#${p.penguin_number}` : ''} {penguinSexIcon(p.sex)} {titleChip}
+        <PenguinMini scan={{peng_num: p.peng_num, tag_number: p.tag_number, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
       </h3>
       <div className="bird-header" style={{ borderLeftColor: sexColor === '#f5f5f5' ? '#2196F3' : sexColor }}>
         <div className="obs-top">
-          <span className="bird-meta">
-            {p.sex && <span className="bird-badge" style={{ background: sexColor }}>{p.sex === 'F' ? 'Female' : p.sex === 'M' ? 'Male' : p.sex}</span>}
-            {p.life_stage && <span className="bird-badge">{p.life_stage}</span>}
-            {ageStr && <span className="bird-badge">{ageStr}</span>}
-            {p.chick_size_sex && <span className="bird-badge">{p.chick_size_sex}</span>}
-          </span>
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
           {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
         </div>
-        {!editing ? (
-          <>
-            {p.vid_for_scanner && <div className="muted">VID: {p.vid_for_scanner}</div>}
-            {p.kommentar && <div className="bird-notes">{p.kommentar}</div>}
-          </>
-        ) : (
-          <div className="obs-edit">
-            <div className="obs-edit-row">
-              <label>Sex</label><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />
-              <label>Stage</label><EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />
-              <label>Size</label><EditableField value={p.chick_size_sex} onSave={savePenguin('chick_size_sex')} placeholder="-" canEdit={true} />
-            </div>
-            <div className="obs-edit-row">
-              <label>VID</label><EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />
-              <label>Notes</label><EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />
-            </div>
-          </div>
-        )}
-        {canEdit && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.penguin_id})}>History</button>}
+        {canEdit && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
       </div>
 
       {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
 
-      {/* Chip & biometric info */}
+      {/* All penguin data */}
       <div className="bird-section">
         <table className="bird-table">
           <tbody>
+            <tr><td className="muted">Sex</td><td>{!editing ? (p.sex || <span className="muted">-</span>) : <EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />}</td></tr>
+            <tr><td className="muted">Life Stage</td><td>{!editing ? (p.life_stage || <span className="muted">-</span>) : <EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />}</td></tr>
+            <tr><td className="muted">Chick Size Code</td><td>{!editing ? (p.chick_size_code || <span className="muted">-</span>) : <EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} />}</td></tr>
+            <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
+            <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
             {chips.map((c: any, i: number) => (<Fragment key={`chip${i}`}>
-              <tr>
-                <td className="muted">Chip ID</td>
-                <td>{c.chip_number.slice(-8)}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td>
-              </tr>
-              {(c.chip_date || editing) && <tr>
-                <td className="muted">Chip Date</td>
-                <td>{!editing ? c.chip_date : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.chip_id, 'chip_date')} placeholder="date" canEdit={true} />}</td>
-              </tr>}
-              {(c.chip_box || editing) && <tr>
-                <td className="muted">Chip Box</td>
-                <td>{!editing ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <EditableField value={c.chip_box} onSave={saveChip(c.chip_id, 'chip_box')} placeholder="box" canEdit={true} />}</td>
-              </tr>}
-              {(c.chip_by || editing) && <tr>
-                <td className="muted">Chipped By</td>
-                <td>{!editing ? c.chip_by : <EditableField value={c.chip_by} onSave={saveChip(c.chip_id, 'chip_by')} placeholder="who" canEdit={true} />}</td>
-              </tr>}
+              <tr><td className="muted">Chip ID</td><td>{c.chip_number.slice(-8)}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
+              <tr><td className="muted">Chip Date</td><td>{!editing ? (c.chip_date || <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.chip_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
+              <tr><td className="muted">Chip Box</td><td>{!editing ? (c.chip_box ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.chip_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
+              <tr><td className="muted">Chipped By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.chip_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
+              <tr><td className="muted">Chip OK</td><td>{c.chip_ok || <span className="muted">-</span>}</td></tr>
             </Fragment>))}
             {biometrics.map((b: any, i: number) => (<Fragment key={`bio${i}`}>
-              {b.observation_date && <tr>
-                <td className="muted">Measured</td>
-                <td>{!editing ? b.observation_date : <EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />}</td>
-              </tr>}
-              {(b.weight || editing) && <tr>
-                <td className="muted">Weight</td>
-                <td>{!editing ? <span>{parseFloat(b.weight).toFixed(0)}g</span> : <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td>
-              </tr>}
-              {(b.right_flipper_length || editing) && <tr>
-                <td className="muted">Flipper Length</td>
-                <td>{!editing ? <span>{parseFloat(b.right_flipper_length).toFixed(0)}mm</span> : <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td>
-              </tr>}
+              <tr><td className="muted">Measured</td><td>{!editing ? (b.observation_date || <span className="muted">-</span>) : <EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />}</td></tr>
+              <tr><td className="muted">Weight</td><td>{!editing ? (b.weight ? `${parseFloat(b.weight).toFixed(0)}g` : <span className="muted">-</span>) : <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>
+              <tr><td className="muted">Flipper Length</td><td>{!editing ? (b.right_flipper_length ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <span className="muted">-</span>) : <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>
             </Fragment>))}
           </tbody>
         </table>
@@ -887,10 +816,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
           {partners.map((pt: any) => (
             <div key={pt.tag} className="partner-card">
               <div className="partner-head">
-                <span className={`bird-chip clickable ${penguinSexClass(pt.sex)}`}
-                      onClick={() => onBirdClick(pt.tag)}>
-                  {pt.penguin_number ? `#${pt.penguin_number} ` : ''}{penguinSexIcon(pt.sex)} {pt.tag.slice(-8)}
-                </span>
+                <PenguinMini scan={{peng_num: pt.peng_num, tag_number: pt.full_tag || pt.tag, sex: pt.sex}} onClick={() => onBirdClick(pt.tag)} />
                 <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''}</span>
               </div>
               <div className="partner-sightings">
@@ -913,7 +839,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   penguins: any[]; search: string; onSearchChange: (s:string)=>void; onBirdClick: (tag:string)=>void;
 }) {
   const filtered = search.length > 0
-    ? penguins.filter(p => p.tag_number.includes(search) || (p.penguin_number && p.penguin_number === search))
+    ? penguins.filter(p => p.tag_number.includes(search) || (p.peng_num && p.peng_num === search))
     : [];
 
   return (
@@ -929,11 +855,10 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
         <div className="penguin-results">
           {filtered.slice(0, 20).map((p: any) => {
             const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
-            const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
             return (
               <div key={p.tag_number} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }}>
                 <span className="pr-tag">
-                  {p.penguin_number ? `#${p.penguin_number} ` : ''}{icon ? `${icon} ` : ''}{p.tag_number.slice(-8)}
+                  <PenguinMini scan={p} onClick={() => { onBirdClick(p.tag_number); onSearchChange(''); }} />
                 </span>
                 <span className="pr-meta">
                   {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
@@ -1089,7 +1014,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   }, [dateInput, season, dateMappings]);
 
   const filteredBirds = birdSearch.length > 0
-    ? allPenguins.filter((p: any) => (p.tag_number.includes(birdSearch) || (p.penguin_number && p.penguin_number === birdSearch)) && !p.tag_number.startsWith('LA900025') && !p.tag_number.startsWith('9130')).slice(0, 10)
+    ? allPenguins.filter((p: any) => (p.tag_number.includes(birdSearch) || (p.peng_num && p.peng_num === birdSearch)) && !p.tag_number.startsWith('LA900025') && !p.tag_number.startsWith('9130')).slice(0, 10)
     : [];
   const [searchIdx, setSearchIdx] = useState(-1);
   useEffect(() => { setSearchIdx(-1); }, [birdSearch]);
@@ -1218,14 +1143,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           setMessage(`Unknown penguin ${birdId} - not in database`);
           continue;
         }
-        const penguinId = knownBird.penguin_id;
-
         await fetch('/penguin-api/crud.php?action=create&table=penguin_scans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({
             observation_id: obsData.id,
-            penguin_id: penguinId,
+            peng_num: knownBird.peng_num,
             scan_time_utc: parsedDate + ' 12:00:00'
           })
         });
@@ -1358,13 +1281,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {o.breeding_status && <span className="badge" style={{background:STATUS_COLORS[o.breeding_status]||'#ccc'}}>{o.breeding_status}</span>}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
-              {(o.scans || []).map((s: any, j: number) => {
-                const sx = (s.sex||'').toUpperCase();
-                const obsDate = o.observation_time_utc;
-                const isC = !s.chipped_as_adult && s.chip_date && (new Date(obsDate).getTime() - (new Date(s.chip_date).getTime() - 42*86400000)) < 180*86400000;
-                const cls = isC && !sx ? 'chick' : sx === 'F' ? 'f' : sx === 'M' ? 'm' : '';
-                return <span key={j} className={`scan ${cls}`} style={{fontSize:'9px'}}>{s.tag_number.slice(-8)}</span>;
-              })}
+              {(o.scans || []).map((s: any, j: number) => (
+                <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} />
+              ))}
             </div>
           ))}
         </div>
@@ -1410,16 +1329,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           })()}
           {filteredBirds.length > 0 && (
             <div className="penguin-results">
-              {filteredBirds.map((p: any, idx: number) => {
-                const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
-                const icon = penguinSexIcon(p.sex, p.chip_date, p.chipped_as_adult);
-                return (
-                  <div key={p.tag_number} className={`penguin-result clickable ${cls} ${idx === searchIdx ? 'focused' : ''}`}
-                    onClick={() => addBird(p.tag_number)}>
-                    {p.penguin_number ? `#${p.penguin_number}` : ''}{icon ? ` ${icon}` : ''} {p.tag_number.slice(-8)}
-                  </div>
-                );
-              })}
+              {filteredBirds.map((p: any, idx: number) => (
+                <div key={p.tag_number} className={`penguin-result clickable ${penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult)} ${idx === searchIdx ? 'focused' : ''}`}
+                  onClick={() => addBird(p.tag_number)}>
+                  <PenguinMini scan={p} onClick={() => addBird(p.tag_number)} />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1428,10 +1343,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <div className="entry-birds">
             {scannedBirds.map(b => {
               const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === b || p.tag_number === b);
-              const cls = bird ? penguinSexClass(bird.sex, bird.chip_date, bird.chipped_as_adult) : '';
-              const icon = bird ? penguinSexIcon(bird.sex, bird.chip_date, bird.chipped_as_adult) : '';
-              return <span key={b} className={`bird-chip clickable ${cls}`} onClick={() => removeBird(b)}>
-                {bird?.penguin_number ? `#${bird.penguin_number} ` : ''}{icon ? `${icon} ` : ''}{b} ✕
+              return <span key={b} className="scan-removable">
+                {bird ? <PenguinMini scan={bird} onClick={() => removeBird(b)} /> : <span className="scan" onClick={() => removeBird(b)}>{b}</span>}
+                <button className="remove-scan" onClick={() => removeBird(b)}>&times;</button>
               </span>;
             })}
           </div>
@@ -1728,7 +1642,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         </header>
         <div className="bird-page">
           <div className="page-header">
-            <h2>Penguin {birdData?.penguin?.penguin_number ? `#${birdData.penguin.penguin_number}` : ''} {selectedBird.slice(-8)}</h2>
             <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
           </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
@@ -1798,7 +1711,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="bird-row">
                       {boxDetail.chipped_here!.map((c: ChippedHere) => (
                         <span key={c.tag_number} className="bird-with-count">
-                          <PenguinMini scan={{tag_number: c.tag_number, penguin_number: c.penguin_number, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
+                          <PenguinMini scan={{tag_number: c.tag_number, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.tag_number)} />
                           <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
