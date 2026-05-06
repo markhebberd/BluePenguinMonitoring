@@ -48,7 +48,7 @@ $stmt->execute([$pid]);
 $biometrics = $stmt->fetchAll();
 
 // Partners (JOIN scans through penguin_chips)
-$stmt = $pdo->prepare("SELECT pc2.peng_num AS partner_peng_num, p2.sex AS partner_sex, p2.life_stage AS partner_life_stage,
+$stmt = $pdo->prepare("SELECT pc2.peng_num AS partner_peng_num, pc2.pit_id AS partner_pit_id, p2.sex AS partner_sex, p2.life_stage AS partner_life_stage, p2.chipped_as_adult AS partner_chipped_as_adult, pc2.chip_date AS partner_chip_date,
     ol.location_name AS box_name, o.observation_time_utc, o.monitor_filename
     FROM penguin_scans ps1
     JOIN penguin_chips pc1 ON ps1.pit_id = pc1.pit_id
@@ -66,8 +66,8 @@ $partners = [];
 foreach ($partnerRows as $row) {
     $pnum = $row['partner_peng_num'];
     if (!isset($partners[$pnum])) {
-        $partners[$pnum] = ['peng_num'=>$pnum, 'sex'=>$row['partner_sex'],
-            'life_stage'=>$row['partner_life_stage'], 'sightings'=>[]];
+        $partners[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$row['partner_pit_id'], 'sex'=>$row['partner_sex'],
+            'life_stage'=>$row['partner_life_stage'], 'chipped_as_adult'=>$row['partner_chipped_as_adult'], 'chip_date'=>$row['partner_chip_date'], 'sightings'=>[]];
     }
     $partners[$pnum]['sightings'][] = ['box'=>$row['box_name'], 'date'=>$row['observation_time_utc'], 'monitor'=>$row['monitor_filename']];
 }

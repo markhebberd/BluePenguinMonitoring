@@ -22,7 +22,7 @@ interface Observation {
   breeding_status:string|null; gate_status:string|null; notes:string;
   scans: Scan[];
 }
-interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; }
+interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; chick_size_code?:string|null; }
 interface BoxDetailData {
   location: { location_id:number; location_name:string; persistent_notes:string|null; pit_id:string|null; } | null;
   observations: Observation[];
@@ -723,6 +723,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
   const boxes = Array.from(new Set(scans.map((s: any) => s.box_name)));
 
   const chips: any[] = p.chips || [];
+  const activeChip = chips.find((c: any) => c.is_active == 1) || chips[0];
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -740,7 +741,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
     <div className="bird-detail">
       <div className="bird-title-row">
         <span className="bird-title-peng">
-          <PenguinMini scan={{peng_num: p.peng_num, pit_id: (chips.find((c: any) => c.is_active) || chips[0])?.pit_id, sex: p.sex, chip_date: (chips.find((c: any) => c.is_active) || chips[0])?.chip_date, chipped_as_adult: p.chipped_as_adult}} onClick={() => {}} />
+          <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => {}} />
         </span>
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -839,9 +840,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
           <h3>Partners ({partners.length})</h3>
           <p className="muted">Birds scanned in the same box at the same time</p>
           {partners.map((pt: any) => (
-            <div key={pt.tag} className="partner-card">
+            <div key={pt.peng_num} className="partner-card">
               <div className="partner-head">
-                <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.full_tag || pt.tag, sex: pt.sex}} onClick={() => onBirdClick(pt.peng_num || pt.tag)} />
+                <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} />
                 <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''}</span>
               </div>
               <div className="partner-sightings">
@@ -1760,7 +1761,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="bird-row">
                       {boxDetail.chipped_here!.map((c: ChippedHere) => (
                         <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={{pit_id: c.pit_id, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult}} onClick={() => openBird(c.peng_num)} />
+                          <PenguinMini scan={{pit_id: c.pit_id, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult, chick_size_code: c.chick_size_code}} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date} />
                           <span className="scan-count">{c.chip_date?.slice(0,4)}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
