@@ -164,7 +164,7 @@ try {
         if (!$locationId) continue;
 
         // Check duplicate
-        $obsTime = $date . ' 12:00:00';
+        $obsTime = $date . ' 02:00:00';
         $stmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
         $stmt->execute([$locationId, $obsTime, $monitorPrefix . '%']);
         if ($stmt->fetchColumn()) { $stats['observations_skipped']++; continue; }
