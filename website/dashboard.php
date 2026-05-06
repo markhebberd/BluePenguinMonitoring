@@ -41,7 +41,7 @@ function handleBox($pdo, $colonyId, $boxName) {
         $s = $pdo->prepare("SELECT ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ?");
         $s->execute([$obs['observation_id']]); $obs['scans'] = $s->fetchAll();
     }
-    $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, rfid_tag_number, rfid_latitude, rfid_longitude, rfid_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+    $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, pit_latitude, pit_longitude, pit_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $l->execute([$colonyId, $boxName]);
 
     // Penguins chipped in this box

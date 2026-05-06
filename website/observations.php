@@ -119,9 +119,9 @@ function handleColonyOverview($pdo, $colonyId) {
     // Latest observation per location
     $sql = "SELECT
                 ol.location_name,
-                ol.rfid_tag_number,
-                ol.rfid_latitude,
-                ol.rfid_longitude,
+                ol.pit_id,
+                ol.pit_latitude,
+                ol.pit_longitude,
                 o.observation_time_utc,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes,

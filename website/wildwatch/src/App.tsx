@@ -24,7 +24,7 @@ interface Observation {
 }
 interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; }
 interface BoxDetailData {
-  location: { location_id:number; location_name:string; persistent_notes:string|null; rfid_pit_id:string|null; } | null;
+  location: { location_id:number; location_name:string; persistent_notes:string|null; pit_id:string|null; } | null;
   observations: Observation[];
   chipped_here?: ChippedHere[];
 }
@@ -1737,7 +1737,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             </div>
             {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
-                {boxDetail.location?.rfid_pit_id && <div className="tag-info">Tag: {boxDetail.location.rfid_pit_id.slice(-8)}</div>}
+                {boxDetail.location?.pit_id && <div className="tag-info">Tag: {boxDetail.location.pit_id.slice(-8)}</div>}
                 {boxDetail.location && (
                   <div className="persistent-notes">
                     <EditableField value={boxDetail.location.persistent_notes || ''} onSave={(val) => updateRecord(token, 'observation_locations', boxDetail.location!.location_id, {persistent_notes: val})} placeholder="Box notes (persistent)" canEdit={userRole !== 'viewer'} />
