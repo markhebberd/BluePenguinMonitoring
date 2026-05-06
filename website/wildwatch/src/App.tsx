@@ -448,10 +448,10 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
           return b.scanCount - a.scanCount;
         });
 
-        const pair = sorted.filter(b => {
+        const pair = breedingMale && breedingFemale ? sorted.filter(b => {
           const k = b.pit_id.slice(-8);
           return k === breedingMale || k === breedingFemale;
-        });
+        }) : [];
         const hasPair = pair.length === 2;
         // Chicks go inside breeding pair border only if pair exists
         const chicks = hasPair ? sorted.filter(b => {
