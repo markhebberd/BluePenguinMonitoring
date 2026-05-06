@@ -146,8 +146,14 @@ header h1:hover { opacity:.8; }
 .sex-icon { font-weight:700; margin-right:2px; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
-.scan.chipped-chick { border: 0.1em solid #FDD835; }
-.scan.chipped-adult { border: 0.1em solid #CE93D8; }
+.scan { border: 0.1em solid #333; }
+.scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 90%, #FDD835 90%); }
+.scan.chipped-adult { background: linear-gradient(to right, #f0f0f0 90%, #E1BEE7 90%); }
+.scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 90%, #FDD835 90%); }
+.scan.f.chipped-adult { background: linear-gradient(to right, #FFE4E1 90%, #E1BEE7 90%); }
+.scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF 90%, #FDD835 90%); }
+.scan.m.chipped-adult { background: linear-gradient(to right, #E6F3FF 90%, #E1BEE7 90%); }
+.scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 90%, #FDD835 90%); }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
 .chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
 
