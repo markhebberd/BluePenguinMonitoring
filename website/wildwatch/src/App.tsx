@@ -452,16 +452,17 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
           const k = b.pit_id.slice(-8);
           return k === breedingMale || k === breedingFemale;
         });
-        // Chicks: chipped as chick, seen during this season
-        const chicks = sorted.filter(b => {
+        const hasPair = pair.length === 2;
+        // Chicks go inside breeding pair border only if pair exists
+        const chicks = hasPair ? sorted.filter(b => {
           const k = b.pit_id.slice(-8);
           if (k === breedingMale || k === breedingFemale) return false;
           return !b.chipped_as_adult && b.chip_date;
-        });
+        }) : [];
         const others = sorted.filter(b => {
           const k = b.pit_id.slice(-8);
           if (k === breedingMale || k === breedingFemale) return false;
-          if (!b.chipped_as_adult && b.chip_date) return false;
+          if (hasPair && !b.chipped_as_adult && b.chip_date) return false;
           return true;
         });
 
@@ -469,7 +470,7 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
           <div key={label} className="season-birds">
             <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
             <div className="bird-row">
-              {(pair.length === 2 || chicks.length > 0) && (
+              {pair.length === 2 && (
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
