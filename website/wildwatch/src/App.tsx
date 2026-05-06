@@ -504,7 +504,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
-        (p.peng_num === birdSearch || p.pit_id.includes(birdSearch))
+        (p.peng_num === birdSearch || (p.pit_id && p.pit_id.includes(birdSearch)))
         && !localScans.some(s => s.pit_id === p.pit_id)
       ).slice(0, 8)
     : [];
@@ -713,7 +713,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; token?: string; canEdit?: boolean }) {
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
   const scans: any[] = data.scans || [];
   const biometrics: any[] = data.biometrics || [];
@@ -741,7 +741,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, token, canEd
     <div className="bird-detail">
       <div className="bird-title-row">
         <span className="bird-title-peng">
-          <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => {}} />
+          Penguin: <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => onNavigateToBird?.(p.peng_num)} />
         </span>
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -865,7 +865,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   penguins: any[]; search: string; onSearchChange: (s:string)=>void; onBirdClick: (tag:string)=>void;
 }) {
   const filtered = search.length > 0
-    ? penguins.filter(p => p.pit_id.includes(search) || (p.peng_num && p.peng_num === search))
+    ? penguins.filter(p => (p.pit_id && p.pit_id.includes(search)) || (p.peng_num && p.peng_num === search))
     : [];
 
   return (
@@ -1808,7 +1808,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
-                  onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
+                  onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
+                  onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }} />
               ) : birdLoading ? <p className="muted">Loading bird...</p> : <p className="muted">Select a bird</p>}
             </div>
           </div>
