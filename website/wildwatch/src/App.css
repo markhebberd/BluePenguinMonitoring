@@ -146,6 +146,9 @@ header h1:hover { opacity:.8; }
 .sex-icon { font-weight:700; margin-right:2px; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
+.chip-as-bar { width:3px; border-radius:1px; align-self:stretch; margin-left:4px; display:inline-block; min-height:12px; }
+.chip-as-bar.chick { background:#FDD835; }
+.chip-as-bar.adult { background:#9C27B0; }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
 .chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
 

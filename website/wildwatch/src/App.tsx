@@ -333,9 +333,11 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.tag_number ? scan.tag_number.slice(-8) : '';
+  const chipAs = scan.chipped_as_adult ? 'adult' : 'chick';
   return (
     <span className={`scan clickable ${cls}`} onClick={onClick}>
       {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{(num || icon) && chip ? ' ' : ''}{chip}
+      <span className={`chip-as-bar ${chipAs}`} />
     </span>
   );
 }
