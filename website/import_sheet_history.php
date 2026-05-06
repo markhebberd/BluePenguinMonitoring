@@ -177,6 +177,12 @@ try {
         $notes = implode('; ', array_filter($g['comments']));
         $filename = $monitorPrefix . '-' . $date;
 
+        // Skip empty observations (no adults, no eggs, no chicks, no birds, no comments)
+        if ($adults === 0 && $eggs === 0 && $chicks === 0 && count($g['birds']) === 0 && empty($notes) && !$g['decomm']) {
+            $stats['observations_skipped']++;
+            continue;
+        }
+
         $observationId = null;
         if (!$dryRun) {
             $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
