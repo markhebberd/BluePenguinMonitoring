@@ -11,9 +11,9 @@ interface Scan { scan_id?:number; peng_num?:string|null; tag_number:string; sex:
 
 function isChickAtDate(bird: any, dateStr: string): boolean {
   if (!bird || !bird.chip_date || bird.chipped_as_adult) return false;
-  const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000;
+  const chipTime = new Date(bird.chip_date).getTime();
   const obsTime = new Date(dateStr).getTime();
-  return (obsTime - hatchTime) < 180 * 86400000;
+  return (obsTime - chipTime) < 90 * 86400000; // chick if chipped as chick and <3 months since chip
 }
 interface Observation {
   observation_id?:number;
@@ -317,13 +317,13 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observat
 
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
   const s = (sex || '').toUpperCase();
-  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - (new Date(chipDate).getTime() - 42 * 86400000)) < 180 * 86400000;
+  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
   return isChick && !s ? 'chick' : s === 'F' ? 'f' : s === 'M' ? 'm' : '';
 }
 
 function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
   const s = (sex || '').toUpperCase();
-  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - (new Date(chipDate).getTime() - 42 * 86400000)) < 180 * 86400000;
+  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
   return isChick && !s ? '\uD83D\uDC23' : s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
 }
 
@@ -1092,12 +1092,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     setScannedBirds([...scannedBirds, short]);
     setBirdSearch('');
 
-    // Auto-increment adult or chick count based on bird age at observation date
-    if (parsedDate && birdInfo.chip_date) {
-      const hatchTime = new Date(birdInfo.chip_date).getTime() - 42 * 86400000; // chip date - 6 weeks
+    // Auto-increment adult or chick count: chick if chipped as chick and <3 months since chip
+    if (parsedDate && birdInfo.chip_date && !birdInfo.chipped_as_adult) {
+      const chipTime = new Date(birdInfo.chip_date).getTime();
       const obsTime = new Date(parsedDate).getTime();
-      const isChick = !birdInfo.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
-      if (isChick) setChicks(c => c + 1);
+      if ((obsTime - chipTime) < 90 * 86400000) setChicks(c => c + 1);
       else setAdults(a => a + 1);
     } else {
       setAdults(a => a + 1);
@@ -1106,11 +1105,10 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
   const removeBird = (tag: string) => {
     const bird = allPenguins.find((p: any) => p.tag_number.slice(-8) === tag || p.tag_number === tag);
-    if (bird && parsedDate && bird.chip_date) {
-      const hatchTime = new Date(bird.chip_date).getTime() - 42 * 86400000;
+    if (bird && parsedDate && bird.chip_date && !bird.chipped_as_adult) {
+      const chipTime = new Date(bird.chip_date).getTime();
       const obsTime = new Date(parsedDate).getTime();
-      const isChick = !bird.chipped_as_adult && (obsTime - hatchTime) < 180 * 86400000;
-      if (isChick) setChicks(c => Math.max(0, c - 1));
+      if ((obsTime - chipTime) < 90 * 86400000) setChicks(c => Math.max(0, c - 1));
       else setAdults(a => Math.max(0, a - 1));
     } else {
       setAdults(a => Math.max(0, a - 1));
