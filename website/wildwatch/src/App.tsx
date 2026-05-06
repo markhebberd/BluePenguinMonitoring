@@ -316,16 +316,21 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observat
 
 
 
+function isChickAtObsDate(chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): boolean {
+  if (chippedAsAdult || !chipDate) return false;
+  return ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
+}
+
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
+  if (isChickAtObsDate(chipDate, chippedAsAdult, observationDate)) return 'chick';
   const s = (sex || '').toUpperCase();
-  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
-  return isChick && !s ? 'chick' : s === 'F' ? 'f' : s === 'M' ? 'm' : '';
+  return s === 'F' ? 'f' : s === 'M' ? 'm' : '';
 }
 
 function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
+  if (isChickAtObsDate(chipDate, chippedAsAdult, observationDate)) return '\uD83D\uDC23';
   const s = (sex || '').toUpperCase();
-  const isChick = !chippedAsAdult && chipDate && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
-  return isChick && !s ? '\uD83D\uDC23' : s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
+  return s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
 }
 
 function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string }) {
@@ -334,12 +339,11 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.pit_id ? scan.pit_id.slice(-8) : '';
-  // Chipped as chick: yellow bar. If no observation date and chick is now >3 months old, show as unproven adult (gray + yellow bar)
   const wasChippedAsChick = !scan.chipped_as_adult;
-  const isChickNow = wasChippedAsChick && scan.chip_date && ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(scan.chip_date).getTime()) < 90 * 86400000;
-  const unprovenAdult = wasChippedAsChick && !isChickNow && !sex;
+  const isChickNow = isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, observationDate);
+  const unprovenAdult = wasChippedAsChick && !isChickNow && !sex && !observationDate;
   const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
-  const grayCls = unprovenAdult && !observationDate ? 'unproven' : '';
+  const grayCls = unprovenAdult ? 'unproven' : '';
   const sizeCode = scan.chick_size_code || '';
   return (
     <span className={`scan clickable ${cls} ${chipCls} ${grayCls}`} onClick={onClick}>
