@@ -131,11 +131,16 @@ $stats = [
     'observations_skipped' => 0,
     'scans_created' => 0,
     'biometrics_created' => 0,
+    'biometric_comments' => [],
     'unknown_penguins' => [],
     'discrepancies' => [],
+    'warnings' => [],
     'date_first' => null,
     'date_last' => null,
 ];
+
+// Track birds seen per date for multi-box detection
+$birdDateBox = []; // pit8 => [date => box]
 
 if (!$dryRun) $pdo->beginTransaction();
 
@@ -184,7 +189,19 @@ try {
         foreach ($g['birds'] as $bird) {
             $pit8 = $bird['pit8'];
             if (!isset($chipLookup[$pit8])) {
-                $stats['unknown_penguins'][$pit8] = ($stats['unknown_penguins'][$pit8] ?? 0) + 1;
+                if (!isset($stats['unknown_penguins'][$pit8])) {
+                    // Find close matches (1 digit off)
+                    $close = [];
+                    foreach ($chipLookup as $known => $fullPit) {
+                        if (strlen($known) === strlen($pit8)) {
+                            $diff = 0;
+                            for ($d = 0; $d < strlen($pit8); $d++) { if ($pit8[$d] !== $known[$d]) $diff++; }
+                            if ($diff === 1) $close[] = $known . ' (peng#' . ($chipToPeng[$known] ?? '?') . ')';
+                        }
+                    }
+                    $stats['unknown_penguins'][$pit8] = ['count' => 0, 'close' => $close, 'first_date' => $date, 'first_box' => $box];
+                }
+                $stats['unknown_penguins'][$pit8]['count']++;
                 continue;
             }
 
@@ -206,6 +223,22 @@ try {
 
             $weight = $bird['weight'] !== '' ? (float)$bird['weight'] : null;
             $sizeCode = $bird['size_code'];
+            $comment = $bird['comment'];
+
+            // Weight range validation
+            if ($weight !== null && ($weight < 100 || $weight > 1800)) {
+                $stats['warnings'][] = "peng#$pengNum weight={$weight}g out of range (100-1800) on $date box $box";
+            }
+
+            // Bird in multiple boxes same day
+            if (!isset($birdDateBox[$pit8])) $birdDateBox[$pit8] = [];
+            if (isset($birdDateBox[$pit8][$date]) && $birdDateBox[$pit8][$date] !== $box) {
+                $stats['warnings'][] = "peng#$pengNum in box {$birdDateBox[$pit8][$date]} AND box $box on $date";
+            }
+            $birdDateBox[$pit8][$date] = $box;
+
+            // Bird count mismatch check (per group, done once)
+            // (handled below after bird loop)
 
             // Check/update chick_size_code on penguin
             if ($sizeCode && $pengNum) {
@@ -217,7 +250,6 @@ try {
                         $pdo->prepare("UPDATE penguins SET chick_size_code = ? WHERE peng_num = ?")->execute([$sizeCode, $pengNum]);
                     }
                 } elseif ($existing !== $sizeCode && strpos($existing, $sizeCode) !== 0) {
-                    // Only flag if sheet value isn't a prefix of DB value (LC vs LCF is fine)
                     $stats['discrepancies'][] = [
                         'peng_num' => $pengNum, 'field' => 'chick_size_code',
                         'db_value' => $existing, 'sheet_value' => $sizeCode, 'date' => $date
@@ -225,21 +257,14 @@ try {
                 }
             }
 
-            // Check sex discrepancy
-            if ($sexNorm && $pengNum) {
-                $stmt = $pdo->prepare("SELECT sex FROM penguins WHERE peng_num = ?");
-                $stmt->execute([$pengNum]);
-                $dbSex = $stmt->fetchColumn();
-                if ($dbSex && $dbSex !== $sexNorm) {
-                    $stats['discrepancies'][] = [
-                        'peng_num' => $pengNum, 'field' => 'sex',
-                        'db_value' => $dbSex, 'sheet_value' => $sexNorm, 'date' => $date
-                    ];
-                }
+            // Extract flipper length from comment (e.g. "Re-flipper: 132")
+            $flipper = null;
+            if ($comment && preg_match('/flipper[:\s]*(\d+)/i', $comment, $m)) {
+                $flipper = (float)$m[1];
             }
 
-            // Insert/check biometric data (if weight or sex observed)
-            if (($weight || $sexNorm) && $pengNum) {
+            // Insert/check biometric data (if weight, sex, comment, or flipper observed)
+            if (($weight || $sexNorm || $comment || $flipper) && $pengNum) {
                 $stmt = $pdo->prepare("SELECT biometric_id, weight FROM penguin_biometric_data WHERE peng_num = ? AND observation_date = ?");
                 $stmt->execute([$pengNum, $date]);
                 $existingBio = $stmt->fetch();
@@ -254,12 +279,21 @@ try {
                     }
                 } else {
                     if (!$dryRun) {
-                        $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, weight) VALUES (?,?,?,?)")
-                            ->execute([$pengNum, $observationId, $date, $weight]);
+                        $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?)")
+                            ->execute([$pengNum, $observationId, $date, $weight, $flipper, $comment ?: null]);
                     }
                     $stats['biometrics_created']++;
+                    if ($comment) {
+                        $stats['biometric_comments'][] = "peng#$pengNum $date box $box: $comment";
+                    }
                 }
             }
+        }
+
+        // Bird count mismatch
+        $birdCount = count($g['birds']);
+        if ($g['summary'] && $birdCount > 0 && $g['summary']['adults'] > 0 && $birdCount > $g['summary']['adults']) {
+            $stats['warnings'][] = "$date box $box: {$birdCount} bird rows but summary says {$g['summary']['adults']} adults";
         }
     }
 
@@ -273,20 +307,43 @@ try {
 
 // Output
 echo "=== RESULTS ===\n";
-echo json_encode($stats, JSON_PRETTY_PRINT) . "\n";
+$summary = $stats;
+unset($summary['unknown_penguins'], $summary['discrepancies'], $summary['warnings'], $summary['biometric_comments']);
+$summary['discrepancy_count'] = count($stats['discrepancies']);
+$summary['warning_count'] = count($stats['warnings']);
+$summary['unknown_penguin_count'] = count($stats['unknown_penguins']);
+$summary['biometric_comment_count'] = count($stats['biometric_comments']);
+echo json_encode($summary, JSON_PRETTY_PRINT) . "\n";
+
+if (count($stats['warnings']) > 0) {
+    echo "\n=== WARNINGS ===\n";
+    foreach ($stats['warnings'] as $w) {
+        echo "  $w\n";
+    }
+}
 
 if (count($stats['discrepancies']) > 0) {
-    echo "\n=== DISCREPANCIES ===\n";
+    echo "\n=== DISCREPANCIES (non-sex) ===\n";
     foreach ($stats['discrepancies'] as $d) {
+        if ($d['field'] === 'sex') continue;
         echo "  #{$d['peng_num']} {$d['field']}: DB={$d['db_value']} Sheet={$d['sheet_value']} Date={$d['date']}\n";
+    }
+}
+
+if (count($stats['biometric_comments']) > 0) {
+    echo "\n=== BIOMETRIC COMMENTS IMPORTED ===\n";
+    foreach ($stats['biometric_comments'] as $c) {
+        echo "  $c\n";
     }
 }
 
 if (count($stats['unknown_penguins']) > 0) {
     echo "\n=== UNKNOWN PENGUINS ===\n";
-    arsort($stats['unknown_penguins']);
-    foreach ($stats['unknown_penguins'] as $pit8 => $count) {
-        echo "  $pit8: $count occurrences\n";
+    uasort($stats['unknown_penguins'], function($a, $b) { return $b['count'] - $a['count']; });
+    foreach ($stats['unknown_penguins'] as $pit8 => $info) {
+        echo "  $pit8: {$info['count']}x (first: {$info['first_date']} box {$info['first_box']})";
+        if (!empty($info['close'])) echo " -> " . implode(', ', $info['close']);
+        echo "\n";
     }
 }
 
