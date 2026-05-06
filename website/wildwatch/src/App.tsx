@@ -528,8 +528,11 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
     <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`}>
       <div className="obs-top">
         <span><b>{fmtDateTime(obs.observation_time_utc)}</b> <span className="muted small">{obs.monitor_filename}</span></span>
-        {canEdit && obsId && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
-        {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
+        <span className="obs-top-right">
+          {editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
+          {canEdit && obsId && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+          {editing && <><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></>}
+        </span>
       </div>
       {!editing ? (
         <>
@@ -574,7 +577,6 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
         </div>
         </>
       )}
-      {editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
       {!editing && obs.scans.length>0 && (
         <div className="scans">
           {obs.scans.map((s,j) => (
