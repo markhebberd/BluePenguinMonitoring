@@ -30,6 +30,15 @@ interface BoxDetailData {
   chipped_here?: ChippedHere[];
 }
 
+function displayStatus(status: string|null, eggs: number, chicks: number): string|null {
+  if (status === 'BR') {
+    if (chicks > 0) return 'G';
+    if (eggs > 0) return 'I';
+    return 'NO';
+  }
+  return status;
+}
+
 // Color progression: NO → UNL → POT → CON → BR → Guard → PG → Molting. Red = alert only.
 const STATUS_COLORS: Record<string,string> = {
   NO:'#E0E0E0',       // gray
@@ -586,7 +595,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
-            {localObs.breeding_status && <span className="badge" style={{background:STATUS_COLORS[localObs.breeding_status]||'#ccc'}}>{localObs.breeding_status}</span>}
+            {(() => { const ds = displayStatus(localObs.breeding_status, localObs.eggs, localObs.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
           </div>
           {localObs.notes && <div className="obs-notes">{localObs.notes}</div>}
@@ -597,7 +606,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
           <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} />
           <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} />
-          <EditableField value={localObs.breeding_status || ''} type="select" options={['','BR','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
+          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
           <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} />
           <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
         </div>
@@ -898,7 +907,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
               {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
-              {s.breeding_status && <span className="badge" style={{background:STATUS_COLORS[s.breeding_status]||'#ccc'}}>{s.breeding_status}</span>}
+              {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
               {s.gate_status && <span className="gate">{s.gate_status}</span>}
             </div>
             {s.notes && <div className="obs-notes">{s.notes}</div>}
@@ -1377,7 +1386,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             <div key={i} className="entry-existing-row">
               <span>{fmtDateNZ(o.observation_time_utc)}</span>
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
-              {o.breeding_status && <span className="badge" style={{background:STATUS_COLORS[o.breeding_status]||'#ccc'}}>{o.breeding_status}</span>}
+              {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className="badge" style={{background:STATUS_COLORS[ds]||'#ccc'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
               {(o.scans || []).map((s: any, j: number) => (
                 <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} />
