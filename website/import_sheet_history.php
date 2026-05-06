@@ -177,8 +177,8 @@ try {
         $notes = implode('; ', array_filter($g['comments']));
         $filename = $monitorPrefix . '-' . $date;
 
-        // Skip empty observations (no adults, no eggs, no chicks, no birds, no comments)
-        if ($adults === 0 && $eggs === 0 && $chicks === 0 && count($g['birds']) === 0 && empty($notes) && !$g['decomm']) {
+        // Only skip if there's truly no data at all (no summary row AND no bird rows AND no comments)
+        if ($g['summary'] === null && count($g['birds']) === 0 && empty($notes) && !$g['decomm']) {
             $stats['observations_skipped']++;
             continue;
         }
