@@ -347,7 +347,7 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void }) {
+function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observations: Observation[]; onBirdClick: (tag:string)=>void; chippedHere?: ChippedHere[] }) {
   // Group birds by season, track co-sightings during incubation/guard
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
   const seasonPairs = new Map<string, Map<string, number>>(); // "maleTag|femaleTag" -> count during I/G
@@ -388,6 +388,19 @@ function AllScannedBirds({ observations, onBirdClick }: { observations: Observat
           pairMap.set(pairKey, (pairMap.get(pairKey) || 0) + 1);
         }
       }
+    }
+  }
+
+  // Merge chipped_here birds into season maps (they were present at chip time)
+  for (const c of (chippedHere || [])) {
+    if (!c.chip_date || !c.pit_id) continue;
+    const chipDate = parseDate(c.chip_date);
+    const label = getSeasonLabel(chipDate);
+    if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
+    const birdMap = seasonBirds.get(label)!;
+    const key = c.pit_id.slice(-8);
+    if (!birdMap.has(key)) {
+      birdMap.set(key, { ...c as any, pit_id: c.pit_id, peng_num: c.peng_num, lastSeen: c.chip_date, igCount: 0, scanCount: 0 });
     }
   }
 
@@ -1814,7 +1827,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                 )}
                 <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
-                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} />
+                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} chippedHere={boxDetail.chipped_here} />
                 {(boxDetail.chipped_here?.length ?? 0) > 0 && (
                   <div className="chipped-here">
                     <div className="muted">Chipped in this box: {boxDetail.chipped_here!.length}</div>
