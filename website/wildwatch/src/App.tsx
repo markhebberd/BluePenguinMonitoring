@@ -333,11 +333,10 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.tag_number ? scan.tag_number.slice(-8) : '';
-  const chipAs = scan.chipped_as_adult ? 'adult' : 'chick';
+  const chipAs = scan.chipped_as_adult ? 'chipped-adult' : 'chipped-chick';
   return (
-    <span className={`scan clickable ${cls}`} onClick={onClick}>
+    <span className={`scan clickable ${cls} ${chipAs}`} onClick={onClick}>
       {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{(num || icon) && chip ? ' ' : ''}{chip}
-      <span className={`chip-as-bar ${chipAs}`} />
     </span>
   );
 }
@@ -1562,18 +1561,45 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     fetchBoxDetail(selectedBox).then(d => {
       setBoxDetail(d);
       setDetailLoading(false);
-      // Auto-open most recently scanned bird in this box
-      const allScans: {tag:string; time:string}[] = [];
-      for (const obs of (d.observations || [])) {
-        for (const s of (obs.scans || [])) {
-          allScans.push({ tag: s.tag_number.slice(-8), time: obs.observation_time_utc });
+      if (window.innerWidth < 900) { setSelectedBird(null); return; }
+
+      // Auto-open first bird from breeding pair, or first bird in box
+      const observations = d.observations || [];
+      // Find breeding pair: M+F seen together during eggs/chicks
+      const pairCounts = new Map<string, number>();
+      for (const obs of observations) {
+        if (obs.eggs > 0 || obs.chicks > 0) {
+          const males = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'M');
+          const females = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'F');
+          for (const m of males) {
+            for (const f of females) {
+              const key = `${m.peng_num}|${f.peng_num}`;
+              pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+            }
+          }
         }
       }
-      if (allScans.length > 0 && window.innerWidth >= 900) {
-        allScans.sort((a,b) => b.time.localeCompare(a.time));
-        setSelectedBird(allScans[0].tag);
+      let bestPair = '';
+      let bestCount = 0;
+      for (const [key, count] of pairCounts) {
+        if (count > bestCount) { bestCount = count; bestPair = key; }
+      }
+      if (bestPair) {
+        setSelectedBird(bestPair.split('|')[0]);
       } else {
-        setSelectedBird(null);
+        // No breeding pair — pick first scanned bird
+        for (const obs of observations) {
+          if (obs.scans.length > 0) {
+            setSelectedBird(obs.scans[0].peng_num || null);
+            return;
+          }
+        }
+        // No scans at all — try chipped_here
+        if (d.chipped_here?.length > 0) {
+          setSelectedBird(d.chipped_here[0].peng_num);
+        } else {
+          setSelectedBird(null);
+        }
       }
     });
   }, [selectedBox]);
