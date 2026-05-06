@@ -1706,6 +1706,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <div className="bird-page">
           <div className="page-header">
             <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
+            <div className="bird-nav">
+              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) <= 1} onClick={() => setSelectedBird(String(parseInt(selectedBird!) - 1))}>&lsaquo; Prev</button>
+              <input className="bird-nav-input" type="text" value={selectedBird || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); if (v) setSelectedBird(v); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) >= 1004} onClick={() => setSelectedBird(String(parseInt(selectedBird!) + 1))}>Next &rsaquo;</button>
+            </div>
           </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
