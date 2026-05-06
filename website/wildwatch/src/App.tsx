@@ -1736,7 +1736,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
             <div className="bird-nav">
               <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) <= 1} onClick={() => setSelectedBird(String(parseInt(selectedBird!) - 1))}>&lsaquo; Prev</button>
-              <input className="bird-nav-input" type="text" value={selectedBird || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); if (v) setSelectedBird(v); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+              <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { setSelectedBird(num); setPenguinSearch(''); }} />
               <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) >= allPenguins.length} onClick={() => setSelectedBird(String(parseInt(selectedBird!) + 1))}>Next &rsaquo;</button>
             </div>
           </div>
