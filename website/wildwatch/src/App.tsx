@@ -1303,7 +1303,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <div className="entry-field">
             <label>Season</label>
             <select autoFocus value={season} onChange={e => setSeason(parseInt(e.target.value))} style={{width:'80px'}}>
-              {Array.from({length: getSeasonStart().getFullYear() - 2000 - 22}, (_, i) => 23 + i).map(y => <option key={y} value={2000+y}>{y}</option>)}
+              {Array.from({length: getSeasonStart().getFullYear() - 2000 - 20}, (_, i) => 21 + i).map(y => <option key={y} value={2000+y}>{y}</option>)}
             </select>
           </div>
           <div className="entry-field">
