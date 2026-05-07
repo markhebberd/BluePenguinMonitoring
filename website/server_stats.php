@@ -29,9 +29,15 @@ $duOutput = trim(shell_exec('du -sm /home/wildwatch 2>/dev/null') ?? '');
 $usedMb = $duOutput ? (float)explode("\t", $duOutput)[0] : ($dbMb + $fileMb);
 $quotaMb = 12001; // 11.72 GB per cPanel
 
-// Error log size
-$errorLog = __DIR__ . '/error_log';
-$errorLogMb = file_exists($errorLog) ? round(filesize($errorLog) / 1048576, 1) : 0;
+// CPU and RAM from /proc
+$loadAvg = sys_getloadavg();
+$cpuPct = round($loadAvg[0] * 100 / max(1, (int)shell_exec('nproc 2>/dev/null') ?: 1), 1);
+$memInfo = @file_get_contents('/proc/meminfo');
+$ramUsedMb = 0; $ramTotalMb = 0;
+if ($memInfo && preg_match('/MemTotal:\s+(\d+)/', $memInfo, $mt) && preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $ma)) {
+    $ramTotalMb = round($mt[1] / 1024);
+    $ramUsedMb = round(($mt[1] - $ma[1]) / 1024);
+}
 
 echo json_encode([
     'db_mb' => $dbMb,
@@ -40,6 +46,9 @@ echo json_encode([
     'quota_mb' => $quotaMb,
     'pct' => round($usedMb / $quotaMb * 100, 1),
     'error_log_mb' => $errorLogMb,
+    'cpu_pct' => $cpuPct,
+    'ram_used_mb' => $ramUsedMb,
+    'ram_total_mb' => $ramTotalMb,
     'observations' => $obs,
     'scans' => $scans,
     'penguins' => $penguins,
