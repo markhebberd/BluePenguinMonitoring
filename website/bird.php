@@ -114,9 +114,38 @@ foreach ($scans as $s) {
 }
 krsort($breedingStats);
 
+// Build unified sightings: scans + chip events, deduped by date+box
+$sightings = [];
+foreach ($scans as $s) {
+    $date = substr($s['observation_time_utc'], 0, 10);
+    $key = $date . '|' . $s['box_name'];
+    if (!isset($sightings[$key])) {
+        $sightings[$key] = [
+            'date' => $s['observation_time_utc'], 'box' => $s['box_name'],
+            'source' => 'scan', 'adults' => (int)$s['adults'], 'eggs' => (int)$s['eggs'],
+            'chicks' => (int)$s['chicks'], 'breeding_status' => $s['breeding_status'],
+            'notes' => $s['notes'], 'seen_with' => $s['seen_with'] ?? [],
+        ];
+    }
+}
+// Add chip events (chipping = presence in box)
+foreach ($penguin['chips'] as $c) {
+    if (!$c['chip_box'] || !$c['chip_date']) continue;
+    $key = $c['chip_date'] . '|' . $c['chip_box'];
+    if (!isset($sightings[$key])) {
+        $sightings[$key] = [
+            'date' => $c['chip_date'], 'box' => $c['chip_box'],
+            'source' => 'chip', 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
+            'breeding_status' => null, 'notes' => 'Chipped', 'seen_with' => [],
+        ];
+    }
+}
+usort($sightings, function($a, $b) { return strcmp($b['date'], $a['date']); });
+
 echo json_encode([
     'penguin' => $penguin,
     'scans' => $scans,
+    'sightings' => array_values($sightings),
     'biometrics' => $biometrics,
     'partners' => array_values($partners),
     'breeding_stats' => array_values($breedingStats),

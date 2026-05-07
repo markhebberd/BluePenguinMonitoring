@@ -766,6 +766,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
   const scans: any[] = data.scans || [];
+  const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
   const partners: any[] = data.partners || [];
   const breedingStats: any[] = data.breeding_stats || [];
@@ -773,10 +774,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
   const chips: any[] = p.chips || [];
   const activeChip = chips.find((c: any) => c.is_active == 1) || chips[0];
 
-  // Boxes: from scans + chip boxes, deduplicated
-  const scanBoxes = scans.map((s: any) => s.box_name);
-  const chipBoxes = chips.map((c: any) => c.chip_box).filter(Boolean);
-  const boxes = Array.from(new Set([...chipBoxes, ...scanBoxes]));
+  const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -869,31 +867,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
       <div className="bird-section">
         <h3>Seen in {boxes.length} box{boxes.length !== 1 ? 'es' : ''}</h3>
         {boxes.map((b: string) => {
-          // Collect sightings for this box: from scans + chip date
-          const boxScans = scans.filter((s: any) => s.box_name === b);
-          const chippedHere = chips.find((c: any) => c.chip_box === b);
-          // Deduplicate by date
-          const sightings = new Map<string, { date: string; seenWith: any[]; notes: string; adults: number; eggs: number; chicks: number; breeding_status: string|null }>();
-          if (chippedHere) {
-            sightings.set(chippedHere.chip_date, { date: chippedHere.chip_date, seenWith: [], notes: '', adults: 0, eggs: 0, chicks: 0, breeding_status: null });
-          }
-          for (const s of boxScans) {
-            const date = s.observation_time_utc.slice(0, 10);
-            if (!sightings.has(date)) {
-              sightings.set(date, { date: s.observation_time_utc, seenWith: s.seen_with || [], notes: s.notes || '', adults: s.adults || 0, eggs: s.eggs || 0, chicks: s.chicks || 0, breeding_status: s.breeding_status });
-            } else if ((s.seen_with || []).length > (sightings.get(date)!.seenWith.length)) {
-              sightings.get(date)!.seenWith = s.seen_with;
-            }
-          }
-          const sorted = Array.from(sightings.values()).sort((a, b) => b.date.localeCompare(a.date));
+          const boxSightings = sightings.filter((s: any) => s.box === b);
           return (
             <div key={b} className="obs-card" style={{marginBottom:6}}>
-              <div className="obs-top"><b className="clickable" onClick={() => onBoxClick(b)}>Box {b}</b> <span className="muted">{sorted.length} visit{sorted.length !== 1 ? 's' : ''}</span></div>
-              {sorted.map((sg, i) => (
+              <div className="obs-top"><b className="clickable" onClick={() => onBoxClick(b)}>Box {b}</b> <span className="muted">{boxSightings.length} visit{boxSightings.length !== 1 ? 's' : ''}</span></div>
+              {boxSightings.map((sg: any, i: number) => (
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
                     <span>{fmtDateTime(sg.date)}</span>
-                    {sg.seenWith.map((sw: any) => (
+                    {(sg.seen_with || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
                     ))}
                     {(() => { const ds = displayStatus(sg.breeding_status, sg.eggs, sg.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
