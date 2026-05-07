@@ -389,8 +389,8 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
     // Breeding window: 1 week before first egg through PG (eggs/chicks present or breeding status)
     const firstEgg = seasonFirstEgg.get(label);
     const obsTime = obsDate.getTime();
-    const bs = (obs.breeding_status || '').toUpperCase();
-    const inBreedingWindow = firstEgg && obsTime >= (firstEgg - 7 * 86400000) && (obs.eggs > 0 || obs.chicks > 0 || bs === 'BR' || bs === 'I' || bs === 'G' || bs === 'PG');
+    // Breeding window: 1 week before first egg to fledge (87 days after first egg)
+    const inBreedingWindow = firstEgg && obsTime >= (firstEgg - 7 * 86400000) && obsTime <= (firstEgg + 87 * 86400000);
 
     for (const scan of obs.scans) {
       const key = scan.pit_id.slice(-8);
