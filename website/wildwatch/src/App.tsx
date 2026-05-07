@@ -867,14 +867,14 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
           const boxScans = scans.filter((s: any) => s.box_name === b);
           const chippedHere = chips.find((c: any) => c.chip_box === b);
           // Deduplicate by date
-          const sightings = new Map<string, { date: string; seenWith: any[] }>();
+          const sightings = new Map<string, { date: string; seenWith: any[]; notes: string; adults: number; eggs: number; chicks: number; breeding_status: string|null }>();
           if (chippedHere) {
-            sightings.set(chippedHere.chip_date, { date: chippedHere.chip_date, seenWith: [] });
+            sightings.set(chippedHere.chip_date, { date: chippedHere.chip_date, seenWith: [], notes: '', adults: 0, eggs: 0, chicks: 0, breeding_status: null });
           }
           for (const s of boxScans) {
             const date = s.observation_time_utc.slice(0, 10);
             if (!sightings.has(date)) {
-              sightings.set(date, { date: s.observation_time_utc, seenWith: s.seen_with || [] });
+              sightings.set(date, { date: s.observation_time_utc, seenWith: s.seen_with || [], notes: s.notes || '', adults: s.adults || 0, eggs: s.eggs || 0, chicks: s.chicks || 0, breeding_status: s.breeding_status });
             } else if ((s.seen_with || []).length > (sightings.get(date)!.seenWith.length)) {
               sightings.get(date)!.seenWith = s.seen_with;
             }
@@ -883,15 +883,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
           return (
             <div key={b} className="obs-card" style={{marginBottom:6}}>
               <div className="obs-top"><b className="clickable" onClick={() => onBoxClick(b)}>Box {b}</b> <span className="muted">{sorted.length} visit{sorted.length !== 1 ? 's' : ''}</span></div>
-              {sorted.slice(0, 5).map((sg, i) => (
-                <div key={i} className="obs-nums" style={{fontSize:11}}>
-                  <span>{fmtDateTime(sg.date)}</span>
-                  {sg.seenWith.map((sw: any) => (
-                    <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
-                  ))}
+              {sorted.map((sg, i) => (
+                <div key={i} style={{marginBottom:3}}>
+                  <div className="obs-nums" style={{fontSize:11}}>
+                    <span>{fmtDateTime(sg.date)}</span>
+                    {sg.seenWith.map((sw: any) => (
+                      <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
+                    ))}
+                    {(() => { const ds = displayStatus(sg.breeding_status, sg.eggs, sg.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                  </div>
+                  {sg.notes && <div className="obs-notes">{sg.notes}</div>}
                 </div>
               ))}
-              {sorted.length > 5 && <div className="muted small">+{sorted.length - 5} more</div>}
             </div>
           );
         })}
