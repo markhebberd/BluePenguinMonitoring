@@ -30,6 +30,39 @@ interface BoxDetailData {
   chipped_here?: ChippedHere[];
 }
 
+const DAY = 86400000;
+const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
+
+/** C# GetEstimatedBreedingDates: find probable laid date from observation history.
+ *  Walk backwards from most recent obs with eggs/chicks to find when offspring first appeared.
+ *  Probable laid date = midpoint between last empty check and first egg check.
+ *  If 2+ eggs at discovery, subtract 2 days (second egg laid ~2 days after first). */
+function estimateLaidDate(observations: Observation[]): number | null {
+  const sorted = [...observations].sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+  const reversed = [...sorted].reverse();
+  const mostRecent = reversed.find(o => o.eggs + o.chicks > 0);
+  if (!mostRecent) return null;
+
+  let whenOffspringFound = parseDate(mostRecent.observation_time_utc).getTime();
+  const olderThanRecent = sorted.filter(o =>
+    parseDate(o.observation_time_utc).getTime() < whenOffspringFound
+  ).reverse();
+
+  for (const older of olderThanRecent) {
+    if (older.breeding_status === 'ABN' && older.eggs + older.chicks > 0) return null;
+    if (older.eggs + older.chicks === 0) {
+      if (older.breeding_status === 'ABN') return null;
+      let adjustedFound = whenOffspringFound;
+      if (mostRecent.eggs > 1) adjustedFound -= 2 * DAY;
+      const whenNotFound = parseDate(older.observation_time_utc).getTime();
+      const uncertainty = (adjustedFound - whenNotFound) / 2;
+      return whenNotFound + Math.ceil(uncertainty / DAY) * DAY;
+    }
+    whenOffspringFound = parseDate(older.observation_time_utc).getTime();
+  }
+  return null;
+}
+
 function displayStatus(status: string|null, eggs: number, chicks: number): string|null {
   if (status === 'BR') {
     if (chicks > 0) return 'G';
@@ -106,45 +139,10 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
 
   const dataEnd = todayCutoff ? Math.min(todayCutoff.getTime(), seasonEnd.getTime()) : seasonEnd.getTime();
 
-  // Calculate egg laid date using C# logic exactly:
-  // Start from the most recent monitor with eggs/chicks, walk backwards to find
-  // the last monitor where eggs+chicks==0. Probable laid date = midpoint.
-  let probableLaidTime: number | null = null;
-  const reversed = [...allSorted].reverse(); // newest first, like C#
-  // Find most recent monitor with eggs or chicks
-  const mostRecent = reversed.find(o => o.eggs + o.chicks > 0);
-  if (mostRecent) {
-    let whenOffspringFound = parseDate(mostRecent.observation_time_utc).getTime();
-    // Walk backwards through older monitors
-    const olderThanRecent = allSorted.filter(o =>
-      parseDate(o.observation_time_utc).getTime() < whenOffspringFound
-    ).reverse(); // newest older first
-
-    for (const older of olderThanRecent) {
-      if (older.breeding_status === 'ABN' && older.eggs + older.chicks > 0) {
-        break; // Abandoned - no date calculation
-      }
-      if (older.eggs + older.chicks === 0) {
-        if (older.breeding_status === 'ABN') break;
-        // Found the empty monitor before eggs appeared
-        let adjustedFound = whenOffspringFound;
-        if (mostRecent.eggs > 1) adjustedFound -= 2 * 86400000; // 2 days earlier for multiple eggs
-        const whenNotFound = parseDate(older.observation_time_utc).getTime();
-        const uncertainty = (adjustedFound - whenNotFound) / 2;
-        probableLaidTime = whenNotFound + Math.ceil(uncertainty / 86400000) * 86400000;
-        break;
-      }
-      // This older monitor also has eggs/chicks - keep walking back
-      whenOffspringFound = parseDate(older.observation_time_utc).getTime();
-    }
-  }
-
-  // Breeding milestones from laid date (matching C#: Hatch=38d, PG=52d, Chip=80d, Fledge=87d)
-  const DAY = 86400000;
-  void (probableLaidTime ? probableLaidTime + 38 * DAY : null); // guardTime/hatch at 38d - observer-set G covers this
-  const pgTime2 = probableLaidTime ? probableLaidTime + 52 * DAY : null;
-  void (probableLaidTime ? probableLaidTime + 80 * DAY : null); // chipTime - 80d, within PG phase
-  const fledgeTime = probableLaidTime ? probableLaidTime + 87 * DAY : null;
+  // Breeding milestones from probable laid date (C# algorithm)
+  const probableLaidTime = estimateLaidDate(allSorted);
+  const pgTime2 = probableLaidTime ? probableLaidTime + BREEDING_OFFSETS.pg * DAY : null;
+  const fledgeTime = probableLaidTime ? probableLaidTime + BREEDING_OFFSETS.fledge * DAY : null;
 
   // Build segments: observer-set statuses first, then overlay calculated phases
   const segments: { startPct: number; endPct: number; status: string }[] = [];
@@ -368,14 +366,17 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
   const seasonPairs = new Map<string, Map<string, number>>();
 
-  // First pass: find earliest egg date per season (for breeding window start)
-  const seasonFirstEgg = new Map<string, number>();
+  // First pass: estimate laid date per season using C# algorithm
+  const seasonLaidDate = new Map<string, number>();
+  const seasonObs = new Map<string, Observation[]>();
   for (const obs of observations) {
-    if (obs.eggs > 0) {
-      const label = getSeasonLabel(parseDate(obs.observation_time_utc));
-      const t = parseDate(obs.observation_time_utc).getTime();
-      if (!seasonFirstEgg.has(label) || t < seasonFirstEgg.get(label)!) seasonFirstEgg.set(label, t);
-    }
+    const label = getSeasonLabel(parseDate(obs.observation_time_utc));
+    if (!seasonObs.has(label)) seasonObs.set(label, []);
+    seasonObs.get(label)!.push(obs);
+  }
+  for (const [label, obs] of seasonObs) {
+    const laid = estimateLaidDate(obs);
+    if (laid) seasonLaidDate.set(label, laid);
   }
 
   for (const obs of observations) {
@@ -386,11 +387,10 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
     const birdMap = seasonBirds.get(label)!;
     const pairMap = seasonPairs.get(label)!;
 
-    // Breeding window: 1 week before first egg through PG (eggs/chicks present or breeding status)
-    const firstEgg = seasonFirstEgg.get(label);
+    // Breeding window: 1 week before probable laid date to fledge (laid + 87 days)
+    const laidDate = seasonLaidDate.get(label);
     const obsTime = obsDate.getTime();
-    // Breeding window: 1 week before first egg to fledge (87 days after first egg)
-    const inBreedingWindow = firstEgg && obsTime >= (firstEgg - 7 * 86400000) && obsTime <= (firstEgg + 87 * 86400000);
+    const inBreedingWindow = laidDate && obsTime >= (laidDate - 7 * DAY) && obsTime <= (laidDate + BREEDING_OFFSETS.fledge * DAY);
 
     for (const scan of obs.scans) {
       const key = scan.pit_id.slice(-8);
