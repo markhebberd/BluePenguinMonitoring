@@ -27,7 +27,8 @@ interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_st
 interface BoxDetailData {
   location: { location_id:number; location_name:string; persistent_notes:string|null; pit_id:string|null; } | null;
   observations: Observation[];
-  chipped_here?: ChippedHere[];
+  all_penguins?: any[];
+  chipped_here?: ChippedHere[]; // deprecated, use all_penguins
 }
 
 const DAY = 86400000;
@@ -361,7 +362,7 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observations: Observation[]; onBirdClick: (tag:string)=>void; chippedHere?: ChippedHere[] }) {
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[] }) {
   // Group birds by season, track co-sightings during breeding window
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
   const seasonPairs = new Map<string, Map<string, number>>();
@@ -420,16 +421,16 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
     }
   }
 
-  // Merge chipped_here birds into season maps (they were present at chip time)
-  for (const c of (chippedHere || [])) {
-    if (!c.chip_date || !c.pit_id) continue;
-    const chipDate = parseDate(c.chip_date);
+  // Merge allPenguinsInBox (includes chipped birds not in scans)
+  for (const p of (allPenguinsInBox || [])) {
+    if (!p.chip_date || !p.pit_id) continue;
+    const chipDate = parseDate(p.chip_date);
     const label = getSeasonLabel(chipDate);
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
-    const key = c.pit_id.slice(-8);
+    const key = p.pit_id.slice(-8);
     if (!birdMap.has(key)) {
-      birdMap.set(key, { ...c as any, pit_id: c.pit_id, peng_num: c.peng_num, lastSeen: c.chip_date, igCount: 0, scanCount: 0 });
+      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: p.scan_count || 0 });
     }
   }
 
@@ -765,7 +766,6 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
 
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
-  const scans: any[] = data.scans || [];
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
   const partners: any[] = data.partners || [];
@@ -888,23 +888,22 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
         })}
       </div>
 
-      {/* Scan history */}
+      {/* Sighting history */}
       <div className="bird-section">
-        <h3>Scan history ({scans.length})</h3>
-        {scans.map((s: any, i: number) => (
+        <h3>Sighting history ({sightings.length})</h3>
+        {sightings.map((s: any, i: number) => (
           <div key={i} className="obs-card">
             <div className="obs-top">
-              <b>{fmtDateTime(s.observation_time_utc)}</b>
-              <span className="bird-chip clickable" onClick={() => onBoxClick(s.box_name)}>Box {s.box_name}</span>
+              <b>{fmtDateTime(s.date)}</b>
+              <span className="bird-chip clickable" onClick={() => onBoxClick(s.box)}>Box {s.box}</span>
             </div>
             <div className="obs-nums">
               {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
               {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
-              {s.gate_status && <span className="gate">{s.gate_status}</span>}
               {(s.seen_with || []).map((sw: any) => (
-                <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.observation_time_utc} />
+                <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
               ))}
             </div>
             {s.notes && <div className="obs-notes">{s.notes}</div>}
@@ -1684,9 +1683,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             return;
           }
         }
-        // No scans at all — try chipped_here
-        if (d.chipped_here?.length > 0) {
-          setSelectedBird(d.chipped_here[0].peng_num);
+        // No scans at all — try all_penguins
+        if (d.all_penguins?.length > 0) {
+          setSelectedBird(d.all_penguins[0].peng_num);
         } else {
           setSelectedBird(null);
         }
@@ -1849,20 +1848,23 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                 )}
                 <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
-                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} chippedHere={boxDetail.chipped_here} />
-                {(boxDetail.chipped_here?.length ?? 0) > 0 && (
+                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
+                {(() => {
+                  const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here);
+                  return chipped.length > 0 && (
                   <div className="chipped-here">
-                    <div className="muted">Chipped in this box: {boxDetail.chipped_here!.length}</div>
+                    <div className="muted">Chipped in this box: {chipped.length}</div>
                     <div className="bird-row">
-                      {boxDetail.chipped_here!.map((c: ChippedHere) => (
+                      {chipped.map((c: any) => (
                         <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={{pit_id: c.pit_id, peng_num: c.peng_num, sex: c.sex, life_stage: c.life_stage, chip_date: c.chip_date, chipped_as_adult: c.chipped_as_adult, chick_size_code: c.chick_size_code}} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date} />
+                          <PenguinMini scan={c} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date} />
                           <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </>
             ) : null}
           </div>

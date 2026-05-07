@@ -15,7 +15,6 @@ if (!empty($num)) {
     $stmt->execute([$num]);
     $penguin = $stmt->fetch();
 } else {
-    // Fallback: lookup by pit_id
     $stmt = $pdo->prepare("SELECT p.* FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num WHERE pc.pit_id = ? OR pc.pit_id LIKE ?");
     $stmt->execute([$tag, '%'.$tag]);
     $penguin = $stmt->fetch();
@@ -29,74 +28,33 @@ $chipsStmt = $pdo->prepare("SELECT pit_id, chip_date, is_active, chip_box, chip_
 $chipsStmt->execute([$pid]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 
-// All scans with observation context (JOIN through penguin_chips)
-$stmt = $pdo->prepare("SELECT ps.scan_time_utc, ps.pit_id, o.observation_id,
-    ol.location_name AS box_name, o.observation_time_utc, o.monitor_filename,
-    o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
-    FROM penguin_scans ps
-    JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
-    JOIN observations o ON ps.observation_id = o.observation_id
-    JOIN observation_locations ol ON o.location_id = ol.location_id
-    WHERE pc.peng_num = ? AND o.is_deleted = FALSE
-    ORDER BY ps.scan_time_utc DESC");
-$stmt->execute([$pid]);
-$scans = $stmt->fetchAll();
-
-// Get co-scanned birds for each observation
-$obsIds = array_unique(array_column($scans, 'observation_id'));
-$coScans = [];
-if (!empty($obsIds)) {
-    $placeholders = implode(',', array_fill(0, count($obsIds), '?'));
-    $coStmt = $pdo->prepare("SELECT ps.observation_id, pc.peng_num, p.sex, p.chipped_as_adult, pc.pit_id, pc.chip_date
-        FROM penguin_scans ps
-        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
-        JOIN penguins p ON pc.peng_num = p.peng_num
-        WHERE ps.observation_id IN ($placeholders) AND pc.peng_num != ?
-        ORDER BY pc.peng_num + 0");
-    $coStmt->execute(array_merge($obsIds, [$pid]));
-    foreach ($coStmt->fetchAll() as $row) {
-        $coScans[$row['observation_id']][] = $row;
-    }
-}
-foreach ($scans as &$s) {
-    $s['seen_with'] = $coScans[$s['observation_id']] ?? [];
-}
+// Unified sightings (shared function)
+$sightings = getPenguinSightings($pdo, $pid);
 
 // Biometrics
 $stmt = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? ORDER BY observation_date DESC");
 $stmt->execute([$pid]);
 $biometrics = $stmt->fetchAll();
 
-// Partners (JOIN scans through penguin_chips)
-$stmt = $pdo->prepare("SELECT pc2.peng_num AS partner_peng_num, pc2.pit_id AS partner_pit_id, p2.sex AS partner_sex, p2.life_stage AS partner_life_stage, p2.chipped_as_adult AS partner_chipped_as_adult, pc2.chip_date AS partner_chip_date,
-    ol.location_name AS box_name, o.observation_time_utc, o.monitor_filename
-    FROM penguin_scans ps1
-    JOIN penguin_chips pc1 ON ps1.pit_id = pc1.pit_id
-    JOIN observations o ON ps1.observation_id = o.observation_id
-    JOIN observation_locations ol ON o.location_id = ol.location_id
-    JOIN penguin_scans ps2 ON ps2.observation_id = ps1.observation_id AND ps2.pit_id != ps1.pit_id
-    JOIN penguin_chips pc2 ON ps2.pit_id = pc2.pit_id
-    JOIN penguins p2 ON pc2.peng_num = p2.peng_num
-    WHERE pc1.peng_num = ? AND o.is_deleted = FALSE
-    ORDER BY o.observation_time_utc DESC");
-$stmt->execute([$pid]);
-$partnerRows = $stmt->fetchAll();
-
+// Partners (from sightings seen_with)
 $partners = [];
-foreach ($partnerRows as $row) {
-    $pnum = $row['partner_peng_num'];
-    if (!isset($partners[$pnum])) {
-        $partners[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$row['partner_pit_id'], 'sex'=>$row['partner_sex'],
-            'life_stage'=>$row['partner_life_stage'], 'chipped_as_adult'=>$row['partner_chipped_as_adult'], 'chip_date'=>$row['partner_chip_date'], 'sightings'=>[]];
+foreach ($sightings as $s) {
+    foreach ($s['seen_with'] as $sw) {
+        $pnum = $sw['peng_num'];
+        if (!isset($partners[$pnum])) {
+            $partners[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$sw['pit_id'], 'sex'=>$sw['sex'],
+                'chipped_as_adult'=>$sw['chipped_as_adult'], 'chip_date'=>$sw['chip_date'],
+                'sightings'=>[]];
+        }
+        $partners[$pnum]['sightings'][] = ['box'=>$s['box'], 'date'=>$s['date']];
     }
-    $partners[$pnum]['sightings'][] = ['box'=>$row['box_name'], 'date'=>$row['observation_time_utc'], 'monitor'=>$row['monitor_filename']];
 }
 usort($partners, function($a,$b){ return count($b['sightings'])-count($a['sightings']); });
 
-// Breeding stats
+// Breeding stats from sightings
 $breedingStats = [];
-foreach ($scans as $s) {
-    $d = new DateTime($s['observation_time_utc']);
+foreach ($sightings as $s) {
+    $d = new DateTime($s['date']);
     $m = (int)$d->format('n');
     $y = (int)$d->format('Y');
     $seasonYear = $m >= 4 ? $y : $y - 1;
@@ -107,45 +65,16 @@ foreach ($scans as $s) {
     }
     $bs = &$breedingStats[$season];
     $bs['scans']++;
-    if (!in_array($s['box_name'], $bs['boxes'])) $bs['boxes'][] = $s['box_name'];
-    if ((int)$s['eggs'] > $bs['max_eggs']) $bs['max_eggs'] = (int)$s['eggs'];
-    if ((int)$s['chicks'] > $bs['max_chicks']) $bs['max_chicks'] = (int)$s['chicks'];
+    if (!in_array($s['box'], $bs['boxes'])) $bs['boxes'][] = $s['box'];
+    if ($s['eggs'] > $bs['max_eggs']) $bs['max_eggs'] = $s['eggs'];
+    if ($s['chicks'] > $bs['max_chicks']) $bs['max_chicks'] = $s['chicks'];
     if ($s['breeding_status'] && !in_array($s['breeding_status'], $bs['statuses'])) $bs['statuses'][] = $s['breeding_status'];
 }
 krsort($breedingStats);
 
-// Build unified sightings: scans + chip events, deduped by date+box
-$sightings = [];
-foreach ($scans as $s) {
-    $date = substr($s['observation_time_utc'], 0, 10);
-    $key = $date . '|' . $s['box_name'];
-    if (!isset($sightings[$key])) {
-        $sightings[$key] = [
-            'date' => $s['observation_time_utc'], 'box' => $s['box_name'],
-            'source' => 'scan', 'adults' => (int)$s['adults'], 'eggs' => (int)$s['eggs'],
-            'chicks' => (int)$s['chicks'], 'breeding_status' => $s['breeding_status'],
-            'notes' => $s['notes'], 'seen_with' => $s['seen_with'] ?? [],
-        ];
-    }
-}
-// Add chip events (chipping = presence in box)
-foreach ($penguin['chips'] as $c) {
-    if (!$c['chip_box'] || !$c['chip_date']) continue;
-    $key = $c['chip_date'] . '|' . $c['chip_box'];
-    if (!isset($sightings[$key])) {
-        $sightings[$key] = [
-            'date' => $c['chip_date'], 'box' => $c['chip_box'],
-            'source' => 'chip', 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
-            'breeding_status' => null, 'notes' => 'Chipped', 'seen_with' => [],
-        ];
-    }
-}
-usort($sightings, function($a, $b) { return strcmp($b['date'], $a['date']); });
-
 echo json_encode([
     'penguin' => $penguin,
-    'scans' => $scans,
-    'sightings' => array_values($sightings),
+    'sightings' => $sightings,
     'biometrics' => $biometrics,
     'partners' => array_values($partners),
     'breeding_stats' => array_values($breedingStats),

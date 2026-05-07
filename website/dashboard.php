@@ -45,11 +45,10 @@ function handleBox($pdo, $colonyId, $boxName) {
     $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, pit_latitude, pit_longitude, pit_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $l->execute([$colonyId, $boxName]);
 
-    // Penguins chipped in this box
-    $c = $pdo->prepare("SELECT pc.pit_id, p.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date, pc.chip_by FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE pc.chip_box = ? ORDER BY pc.chip_date");
-    $c->execute([$boxName]);
+    // All penguins associated with this box (unified: scans + chipped)
+    $allPenguins = getBoxPenguins($pdo, $boxName, $colonyId);
 
-    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'chipped_here'=>$c->fetchAll()]);
+    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'all_penguins'=>$allPenguins]);
 }
 
 function handleOverview($pdo, $colonyId) {
