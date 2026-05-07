@@ -1800,7 +1800,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <header>
         <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
         <span className="sub">Tarakohe Penguin Colony</span>
-        {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · server: cpu ${serverStats.cpu_pct}%, ram ${serverStats.ram_used_mb}/${serverStats.ram_total_mb}MB, disk ${serverStats.pct}%` : ''}</span>}
+        {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
         <span className="header-user">
           <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
           {userName}
