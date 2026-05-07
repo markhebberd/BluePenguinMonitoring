@@ -163,13 +163,7 @@ try {
         if (!$locationId && $dryRun) { $locationId = -1; } // placeholder for dry run
         if (!$locationId) continue;
 
-        // Check duplicate
-        $obsTime = $date . ' 02:00:00';
-        $stmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
-        $stmt->execute([$locationId, $obsTime, $monitorPrefix . '%']);
-        if ($stmt->fetchColumn()) { $stats['observations_skipped']++; continue; }
-
-        // Build observation data
+        // Build observation data (needed for validation even if duplicate)
         $adults = $g['summary']['adults'] ?? count($g['birds']);
         $eggs = $g['summary']['eggs'] ?? 0;
         $chicks = $g['summary']['chicks'] ?? 0;
@@ -183,13 +177,23 @@ try {
             continue;
         }
 
+        // Check duplicate - still run validations below but don't insert
+        $obsTime = $date . ' 02:00:00';
+        $stmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
+        $stmt->execute([$locationId, $obsTime, $monitorPrefix . '%']);
+        $isDuplicate = (bool)$stmt->fetchColumn();
+
         $observationId = null;
-        if (!$dryRun) {
-            $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $filename]);
-            $observationId = $pdo->lastInsertId();
+        if ($isDuplicate) {
+            $stats['observations_skipped']++;
+        } else {
+            if (!$dryRun) {
+                $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $filename]);
+                $observationId = $pdo->lastInsertId();
+            }
+            $stats['observations_created']++;
         }
-        $stats['observations_created']++;
 
         // Process bird rows
         foreach ($g['birds'] as $bird) {
@@ -214,12 +218,14 @@ try {
             $pitId = $chipLookup[$pit8];
             $pengNum = $chipToPeng[$pit8];
 
-            // Insert scan
-            if (!$dryRun && $observationId) {
-                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
-                    ->execute([$observationId, $pitId, $obsTime]);
+            // Insert scan (only for new observations)
+            if (!$isDuplicate) {
+                if (!$dryRun && $observationId) {
+                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
+                        ->execute([$observationId, $pitId, $obsTime]);
+                }
+                $stats['scans_created']++;
             }
-            $stats['scans_created']++;
 
             // Biometric data
             $sex = strtoupper($bird['sex']);
@@ -283,7 +289,7 @@ try {
                             'db_value' => $existingBio['weight'], 'sheet_value' => $weight, 'date' => $date
                         ];
                     }
-                } else {
+                } elseif (!$isDuplicate) {
                     if (!$dryRun) {
                         $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?,?)")
                             ->execute([$pengNum, $observationId, $date, $sexNorm, $weight, $flipper, $comment ?: null]);
@@ -296,10 +302,19 @@ try {
             }
         }
 
-        // Bird count mismatch
+        // Bird count vs summary validation
         $birdCount = count($g['birds']);
-        if ($g['summary'] && $birdCount > 0 && $g['summary']['adults'] > 0 && $birdCount > $g['summary']['adults']) {
-            $stats['warnings'][] = "$date box $box: {$birdCount} bird rows but summary says {$g['summary']['adults']} adults";
+        $summaryAdults = $g['summary']['adults'] ?? 0;
+
+        // Scanned penguins should never exceed adults found
+        if ($birdCount > 0 && $summaryAdults > 0 && $birdCount > $summaryAdults) {
+            $stats['warnings'][] = "$date box $box: {$birdCount} scanned penguins but summary says {$summaryAdults} adults";
+        }
+
+        // 3+ scanned penguins in one box is unusual - flag it
+        if ($birdCount >= 3) {
+            $birdNums = array_map(function($b) use ($chipToPeng) { return 'peng#' . ($chipToPeng[$b['pit8']] ?? $b['pit8']); }, $g['birds']);
+            $stats['warnings'][] = "$date box $box: {$birdCount} penguins scanned (" . implode(', ', $birdNums) . ")";
         }
     }
 
