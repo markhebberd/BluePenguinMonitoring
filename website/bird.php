@@ -29,7 +29,8 @@ $chipsStmt->execute([$pid]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 
 // Unified sightings (shared function)
-$sightings = getPenguinSightings($pdo, $pid);
+$result = getSightings($pdo, $pid);
+$sightings = $result['sightings'];
 
 // Biometrics
 $stmt = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? ORDER BY observation_date DESC");

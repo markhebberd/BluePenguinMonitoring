@@ -46,7 +46,8 @@ function handleBox($pdo, $colonyId, $boxName) {
     $l->execute([$colonyId, $boxName]);
 
     // All penguins associated with this box (unified: scans + chipped)
-    $allPenguins = getBoxPenguins($pdo, $boxName, $colonyId);
+    $result = getSightings($pdo, null, $boxName, $colonyId);
+    $allPenguins = $result['penguins'];
 
     echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'all_penguins'=>$allPenguins]);
 }
