@@ -124,23 +124,25 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     $stmt->execute($params);
     $scans = $stmt->fetchAll();
 
-    // Co-scanned birds per observation (only for penguin queries, too expensive for box queries)
+    // Co-scanned birds per observation (penguin queries only — box view has scans inline)
     $coScans = [];
     if ($pengNum) {
-        $obsIds = array_unique(array_column($scans, 'observation_id'));
-        if (!empty($obsIds)) {
-            $ph = implode(',', array_fill(0, count($obsIds), '?'));
-            $coStmt = $pdo->prepare("SELECT ps.observation_id, pc.peng_num, p.sex, p.chipped_as_adult, pc.pit_id, pc.chip_date, p.chick_size_code
-                FROM penguin_scans ps
-                JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
-                JOIN penguins p ON pc.peng_num = p.peng_num
-                WHERE ps.observation_id IN ($ph) AND pc.peng_num != ?
-                ORDER BY pc.peng_num + 0");
-            $coStmt->execute(array_merge($obsIds, [$pengNum]));
-            foreach ($coStmt->fetchAll() as $row) {
-                $coScans[$row['observation_id']][] = $row;
-            }
+    $obsIds = array_unique(array_column($scans, 'observation_id'));
+    if (!empty($obsIds)) {
+        $ph = implode(',', array_fill(0, count($obsIds), '?'));
+        $coStmt = $pdo->prepare("SELECT ps.observation_id, pc.peng_num, p.sex, p.chipped_as_adult, pc.pit_id, pc.chip_date, p.chick_size_code
+            FROM penguin_scans ps
+            JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+            JOIN penguins p ON pc.peng_num = p.peng_num
+            WHERE ps.observation_id IN ($ph)" . ($pengNum ? " AND pc.peng_num != ?" : "") . "
+            ORDER BY pc.peng_num");
+        $params = $obsIds;
+        if ($pengNum) $params[] = $pengNum;
+        $coStmt->execute($params);
+        foreach ($coStmt->fetchAll() as $row) {
+            $coScans[$row['observation_id']][] = $row;
         }
+    }
     }
 
     // Build penguin map and sighting list
