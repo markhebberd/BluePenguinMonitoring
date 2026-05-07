@@ -172,6 +172,10 @@ header h1:hover { opacity:.8; }
 .bird-nav-btn:hover:not(:disabled) { background:#f0f0f0; }
 .bird-nav-btn:disabled { opacity:0.3; cursor:default; }
 .bird-nav-input { width:50px; text-align:center; border:1px solid #ccc; border-radius:4px; padding:4px; font-size:13px; }
+.header-nav { display:flex; gap:6px; align-items:center; }
+.box-search-input { width:50px; text-align:center; border:1px solid #ccc; border-radius:4px; padding:4px 6px; font-size:12px; }
+.header-nav .penguin-search { flex:1; }
+.header-nav .penguin-search-input { font-size:12px; padding:4px 8px; width:140px; }
 .bird-header { border-left:4px solid #2196F3; padding-left:12px; margin-bottom:16px; }
 .bird-header h2 { font-size:20px; color:#1a5276; }
 .bird-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0; }

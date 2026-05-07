@@ -921,9 +921,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
               {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {s.gate_status && <span className="gate">{s.gate_status}</span>}
+              {(s.seen_with || []).map((sw: any) => (
+                <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.observation_time_utc} />
+              ))}
             </div>
             {s.notes && <div className="obs-notes">{s.notes}</div>}
-            <div className="muted small">{s.monitor_filename}</div>
           </div>
         ))}
       </div>
@@ -1787,6 +1789,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
           <span className="sub">Tarakohe Penguin Colony</span>
           {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
+          <span className="header-nav">
+            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+            <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          </span>
         </header>
         <div className="bird-page">
           <div className="page-header">
@@ -1813,6 +1819,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
         <span className="sub">Tarakohe Penguin Colony</span>
         {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
+        <span className="header-nav">
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        </span>
         <span className="header-user">
           <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
           {userName}
