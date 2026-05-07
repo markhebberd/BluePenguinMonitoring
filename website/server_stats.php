@@ -29,12 +29,17 @@ $duOutput = trim(shell_exec('du -sm /home/wildwatch 2>/dev/null') ?? '');
 $usedMb = $duOutput ? (float)explode("\t", $duOutput)[0] : ($dbMb + $fileMb);
 $quotaMb = 12001; // 11.72 GB per cPanel
 
+// Error log size
+$errorLog = __DIR__ . '/error_log';
+$errorLogMb = file_exists($errorLog) ? round(filesize($errorLog) / 1048576, 1) : 0;
+
 echo json_encode([
     'db_mb' => $dbMb,
     'files_mb' => $fileMb,
     'used_mb' => $usedMb,
     'quota_mb' => $quotaMb,
     'pct' => round($usedMb / $quotaMb * 100, 1),
+    'error_log_mb' => $errorLogMb,
     'observations' => $obs,
     'scans' => $scans,
     'penguins' => $penguins,
