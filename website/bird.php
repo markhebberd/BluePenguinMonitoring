@@ -37,7 +37,7 @@ $stmt = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? O
 $stmt->execute([$pid]);
 $biometrics = $stmt->fetchAll();
 
-// Partners (from sightings seen_with)
+// Partners (from sightings seen_with, with full observation context)
 $partners = [];
 foreach ($sightings as $s) {
     foreach ($s['seen_with'] as $sw) {
@@ -45,9 +45,17 @@ foreach ($sightings as $s) {
         if (!isset($partners[$pnum])) {
             $partners[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$sw['pit_id'], 'sex'=>$sw['sex'],
                 'chipped_as_adult'=>$sw['chipped_as_adult'], 'chip_date'=>$sw['chip_date'],
+                'chick_size_code'=>$sw['chick_size_code'] ?? null,
                 'sightings'=>[]];
         }
-        $partners[$pnum]['sightings'][] = ['box'=>$s['box'], 'date'=>$s['date']];
+        // Include full observation context + other penguins seen
+        $others = array_filter($s['seen_with'], function($o) use ($pnum) { return $o['peng_num'] !== $pnum; });
+        $partners[$pnum]['sightings'][] = [
+            'box'=>$s['box'], 'date'=>$s['date'],
+            'adults'=>$s['adults'], 'eggs'=>$s['eggs'], 'chicks'=>$s['chicks'],
+            'breeding_status'=>$s['breeding_status'], 'notes'=>$s['notes'],
+            'also_seen'=>array_values($others),
+        ];
     }
 }
 usort($partners, function($a,$b){ return count($b['sightings'])-count($a['sightings']); });

@@ -928,6 +928,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
                   <div key={i} className="partner-row clickable" onClick={() => onSightingClick(s.box, s.date)}>
                     <span>{fmtDateTime(s.date)}</span>
                     <span className="bird-chip">Box {s.box}</span>
+                    {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 4))}</span>}
+                    {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 4))}</span>}
+                    {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                    {(s.also_seen || []).map((sw: any) => (
+                      <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
+                    ))}
                   </div>
                 ))}
               </div>
