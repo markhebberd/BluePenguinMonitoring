@@ -1757,6 +1757,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <header>
           <h1 className="logo clickable" onClick={() => { setShowEntry(false); }}>WildWatch</h1>
           <span className="sub">Tarakohe Penguin Colony</span>
+          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
           <span className="header-user">{userName}
             <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
             <button className="logout-btn" onClick={onLogout}>Logout</button>
@@ -1775,6 +1776,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <header>
           <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
           <span className="sub">Tarakohe Penguin Colony</span>
+          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
         </header>
         <div className="bird-page">
           <div className="page-header">

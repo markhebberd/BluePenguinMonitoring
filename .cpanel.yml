@@ -5,9 +5,3 @@ deployment:
     - /bin/mkdir -p $DEPLOYPATH
     - /bin/cp website/*.php $DEPLOYPATH/
     - /bin/cp website/*.sql $DEPLOYPATH/
-    - /bin/mkdir -p /home/wildwatch/public_html/assets
-    - /bin/cp website/wildwatch/dist/index.html /home/wildwatch/public_html/index.html
-    - /bin/cp website/wildwatch/dist/assets/* /home/wildwatch/public_html/assets/
-    - /bin/cp website/wildwatch/dist/favicon.svg /home/wildwatch/public_html/favicon.svg
-    - /bin/cp website/wildwatch/dist/icons.svg /home/wildwatch/public_html/icons.svg
-    - /bin/cp website/wildwatch/dist/manifest.json /home/wildwatch/public_html/manifest.json
