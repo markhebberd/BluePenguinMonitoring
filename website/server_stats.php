@@ -27,7 +27,7 @@ $penguins = (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn();
 // Account usage from du
 $duOutput = trim(shell_exec('du -sm /home/wildwatch 2>/dev/null') ?? '');
 $usedMb = $duOutput ? (float)explode("\t", $duOutput)[0] : ($dbMb + $fileMb);
-$quotaMb = 1024; // 1GB assumed quota — adjust if different
+$quotaMb = 12001; // 11.72 GB per cPanel
 
 echo json_encode([
     'db_mb' => $dbMb,
