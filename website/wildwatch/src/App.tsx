@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory } from './api/boxtags';
+import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats } from './api/boxtags';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -1125,7 +1125,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   }, [dateInput, season, dateMappings]);
 
   const filteredBirds = birdSearch.length > 0
-    ? allPenguins.filter((p: any) => (p.pit_id.includes(birdSearch) || (p.peng_num && p.peng_num === birdSearch)) && !p.pit_id.startsWith('LA900025') && !p.pit_id.startsWith('9130')).slice(0, 10)
+    ? allPenguins.filter((p: any) => p.pit_id && (p.pit_id.includes(birdSearch) || (p.peng_num && p.peng_num === birdSearch)) && !p.pit_id.startsWith('LA900025') && !p.pit_id.startsWith('9130')).slice(0, 10)
     : [];
   const [searchIdx, setSearchIdx] = useState(-1);
   useEffect(() => { setSearchIdx(-1); }, [birdSearch]);
@@ -1617,6 +1617,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const [allPenguins, setAllPenguins] = useState<any[]>([]);
   const [penguinSearch, setPenguinSearch] = useState('');
+  const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
@@ -1645,8 +1646,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchBoxTags(), fetchOverview(), fetchAllPenguins()])
-      .then(([tags, ov, pgs]) => { setBoxTags(tags); setStats(ov); setAllPenguins(pgs); setLoading(false); })
+    Promise.all([fetchBoxTags(), fetchOverview(), fetchAllPenguins(), fetchServerStats()])
+      .then(([tags, ov, pgs, ss]) => { setBoxTags(tags); setStats(ov); setAllPenguins(pgs); setServerStats(ss); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
@@ -1799,7 +1800,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <header>
         <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
         <span className="sub">Tarakohe Penguin Colony</span>
-        {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
+        {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · ${serverStats.total_mb}MB` : ''}</span>}
         <span className="header-user">
           <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
           {userName}

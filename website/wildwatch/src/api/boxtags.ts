@@ -12,6 +12,10 @@ export async function fetchOverview() {
   return (await fetch(`/penguin-api/dashboard.php?view=overview&_=${Date.now()}`)).json();
 }
 
+export async function fetchServerStats() {
+  return (await fetch(`/penguin-api/server_stats.php?_=${Date.now()}`)).json();
+}
+
 export async function fetchTimeline() {
   return (await fetch('/penguin-api/dashboard.php?view=timeline')).json();
 }
