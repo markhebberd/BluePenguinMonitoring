@@ -408,14 +408,13 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
       }
     }
 
-    // Track M+F pairs during breeding window
-    if (inBreedingWindow && obs.scans.length >= 2) {
-      const males = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'M');
-      const females = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'F');
-      for (const m of males) {
-        for (const f of females) {
-          const pairKey = m.pit_id.slice(-8) + '|' + f.pit_id.slice(-8);
-          pairMap.set(pairKey, (pairMap.get(pairKey) || 0) + 1);
+    // Track individual M and F sightings during breeding window
+    if (inBreedingWindow) {
+      for (const scan of obs.scans) {
+        const sex = (scan.sex || '').toUpperCase();
+        if (sex === 'M' || sex === 'F') {
+          const key = sex + '|' + scan.pit_id.slice(-8);
+          pairMap.set(key, (pairMap.get(key) || 0) + 1);
         }
       }
     }
@@ -445,23 +444,16 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
         const birds = Array.from(birdMap.values());
         if (birds.length === 0) return null;
 
-        // Find breeding pair: M+F with most I/G co-sightings
-        // If no I/G data, fall back to most common M+F pair by total co-sightings
+        // Find breeding pair: most-seen M and most-seen F during breeding window
         const pairMap = seasonPairs.get(label) || new Map();
         let breedingMale = '';
         let breedingFemale = '';
-        let maxPairCount = 0;
+        let maxMale = 0;
+        let maxFemale = 0;
         for (const [key, count] of pairMap.entries()) {
-          if (count > maxPairCount) {
-            maxPairCount = count;
-            [breedingMale, breedingFemale] = key.split('|');
-          }
-        }
-
-        // Only show breeding pair if there were actual eggs or chicks (I/G observations)
-        if (maxPairCount === 0) {
-          breedingMale = '';
-          breedingFemale = '';
+          const [sex, pit8] = key.split('|');
+          if (sex === 'M' && count > maxMale) { maxMale = count; breedingMale = pit8; }
+          if (sex === 'F' && count > maxFemale) { maxFemale = count; breedingFemale = pit8; }
         }
 
         // Sort: breeding M (0), breeding F (1), other M (2), other F (3), unsexed (4)
