@@ -364,9 +364,19 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
 }
 
 function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observations: Observation[]; onBirdClick: (tag:string)=>void; chippedHere?: ChippedHere[] }) {
-  // Group birds by season, track co-sightings during incubation/guard
+  // Group birds by season, track co-sightings during breeding window
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
-  const seasonPairs = new Map<string, Map<string, number>>(); // "maleTag|femaleTag" -> count during I/G
+  const seasonPairs = new Map<string, Map<string, number>>();
+
+  // First pass: find earliest egg date per season (for breeding window start)
+  const seasonFirstEgg = new Map<string, number>();
+  for (const obs of observations) {
+    if (obs.eggs > 0) {
+      const label = getSeasonLabel(parseDate(obs.observation_time_utc));
+      const t = parseDate(obs.observation_time_utc).getTime();
+      if (!seasonFirstEgg.has(label) || t < seasonFirstEgg.get(label)!) seasonFirstEgg.set(label, t);
+    }
+  }
 
   for (const obs of observations) {
     const obsDate = parseDate(obs.observation_time_utc);
@@ -376,16 +386,20 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
     const birdMap = seasonBirds.get(label)!;
     const pairMap = seasonPairs.get(label)!;
 
-    const isIG = obs.eggs > 0 || obs.chicks > 0;
+    // Breeding window: 1 week before first egg through PG (eggs/chicks present or breeding status)
+    const firstEgg = seasonFirstEgg.get(label);
+    const obsTime = obsDate.getTime();
+    const bs = (obs.breeding_status || '').toUpperCase();
+    const inBreedingWindow = firstEgg && obsTime >= (firstEgg - 7 * 86400000) && (obs.eggs > 0 || obs.chicks > 0 || bs === 'BR' || bs === 'I' || bs === 'G' || bs === 'PG');
 
     for (const scan of obs.scans) {
       const key = scan.pit_id.slice(-8);
       const existing = birdMap.get(key);
       if (!existing) {
-        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, igCount: isIG ? 1 : 0, scanCount: 1 });
+        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, igCount: inBreedingWindow ? 1 : 0, scanCount: 1 });
       } else {
         existing.scanCount++;
-        if (isIG) existing.igCount++;
+        if (inBreedingWindow) existing.igCount++;
         if (obs.observation_time_utc > existing.lastSeen) {
           existing.lastSeen = obs.observation_time_utc;
           existing.sex = scan.sex;
@@ -394,8 +408,8 @@ function AllScannedBirds({ observations, onBirdClick, chippedHere }: { observati
       }
     }
 
-    // Track M+F pairs during I/G phases
-    if (isIG && obs.scans.length >= 2) {
+    // Track M+F pairs during breeding window
+    if (inBreedingWindow && obs.scans.length >= 2) {
       const males = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'M');
       const females = obs.scans.filter(s => (s.sex || '').toUpperCase() === 'F');
       for (const m of males) {
