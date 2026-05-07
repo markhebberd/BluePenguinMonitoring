@@ -820,21 +820,22 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
             </Fragment>);
             })}
             <tr><td className="muted">Last Known Life Stage</td><td>{!editing ? (p.life_stage || <span className="muted">-</span>) : <EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />}</td></tr>
-            {biometrics.map((b: any, i: number) => (<Fragment key={`bio${i}`}>
+            {biometrics.map((b: any, i: number) => {
+              const flags = [
+                b.is_moulting && 'Moulting', b.condition_underweight && 'Underweight',
+                b.condition_ticks && 'Ticks', b.condition_dead && 'Dead',
+                b.condition_dog_attacked && 'Dog Attacked', b.condition_attacked && 'Attacked',
+                b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
+              ].filter(Boolean);
+              return (<Fragment key={`bio${i}`}>
               <tr><td className="muted" colSpan={2} style={{fontWeight:600, paddingTop:8}}>Biometrics {b.observation_date || ''}</td></tr>
-              <tr><td className="muted">Date</td><td>{!editing ? (b.observation_date || <span className="muted">-</span>) : <EditableField value={b.observation_date} type="date" onSave={saveBio(b.biometric_id, 'observation_date')} canEdit={true} />}</td></tr>
-              <tr><td className="muted">Weight</td><td>{!editing ? (b.weight ? `${parseFloat(b.weight).toFixed(0)}g` : <span className="muted">-</span>) : <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>
-              <tr><td className="muted">Flipper Length</td><td>{!editing ? (b.right_flipper_length ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <span className="muted">-</span>) : <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>
-              <tr><td className="muted">Moulting</td><td>{b.is_moulting ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Underweight</td><td>{b.condition_underweight ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Ticks</td><td>{b.condition_ticks ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Dead</td><td>{b.condition_dead ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Dog Attacked</td><td>{b.condition_dog_attacked ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Attacked</td><td>{b.condition_attacked ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Aggressive</td><td>{b.disposition_aggressive ? 'Yes' : <span className="muted">No</span>}</td></tr>
-              <tr><td className="muted">Passive</td><td>{b.disposition_passive ? 'Yes' : <span className="muted">No</span>}</td></tr>
+              {b.observed_sex && <tr><td className="muted">Observed Sex</td><td>{b.observed_sex}</td></tr>}
+              {b.weight && <tr><td className="muted">Weight</td><td>{!editing ? `${parseFloat(b.weight).toFixed(0)}g` : <><EditableField value={parseFloat(b.weight).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>}
+              {b.right_flipper_length && <tr><td className="muted">Flipper Length</td><td>{!editing ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <><EditableField value={parseFloat(b.right_flipper_length).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>}
+              {flags.length > 0 && <tr><td className="muted">Conditions</td><td>{flags.join(', ')}</td></tr>}
               {b.notes && <tr><td className="muted">Notes</td><td>{b.notes}</td></tr>}
-            </Fragment>))}
+            </Fragment>);
+            })}
           </tbody>
         </table>
       </div>

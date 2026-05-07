@@ -285,8 +285,8 @@ try {
                     }
                 } else {
                     if (!$dryRun) {
-                        $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?)")
-                            ->execute([$pengNum, $observationId, $date, $weight, $flipper, $comment ?: null]);
+                        $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?,?)")
+                            ->execute([$pengNum, $observationId, $date, $sexNorm, $weight, $flipper, $comment ?: null]);
                     }
                     $stats['biometrics_created']++;
                     if ($comment) {
