@@ -24,10 +24,17 @@ $obs = (int)$pdo->query("SELECT COUNT(*) FROM observations WHERE is_deleted = FA
 $scans = (int)$pdo->query("SELECT COUNT(*) FROM penguin_scans")->fetchColumn();
 $penguins = (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn();
 
+// Account usage from du
+$duOutput = trim(shell_exec('du -sm /home/wildwatch 2>/dev/null') ?? '');
+$usedMb = $duOutput ? (float)explode("\t", $duOutput)[0] : ($dbMb + $fileMb);
+$quotaMb = 1024; // 1GB assumed quota — adjust if different
+
 echo json_encode([
     'db_mb' => $dbMb,
     'files_mb' => $fileMb,
-    'total_mb' => $dbMb + $fileMb,
+    'used_mb' => $usedMb,
+    'quota_mb' => $quotaMb,
+    'pct' => round($usedMb / $quotaMb * 100, 1),
     'observations' => $obs,
     'scans' => $scans,
     'penguins' => $penguins,
