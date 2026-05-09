@@ -33,7 +33,12 @@ namespace PenguinMonitor
     public class MainActivity : Activity, ILocationListener
     {
         //Lazy versioning.
-        private static string version = "37.35";
+        private static string version = "37.36";
+        private static readonly TimeZoneInfo NzTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Pacific/Auckland");
+        internal static DateTime ToNzTime(DateTime dt) => TimeZoneInfo.ConvertTimeFromUtc(
+            dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc), NzTimeZone);
+        internal static DateTime NzNow => ToNzTime(DateTime.UtcNow);
+        internal static DateTime NzToday => NzNow.Date;
         // Bluetooth manager
         private BluetoothManager? _bluetoothManager;
 
@@ -1159,13 +1164,13 @@ namespace PenguinMonitor
                 {
                     foreach (ScanRecord sc in box.ScannedIds)
                     {
-                        timeTV.Text += "\n" + sc.Timestamp.ToLocalTime().ToString("d MMM yyyy, HH:mm");
+                        timeTV.Text += "\n" + ToNzTime(sc.Timestamp).ToString("d MMM yyyy, HH:mm");
                         timeFound = true;
                         break;
                     }
                     if (!timeFound && box.whenDataCollectedUtc.Year > 2015)
                     {
-                        timeTV.Text += "\n" + box.whenDataCollectedUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm");
+                        timeTV.Text += "\n" + ToNzTime(box.whenDataCollectedUtc).ToString("d MMM yyyy, HH:mm");
                         timeFound = true;
                     }
                     if (timeFound) break;
@@ -1207,22 +1212,25 @@ namespace PenguinMonitor
             };
             filterSentenceLayout.AddView(showButton);
 
-            var exceptLabel = new TextView(this) { Text = " except ", TextSize = 18 };
-            exceptLabel.SetTextColor(Color.Black);
-            filterSentenceLayout.AddView(exceptLabel);
-
-            string hideText = GetHideFilterText();
-            var hideButton = new TextView(this) { Text = hideText, TextSize = 18 };
-            hideButton.SetTextColor(UIFactory.DANGER_RED);
-            hideButton.SetTypeface(null, TypefaceStyle.Bold);
-            hideButton.PaintFlags = hideButton.PaintFlags | Android.Graphics.PaintFlags.UnderlineText;
-            hideButton.Click += (s, e) =>
+            if (showText != "none")
             {
-                _appSettings.HideFiltersVisible = !_appSettings.HideFiltersVisible;
-                _appSettings.ShowFiltersVisible = false;
-                DrawPageLayouts();
-            };
-            filterSentenceLayout.AddView(hideButton);
+                var exceptLabel = new TextView(this) { Text = " except ", TextSize = 18 };
+                exceptLabel.SetTextColor(Color.Black);
+                filterSentenceLayout.AddView(exceptLabel);
+
+                string hideText = GetHideFilterText();
+                var hideButton = new TextView(this) { Text = hideText, TextSize = 18 };
+                hideButton.SetTextColor(UIFactory.DANGER_RED);
+                hideButton.SetTypeface(null, TypefaceStyle.Bold);
+                hideButton.PaintFlags = hideButton.PaintFlags | Android.Graphics.PaintFlags.UnderlineText;
+                hideButton.Click += (s, e) =>
+                {
+                    _appSettings.HideFiltersVisible = !_appSettings.HideFiltersVisible;
+                    _appSettings.ShowFiltersVisible = false;
+                    DrawPageLayouts();
+                };
+                filterSentenceLayout.AddView(hideButton);
+            }
 
             _overviewFiltersLayout.AddView(filterSentenceLayout);
 
@@ -1570,10 +1578,10 @@ namespace PenguinMonitor
             foreach (var boxData in monitorDetails.BoxData.Values)
             {
                 if (boxData.whenDataCollectedUtc.Year > 2010)
-                    return boxData.whenDataCollectedUtc.ToLocalTime();
+                    return ToNzTime(boxData.whenDataCollectedUtc);
                 foreach (var scan in boxData.ScannedIds)
                     if (scan.Timestamp.Year > 2010)
-                        return scan.Timestamp.ToLocalTime();
+                        return ToNzTime(scan.Timestamp);
             }
             return DateTime.MinValue;
         }
@@ -1797,7 +1805,7 @@ namespace PenguinMonitor
             }
 
             // Filter to only future dates (including today), then sort
-            var today = DateTime.Today;
+            var today = NzToday;
             var sortedMilestones = milestones
                 .Where(m => m.date >= today)
                 .OrderBy(m => m.date)
@@ -2377,7 +2385,7 @@ namespace PenguinMonitor
             if (_appSettings.ShowSingleEggBoxesInMultiboxView) filters.Add("1 egg");
             if (_appSettings.ShowDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
 
-            return filters.Count > 0 ? string.Join(", ", filters) : "all";
+            return filters.Count > 0 ? string.Join(", ", filters) : "none";
         }
 
         private string GetHideFilterText()
@@ -2466,7 +2474,7 @@ namespace PenguinMonitor
                     int displayMonitorIndex = _appSettings.CurrentlyVisibleMonitor + _currentHistoricalDataIndex;
 
                     _boxSavedTimeTextView.Text = _allMonitorData.ContainsKey(displayMonitorIndex) && _allMonitorData[displayMonitorIndex].BoxData.ContainsKey(_currentBoxName) ?
-                        _allMonitorData[displayMonitorIndex].BoxData[_currentBoxName].whenDataCollectedUtc.ToLocalTime().ToString("d MMM yyyy\nHH:mm") : "";
+                        ToNzTime(_allMonitorData[displayMonitorIndex].BoxData[_currentBoxName].whenDataCollectedUtc).ToString("d MMM yyyy\nHH:mm") : "";
                     // Show date in red if viewing historical data
                     _boxSavedTimeTextView.SetTextColor(_currentHistoricalDataIndex > 0 ? UIFactory.DANGER_RED : Color.Black);
                     _boxSavedTimeTextView.Gravity = GravityFlags.Right;
@@ -3290,8 +3298,8 @@ namespace PenguinMonitor
 
                 // Check if it's a recent chick (< 3 months old)
                 bool isRecentChick = penguinData.LastKnownLifeStage == LifeStage.Chick &&
-                                     !(penguinData.ChipDate > DateTime.Today.AddYears(-20) &&
-                                       DateTime.Today > penguinData.ChipDate.AddMonths(3));
+                                     !(penguinData.ChipDate > NzToday.AddYears(-20) &&
+                                       NzToday > penguinData.ChipDate.AddMonths(3));
 
                 if (isRecentChick)
                 {
@@ -3327,7 +3335,7 @@ namespace PenguinMonitor
             scanLayout.SetPadding(12, 8, 12, 8);
 
             // Scan info text with additional penguin information
-            var timeStr = scan.Timestamp.ToLocalTime().ToString("MMM dd, HH:mm");
+            var timeStr = ToNzTime(scan.Timestamp).ToString("MMM dd, HH:mm");
             var scanText = new TextView(this)
             {
                 Text = $"• {scan.BirdId}{additionalInfo} at {timeStr}",
@@ -3402,7 +3410,7 @@ namespace PenguinMonitor
                             if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData) && (
                                 LifeStage.Adult == penguinData.LastKnownLifeStage || 
                                 LifeStage.Returnee == penguinData.LastKnownLifeStage || 
-                                DateTime.Now > penguinData.ChipDate.AddMonths(3)))
+                                NzNow > penguinData.ChipDate.AddMonths(3)))
                             {
                                 _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
                             }
@@ -3499,7 +3507,7 @@ namespace PenguinMonitor
 
                             if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData))
                             {
-                                if (LifeStage.Adult == penguinData.LastKnownLifeStage || LifeStage.Returnee == penguinData.LastKnownLifeStage || DateTime.Now > penguinData.ChipDate.AddMonths(3))
+                                if (LifeStage.Adult == penguinData.LastKnownLifeStage || LifeStage.Returnee == penguinData.LastKnownLifeStage || NzNow > penguinData.ChipDate.AddMonths(3))
                                 {
                                     _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
                                     _allMonitorData[_appSettings.CurrentlyVisibleMonitor].BoxData[targetBoxName].Adults++;
@@ -3777,7 +3785,7 @@ namespace PenguinMonitor
                         }
                         else if (penguin.LastKnownLifeStage == LifeStage.Chick)
                         {
-                            if (penguin.ChipDate > DateTime.Today.AddYears(-20) && DateTime.Today > penguin.ChipDate.AddMonths(3))
+                            if (penguin.ChipDate > NzToday.AddYears(-20) && NzToday > penguin.ChipDate.AddMonths(3))
                             {
                                 _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
                                 toastMessage += $" (+1 Adult)";
@@ -3808,7 +3816,7 @@ namespace PenguinMonitor
         }
         private void ShowSaveFilenameDialog(bool upload = false)
         {
-            var now = DateTime.Now;
+            var now = NzNow;
             string defaultFileName = $"PenguinMonitor {now:yyMMdd HHmmss}";            
             if (!string.IsNullOrEmpty(_allMonitorData[_appSettings.CurrentlyVisibleMonitor].filename))
             {

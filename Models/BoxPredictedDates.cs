@@ -14,15 +14,15 @@
             try
             {
                 DateTime estHatch = DateTime.Parse(estHatchDate);
-                if (estHatch.AddDays(3) >= DateTime.Today)
+                if (estHatch.AddDays(3) >= MainActivity.NzToday)
                     return "Hatch" + getDateString(estHatch);
 
                 DateTime estPG = DateTime.Parse(estPGDate);
-                if (estPG.AddDays(3) >= DateTime.Today)
+                if (estPG.AddDays(3) >= MainActivity.NzToday)
                     return "PG" + getDateString(estPG);
 
                 DateTime chipStart = DateTime.Parse(chipWindowStart);
-                if (chipStart.AddDays(3) >= DateTime.Today)
+                if (chipStart.AddDays(3) >= MainActivity.NzToday)
                     return "Chip" + getDateString(chipStart);
 
                 DateTime estFledge = DateTime.Parse(estFledgeDate);
@@ -32,7 +32,7 @@
         }
         private string getDateString(DateTime expectedDate)
         {
-            DateTime today = DateTime.Today;
+            DateTime today = MainActivity.NzToday;
             if (expectedDate.Date.Equals(today))
             {
                 return " today";

@@ -535,7 +535,7 @@ namespace PenguinMonitor.Services
             if (thisBoxData == null || thisBoxData.Eggs + thisBoxData.Chicks == 0 || olderBoxDatas == null || olderBoxDatas.Count==0)
                 return "";
             string breedingStatusString = "";
-            DateTime whenOffspringFound = thisBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+            DateTime whenOffspringFound = MainActivity.ToNzTime(thisBoxData.whenDataCollectedUtc).Date;
             DateTime whenOffspringNotFound = DateTime.MinValue;
             foreach (BoxData olderBoxData in olderBoxDatas.Skip(skip))
             {
@@ -549,10 +549,10 @@ namespace PenguinMonitor.Services
                         return "Abandoned";
                     if (thisBoxData.Eggs > 1) //in case of multiple eggs, assume first one was laid 2 days before found
                         whenOffspringFound = whenOffspringFound.AddDays(-2);
-                    whenOffspringNotFound = olderBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+                    whenOffspringNotFound = MainActivity.ToNzTime(olderBoxData.whenDataCollectedUtc).Date;
                     TimeSpan uncertainty = (whenOffspringFound - whenOffspringNotFound)/2;
                     DateTime probableLaidDate = whenOffspringNotFound.AddDays(Math.Ceiling(uncertainty.TotalDays));
-                    int daysSinceLaid = (int)(DateTime.UtcNow.ToLocalTime().Date - probableLaidDate).TotalDays;
+                    int daysSinceLaid = (int)(MainActivity.NzToday - probableLaidDate).TotalDays;
                     return breedingDateStatus(daysSinceLaid) + (uncertainty.TotalDays > 1 ? " ±" + (int)uncertainty.TotalDays : "");
                 }
                 whenOffspringFound = olderBoxData.whenDataCollectedUtc;
@@ -561,20 +561,20 @@ namespace PenguinMonitor.Services
         }
         public static string breedingDateStatus(int daysSinceLaid)
         {
-            DateTime estHatch = DateTime.Today.AddDays(38 - daysSinceLaid);
-            if (estHatch.AddDays(3) >= DateTime.Today)
+            DateTime estHatch = MainActivity.NzToday.AddDays(38 - daysSinceLaid);
+            if (estHatch.AddDays(3) >= MainActivity.NzToday)
                 return "Hatch" + getDateString(estHatch);
 
-            DateTime estPG = DateTime.Today.AddDays(52 - daysSinceLaid);
-            if (estPG.AddDays(3) >= DateTime.Today)
+            DateTime estPG = MainActivity.NzToday.AddDays(52 - daysSinceLaid);
+            if (estPG.AddDays(3) >= MainActivity.NzToday)
                 return "PG" + getDateString(estPG);
 
-            DateTime chipStart = DateTime.Today.AddDays(80 - daysSinceLaid);
-            if (chipStart.AddDays(3) >= DateTime.Today)
+            DateTime chipStart = MainActivity.NzToday.AddDays(80 - daysSinceLaid);
+            if (chipStart.AddDays(3) >= MainActivity.NzToday)
                 return "Chip" + getDateString(chipStart);
 
-            DateTime estFledge = DateTime.Today.AddDays(87 - daysSinceLaid);
-            if (estFledge.AddDays(3) >= DateTime.Today)
+            DateTime estFledge = MainActivity.NzToday.AddDays(87 - daysSinceLaid);
+            if (estFledge.AddDays(3) >= MainActivity.NzToday)
                 return "Fledge" + getDateString(estFledge);
             return "Fail detecting laid date?";
         }
@@ -603,7 +603,7 @@ namespace PenguinMonitor.Services
             // Track whether we ever saw eggs in the history (needed to calculate hatch date)
             bool sawEggsInHistory = thisBoxData.Eggs > 0;
 
-            DateTime whenOffspringFound = thisBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+            DateTime whenOffspringFound = MainActivity.ToNzTime(thisBoxData.whenDataCollectedUtc).Date;
             foreach (BoxData olderBoxData in olderBoxDatas.Skip(skip))
             {
                 if (olderBoxData.Eggs > 0)
@@ -617,17 +617,17 @@ namespace PenguinMonitor.Services
                         return null;
                     if (thisBoxData.Eggs > 1)
                         whenOffspringFound = whenOffspringFound.AddDays(-2);
-                    DateTime whenOffspringNotFound = olderBoxData.whenDataCollectedUtc.ToLocalTime().Date;
+                    DateTime whenOffspringNotFound = MainActivity.ToNzTime(olderBoxData.whenDataCollectedUtc).Date;
                     TimeSpan uncertainty = (whenOffspringFound - whenOffspringNotFound) / 2;
                     DateTime probableLaidDate = whenOffspringNotFound.AddDays(Math.Ceiling(uncertainty.TotalDays));
-                    int daysSinceLaid = (int)(DateTime.UtcNow.ToLocalTime().Date - probableLaidDate).TotalDays;
+                    int daysSinceLaid = (int)(MainActivity.NzToday - probableLaidDate).TotalDays;
 
                     // Only show hatch date if we saw eggs in history (otherwise we don't know when egg was laid)
                     // Also don't show if chicks already present (hatching already occurred)
-                    DateTime? estHatch = (sawEggsInHistory && thisBoxData.Chicks == 0) ? DateTime.Today.AddDays(38 - daysSinceLaid) : null;
-                    DateTime estPG = DateTime.Today.AddDays(52 - daysSinceLaid);
-                    DateTime chipStart = DateTime.Today.AddDays(80 - daysSinceLaid);
-                    DateTime estFledge = DateTime.Today.AddDays(87 - daysSinceLaid);
+                    DateTime? estHatch = (sawEggsInHistory && thisBoxData.Chicks == 0) ? MainActivity.NzToday.AddDays(38 - daysSinceLaid) : null;
+                    DateTime estPG = MainActivity.NzToday.AddDays(52 - daysSinceLaid);
+                    DateTime chipStart = MainActivity.NzToday.AddDays(80 - daysSinceLaid);
+                    DateTime estFledge = MainActivity.NzToday.AddDays(87 - daysSinceLaid);
 
                     return (estHatch, estPG, chipStart, estFledge);
                 }
@@ -637,7 +637,7 @@ namespace PenguinMonitor.Services
         }
         private static string getDateString(DateTime expectedDate)
         {
-            DateTime today = DateTime.Today;
+            DateTime today = MainActivity.NzToday;
             if (expectedDate.Date.Equals(today))
             {
                 return " today";
