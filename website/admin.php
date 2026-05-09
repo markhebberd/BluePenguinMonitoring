@@ -542,10 +542,11 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
                     // Find close match
                     $close = null;
                     foreach ($chipLookup as $known => $fullPit) {
-                        if (strlen($known) === strlen($pit8)) {
+                        $knownStr = (string)$known;
+                        if (strlen($knownStr) === strlen($pit8)) {
                             $diff = 0;
-                            for ($d = 0; $d < strlen($pit8); $d++) { if ($pit8[$d] !== $known[$d]) $diff++; }
-                            if ($diff === 1) { $close = $known . ' (peng#' . ($chipToPeng[$known] ?? '?') . ')'; break; }
+                            for ($d = 0; $d < strlen($pit8); $d++) { if ($pit8[$d] !== $knownStr[$d]) $diff++; }
+                            if ($diff === 1) { $close = $knownStr . ' (peng#' . ($chipToPeng[$knownStr] ?? $chipToPeng[$known] ?? '?') . ')'; break; }
                         }
                     }
                     $stats['unknown_pits'][$pit8] = ['count'=>0, 'close'=>$close, 'first_date'=>$date, 'first_box'=>$box];
