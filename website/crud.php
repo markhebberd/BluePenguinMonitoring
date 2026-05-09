@@ -55,6 +55,7 @@ $tables = [
 ];
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
+if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'role'=>$observer['role'] ?? 'viewer']); exit; }
 
 if (!in_array($action, ['list','get','create','update','delete'])) { echo json_encode(['error'=>'Invalid action']); exit; }
 if (!isset($tables[$table])) { echo json_encode(['error'=>'Invalid table']); exit; }

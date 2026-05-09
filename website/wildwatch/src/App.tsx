@@ -1547,6 +1547,20 @@ function App() {
     setUserRole('viewer');
   };
 
+  // Refresh role from server on load (in case it changed since login)
+  useEffect(() => {
+    if (!authToken) return;
+    fetch('/penguin-api/crud.php?action=me', { headers: { 'Authorization': `Bearer ${authToken}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.role && d.role !== userRole) {
+          setUserRole(d.role);
+          localStorage.setItem('ww_role', d.role);
+        }
+      })
+      .catch(() => {});
+  }, [authToken]);
+
   if (!authToken) {
     return <LoginScreen onLogin={handleLogin} />;
   }
