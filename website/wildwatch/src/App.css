@@ -35,7 +35,7 @@ header h1:hover { opacity:.8; }
 .penguin-search { position:relative; }
 .penguin-search-input { width:100%; padding:10px 14px; font-size:15px; border:2px solid #ddd; border-radius:8px; outline:none; max-width:100%; }
 .penguin-search-input:focus { border-color:#2196F3; }
-.penguin-results { background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; margin-top:-2px; max-height:300px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1); }
+.penguin-results { position:absolute; left:0; right:0; z-index:200; background:#fff; border:1px solid #ddd; border-radius:0 0 8px 8px; margin-top:-2px; max-height:300px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1); }
 .penguin-result { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid #f0f0f0; cursor:pointer; }
 .penguin-result:last-child { border-bottom:none; }
 .penguin-result .scan { background:transparent; border:none; color:inherit; }
