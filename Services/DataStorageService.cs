@@ -133,10 +133,13 @@ namespace PenguinMonitor.Services
                     _allMonitorData.Add(_allMonitorData.Count, monitor);
                 }
 
-                // Sort by LastSaved descending (newest first), keeping index 0 (current session) in place
+                // Sort by observation date descending, LastSaved as tiebreaker. Index 0 = current session.
                 var current = _allMonitorData[0];
                 var sorted = _allMonitorData.Values.Where((v, i) => i > 0)
-                    .OrderByDescending(m => m.LastSaved).ToList();
+                    .OrderByDescending(m => m.BoxData.Values.Any()
+                        ? m.BoxData.Values.Max(b => b.whenDataCollectedUtc)
+                        : m.LastSaved)
+                    .ThenByDescending(m => m.LastSaved).ToList();
                 _allMonitorData.Clear();
                 _allMonitorData.Add(0, current);
                 for (int i = 0; i < sorted.Count; i++)

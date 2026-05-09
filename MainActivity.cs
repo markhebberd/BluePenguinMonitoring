@@ -1177,6 +1177,32 @@ namespace PenguinMonitor
                 }
             if (!timeFound)
                 timeTV.Text += "\nNo date in data";
+
+            // Flag boxes with dates different from the majority
+            if (_allMonitorData.ContainsKey(_appSettings.CurrentlyVisibleMonitor))
+            {
+                var monitor = _allMonitorData[_appSettings.CurrentlyVisibleMonitor];
+                var dateCounts = new Dictionary<string, int>();
+                var dateBoxes = new Dictionary<string, List<string>>();
+                foreach (var entry in monitor.BoxData)
+                {
+                    var nzDate = ToNzTime(entry.Value.whenDataCollectedUtc).ToString("d MMM yyyy");
+                    if (!dateCounts.ContainsKey(nzDate)) { dateCounts[nzDate] = 0; dateBoxes[nzDate] = new List<string>(); }
+                    dateCounts[nzDate]++;
+                    dateBoxes[nzDate].Add(entry.Key);
+                }
+                if (dateCounts.Count > 1)
+                {
+                    var mainDate = dateCounts.OrderByDescending(kv => kv.Value).First().Key;
+                    foreach (var kv in dateCounts.Where(kv => kv.Key != mainDate))
+                    {
+                        var boxes = string.Join(", ", dateBoxes[kv.Key].Take(5));
+                        if (dateBoxes[kv.Key].Count > 5) boxes += $" +{dateBoxes[kv.Key].Count - 5} more";
+                        timeTV.Text += $"\n⚠ {kv.Value} boxes on {kv.Key}: {boxes}";
+                    }
+                }
+            }
+
             timeTV.Text = timeTV.Text.Trim();
             timeTV.SetTextColor(Color.Black);
             timeTV.SetPadding(0, 0, 0, 0);
