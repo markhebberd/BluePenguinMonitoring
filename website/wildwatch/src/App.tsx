@@ -1516,11 +1516,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   );
 }
 
-function parseUrl(): { box?: string; bird?: string; enter?: boolean } {
+function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean } {
   const path = window.location.pathname;
   const boxMatch = path.match(/^\/box\/(.+)/);
   const birdMatch = path.match(/^\/bird\/(.+)/);
-  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter' };
+  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin' };
 }
 
 function App() {
@@ -1723,28 +1723,30 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [penguinSearch, setPenguinSearch] = useState('');
   const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(initial.admin || false);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
 
   // Sync state to URL
   useEffect(() => {
     let path = '/';
-    if (showEntry) path = '/enter';
+    if (showAdmin) path = '/admin';
+    else if (showEntry) path = '/enter';
     else if (selectedBox) path = `/box/${selectedBox}`;
     else if (selectedBird) path = `/bird/${selectedBird}`;
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, enter } = parseUrl();
+      const { box, bird, enter, admin } = parseUrl();
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
+      setShowAdmin(admin || false);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
