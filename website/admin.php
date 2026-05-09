@@ -482,10 +482,25 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
         $locationId = $stmt->fetchColumn();
 
         if ($locationId) {
-            // Skip duplicates
-            $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
+            // Check for existing observation
+            $dup = $pdo->prepare("SELECT observation_id, adults, eggs, chicks, notes FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
             $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
-            if ($dup->fetchColumn()) { $stats['duplicates']++; continue; }
+            $existing = $dup->fetch();
+            if ($existing) {
+                // Check for content changes
+                $changed = ((int)$existing['adults'] !== $adults || (int)$existing['eggs'] !== $eggs || (int)$existing['chicks'] !== $chicks || ($existing['notes'] ?? '') !== $notes);
+                if ($changed) {
+                    if (!$dryRun) {
+                        $pdo->prepare("UPDATE observations SET adults=?, eggs=?, chicks=?, breeding_status=?, notes=? WHERE observation_id=?")
+                            ->execute([$adults, $eggs, $chicks, $breedingStatus, $notes, $existing['observation_id']]);
+                    }
+                    if (!isset($stats['updated'])) $stats['updated'] = 0;
+                    $stats['updated']++;
+                } else {
+                    $stats['duplicates']++;
+                }
+                continue;
+            }
         }
 
         if (!$dryRun) {

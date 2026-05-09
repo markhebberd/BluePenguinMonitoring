@@ -1763,7 +1763,7 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
             {sightingResult.error ? <div style={{color:'#F44336'}}>{sightingResult.error}</div> : <>
               {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
               <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
-              <div>Observations: {sightingResult.stats?.observations} new, {sightingResult.stats?.duplicates || 0} duplicates, {sightingResult.stats?.empty_skipped || 0} empty skipped</div>
+              <div>Observations: {sightingResult.stats?.observations || 0} new, {sightingResult.stats?.updated || 0} updated, {sightingResult.stats?.duplicates || 0} unchanged, {sightingResult.stats?.empty_skipped || 0} empty</div>
               <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PIT occurrences, {Object.keys(sightingResult.stats?.unknown_pits || {}).length} unique)</div>
               <div>Biometrics: {sightingResult.stats?.biometrics}</div>
               {Object.keys(sightingResult.stats?.unknown_pits || {}).length > 0 && <>
@@ -1998,7 +1998,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return (
       <div className="app">
         <header>
-          <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
+          <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
           <span className="sub">Tarakohe Penguin Colony</span>
           {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
           <span className="header-nav">
@@ -2028,7 +2028,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   return (
     <div className="app">
       <header>
-        <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); }}>WildWatch</h1>
+        <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
         <span className="sub">Tarakohe Penguin Colony</span>
         {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
         <span className="header-nav">
