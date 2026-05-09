@@ -476,19 +476,26 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
         $observationId = null;
         if (!$dryRun) {
             $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $box]);
-            $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-            $stmt->execute([$colonyId, $box]);
-            $locationId = $stmt->fetchColumn();
-            if ($locationId) {
-                // Skip duplicates in additive mode
-                $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
-                $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
-                if ($dup->fetchColumn()) { $stats['skipped']++; continue; }
+        }
+        $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+        $stmt->execute([$colonyId, $box]);
+        $locationId = $stmt->fetchColumn();
 
-                $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                    ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
-                $observationId = $pdo->lastInsertId();
+        if ($locationId) {
+            // Skip duplicates
+            $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
+            $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
+            if ($dup->fetchColumn()) { $stats['skipped']++; continue; }
+        }
+
+        if (!$dryRun) {
+            if (!$locationId) {
+                // Shouldn't happen since we inserted above, but just in case
+                continue;
             }
+            $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
+            $observationId = $pdo->lastInsertId();
         }
         $stats['observations']++;
 
