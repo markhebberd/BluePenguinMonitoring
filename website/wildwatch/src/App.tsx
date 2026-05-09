@@ -2120,6 +2120,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                 )}
                 <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
+              </>
+            ) : null}
+          </div>
+
+          {/* Split: observations+birds left, penguin detail right */}
+          {!detailLoading && boxDetail && (
+          <div className="detail-split">
+            <div className="detail-obs">
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
                 {(() => {
                   const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here);
@@ -2137,14 +2145,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                   );
                 })()}
-              </>
-            ) : null}
-          </div>
-
-          {/* Bottom split: observations left, bird right */}
-          {!detailLoading && boxDetail && (
-          <div className="detail-split">
-            <div className="detail-obs">
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
                 const thisLabel = getSeasonLabel();
