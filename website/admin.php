@@ -487,32 +487,40 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
             $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
             $existing = $dup->fetch();
             if ($existing) {
+                $observationId = $existing['observation_id'];
                 // Check for content changes
                 $changed = ((int)$existing['adults'] !== $adults || (int)$existing['eggs'] !== $eggs || (int)$existing['chicks'] !== $chicks || ($existing['notes'] ?? '') !== $notes);
                 if ($changed) {
                     if (!$dryRun) {
                         $pdo->prepare("UPDATE observations SET adults=?, eggs=?, chicks=?, breeding_status=?, notes=? WHERE observation_id=?")
-                            ->execute([$adults, $eggs, $chicks, $breedingStatus, $notes, $existing['observation_id']]);
+                            ->execute([$adults, $eggs, $chicks, $breedingStatus, $notes, $observationId]);
                     }
                     if (!isset($stats['updated'])) $stats['updated'] = 0;
                     $stats['updated']++;
                 } else {
                     $stats['duplicates']++;
                 }
-                continue;
+                // Get existing scans for this observation to check for missing ones
+                $existingScans = [];
+                $scanStmt = $pdo->prepare("SELECT pit_id FROM penguin_scans WHERE observation_id = ?");
+                $scanStmt->execute([$observationId]);
+                foreach ($scanStmt->fetchAll() as $es) $existingScans[$es['pit_id']] = true;
+            } else {
+                $existingScans = [];
             }
+        } else {
+            $existingScans = [];
         }
 
-        if (!$dryRun) {
-            if (!$locationId) {
-                // Shouldn't happen since we inserted above, but just in case
-                continue;
+        if (!$existing) {
+            if (!$dryRun) {
+                if (!$locationId) continue;
+                $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
+                $observationId = $pdo->lastInsertId();
             }
-            $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
-            $observationId = $pdo->lastInsertId();
+            $stats['observations']++;
         }
-        $stats['observations']++;
 
         // 3+ penguins warning
         if (count($g['birds']) >= 3) {
@@ -540,6 +548,9 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
                 continue;
             }
             $pitId = $chipLookup[$pit8]; $pengNum = $chipToPeng[$pit8];
+
+            // Skip if scan already exists for this observation
+            if (isset($existingScans[$pitId])) continue;
 
             if (!$dryRun && $observationId) {
                 $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")->execute([$observationId, $pitId, $obsTime]);
