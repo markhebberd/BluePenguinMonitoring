@@ -1760,12 +1760,17 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
               {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
               <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
               <div>Observations: {sightingResult.stats?.observations} ({sightingResult.stats?.skipped} empty skipped)</div>
-              <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PITs)</div>
+              <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PIT occurrences, {Object.keys(sightingResult.stats?.unknown_pits || {}).length} unique)</div>
               <div>Biometrics: {sightingResult.stats?.biometrics}</div>
+              {Object.keys(sightingResult.stats?.unknown_pits || {}).length > 0 && <>
+                <div style={{marginTop:4, fontWeight:600}}>Unknown PITs ({Object.keys(sightingResult.stats.unknown_pits).length}):</div>
+                {Object.entries(sightingResult.stats.unknown_pits).sort((a: any, b: any) => b[1].count - a[1].count).map(([pit8, info]: [string, any]) => (
+                  <div key={pit8} className="muted small">{pit8}: {info.count}x (first: {info.first_date} box {info.first_box}){info.close ? ` → ${info.close}` : ''}</div>
+                ))}
+              </>}
               {sightingResult.stats?.warnings?.length > 0 && <>
                 <div style={{marginTop:4, fontWeight:600}}>Warnings ({sightingResult.stats.warnings.length}):</div>
-                {sightingResult.stats.warnings.slice(0, 20).map((w: string, i: number) => <div key={i} className="muted small">{w}</div>)}
-                {sightingResult.stats.warnings.length > 20 && <div className="muted small">+{sightingResult.stats.warnings.length - 20} more</div>}
+                {sightingResult.stats.warnings.map((w: string, i: number) => <div key={i} className="muted small">{w}</div>)}
               </>}
             </>}
           </div>

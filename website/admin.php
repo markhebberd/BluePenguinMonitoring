@@ -435,7 +435,7 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    $stats = ['observations'=>0, 'skipped'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'warnings'=>[]];
+    $stats = ['observations'=>0, 'skipped'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'unknown_pits'=>[], 'warnings'=>[]];
 
     foreach ($groups as $g) {
         $date = $g['date']; $box = $g['box'];
@@ -470,7 +470,23 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
 
         foreach ($g['birds'] as $bird) {
             $pit8 = $bird['pit8'];
-            if (!isset($chipLookup[$pit8])) { $stats['unknown_count']++; continue; }
+            if (!isset($chipLookup[$pit8])) {
+                $stats['unknown_count']++;
+                if (!isset($stats['unknown_pits'][$pit8])) {
+                    // Find close match
+                    $close = null;
+                    foreach ($chipLookup as $known => $fullPit) {
+                        if (strlen($known) === strlen($pit8)) {
+                            $diff = 0;
+                            for ($d = 0; $d < strlen($pit8); $d++) { if ($pit8[$d] !== $known[$d]) $diff++; }
+                            if ($diff === 1) { $close = $known . ' (peng#' . ($chipToPeng[$known] ?? '?') . ')'; break; }
+                        }
+                    }
+                    $stats['unknown_pits'][$pit8] = ['count'=>0, 'close'=>$close, 'first_date'=>$date, 'first_box'=>$box];
+                }
+                $stats['unknown_pits'][$pit8]['count']++;
+                continue;
+            }
             $pitId = $chipLookup[$pit8]; $pengNum = $chipToPeng[$pit8];
 
             if (!$dryRun && $observationId) {
