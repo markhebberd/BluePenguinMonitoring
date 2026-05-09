@@ -1604,6 +1604,8 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
+  const [reimportResult, setReimportResult] = useState<any>(null);
+  const [reimporting, setReimporting] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1634,6 +1636,19 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
   };
   const trialSync = () => doSync('trial_sync');
   const syncMonitors = () => doSync('sync_monitors');
+
+  const doReimport = async (action: string) => {
+    setReimporting(true); setReimportResult(null);
+    try {
+      const r = await fetch(`/penguin-api/admin.php?action=${action}`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const result = await r.json();
+      result.dry_run = (action === 'trial_reimport_penguins');
+      setReimportResult(result);
+    } catch (e: any) { setReimportResult({ error: e.message }); }
+    setReimporting(false);
+  };
 
   return (
     <div className="admin-panel">
@@ -1704,6 +1719,31 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
                     </div>
                   </div>
                 ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="admin-section">
+        <h3>Reimport Penguins</h3>
+        <p className="muted">Wipe and reimport all penguins from Google Sheets (1004 birds). Clears scans + biometrics.</p>
+        <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
+          {reimporting ? 'Working...' : 'Trial (preview)'}
+        </button>
+        <button className="edit-btn done-btn" onClick={() => { if (confirm('This will DELETE all penguins, chips, scans and biometrics then reimport from Google Sheets. Continue?')) doReimport('reimport_penguins'); }} disabled={reimporting} style={{marginLeft:6}}>
+          {reimporting ? 'Working...' : 'Wipe & reimport'}
+        </button>
+        {reimportResult && (
+          <div className="obs-card" style={{marginTop:8, borderLeftColor: reimportResult.dry_run ? '#FF9800' : '#4CAF50'}}>
+            {reimportResult.error ? (
+              <div style={{color:'#F44336'}}>{reimportResult.error}</div>
+            ) : (
+              <>
+                {reimportResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
+                <div>CSV rows: {reimportResult.csv_rows}</div>
+                <div>Current DB: {reimportResult.previous?.penguins} penguins, {reimportResult.previous?.chips} chips</div>
+                <div>Would create: {reimportResult.result?.penguins} penguins, {reimportResult.result?.chips} chips ({reimportResult.result?.rechips} rechips), {reimportResult.result?.skipped} skipped</div>
               </>
             )}
           </div>

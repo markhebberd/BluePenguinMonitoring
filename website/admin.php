@@ -203,4 +203,113 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
     exit;
 }
 
+if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
+    $dryRun = ($action === 'trial_reimport_penguins');
+
+    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=143001868';
+    $csv = @file_get_contents($csvUrl);
+    if (!$csv) $csv = @file_get_contents(__DIR__ . '/all_penguins_sheet2.csv');
+    if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
+
+    $handle = fopen('php://temp', 'r+');
+    fwrite($handle, $csv);
+    rewind($handle);
+    $header = fgetcsv($handle);
+    $rows = [];
+    while (($row = fgetcsv($handle)) !== false) $rows[] = $row;
+    fclose($handle);
+
+    // Count current state
+    $currentPenguins = (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn();
+    $currentChips = (int)$pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn();
+
+    $created = 0; $chipsCreated = 0; $rechips = 0; $skipped = 0;
+
+    if (!$dryRun) {
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+        $pdo->exec("DELETE FROM penguin_scans");
+        $pdo->exec("DELETE FROM penguin_biometric_data");
+        $pdo->exec("DELETE FROM penguin_chips");
+        $pdo->exec("DELETE FROM penguins");
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    }
+
+    foreach ($rows as $cols) {
+        while (count($cols) < 40) $cols[] = '';
+        $number = trim($cols[0]);
+        if (empty($number) || !is_numeric($number)) { $skipped++; continue; }
+        $fullChipId = trim($cols[1]);
+        if (empty($fullChipId)) { $skipped++; continue; }
+
+        $fullIsoRaw = trim($cols[37] ?? '');
+        $reChipFlag = trim($cols[33] ?? '');
+        if (!empty($reChipFlag) && !empty($fullIsoRaw)) {
+            $shortId = 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $fullChipId), 8, '0', STR_PAD_LEFT);
+        } elseif (!empty($fullIsoRaw)) {
+            $shortId = 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw);
+        } else {
+            $shortId = 'LA' . preg_replace('/[^0-9]/', '', $fullChipId);
+        }
+        if (strlen($shortId) < 4) { $skipped++; continue; }
+
+        $chipDate = trim($cols[2]);
+        $sex = trim($cols[3]);
+        $vid = trim($cols[4]);
+        $chipBox = trim($cols[6]);
+        $lifeStage = trim($cols[12]);
+        $chipBy = trim($cols[23]);
+        $chipAs = trim($cols[24]);
+        $chickSizeSex = trim($cols[31]);
+        $rechipBy = trim($cols[34] ?? '');
+        $activeChip2 = trim($cols[35] ?? '');
+        $rechipDateRaw = trim($cols[36] ?? '');
+        $solo = trim($cols[38] ?? '');
+        $kommentar = trim($cols[39] ?? '');
+
+        $parsedDate = null;
+        if (!empty($chipDate)) { $ts = strtotime($chipDate); if ($ts) $parsedDate = date('Y-m-d', $ts); }
+        $chippedAsAdult = 0;
+        if (!empty($chipAs)) $chippedAsAdult = (stripos($chipAs, 'chick') === false) ? 1 : 0;
+        $sexNorm = null;
+        if (strtoupper($sex) === 'F' || stripos($sex, 'female') !== false) $sexNorm = 'F';
+        elseif (strtoupper($sex) === 'M' || stripos($sex, 'male') !== false) $sexNorm = 'M';
+
+        if (!$dryRun) {
+            $pdo->prepare("INSERT INTO penguins (peng_num, sex, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$number, $sexNorm, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
+        }
+        $created++;
+
+        $isActive = empty($reChipFlag) ? 1 : 0;
+        if (!$dryRun) {
+            $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, chip_box, chip_by, solo) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$shortId, $number, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $solo ?: null]);
+        }
+        $chipsCreated++;
+
+        if (!empty($activeChip2) && !empty($reChipFlag)) {
+            $rechipFullId = !empty($fullIsoRaw) ? 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw) : 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $activeChip2), 8, '0', STR_PAD_LEFT);
+            if ($rechipFullId !== $shortId) {
+                $rechipDate = null;
+                if (!empty($rechipDateRaw)) { $ts = strtotime($rechipDateRaw); if ($ts) $rechipDate = date('Y-m-d', $ts); }
+                if (!$dryRun) {
+                    $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, rechip_by) VALUES (?, ?, ?, TRUE, ?)")
+                        ->execute([$rechipFullId, $number, $rechipDate, $rechipBy ?: null]);
+                }
+                $rechips++;
+                $chipsCreated++;
+            }
+        }
+    }
+
+    echo json_encode([
+        'success' => true,
+        'dry_run' => $dryRun,
+        'csv_rows' => count($rows),
+        'previous' => ['penguins'=>$currentPenguins, 'chips'=>$currentChips],
+        'result' => ['penguins'=>$created, 'chips'=>$chipsCreated, 'rechips'=>$rechips, 'skipped'=>$skipped],
+    ]);
+    exit;
+}
+
 echo json_encode(['error'=>'Unknown action']);
