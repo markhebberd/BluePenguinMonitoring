@@ -69,11 +69,14 @@ $groups = []; // key = "YYYY-MM-DD|box" => { date, box, summary, birds[], decomm
 foreach ($rows as $i => $row) {
     while (count($row) < 11) $row[] = '';
     $dateStr = trim($row[0]);
-    if (empty($dateStr)) continue;
-
-    $ts = DateTime::createFromFormat('d/m/y', $dateStr);
-    if (!$ts) { echo "ERROR: Bad date '$dateStr' at row " . ($i+2) . "\n"; exit; }
-    $date = $ts->format('Y-m-d');
+    if (!empty($dateStr)) {
+        $ts = DateTime::createFromFormat('d/m/y', $dateStr);
+        if (!$ts) { echo "ERROR: Bad date '$dateStr' at row " . ($i+2) . "\n"; exit; }
+        $date = $ts->format('Y-m-d');
+    } else {
+        $date = $prevDate;
+    }
+    if (!$date) continue;
 
     // Validate chronological ordering
     if ($prevDate && $date < $prevDate) {

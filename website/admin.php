@@ -425,12 +425,16 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
     foreach ($rows as $i => $row) {
         while (count($row) < 11) $row[] = '';
         $dateStr = trim($row[0]);
-        if (empty($dateStr)) continue;
-        $ts = DateTime::createFromFormat('d/m/y', $dateStr);
-        if (!$ts) { echo json_encode(['error'=>"Bad date '$dateStr' at row ".($i+2)]); exit; }
-        $date = $ts->format('Y-m-d');
-        if ($prevDate && $date < $prevDate) { echo json_encode(['error'=>"Date decrease at row ".($i+2).": $date < $prevDate"]); exit; }
-        $prevDate = $date;
+        if (!empty($dateStr)) {
+            $ts = DateTime::createFromFormat('d/m/y', $dateStr);
+            if (!$ts) { echo json_encode(['error'=>"Bad date '$dateStr' at row ".($i+2)]); exit; }
+            $date = $ts->format('Y-m-d');
+            if ($prevDate && $date < $prevDate) { echo json_encode(['error'=>"Date decrease at row ".($i+2).": $date < $prevDate"]); exit; }
+            $prevDate = $date;
+        } else {
+            $date = $prevDate; // carry forward from previous row
+        }
+        if (!$date) continue;
 
         $boxUsed = strtoupper(trim($row[1]));
         $box = trim($row[2]);
