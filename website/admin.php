@@ -312,4 +312,138 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
     exit;
 }
 
+if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
+    $dryRun = ($action === 'trial_import_sightings');
+    $monitorPrefix = 'sheet-import';
+    $colonyId = 1; $observerId = 1;
+
+    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=325619240';
+    $csv = @file_get_contents($csvUrl);
+    if (!$csv) $csv = @file_get_contents(__DIR__ . '/sheet_history.csv');
+    if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
+
+    $handle = fopen('php://temp', 'r+');
+    fwrite($handle, $csv);
+    rewind($handle);
+    fgetcsv($handle); // skip header
+    $rows = [];
+    while (($row = fgetcsv($handle)) !== false) $rows[] = $row;
+    fclose($handle);
+
+    // Build chip lookup
+    $chipLookup = []; $chipToPeng = [];
+    foreach ($pdo->query("SELECT pit_id, peng_num FROM penguin_chips")->fetchAll() as $c) {
+        $chipLookup[substr($c['pit_id'], -8)] = $c['pit_id'];
+        $chipToPeng[substr($c['pit_id'], -8)] = $c['peng_num'];
+    }
+
+    // Parse and group by date+box
+    $prevDate = null; $groups = [];
+    foreach ($rows as $i => $row) {
+        while (count($row) < 11) $row[] = '';
+        $dateStr = trim($row[0]);
+        if (empty($dateStr)) continue;
+        $ts = DateTime::createFromFormat('d/m/y', $dateStr);
+        if (!$ts) { echo json_encode(['error'=>"Bad date '$dateStr' at row ".($i+2)]); exit; }
+        $date = $ts->format('Y-m-d');
+        if ($prevDate && $date < $prevDate) { echo json_encode(['error'=>"Date decrease at row ".($i+2).": $date < $prevDate"]); exit; }
+        $prevDate = $date;
+
+        $boxUsed = strtoupper(trim($row[1]));
+        $box = trim($row[2]);
+        if (empty($box)) continue;
+        $key = "$date|$box";
+        if (!isset($groups[$key])) $groups[$key] = ['date'=>$date, 'box'=>$box, 'summary'=>null, 'birds'=>[], 'decomm'=>false, 'comments'=>[]];
+        $g = &$groups[$key];
+        if ($boxUsed === 'DECOMM') $g['decomm'] = true;
+
+        $birdNum = trim($row[6]);
+        $comment = trim($row[10]);
+        if ($comment) $g['comments'][] = $comment;
+
+        if (!empty($birdNum)) {
+            $g['birds'][] = ['pit8'=>substr(preg_replace('/[^0-9]/', '', $birdNum), -8), 'sex'=>trim($row[7]), 'size_code'=>strtoupper(trim($row[8])), 'weight'=>trim($row[9]), 'comment'=>$comment];
+        } elseif (trim($row[3]) !== '' || trim($row[4]) !== '' || trim($row[5]) !== '') {
+            $g['summary'] = ['adults'=>(int)trim($row[3]), 'eggs'=>(int)trim($row[4]), 'chicks'=>(int)trim($row[5])];
+        }
+    }
+
+    // Wipe previous sheet imports if real run
+    if (!$dryRun) {
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+        $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
+        $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
+        $pdo->exec("DELETE FROM observations WHERE monitor_filename LIKE '{$monitorPrefix}%'");
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    }
+
+    $stats = ['observations'=>0, 'skipped'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'warnings'=>[]];
+
+    foreach ($groups as $g) {
+        $date = $g['date']; $box = $g['box'];
+        if ($g['summary'] === null && count($g['birds']) === 0 && empty(implode('', $g['comments'])) && !$g['decomm']) { $stats['skipped']++; continue; }
+
+        $adults = $g['summary']['adults'] ?? count($g['birds']);
+        $eggs = $g['summary']['eggs'] ?? 0;
+        $chicks = $g['summary']['chicks'] ?? 0;
+        $breedingStatus = $g['decomm'] ? 'DCM' : null;
+        $notes = implode('; ', array_filter($g['comments']));
+        $obsTime = $date . ' 02:00:00';
+
+        $observationId = null;
+        if (!$dryRun) {
+            $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $box]);
+            $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+            $stmt->execute([$colonyId, $box]);
+            $locationId = $stmt->fetchColumn();
+            if ($locationId) {
+                $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
+                $observationId = $pdo->lastInsertId();
+            }
+        }
+        $stats['observations']++;
+
+        // 3+ penguins warning
+        if (count($g['birds']) >= 3) {
+            $birdNums = array_map(function($b) use ($chipToPeng) { return 'peng#'.($chipToPeng[$b['pit8']] ?? $b['pit8']); }, $g['birds']);
+            $stats['warnings'][] = "$date box $box: ".count($g['birds'])." penguins (".implode(', ', $birdNums).")";
+        }
+
+        foreach ($g['birds'] as $bird) {
+            $pit8 = $bird['pit8'];
+            if (!isset($chipLookup[$pit8])) { $stats['unknown_count']++; continue; }
+            $pitId = $chipLookup[$pit8]; $pengNum = $chipToPeng[$pit8];
+
+            if (!$dryRun && $observationId) {
+                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")->execute([$observationId, $pitId, $obsTime]);
+            }
+            $stats['scans']++;
+
+            $sex = strtoupper($bird['sex']);
+            $sexNorm = ($sex === 'M' || $sex === 'UM') ? 'M' : (($sex === 'F' || $sex === 'UF') ? 'F' : null);
+            $weight = $bird['weight'] !== '' ? (float)$bird['weight'] : null;
+            $flipper = null;
+            if ($bird['comment'] && preg_match('/flipper[:\s]*(\d+)/i', $bird['comment'], $m)) $flipper = (float)$m[1];
+
+            if (($weight || $sexNorm || $bird['comment'] || $flipper) && $pengNum) {
+                if (!$dryRun && $observationId) {
+                    $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?,?)")
+                        ->execute([$pengNum, $observationId, $date, $sexNorm, $weight, $flipper, $bird['comment'] ?: null]);
+                }
+                $stats['biometrics']++;
+            }
+        }
+    }
+
+    echo json_encode([
+        'success' => true,
+        'dry_run' => $dryRun,
+        'csv_rows' => count($rows),
+        'groups' => count($groups),
+        'stats' => $stats,
+    ]);
+    exit;
+}
+
 echo json_encode(['error'=>'Unknown action']);

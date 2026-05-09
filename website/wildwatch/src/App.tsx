@@ -1606,6 +1606,7 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
   const [syncing, setSyncing] = useState(false);
   const [reimportResult, setReimportResult] = useState<any>(null);
   const [reimporting, setReimporting] = useState(false);
+  const [sightingResult, setSightingResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1638,15 +1639,20 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
   const syncMonitors = () => doSync('sync_monitors');
 
   const doReimport = async (action: string) => {
-    setReimporting(true); setReimportResult(null);
+    const isSighting = action.includes('sighting');
+    setReimporting(true);
+    if (isSighting) setSightingResult(null); else setReimportResult(null);
     try {
       const r = await fetch(`/penguin-api/admin.php?action=${action}`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
       });
       const result = await r.json();
-      result.dry_run = (action === 'trial_reimport_penguins');
-      setReimportResult(result);
-    } catch (e: any) { setReimportResult({ error: e.message }); }
+      result.dry_run = action.startsWith('trial_');
+      if (isSighting) setSightingResult(result); else setReimportResult(result);
+    } catch (e: any) {
+      const err = { error: e.message };
+      if (isSighting) setSightingResult(err); else setReimportResult(err);
+    }
     setReimporting(false);
   };
 
@@ -1682,13 +1688,13 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
       </div>
 
       <div className="admin-section">
-        <h3>Sync Monitors</h3>
-        <p className="muted">Pull latest monitor data from the old TCP server (210.54.37.120)</p>
+        <h3>Sync Monitors (TCP Server)</h3>
+        <p className="muted">Pull latest from old TCP server (210.54.37.120)</p>
         <button className="edit-btn" onClick={() => trialSync()} disabled={syncing}>
-          {syncing ? 'Syncing...' : 'Trial sync (preview)'}
+          {syncing ? 'Working...' : 'Trial (preview)'}
         </button>
         <button className="edit-btn done-btn" onClick={syncMonitors} disabled={syncing} style={{marginLeft:6}}>
-          {syncing ? 'Syncing...' : 'Sync & import'}
+          {syncing ? 'Working...' : 'Sync & import'}
         </button>
         {syncResult && (
           <div style={{marginTop:8}}>
@@ -1721,6 +1727,33 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
                 ))}
               </>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="admin-section">
+        <h3>Import Sightings (Google Sheets)</h3>
+        <p className="muted">Wipe and reimport historical observations from the spreadsheet (2021-2024)</p>
+        <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
+          {reimporting ? 'Working...' : 'Trial (preview)'}
+        </button>
+        <button className="edit-btn done-btn" onClick={() => { if (confirm('This will DELETE all sheet-imported observations and reimport from Google Sheets. Continue?')) doReimport('import_sightings'); }} disabled={reimporting} style={{marginLeft:6}}>
+          {reimporting ? 'Working...' : 'Wipe & reimport'}
+        </button>
+        {sightingResult && (
+          <div className="obs-card" style={{marginTop:8, borderLeftColor: sightingResult.dry_run ? '#FF9800' : '#4CAF50'}}>
+            {sightingResult.error ? <div style={{color:'#F44336'}}>{sightingResult.error}</div> : <>
+              {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
+              <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
+              <div>Observations: {sightingResult.stats?.observations} ({sightingResult.stats?.skipped} empty skipped)</div>
+              <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PITs)</div>
+              <div>Biometrics: {sightingResult.stats?.biometrics}</div>
+              {sightingResult.stats?.warnings?.length > 0 && <>
+                <div style={{marginTop:4, fontWeight:600}}>Warnings ({sightingResult.stats.warnings.length}):</div>
+                {sightingResult.stats.warnings.slice(0, 20).map((w: string, i: number) => <div key={i} className="muted small">{w}</div>)}
+                {sightingResult.stats.warnings.length > 20 && <div className="muted small">+{sightingResult.stats.warnings.length - 20} more</div>}
+              </>}
+            </>}
           </div>
         )}
       </div>
