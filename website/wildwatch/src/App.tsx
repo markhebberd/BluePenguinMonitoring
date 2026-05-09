@@ -1430,22 +1430,19 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <input type="text" value={birdSearch} onChange={e => setBirdSearch(e.target.value.replace(/[^0-9A-Za-z]/g,''))} onKeyDown={handleSearchKey} placeholder="Search by ID" />
           {/* Quick add - penguins seen this season */}
           {box && existingObs.length > 0 && (() => {
-            const seenBirds = new Map<string, { sex: string|null }>();
+            const seenBirds = new Map<string, any>();
             for (const o of existingObs) {
               for (const s of (o.scans || [])) {
                 const tag = s.pit_id.slice(-8);
-                if (!seenBirds.has(tag)) seenBirds.set(tag, { sex: s.sex });
+                if (!seenBirds.has(tag)) seenBirds.set(tag, s);
               }
             }
             return seenBirds.size > 0 ? (
               <div className="bird-row" style={{marginTop:'6px'}}>
-                {Array.from(seenBirds.entries()).map(([tag, info]) => {
-                  const cls = penguinSexClass(info.sex);
-                  const icon = penguinSexIcon(info.sex);
+                {Array.from(seenBirds.entries()).map(([tag, scan]) => {
                   const already = scannedBirds.includes(tag);
-                  return <span key={tag} className={`bird-chip clickable ${cls} ${already ? 'added' : ''}`}
-                    onClick={() => { if (!already) addBird(tag); }}>
-                    {icon ? `${icon} ` : ''}{tag}{already ? ' \u2713' : ''}
+                  return <span key={tag} className={already ? 'added' : ''} style={{opacity: already ? 0.4 : 1}}>
+                    <PenguinMini scan={scan} onClick={() => { if (!already) addBird(tag); }} />
                   </span>;
                 })}
               </div>
