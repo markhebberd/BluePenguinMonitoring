@@ -1600,6 +1600,93 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   );
 }
 
+function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) {
+  const [users, setUsers] = useState<any[]>([]);
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/penguin-api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [token]);
+
+  const updateUser = async (id: number, field: string, value: string) => {
+    await fetch('/penguin-api/admin.php?action=update_user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ observer_id: id, [field]: value })
+    });
+    setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
+  };
+
+  const syncMonitors = async () => {
+    setSyncing(true); setSyncResult(null);
+    try {
+      const r = await fetch('/penguin-api/admin.php?action=sync_monitors', {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setSyncResult(await r.json());
+    } catch (e: any) { setSyncResult({ error: e.message }); }
+    setSyncing(false);
+  };
+
+  return (
+    <div className="admin-panel">
+      <div className="admin-header">
+        <h2>Admin</h2>
+        <button className="page-back" onClick={onClose}>&times;</button>
+      </div>
+
+      <div className="admin-section">
+        <h3>Users</h3>
+        {loading ? <p className="muted">Loading...</p> : (
+          <table className="bird-table" style={{width:'100%'}}>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.observer_id}>
+                  <td>{u.observer_name}</td>
+                  <td>{u.email}</td>
+                  <td>
+                    <select value={u.role || 'viewer'} onChange={e => updateUser(u.observer_id, 'role', e.target.value)}>
+                      <option value="viewer">Viewer</option>
+                      <option value="editor">Editor</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="admin-section">
+        <h3>Sync Monitors</h3>
+        <p className="muted">Pull latest monitor data from the old TCP server (210.54.37.120)</p>
+        <button className="edit-btn" onClick={syncMonitors} disabled={syncing}>
+          {syncing ? 'Syncing...' : 'Sync now'}
+        </button>
+        {syncResult && (
+          <div className="obs-card" style={{marginTop:8}}>
+            {syncResult.error ? (
+              <div style={{color:'#F44336'}}>{syncResult.error}</div>
+            ) : (
+              <>
+                <div>Monitors received: {syncResult.monitors_received}</div>
+                <div>New observations: {syncResult.new_observations}</div>
+                <div>Scans created: {syncResult.scans_created}</div>
+                <div>Skipped (duplicate): {syncResult.skipped_duplicate}</div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const initial = parseUrl();
@@ -1618,6 +1705,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [penguinSearch, setPenguinSearch] = useState('');
   const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
 
@@ -1812,11 +1900,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         </span>
         <span className="header-user">
           <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
+          {userRole === 'admin' && <button className="logout-btn" onClick={() => setShowAdmin(!showAdmin)}>Admin</button>}
           {userName}
           <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
           <button className="logout-btn" onClick={onLogout}>Logout</button>
         </span>
       </header>
+
+      {showAdmin && <AdminPanel token={token} onClose={() => setShowAdmin(false)} />}
 
       {!selectedBox && (
         <>
