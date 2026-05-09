@@ -127,13 +127,17 @@ if ($action === 'sync_monitors') {
         $boxCount = count($monitor['BoxData'] ?? []);
 
         if ($monitor['IsDeleted'] ?? false) {
-            $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'new_obs'=>0, 'scans'=>0, 'skipped'=>0];
+            $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'new_obs'=>0, 'scans'=>0, 'skipped'=>0, 'adults'=>0, 'eggs'=>0, 'chicks'=>0];
             continue;
         }
 
         $monNewObs = 0; $monScans = 0; $monSkipped = 0;
+        $monAdults = 0; $monEggs = 0; $monChicks = 0;
 
         foreach ($monitor['BoxData'] ?? [] as $boxName => $boxData) {
+            $monAdults += (int)($boxData['Adults'] ?? 0);
+            $monEggs += (int)($boxData['Eggs'] ?? 0);
+            $monChicks += (int)($boxData['Chicks'] ?? 0);
             $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
                 ->execute([$colonyId, $boxName]);
             $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
@@ -173,7 +177,7 @@ if ($action === 'sync_monitors') {
             }
         }
         $status = $monNewObs > 0 ? 'imported' : ($monSkipped > 0 ? 'already_imported' : 'empty');
-        $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>$status, 'new_obs'=>$monNewObs, 'scans'=>$monScans, 'skipped'=>$monSkipped];
+        $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'boxes_imported'=>$monNewObs, 'boxes_skipped'=>$monSkipped, 'status'=>$status, 'scans'=>$monScans, 'adults'=>$monAdults, 'eggs'=>$monEggs, 'chicks'=>$monChicks];
     }
 
     $totals = ['new_obs'=>0, 'scans'=>0, 'skipped'=>0, 'deleted'=>0, 'already_imported'=>0, 'imported'=>0];

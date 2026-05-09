@@ -1686,7 +1686,14 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
                         color: m.status === 'already_imported' ? '#333' : '#fff'
                       }}>{m.status === 'already_imported' ? 'exists' : m.status}</span>
                     </div>
-                    <div className="muted small">{m.date ? fmtDateTime(m.date) : ''} &middot; {m.boxes} boxes{m.new_obs > 0 ? ` · ${m.new_obs} new obs` : ''}{m.scans > 0 ? ` · ${m.scans} scans` : ''}</div>
+                    <div className="obs-nums" style={{fontSize:11}}>
+                      <span>{m.date ? fmtDateTime(m.date) : ''}</span>
+                      <span>{m.boxes_imported || 0}/{m.boxes} boxes</span>
+                      {m.scans > 0 && <span>{m.scans} penguins</span>}
+                      {m.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(m.adults, 3))}{m.adults}</span>}
+                      {m.eggs > 0 && <span>{'\uD83E\uDD5A'}{m.eggs}</span>}
+                      {m.chicks > 0 && <span>{'\uD83D\uDC23'}{m.chicks}</span>}
+                    </div>
                   </div>
                 ))}
               </>
