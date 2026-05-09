@@ -49,8 +49,17 @@ if ($action === 'update_user') {
     exit;
 }
 
-if ($action === 'sync_monitors' || $action === 'trial_sync') {
+if ($action === 'sync_monitors' || $action === 'trial_sync' || $action === 'wipe_sync_monitors') {
     $dryRun = ($action === 'trial_sync');
+    $wipe = ($action === 'wipe_sync_monitors');
+
+    // Wipe previous monitor imports if requested
+    if ($wipe) {
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+        $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename NOT LIKE 'sheet-import%'");
+        $pdo->exec("DELETE FROM observations WHERE monitor_filename NOT LIKE 'sheet-import%'");
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    }
     // Pull from old TCP server using same protocol as C# app
     $host = '210.54.37.120';
     $port = 8080;
@@ -203,8 +212,9 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
     exit;
 }
 
-if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
+if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins' || $action === 'import_penguins') {
     $dryRun = ($action === 'trial_reimport_penguins');
+    $wipe = ($action === 'reimport_penguins');
 
     $csv = fetchGoogleSheet('143001868');
     if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
@@ -280,7 +290,7 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
         }
     }
 
-    if (!$dryRun) {
+    if ($wipe && !$dryRun) {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
         $pdo->exec("DELETE FROM penguin_scans");
         $pdo->exec("DELETE FROM penguin_biometric_data");
@@ -330,6 +340,12 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
         elseif (strtoupper($sex) === 'M' || stripos($sex, 'male') !== false) $sexNorm = 'M';
 
         if (!$dryRun) {
+            // Skip existing in additive mode
+            if (!$wipe) {
+                $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+                $exists->execute([$number]);
+                if ($exists->fetchColumn()) { $skipped++; continue; }
+            }
             $pdo->prepare("INSERT INTO penguins (peng_num, sex, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?)")
                 ->execute([$number, $sexNorm, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
         }

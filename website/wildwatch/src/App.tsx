@@ -1649,8 +1649,6 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
     } catch (e: any) { setSyncResult({ error: e.message }); }
     setSyncing(false);
   };
-  const trialSync = () => doSync('trial_sync');
-  const syncMonitors = () => doSync('sync_monitors');
 
   const doReimport = async (action: string) => {
     const isSighting = action.includes('sighting');
@@ -1704,11 +1702,14 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
       <div className="admin-section">
         <h3>Sync Monitors (TCP Server)</h3>
         <p className="muted">Pull latest from old TCP server (210.54.37.120)</p>
-        <button className="edit-btn" onClick={() => trialSync()} disabled={syncing}>
-          {syncing ? 'Working...' : 'Trial (preview)'}
+        <button className="edit-btn" onClick={() => doSync('trial_sync')} disabled={syncing}>
+          {syncing ? 'Working...' : 'Trial'}
         </button>
-        <button className="edit-btn done-btn" onClick={syncMonitors} disabled={syncing} style={{marginLeft:6}}>
-          {syncing ? 'Working...' : 'Sync & import'}
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations then reimport?')) doSync('wipe_sync_monitors'); }} disabled={syncing} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
+          {syncing ? 'Working...' : 'Wipe & import'}
+        </button>
+        <button className="edit-btn done-btn" onClick={() => doSync('sync_monitors')} disabled={syncing} style={{marginLeft:6}}>
+          {syncing ? 'Working...' : 'Import'}
         </button>
         {syncResult && (
           <div style={{marginTop:8}}>
@@ -1749,13 +1750,13 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
         <h3>Import Sightings (Google Sheets)</h3>
         <p className="muted">Historical observations from the spreadsheet (2021-2024)</p>
         <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
-          {reimporting ? 'Working...' : 'Trial (preview)'}
-        </button>
-        <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
-          {reimporting ? 'Working...' : 'Import new'}
+          {reimporting ? 'Working...' : 'Trial'}
         </button>
         <button className="edit-btn" onClick={() => { if (confirm('DELETE all sheet-imported observations and reimport?')) doReimport('wipe_import_sightings'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe & reimport'}
+          {reimporting ? 'Working...' : 'Wipe & import'}
+        </button>
+        <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
+          {reimporting ? 'Working...' : 'Import'}
         </button>
         {sightingResult && (
           <div className="obs-card" style={{marginTop:8, borderLeftColor: sightingResult.dry_run ? '#FF9800' : '#4CAF50'}}>
@@ -1784,10 +1785,13 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
         <h3>Reimport Penguins</h3>
         <p className="muted">Penguin reference data from Google Sheets (1004 birds)</p>
         <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
-          {reimporting ? 'Working...' : 'Trial (preview)'}
+          {reimporting ? 'Working...' : 'Trial'}
         </button>
         <button className="edit-btn" onClick={() => { if (confirm('DELETE all penguins, chips, scans and biometrics then reimport?')) doReimport('reimport_penguins'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe & reimport'}
+          {reimporting ? 'Working...' : 'Wipe & import'}
+        </button>
+        <button className="edit-btn done-btn" onClick={() => doReimport('import_penguins')} disabled={reimporting} style={{marginLeft:6}}>
+          {reimporting ? 'Working...' : 'Import'}
         </button>
         {reimportResult && (
           <div className="obs-card" style={{marginTop:8, borderLeftColor: reimportResult.dry_run ? '#FF9800' : '#4CAF50'}}>
