@@ -97,6 +97,21 @@ function setHeaders() {
     }
 }
 /**
+ * Fetch CSV from Google Sheets using curl (file_get_contents fails on this host)
+ */
+function fetchGoogleSheet($gid) {
+    $url = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=$gid";
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    $csv = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($code === 200 && $csv) ? $csv : null;
+}
+
+/**
  * Get all penguin sightings: scans + chip events, deduplicated by date+box.
  * Filter by penguin OR box (or both). Returns array sorted newest first.
  * Each entry: peng_num, pit_id, sex, chipped_as_adult, chick_size_code, chip_date,

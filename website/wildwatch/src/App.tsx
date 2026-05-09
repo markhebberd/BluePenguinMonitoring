@@ -1747,11 +1747,14 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
 
       <div className="admin-section">
         <h3>Import Sightings (Google Sheets)</h3>
-        <p className="muted">Wipe and reimport historical observations from the spreadsheet (2021-2024)</p>
+        <p className="muted">Historical observations from the spreadsheet (2021-2024)</p>
         <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial (preview)'}
         </button>
-        <button className="edit-btn done-btn" onClick={() => { if (confirm('This will DELETE all sheet-imported observations and reimport from Google Sheets. Continue?')) doReimport('import_sightings'); }} disabled={reimporting} style={{marginLeft:6}}>
+        <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
+          {reimporting ? 'Working...' : 'Import new'}
+        </button>
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all sheet-imported observations and reimport?')) doReimport('wipe_import_sightings'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
           {reimporting ? 'Working...' : 'Wipe & reimport'}
         </button>
         {sightingResult && (
@@ -1779,11 +1782,11 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
 
       <div className="admin-section">
         <h3>Reimport Penguins</h3>
-        <p className="muted">Wipe and reimport all penguins from Google Sheets (1004 birds). Clears scans + biometrics.</p>
+        <p className="muted">Penguin reference data from Google Sheets (1004 birds)</p>
         <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial (preview)'}
         </button>
-        <button className="edit-btn done-btn" onClick={() => { if (confirm('This will DELETE all penguins, chips, scans and biometrics then reimport from Google Sheets. Continue?')) doReimport('reimport_penguins'); }} disabled={reimporting} style={{marginLeft:6}}>
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all penguins, chips, scans and biometrics then reimport?')) doReimport('reimport_penguins'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
           {reimporting ? 'Working...' : 'Wipe & reimport'}
         </button>
         {reimportResult && (

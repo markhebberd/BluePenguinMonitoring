@@ -206,10 +206,8 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
 if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
     $dryRun = ($action === 'trial_reimport_penguins');
 
-    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=143001868';
-    $csv = @file_get_contents($csvUrl);
-    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
-    if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
+    $csv = fetchGoogleSheet('143001868');
+    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
 
     $handle = fopen('php://temp', 'r+');
     fwrite($handle, $csv);
@@ -370,15 +368,14 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
     exit;
 }
 
-if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
+if ($action === 'import_sightings' || $action === 'trial_import_sightings' || $action === 'wipe_import_sightings') {
     $dryRun = ($action === 'trial_import_sightings');
+    $wipe = ($action === 'wipe_import_sightings');
     $monitorPrefix = 'sheet-import';
     $colonyId = 1; $observerId = 1;
 
-    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=325619240';
-    $csv = @file_get_contents($csvUrl);
-    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
-    if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
+    $csv = fetchGoogleSheet('325619240');
+    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
 
     $handle = fopen('php://temp', 'r+');
     fwrite($handle, $csv);
@@ -426,8 +423,8 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
         }
     }
 
-    // Wipe previous sheet imports if real run
-    if (!$dryRun) {
+    // Wipe previous sheet imports only if wipe requested
+    if ($wipe && !$dryRun) {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
         $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
         $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
@@ -455,6 +452,11 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
             $stmt->execute([$colonyId, $box]);
             $locationId = $stmt->fetchColumn();
             if ($locationId) {
+                // Skip duplicates in additive mode
+                $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
+                $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
+                if ($dup->fetchColumn()) { $stats['skipped']++; continue; }
+
                 $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
                     ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
                 $observationId = $pdo->lastInsertId();
