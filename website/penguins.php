@@ -39,11 +39,11 @@ $sql = "SELECT
              JOIN penguin_scans ps3 ON ps2.observation_id = ps3.observation_id AND ps2.pit_id != ps3.pit_id
              JOIN penguin_chips pc3 ON ps3.pit_id = pc3.pit_id
              WHERE pc2.peng_num = p.peng_num) as partner_count,
-            (SELECT SUM(o2.chicks)
+            (SELECT MAX(o2.chicks)
              FROM penguin_scans ps4
              JOIN penguin_chips pc4 ON ps4.pit_id = pc4.pit_id
              JOIN observations o2 ON ps4.observation_id = o2.observation_id
-             WHERE pc4.peng_num = p.peng_num AND o2.chicks > 0 AND o2.is_deleted = FALSE) as total_chicks_raised
+             WHERE pc4.peng_num = p.peng_num AND o2.chicks > 0 AND o2.is_deleted = FALSE) as max_chicks
         FROM penguins p
         LEFT JOIN penguin_chips pc_active ON pc_active.peng_num = p.peng_num AND pc_active.is_active = 1
         LEFT JOIN penguin_chips pc_any ON pc_any.peng_num = p.peng_num

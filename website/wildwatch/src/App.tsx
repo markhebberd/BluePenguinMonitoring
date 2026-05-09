@@ -987,8 +987,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
               <span className="pr-tag"><PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num); onSearchChange(''); }} /></span>
               <span className="pr-meta">
                 {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
-                {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
-                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
+                                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
               </span>
             </div>
           ))}
@@ -998,8 +997,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
               <span className="pr-tag"><PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num || p.pit_id); onSearchChange(''); }} /></span>
               <span className="pr-meta">
                 {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
-                {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
-                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
+                                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
               </span>
             </div>
           ))}
