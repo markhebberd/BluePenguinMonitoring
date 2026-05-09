@@ -398,6 +398,7 @@ if ($action === 'import_penguins' || $action === 'trial_reimport_penguins') {
 }
 
 if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
+    set_time_limit(300);
     $dryRun = ($action === 'trial_import_sightings');
     $monitorPrefix = 'sheet-import';
     $colonyId = 1; $observerId = 1;
