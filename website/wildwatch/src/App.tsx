@@ -975,7 +975,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
     <div className="penguin-search">
       <input
         type="text"
-        placeholder="Search penguin by ID number..."
+        placeholder="Search penguin"
         value={search}
         onChange={e => onSearchChange(e.target.value.replace(/[^0-9A-Za-z]/g, ''))}
         className="penguin-search-input"
