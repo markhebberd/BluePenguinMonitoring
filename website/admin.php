@@ -206,7 +206,7 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
 if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
     $dryRun = ($action === 'trial_reimport_penguins');
 
-    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=143001868';
+    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=143001868';
     $csv = @file_get_contents($csvUrl);
     if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
     if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
@@ -375,7 +375,7 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
     $monitorPrefix = 'sheet-import';
     $colonyId = 1; $observerId = 1;
 
-    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=325619240';
+    $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=325619240';
     $csv = @file_get_contents($csvUrl);
     if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
     if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }

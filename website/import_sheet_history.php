@@ -37,7 +37,7 @@ if ($wipe && !$dryRun) {
 }
 
 // 1. Download CSV
-$csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=325619240';
+$csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=325619240';
 $csv = @file_get_contents($csvUrl);
 if (!$csv) { echo "ERROR: Google Sheets export failed\n"; exit; }
 if (!$csv) { echo "ERROR: No CSV source\n"; exit; }

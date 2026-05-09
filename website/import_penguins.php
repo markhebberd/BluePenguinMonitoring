@@ -11,7 +11,7 @@ setHeaders();
 validateApiKey();
 $pdo = getDbConnection();
 
-$csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=143001868';
+$csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=143001868';
 
 $csv = @file_get_contents($csvUrl);
 if (!$csv) {
