@@ -211,7 +211,7 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
                 }
             }
         }
-        $status = $monNewObs > 0 ? 'imported' : ($monSkipped > 0 ? 'already_imported' : 'empty');
+        $status = $monNewObs > 0 ? ($dryRun ? 'would_import' : 'imported') : ($monSkipped > 0 ? 'already_imported' : 'empty');
         $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'boxes_imported'=>$monNewObs, 'boxes_skipped'=>$monSkipped, 'status'=>$status, 'scans'=>$monScans, 'adults'=>$monAdults, 'eggs'=>$monEggs, 'chicks'=>$monChicks];
     }
 

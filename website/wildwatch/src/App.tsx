@@ -1725,10 +1725,10 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
                   <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'already_imported' ? 0.5 : 1}}>
                     <div className="obs-top">
                       <b>{m.filename}</b>
-                      <span className={`badge ${m.status === 'deleted' ? '' : m.status === 'imported' ? '' : 'bordered'}`} style={{
-                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : '#E0E0E0',
-                        color: m.status === 'already_imported' ? '#333' : '#fff'
-                      }}>{m.status === 'already_imported' ? 'exists' : m.status}</span>
+                      <span className={`badge ${m.status === 'already_imported' || m.status === 'empty' ? 'bordered' : ''}`} style={{
+                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : m.status === 'would_import' ? '#FF9800' : '#E0E0E0',
+                        color: m.status === 'already_imported' || m.status === 'empty' ? '#333' : '#fff'
+                      }}>{m.status === 'already_imported' ? 'exists' : m.status === 'would_import' ? 'new' : m.status}</span>
                     </div>
                     <div className="obs-nums" style={{fontSize:11}}>
                       <span>{m.date ? fmtDateTime(m.date) : ''}</span>
