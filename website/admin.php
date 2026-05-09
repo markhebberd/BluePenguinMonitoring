@@ -113,12 +113,25 @@ if ($action === 'sync_monitors') {
     }
 
     // Import new monitors
-    $imported = 0; $skipped = 0; $scansCreated = 0; $newObs = 0;
     $colonyId = 1; $observerId = 1;
+    $monitorResults = [];
+
+    // Process newest first
+    usort($monitors, function($a, $b) {
+        return strcmp($b['LastSaved'] ?? '', $a['LastSaved'] ?? '');
+    });
 
     foreach ($monitors as $monitor) {
-        if ($monitor['IsDeleted'] ?? false) continue;
         $filename = $monitor['filename'] ?? 'unknown';
+        $lastSaved = $monitor['LastSaved'] ?? null;
+        $boxCount = count($monitor['BoxData'] ?? []);
+
+        if ($monitor['IsDeleted'] ?? false) {
+            $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'new_obs'=>0, 'scans'=>0, 'skipped'=>0];
+            continue;
+        }
+
+        $monNewObs = 0; $monScans = 0; $monSkipped = 0;
 
         foreach ($monitor['BoxData'] ?? [] as $boxName => $boxData) {
             $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
@@ -134,7 +147,7 @@ if ($action === 'sync_monitors') {
             // Skip duplicates
             $stmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ?");
             $stmt->execute([$locationId, $obsTimeParsed, $observerId]);
-            if ($stmt->fetchColumn()) { $skipped++; continue; }
+            if ($stmt->fetchColumn()) { $monSkipped++; continue; }
 
             $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
             $stmt->execute([$locationId, $observerId, $obsTimeParsed,
@@ -142,7 +155,7 @@ if ($action === 'sync_monitors') {
                 $boxData['BreedingChance'] ?? null, $boxData['GateStatus'] ?? null,
                 $boxData['Notes'] ?? '', $filename]);
             $observationId = $pdo->lastInsertId();
-            $newObs++;
+            $monNewObs++;
 
             foreach ($boxData['ScannedIds'] ?? [] as $scan) {
                 $birdId = $scan['BirdId'] ?? '';
@@ -155,20 +168,28 @@ if ($action === 'sync_monitors') {
                     $scanTime = $scan['Timestamp'] ?? $obsTimeParsed;
                     $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
                         ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime))]);
-                    $scansCreated++;
+                    $monScans++;
                 }
             }
         }
-        $imported++;
+        $status = $monNewObs > 0 ? 'imported' : ($monSkipped > 0 ? 'already_imported' : 'empty');
+        $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>$status, 'new_obs'=>$monNewObs, 'scans'=>$monScans, 'skipped'=>$monSkipped];
+    }
+
+    $totals = ['new_obs'=>0, 'scans'=>0, 'skipped'=>0, 'deleted'=>0, 'already_imported'=>0, 'imported'=>0];
+    foreach ($monitorResults as $mr) {
+        $totals['new_obs'] += $mr['new_obs'];
+        $totals['scans'] += $mr['scans'];
+        $totals['skipped'] += $mr['skipped'];
+        if ($mr['status'] === 'deleted') $totals['deleted']++;
+        elseif ($mr['status'] === 'already_imported') $totals['already_imported']++;
+        elseif ($mr['status'] === 'imported') $totals['imported']++;
     }
 
     echo json_encode([
         'success' => true,
-        'monitors_received' => count($monitors),
-        'monitors_imported' => $imported,
-        'new_observations' => $newObs,
-        'scans_created' => $scansCreated,
-        'skipped_duplicate' => $skipped,
+        'totals' => $totals,
+        'monitors' => $monitorResults,
     ]);
     exit;
 }

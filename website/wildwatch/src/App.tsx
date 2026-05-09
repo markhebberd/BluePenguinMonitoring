@@ -1669,15 +1669,26 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
           {syncing ? 'Syncing...' : 'Sync now'}
         </button>
         {syncResult && (
-          <div className="obs-card" style={{marginTop:8}}>
+          <div style={{marginTop:8}}>
             {syncResult.error ? (
               <div style={{color:'#F44336'}}>{syncResult.error}</div>
             ) : (
               <>
-                <div>Monitors received: {syncResult.monitors_received}</div>
-                <div>New observations: {syncResult.new_observations}</div>
-                <div>Scans created: {syncResult.scans_created}</div>
-                <div>Skipped (duplicate): {syncResult.skipped_duplicate}</div>
+                <div className="obs-card" style={{marginBottom:8}}>
+                  <b>Summary:</b> {syncResult.totals?.imported || 0} imported, {syncResult.totals?.already_imported || 0} already imported, {syncResult.totals?.deleted || 0} deleted, {syncResult.totals?.new_obs || 0} new obs, {syncResult.totals?.scans || 0} scans
+                </div>
+                {(syncResult.monitors || []).map((m: any, i: number) => (
+                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'already_imported' ? 0.5 : 1}}>
+                    <div className="obs-top">
+                      <b>{m.filename}</b>
+                      <span className={`badge ${m.status === 'deleted' ? '' : m.status === 'imported' ? '' : 'bordered'}`} style={{
+                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : '#E0E0E0',
+                        color: m.status === 'already_imported' ? '#333' : '#fff'
+                      }}>{m.status === 'already_imported' ? 'exists' : m.status}</span>
+                    </div>
+                    <div className="muted small">{m.date ? fmtDateTime(m.date) : ''} &middot; {m.boxes} boxes{m.new_obs > 0 ? ` · ${m.new_obs} new obs` : ''}{m.scans > 0 ? ` · ${m.scans} scans` : ''}</div>
+                  </div>
+                ))}
               </>
             )}
           </div>
