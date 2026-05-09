@@ -49,17 +49,38 @@ if ($action === 'update_user') {
     exit;
 }
 
-if ($action === 'sync_monitors' || $action === 'trial_sync' || $action === 'wipe_sync_monitors') {
-    $dryRun = ($action === 'trial_sync');
-    $wipe = ($action === 'wipe_sync_monitors');
+if ($action === 'wipe_monitors') {
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+    $del1 = $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename NOT LIKE 'sheet-import%'");
+    $del2 = $pdo->exec("DELETE FROM observations WHERE monitor_filename NOT LIKE 'sheet-import%'");
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_observations'=>$del2]);
+    exit;
+}
 
-    // Wipe previous monitor imports if requested
-    if ($wipe) {
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-        $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename NOT LIKE 'sheet-import%'");
-        $pdo->exec("DELETE FROM observations WHERE monitor_filename NOT LIKE 'sheet-import%'");
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    }
+if ($action === 'wipe_sightings') {
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+    $del1 = $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE 'sheet-import%'");
+    $del2 = $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE 'sheet-import%'");
+    $del3 = $pdo->exec("DELETE FROM observations WHERE monitor_filename LIKE 'sheet-import%'");
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_biometrics'=>$del2, 'deleted_observations'=>$del3]);
+    exit;
+}
+
+if ($action === 'wipe_penguins') {
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+    $pdo->exec("DELETE FROM penguin_scans");
+    $pdo->exec("DELETE FROM penguin_biometric_data");
+    $pdo->exec("DELETE FROM penguin_chips");
+    $pdo->exec("DELETE FROM penguins");
+    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    echo json_encode(['success'=>true, 'message'=>'All penguins, chips, scans and biometrics deleted']);
+    exit;
+}
+
+if ($action === 'sync_monitors' || $action === 'trial_sync') {
+    $dryRun = ($action === 'trial_sync');
     // Pull from old TCP server using same protocol as C# app
     $host = '210.54.37.120';
     $port = 8080;
@@ -212,9 +233,8 @@ if ($action === 'sync_monitors' || $action === 'trial_sync' || $action === 'wipe
     exit;
 }
 
-if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins' || $action === 'import_penguins') {
+if ($action === 'import_penguins' || $action === 'trial_reimport_penguins') {
     $dryRun = ($action === 'trial_reimport_penguins');
-    $wipe = ($action === 'reimport_penguins');
 
     $csv = fetchGoogleSheet('143001868');
     if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
@@ -290,14 +310,7 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins' || 
         }
     }
 
-    if ($wipe && !$dryRun) {
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-        $pdo->exec("DELETE FROM penguin_scans");
-        $pdo->exec("DELETE FROM penguin_biometric_data");
-        $pdo->exec("DELETE FROM penguin_chips");
-        $pdo->exec("DELETE FROM penguins");
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    }
+    // Wipe removed — use wipe_penguins action instead
 
     foreach ($rows as $cols) {
         while (count($cols) < 40) $cols[] = '';
@@ -384,9 +397,8 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins' || 
     exit;
 }
 
-if ($action === 'import_sightings' || $action === 'trial_import_sightings' || $action === 'wipe_import_sightings') {
+if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
     $dryRun = ($action === 'trial_import_sightings');
-    $wipe = ($action === 'wipe_import_sightings');
     $monitorPrefix = 'sheet-import';
     $colonyId = 1; $observerId = 1;
 
@@ -439,8 +451,8 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings' || $a
         }
     }
 
-    // Wipe previous sheet imports only if wipe requested
-    if ($wipe && !$dryRun) {
+    // Legacy wipe path removed — use wipe_sightings action instead
+    if (false) {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
         $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
         $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");

@@ -1705,8 +1705,8 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
         <button className="edit-btn" onClick={() => doSync('trial_sync')} disabled={syncing}>
           {syncing ? 'Working...' : 'Trial'}
         </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations then reimport?')) doSync('wipe_sync_monitors'); }} disabled={syncing} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {syncing ? 'Working...' : 'Wipe & import'}
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations?')) doSync('wipe_monitors'); }} disabled={syncing} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
+          {syncing ? 'Working...' : 'Wipe'}
         </button>
         <button className="edit-btn done-btn" onClick={() => doSync('sync_monitors')} disabled={syncing} style={{marginLeft:6}}>
           {syncing ? 'Working...' : 'Import'}
@@ -1752,8 +1752,8 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
         <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial'}
         </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all sheet-imported observations and reimport?')) doReimport('wipe_import_sightings'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe & import'}
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all sheet-imported observations?')) doReimport('wipe_sightings'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
+          {reimporting ? 'Working...' : 'Wipe'}
         </button>
         <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
           {reimporting ? 'Working...' : 'Import'}
@@ -1787,8 +1787,8 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
         <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial'}
         </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all penguins, chips, scans and biometrics then reimport?')) doReimport('reimport_penguins'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe & import'}
+        <button className="edit-btn" onClick={() => { if (confirm('DELETE all penguins, chips, scans and biometrics?')) doReimport('wipe_penguins'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
+          {reimporting ? 'Working...' : 'Wipe'}
         </button>
         <button className="edit-btn done-btn" onClick={() => doReimport('import_penguins')} disabled={reimporting} style={{marginLeft:6}}>
           {reimporting ? 'Working...' : 'Import'}
