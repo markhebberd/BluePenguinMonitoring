@@ -522,8 +522,8 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
             $stats['observations']++;
         }
 
-        // 3+ penguins warning
-        if (count($g['birds']) >= 3) {
+        // 3+ penguins warning (only for new observations)
+        if (!$existing && count($g['birds']) >= 3) {
             $birdNums = array_map(function($b) use ($chipToPeng) { return 'peng#'.($chipToPeng[$b['pit8']] ?? $b['pit8']); }, $g['birds']);
             $stats['warnings'][] = "$date box $box: ".count($g['birds'])." penguins (".implode(', ', $birdNums).")";
         }

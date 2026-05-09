@@ -1789,9 +1789,9 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
             {sightingResult.error ? <div style={{color:'#F44336'}}>{sightingResult.error}</div> : <>
               {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
               <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
-              <div>Observations: {sightingResult.stats?.observations || 0} new, {sightingResult.stats?.updated || 0} updated, {sightingResult.stats?.duplicates || 0} unchanged, {sightingResult.stats?.empty_skipped || 0} empty</div>
-              <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PIT occurrences, {Object.keys(sightingResult.stats?.unknown_pits || {}).length} unique)</div>
-              <div>Biometrics: {sightingResult.stats?.biometrics}</div>
+              <div><b>New:</b> {sightingResult.stats?.observations || 0} observations, {sightingResult.stats?.scans || 0} scans, {sightingResult.stats?.biometrics || 0} biometrics{sightingResult.stats?.updated > 0 ? `, ${sightingResult.stats.updated} updated` : ''}</div>
+              <div className="muted">{sightingResult.stats?.duplicates || 0} unchanged, {sightingResult.stats?.empty_skipped || 0} empty</div>
+              {sightingResult.stats?.unknown_count > 0 && <div className="muted">{Object.keys(sightingResult.stats?.unknown_pits || {}).length} unknown PITs ({sightingResult.stats.unknown_count} occurrences)</div>}
               {Object.keys(sightingResult.stats?.unknown_pits || {}).length > 0 && <>
                 <div style={{marginTop:4, fontWeight:600}}>Unknown PITs ({Object.keys(sightingResult.stats.unknown_pits).length}):</div>
                 {Object.entries(sightingResult.stats.unknown_pits).sort((a: any, b: any) => b[1].count - a[1].count).map(([pit8, info]: [string, any]) => (
