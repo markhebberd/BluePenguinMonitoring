@@ -236,7 +236,7 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
 if ($action === 'import_penguins' || $action === 'trial_reimport_penguins') {
     $dryRun = ($action === 'trial_reimport_penguins');
 
-    $csv = fetchGoogleSheet('143001868');
+    $csv = fetchGoogleSheet('406382921');
     if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
 
     $handle = fopen('php://temp', 'r+');
