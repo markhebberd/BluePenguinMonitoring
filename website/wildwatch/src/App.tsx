@@ -1763,7 +1763,7 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
             {sightingResult.error ? <div style={{color:'#F44336'}}>{sightingResult.error}</div> : <>
               {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
               <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
-              <div>Observations: {sightingResult.stats?.observations} ({sightingResult.stats?.skipped} empty skipped)</div>
+              <div>Observations: {sightingResult.stats?.observations} new, {sightingResult.stats?.duplicates || 0} duplicates, {sightingResult.stats?.empty_skipped || 0} empty skipped</div>
               <div>Scans: {sightingResult.stats?.scans} ({sightingResult.stats?.unknown_count} unknown PIT occurrences, {Object.keys(sightingResult.stats?.unknown_pits || {}).length} unique)</div>
               <div>Biometrics: {sightingResult.stats?.biometrics}</div>
               {Object.keys(sightingResult.stats?.unknown_pits || {}).length > 0 && <>

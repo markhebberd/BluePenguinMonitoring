@@ -460,11 +460,11 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
     }
 
-    $stats = ['observations'=>0, 'skipped'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'unknown_pits'=>[], 'warnings'=>[]];
+    $stats = ['observations'=>0, 'empty_skipped'=>0, 'duplicates'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'unknown_pits'=>[], 'warnings'=>[]];
 
     foreach ($groups as $g) {
         $date = $g['date']; $box = $g['box'];
-        if ($g['summary'] === null && count($g['birds']) === 0 && empty(implode('', $g['comments'])) && !$g['decomm']) { $stats['skipped']++; continue; }
+        if ($g['summary'] === null && count($g['birds']) === 0 && empty(implode('', $g['comments'])) && !$g['decomm']) { $stats['empty_skipped']++; continue; }
 
         $adults = $g['summary']['adults'] ?? count($g['birds']);
         $eggs = $g['summary']['eggs'] ?? 0;
@@ -485,7 +485,7 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
             // Skip duplicates
             $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
             $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
-            if ($dup->fetchColumn()) { $stats['skipped']++; continue; }
+            if ($dup->fetchColumn()) { $stats['duplicates']++; continue; }
         }
 
         if (!$dryRun) {
