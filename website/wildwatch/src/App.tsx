@@ -964,9 +964,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
 function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   penguins: any[]; search: string; onSearchChange: (s:string)=>void; onBirdClick: (tag:string)=>void;
 }) {
-  const filtered = search.length > 0
-    ? penguins.filter(p => (p.pit_id && p.pit_id.includes(search)) || (p.peng_num && p.peng_num === search))
-    : [];
+  const filtered = useMemo(() => {
+    if (search.length === 0) return { exact: [] as any[], pit: [] as any[] };
+    const exact = penguins.filter(p => p.peng_num && p.peng_num === search);
+    const pit = penguins.filter(p => p.pit_id && p.pit_id.includes(search) && !(p.peng_num && p.peng_num === search));
+    return { exact, pit };
+  }, [penguins, search]);
 
   return (
     <div className="penguin-search">
@@ -977,27 +980,33 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
         onChange={e => onSearchChange(e.target.value.replace(/[^0-9A-Za-z]/g, ''))}
         className="penguin-search-input"
       />
-      {filtered.length > 0 && (
+      {(filtered.exact.length > 0 || filtered.pit.length > 0) && (
         <div className="penguin-results">
-          {filtered.slice(0, 20).map((p: any) => {
-            const cls = penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult);
-            return (
-              <div key={p.pit_id} className={`penguin-result clickable ${cls}`} onClick={() => { onBirdClick(p.peng_num || p.pit_id); onSearchChange(''); }}>
-                <span className="pr-tag">
-                  <PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num || p.pit_id); onSearchChange(''); }} />
-                </span>
-                <span className="pr-meta">
-                  {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
-                  {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
-                  <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
-                </span>
-              </div>
-            );
-          })}
-          {filtered.length > 20 && <div className="muted" style={{padding:'4px 8px'}}>+{filtered.length - 20} more</div>}
+          {filtered.exact.map((p: any) => (
+            <div key={p.peng_num} className={`penguin-result clickable ${penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult)}`} onClick={() => { onBirdClick(p.peng_num); onSearchChange(''); }}>
+              <span className="pr-tag"><PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num); onSearchChange(''); }} /></span>
+              <span className="pr-meta">
+                {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
+                {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
+                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
+              </span>
+            </div>
+          ))}
+          {filtered.exact.length > 0 && filtered.pit.length > 0 && <div className="muted small" style={{padding:'2px 8px', borderTop:'1px solid #eee'}}>PIT ID matches:</div>}
+          {filtered.pit.slice(0, 20).map((p: any) => (
+            <div key={p.pit_id} className={`penguin-result clickable ${penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult)}`} onClick={() => { onBirdClick(p.peng_num || p.pit_id); onSearchChange(''); }}>
+              <span className="pr-tag"><PenguinMini scan={p} onClick={() => { onBirdClick(p.peng_num || p.pit_id); onSearchChange(''); }} /></span>
+              <span className="pr-meta">
+                {p.partner_count > 0 && <span className="pr-stat">{p.partner_count} partner{p.partner_count>1?'s':''}</span>}
+                {p.total_chicks_raised > 0 && <span className="pr-stat">{p.total_chicks_raised} chick{p.total_chicks_raised>1?'s':''} raised</span>}
+                <span className="pr-stat">{p.total_scans} scan{p.total_scans>1?'s':''}</span>
+              </span>
+            </div>
+          ))}
+          {filtered.pit.length > 20 && <div className="muted" style={{padding:'4px 8px'}}>+{filtered.pit.length - 20} more</div>}
         </div>
       )}
-      {search.length > 0 && filtered.length === 0 && (
+      {search.length > 0 && filtered.exact.length === 0 && filtered.pit.length === 0 && (
         <div className="penguin-results"><div className="muted" style={{padding:'8px'}}>No penguins match "{search}"</div></div>
       )}
     </div>
