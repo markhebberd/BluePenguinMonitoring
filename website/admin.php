@@ -224,6 +224,63 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
     $currentChips = (int)$pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn();
 
     $created = 0; $chipsCreated = 0; $rechips = 0; $skipped = 0;
+    $chipDateIssues = [];
+
+    // Compare chip dates: DB vs sheet BEFORE wiping
+    $existingChips = [];
+    foreach ($pdo->query("SELECT pit_id, peng_num, chip_date FROM penguin_chips")->fetchAll() as $c) {
+        $existingChips[$c['pit_id']] = $c;
+    }
+
+    // Build what the sheet will create
+    $sheetChips = [];
+    foreach ($rows as $cols) {
+        while (count($cols) < 40) $cols[] = '';
+        $number = trim($cols[0]);
+        if (empty($number) || !is_numeric($number)) continue;
+        $fullChipId = trim($cols[1]);
+        if (empty($fullChipId)) continue;
+        $fullIsoRaw = trim($cols[37] ?? '');
+        $reChipFlag = trim($cols[33] ?? '');
+        if (!empty($reChipFlag) && !empty($fullIsoRaw)) {
+            $sid = 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $fullChipId), 8, '0', STR_PAD_LEFT);
+        } elseif (!empty($fullIsoRaw)) {
+            $sid = 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw);
+        } else {
+            $sid = 'LA' . preg_replace('/[^0-9]/', '', $fullChipId);
+        }
+        $cd = trim($cols[2]);
+        $pd = null;
+        if (!empty($cd)) { $ts = strtotime($cd); if ($ts) $pd = date('Y-m-d', $ts); }
+        $sheetChips[$sid] = ['peng_num'=>$number, 'chip_date'=>$pd];
+
+        // Rechip
+        $ac2 = trim($cols[35] ?? '');
+        if (!empty($ac2) && !empty($reChipFlag)) {
+            $rid = !empty($fullIsoRaw) ? 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw) : 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $ac2), 8, '0', STR_PAD_LEFT);
+            $rcd = trim($cols[36] ?? '');
+            $rpd = null;
+            if (!empty($rcd)) { $ts = strtotime($rcd); if ($ts) $rpd = date('Y-m-d', $ts); }
+            if ($rid !== $sid) $sheetChips[$rid] = ['peng_num'=>$number, 'chip_date'=>$rpd];
+        }
+    }
+
+    // Find discrepancies
+    foreach ($existingChips as $pitId => $db) {
+        if (isset($sheetChips[$pitId])) {
+            $sheet = $sheetChips[$pitId];
+            if ($db['chip_date'] !== $sheet['chip_date']) {
+                $chipDateIssues[] = ['type'=>'date_mismatch', 'pit_id'=>$pitId, 'peng_num'=>$db['peng_num'], 'db_date'=>$db['chip_date'], 'sheet_date'=>$sheet['chip_date']];
+            }
+        } else {
+            $chipDateIssues[] = ['type'=>'in_db_not_sheet', 'pit_id'=>$pitId, 'peng_num'=>$db['peng_num'], 'db_date'=>$db['chip_date']];
+        }
+    }
+    foreach ($sheetChips as $pitId => $sheet) {
+        if (!isset($existingChips[$pitId])) {
+            $chipDateIssues[] = ['type'=>'in_sheet_not_db', 'pit_id'=>$pitId, 'peng_num'=>$sheet['peng_num'], 'sheet_date'=>$sheet['chip_date']];
+        }
+    }
 
     if (!$dryRun) {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
@@ -308,6 +365,7 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
         'csv_rows' => count($rows),
         'previous' => ['penguins'=>$currentPenguins, 'chips'=>$currentChips],
         'result' => ['penguins'=>$created, 'chips'=>$chipsCreated, 'rechips'=>$rechips, 'skipped'=>$skipped],
+        'chip_date_issues' => $chipDateIssues,
     ]);
     exit;
 }

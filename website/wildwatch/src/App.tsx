@@ -1777,6 +1777,16 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
                 <div>CSV rows: {reimportResult.csv_rows}</div>
                 <div>Current DB: {reimportResult.previous?.penguins} penguins, {reimportResult.previous?.chips} chips</div>
                 <div>Would create: {reimportResult.result?.penguins} penguins, {reimportResult.result?.chips} chips ({reimportResult.result?.rechips} rechips), {reimportResult.result?.skipped} skipped</div>
+                {reimportResult.chip_date_issues?.length > 0 && <>
+                  <div style={{marginTop:6, fontWeight:600}}>Chip date issues ({reimportResult.chip_date_issues.length}):</div>
+                  {reimportResult.chip_date_issues.map((issue: any, i: number) => (
+                    <div key={i} className="muted small" style={{color: issue.type === 'date_mismatch' ? '#F44336' : '#FF9800'}}>
+                      {issue.type === 'date_mismatch' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: DB=${issue.db_date} Sheet=${issue.sheet_date}`}
+                      {issue.type === 'in_db_not_sheet' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: in DB (${issue.db_date}) but NOT in sheet`}
+                      {issue.type === 'in_sheet_not_db' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: in sheet (${issue.sheet_date}) but NOT in DB`}
+                    </div>
+                  ))}
+                </>}
               </>
             )}
           </div>
