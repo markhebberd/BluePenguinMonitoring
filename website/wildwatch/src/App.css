@@ -173,6 +173,9 @@ header h1:hover { opacity:.8; }
 .bird-nav-btn:disabled { opacity:0.3; cursor:default; }
 .bird-nav-input { width:50px; text-align:center; border:1px solid #ccc; border-radius:4px; padding:4px; font-size:13px; }
 .header-nav { display:flex; gap:6px; align-items:center; }
+.detail-obs { overflow-y:auto; max-height:calc(100vh - 200px); }
+.detail-bird { overflow-y:auto; max-height:calc(100vh - 200px); position:sticky; top:0; }
+.grid-sidebar { overflow-y:auto; max-height:calc(100vh - 200px); position:sticky; top:0; }
 .admin-panel { max-width:800px; margin:0 auto; padding:16px 20px; }
 .admin-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
 .admin-header h2 { margin:0; color:#1a5276; }

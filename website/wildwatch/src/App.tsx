@@ -778,6 +778,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [showBio, setShowBio] = useState(false);
   useEffect(() => {
     if (token && p.peng_num) {
       fetchHistory(token, 'penguins', p.peng_num).then(d => setHasHistory(Array.isArray(d) && d.length > 0));
@@ -824,22 +825,37 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
             </Fragment>);
             })}
             <tr><td className="muted">Last Known Life Stage</td><td>{!editing ? (p.life_stage || <span className="muted">-</span>) : <EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />}</td></tr>
-            {biometrics.map((b: any, i: number) => {
-              const flags = [
-                b.is_moulting && 'Moulting', b.condition_underweight && 'Underweight',
-                b.condition_ticks && 'Ticks', b.condition_dead && 'Dead',
-                b.condition_dog_attacked && 'Dog Attacked', b.condition_attacked && 'Attacked',
-                b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
-              ].filter(Boolean);
-              return (<Fragment key={`bio${i}`}>
-              <tr><td className="muted" colSpan={2} style={{fontWeight:600, paddingTop:8}}>Biometrics {b.observation_date || ''}</td></tr>
-              {b.observed_sex && <tr><td className="muted">Observed Sex</td><td>{b.observed_sex}</td></tr>}
-              {b.weight && <tr><td className="muted">Weight</td><td>{!editing ? `${parseFloat(b.weight).toFixed(0)}g` : <><EditableField value={parseFloat(b.weight).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>}
-              {b.right_flipper_length && <tr><td className="muted">Flipper Length</td><td>{!editing ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <><EditableField value={parseFloat(b.right_flipper_length).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>}
-              {flags.length > 0 && <tr><td className="muted">Conditions</td><td>{flags.join(', ')}</td></tr>}
-              {b.notes && <tr><td className="muted">Notes</td><td>{b.notes}</td></tr>}
-            </Fragment>);
-            })}
+            {(() => {
+              if (biometrics.length === 0) return null;
+              // Build summary
+              const sexCounts: Record<string,number> = {};
+              const lastComment = biometrics.find((b: any) => b.notes)?.notes;
+              const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
+              biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
+              const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${s} ${n}x`).join(', ');
+              const weightSummary = weights.length > 0 ? `${Math.min(...weights)}-${Math.max(...weights)}g (${weights.length}x)` : '';
+              const summary = [sexSummary, weightSummary, lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
+
+              return (<>
+              <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
+              {showBio && biometrics.map((b: any, i: number) => {
+                const flags = [
+                  b.is_moulting && 'Moulting', b.condition_underweight && 'Underweight',
+                  b.condition_ticks && 'Ticks', b.condition_dead && 'Dead',
+                  b.condition_dog_attacked && 'Dog Attacked', b.condition_attacked && 'Attacked',
+                  b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
+                ].filter(Boolean);
+                return (<Fragment key={`bio${i}`}>
+                <tr><td className="muted" colSpan={2} style={{fontWeight:600, paddingTop:4, fontSize:11}}>{b.observation_date || ''}</td></tr>
+                {b.observed_sex && <tr><td className="muted">Sex</td><td>{b.observed_sex}</td></tr>}
+                {b.weight && <tr><td className="muted">Weight</td><td>{!editing ? `${parseFloat(b.weight).toFixed(0)}g` : <><EditableField value={parseFloat(b.weight).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>}
+                {b.right_flipper_length && <tr><td className="muted">Flipper</td><td>{!editing ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <><EditableField value={parseFloat(b.right_flipper_length).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>}
+                {flags.length > 0 && <tr><td className="muted">Flags</td><td>{flags.join(', ')}</td></tr>}
+                {b.notes && <tr><td className="muted">Note</td><td style={{fontSize:11}}>{b.notes}</td></tr>}
+              </Fragment>);
+              })}
+              </>);
+            })()}
           </tbody>
         </table>
       </div>
@@ -1614,6 +1630,16 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   );
 }
 
+function CollapsibleSeason({ label, observations, onBirdClick, highlightObs, scrollToObs, token, canEdit, allPenguins }: any) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div>
+      <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
+      {expanded && observations.map((o: any, i: number) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={onBirdClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} />)}
+    </div>
+  );
+}
+
 function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) {
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
@@ -1859,11 +1885,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, enter, admin } = parseUrl();
+      const { box, bird, enter, admin: adm } = parseUrl();
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
-      setShowAdmin(admin || false);
+      setShowAdmin(adm || false);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -1975,6 +2001,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
 
   // Data entry page
+  if (showAdmin) {
+    return (
+      <div className="app">
+        <header>
+          <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
+          <span className="sub">Tarakohe Penguin Colony</span>
+          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
+        </header>
+        <AdminPanel token={token} onClose={() => setShowAdmin(false)} />
+        {passwordDialog}
+      </div>
+    );
+  }
+
   if (showEntry) {
     return (
       <div className="app">
@@ -2043,8 +2083,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <button className="logout-btn" onClick={onLogout}>Logout</button>
         </span>
       </header>
-
-      {showAdmin && <AdminPanel token={token} onClose={() => setShowAdmin(false)} />}
 
       {!selectedBox && (
         <>
@@ -2127,10 +2165,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   {thisSeason.length === 0 && <p className="muted">No observations this season</p>}
                   {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />)}
                   {sortedPrev.map(([label, obs]) => (
-                    <div key={label}>
-                      <div className="season-divider"><hr/><span>{label} ({obs.length})</span><hr/></div>
-                      {obs.map((o,i) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={openBird} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />)}
-                    </div>
+                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
                   ))}
                 </>);
               })()}
