@@ -15,7 +15,7 @@ $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd
 
 $csv = @file_get_contents($csvUrl);
 if (!$csv) {
-    $csv = file_get_contents(__DIR__ . '/all_penguins_sheet2.csv');
+    $csv = null; // NO STALE FALLBACK
 }
 if (!$csv) { echo json_encode(['error' => 'No CSV source available']); exit; }
 

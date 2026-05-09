@@ -208,7 +208,7 @@ if ($action === 'reimport_penguins' || $action === 'trial_reimport_penguins') {
 
     $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=143001868';
     $csv = @file_get_contents($csvUrl);
-    if (!$csv) $csv = @file_get_contents(__DIR__ . '/all_penguins_sheet2.csv');
+    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
     if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
 
     $handle = fopen('php://temp', 'r+');
@@ -377,7 +377,7 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
 
     $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=325619240';
     $csv = @file_get_contents($csvUrl);
-    if (!$csv) $csv = @file_get_contents(__DIR__ . '/sheet_history.csv');
+    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed - check sheet sharing settings']); exit; }
     if (!$csv) { echo json_encode(['error'=>'No CSV source']); exit; }
 
     $handle = fopen('php://temp', 'r+');

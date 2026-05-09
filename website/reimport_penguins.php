@@ -27,7 +27,7 @@ echo "=== IMPORTING PENGUINS ===\n";
 $csvUrl = 'https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=143001868';
 $csv = @file_get_contents($csvUrl);
 if (!$csv) {
-    $csv = @file_get_contents(__DIR__ . '/all_penguins_sheet2.csv');
+    $csv = @null; // NO STALE FALLBACK
 }
 if (!$csv) { echo "ERROR: No CSV source available\n"; exit; }
 
