@@ -49,7 +49,8 @@ if ($action === 'update_user') {
     exit;
 }
 
-if ($action === 'sync_monitors') {
+if ($action === 'sync_monitors' || $action === 'trial_sync') {
+    $dryRun = ($action === 'trial_sync');
     // Pull from old TCP server using same protocol as C# app
     $host = '210.54.37.120';
     $port = 8080;
@@ -138,7 +139,7 @@ if ($action === 'sync_monitors') {
             $monAdults += (int)($boxData['Adults'] ?? 0);
             $monEggs += (int)($boxData['Eggs'] ?? 0);
             $monChicks += (int)($boxData['Chicks'] ?? 0);
-            $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
+            if (!$dryRun) $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
                 ->execute([$colonyId, $boxName]);
             $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
             $stmt->execute([$colonyId, $boxName]);
@@ -153,12 +154,14 @@ if ($action === 'sync_monitors') {
             $stmt->execute([$locationId, $obsTimeParsed, $observerId]);
             if ($stmt->fetchColumn()) { $monSkipped++; continue; }
 
-            $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$locationId, $observerId, $obsTimeParsed,
-                $boxData['Adults'] ?? 0, $boxData['Eggs'] ?? 0, $boxData['Chicks'] ?? 0,
-                $boxData['BreedingChance'] ?? null, $boxData['GateStatus'] ?? null,
-                $boxData['Notes'] ?? '', $filename]);
-            $observationId = $pdo->lastInsertId();
+            if (!$dryRun) {
+                $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
+                $stmt->execute([$locationId, $observerId, $obsTimeParsed,
+                    $boxData['Adults'] ?? 0, $boxData['Eggs'] ?? 0, $boxData['Chicks'] ?? 0,
+                    $boxData['BreedingChance'] ?? null, $boxData['GateStatus'] ?? null,
+                    $boxData['Notes'] ?? '', $filename]);
+                $observationId = $pdo->lastInsertId();
+            }
             $monNewObs++;
 
             foreach ($boxData['ScannedIds'] ?? [] as $scan) {
@@ -169,9 +172,11 @@ if ($action === 'sync_monitors') {
                 if (substr($short8, 0, 4) === '9130' || strpos($birdId, 'LA9000250') !== false) continue;
 
                 if (isset($chipLookup[$short8])) {
-                    $scanTime = $scan['Timestamp'] ?? $obsTimeParsed;
-                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
-                        ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime))]);
+                    if (!$dryRun && isset($observationId)) {
+                        $scanTime = $scan['Timestamp'] ?? $obsTimeParsed;
+                        $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
+                            ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime))]);
+                    }
                     $monScans++;
                 }
             }

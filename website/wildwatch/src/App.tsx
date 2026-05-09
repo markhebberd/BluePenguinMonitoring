@@ -1620,16 +1620,20 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
     setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
   };
 
-  const syncMonitors = async () => {
+  const doSync = async (action: string) => {
     setSyncing(true); setSyncResult(null);
     try {
-      const r = await fetch('/penguin-api/admin.php?action=sync_monitors', {
+      const r = await fetch(`/penguin-api/admin.php?action=${action}`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
       });
-      setSyncResult(await r.json());
+      const result = await r.json();
+      result.dry_run = (action === 'trial_sync');
+      setSyncResult(result);
     } catch (e: any) { setSyncResult({ error: e.message }); }
     setSyncing(false);
   };
+  const trialSync = () => doSync('trial_sync');
+  const syncMonitors = () => doSync('sync_monitors');
 
   return (
     <div className="admin-panel">
@@ -1665,8 +1669,11 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
       <div className="admin-section">
         <h3>Sync Monitors</h3>
         <p className="muted">Pull latest monitor data from the old TCP server (210.54.37.120)</p>
-        <button className="edit-btn" onClick={syncMonitors} disabled={syncing}>
-          {syncing ? 'Syncing...' : 'Sync now'}
+        <button className="edit-btn" onClick={() => trialSync()} disabled={syncing}>
+          {syncing ? 'Syncing...' : 'Trial sync (preview)'}
+        </button>
+        <button className="edit-btn done-btn" onClick={syncMonitors} disabled={syncing} style={{marginLeft:6}}>
+          {syncing ? 'Syncing...' : 'Sync & import'}
         </button>
         {syncResult && (
           <div style={{marginTop:8}}>
@@ -1674,8 +1681,9 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
               <div style={{color:'#F44336'}}>{syncResult.error}</div>
             ) : (
               <>
-                <div className="obs-card" style={{marginBottom:8}}>
-                  <b>Summary:</b> {syncResult.totals?.imported || 0} imported, {syncResult.totals?.already_imported || 0} already imported, {syncResult.totals?.deleted || 0} deleted, {syncResult.totals?.new_obs || 0} new obs, {syncResult.totals?.scans || 0} scans
+                <div className="obs-card" style={{marginBottom:8, borderLeftColor: syncResult.dry_run ? '#FF9800' : '#4CAF50'}}>
+                  {syncResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
+                  <b>Summary:</b> {syncResult.totals?.imported || 0} would import, {syncResult.totals?.already_imported || 0} already imported, {syncResult.totals?.deleted || 0} deleted, {syncResult.totals?.new_obs || 0} new obs, {syncResult.totals?.scans || 0} scans
                 </div>
                 {(syncResult.monitors || []).map((m: any, i: number) => (
                   <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'already_imported' ? 0.5 : 1}}>
