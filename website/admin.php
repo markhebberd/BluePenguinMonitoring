@@ -188,7 +188,7 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
                 $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
                 $stmt->execute([$locationId, $observerId, $obsTimeParsed,
                     $boxData['Adults'] ?? 0, $boxData['Eggs'] ?? 0, $boxData['Chicks'] ?? 0,
-                    $boxData['BreedingChance'] ?? null, $boxData['GateStatus'] ?? null,
+                    !empty($boxData['BreedingChance']) ? $boxData['BreedingChance'] : null, !empty($boxData['GateStatus']) ? $boxData['GateStatus'] : null,
                     $boxData['Notes'] ?? '', $filename]);
                 $observationId = $pdo->lastInsertId();
             }
@@ -212,7 +212,14 @@ if ($action === 'sync_monitors' || $action === 'trial_sync') {
             }
         }
         $status = $monNewObs > 0 ? ($dryRun ? 'would_import' : 'imported') : ($monSkipped > 0 ? 'already_imported' : 'empty');
-        $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'boxes_imported'=>$monNewObs, 'boxes_skipped'=>$monSkipped, 'status'=>$status, 'scans'=>$monScans, 'adults'=>$monAdults, 'eggs'=>$monEggs, 'chicks'=>$monChicks];
+        // Count breeding statuses from TCP data
+        $breedingCounts = [];
+        foreach ($monitor['BoxData'] ?? [] as $bn => $bd) {
+            $bc = $bd['BreedingChance'] ?? '';
+            $key = $bc === '' || $bc === null ? '(empty)' : $bc;
+            $breedingCounts[$key] = ($breedingCounts[$key] ?? 0) + 1;
+        }
+        $monitorResults[] = ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'boxes_imported'=>$monNewObs, 'boxes_skipped'=>$monSkipped, 'status'=>$status, 'scans'=>$monScans, 'adults'=>$monAdults, 'eggs'=>$monEggs, 'chicks'=>$monChicks, 'breeding_statuses'=>$breedingCounts];
     }
 
     $totals = ['new_obs'=>0, 'scans'=>0, 'skipped'=>0, 'deleted'=>0, 'already_imported'=>0, 'imported'=>0];
@@ -431,16 +438,15 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
             $ts = DateTime::createFromFormat('d/m/y', $dateStr);
             if (!$ts) { echo json_encode(['error'=>"Bad date '$dateStr' at row ".($i+2)]); exit; }
             $date = $ts->format('Y-m-d');
-            if ($prevDate && $date < $prevDate) { echo json_encode(['error'=>"Date decrease at row ".($i+2).": $date < $prevDate"]); exit; }
             $prevDate = $date;
         } else {
-            $date = $prevDate; // carry forward from previous row
+            $date = $prevDate;
         }
         if (!$date) continue;
 
-        $boxUsed = strtoupper(trim($row[1]));
         $box = trim($row[2]);
         if (empty($box)) continue;
+        $boxUsed = strtoupper(trim($row[1]));
         $key = "$date|$box";
         if (!isset($groups[$key])) $groups[$key] = ['date'=>$date, 'box'=>$box, 'summary'=>null, 'birds'=>[], 'decomm'=>false, 'comments'=>[]];
         $g = &$groups[$key];
@@ -576,6 +582,13 @@ if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
                         ->execute([$pengNum, $observationId, $date, $sexNorm, $weight, $flipper, $bird['comment'] ?: null]);
                 }
                 $stats['biometrics']++;
+            }
+
+            // Update chick_size_code on penguin if available and not already set
+            $sizeCode = $bird['size_code'] ?? '';
+            if ($sizeCode && $pengNum && !$dryRun) {
+                $pdo->prepare("UPDATE penguins SET chick_size_code = ? WHERE peng_num = ? AND (chick_size_code IS NULL OR chick_size_code = '')")
+                    ->execute([$sizeCode, $pengNum]);
             }
         }
     }

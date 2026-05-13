@@ -110,6 +110,7 @@ function handleLogin($pdo) {
         'token'=>$token,
         'observer_id'=>$observer['observer_id'],
         'name'=>$observer['observer_name'],
+        'email'=>$observer['email'],
         'role'=>$observer['role'] ?? 'viewer',
         'expires'=>$expires
     ]);
@@ -169,7 +170,8 @@ function handleList($pdo, $table) {
     }
     $sql = "SELECT * FROM $table";
     if ($where) $sql .= " WHERE " . implode(' AND ', $where);
-    $sql .= " ORDER BY 1 DESC LIMIT 100";
+    $limit = ($table === 'observation_locations' || $table === 'penguins' || $table === 'penguin_chips') ? 5000 : 100;
+    $sql .= " ORDER BY 1 DESC LIMIT $limit";
     $stmt = $pdo->prepare($sql); $stmt->execute($params);
     echo json_encode($stmt->fetchAll());
 }
@@ -219,8 +221,9 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE $table SET " . implode(',', $sets) . " WHERE $pk = ?")->execute($params);
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'UPDATE', ?, ?)")
-            ->execute([$table, $id, $observer['observer_id'], json_encode($changed)]);
+        $reason = $body['_reason'] ?? null;
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'UPDATE', ?, ?, ?)")
+            ->execute([$table, $id, $observer['observer_id'], json_encode($changed), $reason]);
         $pdo->commit();
         echo json_encode(['success'=>true, 'changed'=>count($changed)]);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
@@ -228,6 +231,7 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
 
 function handleDelete($pdo, $table, $pk, $id, $observer) {
     if (!$id) { http_response_code(400); echo json_encode(['error'=>'id required']); return; }
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $old = $stmt->fetch();
     if (!$old) { http_response_code(404); echo json_encode(['error'=>'Not found']); return; }
@@ -241,8 +245,9 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
         } else {
             $pdo->prepare("DELETE FROM $table WHERE $pk = ?")->execute([$id]);
         }
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'DELETE', ?, ?)")
-            ->execute([$table, $id, $observer['observer_id'], json_encode($old)]);
+        $reason = $body['_reason'] ?? null;
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'DELETE', ?, ?, ?)")
+            ->execute([$table, $id, $observer['observer_id'], json_encode($old), $reason]);
         $pdo->commit();
         echo json_encode(['success'=>true]);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }

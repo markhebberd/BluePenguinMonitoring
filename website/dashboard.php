@@ -49,7 +49,22 @@ function handleBox($pdo, $colonyId, $boxName) {
     $result = getSightings($pdo, null, $boxName, $colonyId);
     $allPenguins = $result['penguins'];
 
-    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'all_penguins'=>$allPenguins]);
+    // Count deleted observations
+    $delStmt = $pdo->prepare("SELECT COUNT(*) as c FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = TRUE");
+    $delStmt->execute([$colonyId, $boxName]);
+    $deletedCount = (int)$delStmt->fetch()['c'];
+
+    // Optionally include deleted observations
+    $deleted = [];
+    if ($deletedCount > 0 && isset($_GET['include_deleted'])) {
+        $delObs = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.notes, o.deleted_at, ob.observer_name as deleted_by_name
+            FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id LEFT JOIN observers ob ON o.deleted_by = ob.observer_id
+            WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = TRUE ORDER BY o.observation_time_utc DESC");
+        $delObs->execute([$colonyId, $boxName]);
+        $deleted = $delObs->fetchAll();
+    }
+
+    echo json_encode(['location'=>$l->fetch(), 'observations'=>$observations, 'all_penguins'=>$allPenguins, 'deleted_count'=>$deletedCount, 'deleted'=>$deleted]);
 }
 
 function handleOverview($pdo, $colonyId) {
@@ -90,6 +105,17 @@ function handleOverview($pdo, $colonyId) {
     $stmt = $pdo->prepare("SELECT COUNT(*) as c FROM observation_locations WHERE colony_id = ?");
     $stmt->execute([$colonyId]); $totalBoxes = (int)$stmt->fetch()['c'];
 
+    // Distinct dates with activity (observations + chippings)
+    $stmt = $pdo->prepare("SELECT DISTINCT d FROM (
+        SELECT DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as d
+        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        UNION
+        SELECT chip_date as d FROM penguin_chips WHERE chip_date IS NOT NULL
+    ) dates ORDER BY d DESC");
+    $stmt->execute([$colonyId]);
+    $dates = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
     echo json_encode([
         'total_boxes' => $totalBoxes,
         'season_observations' => $seasonObs,
@@ -99,5 +125,6 @@ function handleOverview($pdo, $colonyId) {
         'total_eggs' => $totalEggs,
         'total_chicks' => $totalChicks,
         'box_info' => $boxInfo,
+        'observation_dates' => $dates,
     ]);
 }

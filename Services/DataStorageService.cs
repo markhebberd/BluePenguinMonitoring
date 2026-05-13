@@ -217,6 +217,10 @@ namespace PenguinMonitor.Services
             public Dictionary<string, BoxTag>? BoxTags { get; set; }
             public BoxTagService.SyncResult? TagSyncResult { get; set; }
             public string? BoxTagError { get; set; }
+            public int BirdCount { get; set; }
+            public int MonitorCount { get; set; }
+            public int BoxNoteCount { get; set; }
+            public string? Error { get; set; }
         }
 
         internal async Task<DownloadResult> DownloadRemoteData(Android.Content.Context? context, Dictionary<int, MonitorDetails> allMonitorData, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null)
@@ -285,10 +289,10 @@ namespace PenguinMonitor.Services
                 Dictionary<string, PenguinData> remotePenguinData = new Dictionary<string, PenguinData>();
                 foreach (var record in penguinRecords)
                 {
-                    if (string.IsNullOrEmpty(record.tag_number) || record.tag_number.Length < 8)
+                    if (string.IsNullOrEmpty(record.pit_id) || record.pit_id.Length < 8)
                         continue;
 
-                    var cleanId = new string(record.tag_number.Where(char.IsLetterOrDigit).ToArray());
+                    var cleanId = new string(record.pit_id.Where(char.IsLetterOrDigit).ToArray());
                     var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
 
                     if (eightDigitId.Length != 8) continue;
@@ -363,17 +367,31 @@ namespace PenguinMonitor.Services
                     }
                 }
 
-                new Handler(Looper.MainLooper).Post(() =>
-                {
-                    Toast.MakeText(context, $"Got {boxDataCount} box monitor, {remotePenguinData.Count} remote bird infos{tagSyncInfo}", ToastLength.Long)?.Show();
-                });
+                downloadResult.BirdCount = remotePenguinData.Count;
+                downloadResult.MonitorCount = boxDataCount;
+
+                // Verify penguin count matches server
+                var errors = new List<string>();
+                try {
+                    var countResp = await _httpClient.GetAsync(WILDWATCH_PENGUINS_URL + "?count");
+                    var countJson = await countResp.Content.ReadAsStringAsync();
+                    var countObj = JsonConvert.DeserializeObject<Dictionary<string, int>>(countJson);
+                    if (countObj != null && countObj.ContainsKey("count")) {
+                        int expected = countObj["count"];
+                        if (remotePenguinData.Count < expected)
+                            errors.Add($"Penguins: got {remotePenguinData.Count}/{expected}");
+                    }
+                } catch { }
+
+                if (remotePenguinData.Count == 0)
+                    errors.Add("No penguin records received from server");
+
+                if (errors.Count > 0)
+                    downloadResult.Error = string.Join("; ", errors);
             }
             catch (Exception ex)
             {
-                new Handler(Looper.MainLooper).Post(() =>
-                  {
-                      Toast.MakeText(context, $"❌ Download failed: {ex.Message}", ToastLength.Long)?.Show();
-                  });
+                downloadResult.Error = ex.Message;
             }
             return downloadResult;
         }

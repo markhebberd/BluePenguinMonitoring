@@ -32,11 +32,11 @@ export async function fetchBirdDetail(pengNum: string) {
   return (await fetch(`/penguin-api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`)).json();
 }
 
-export async function updateRecord(token: string, table: string, id: number | string, fields: Record<string, any>) {
+export async function updateRecord(token: string, table: string, id: number | string, fields: Record<string, any>, reason?: string) {
   const r = await fetch(`/penguin-api/crud.php?action=update&table=${table}&id=${id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify(fields)
+    body: JSON.stringify({ ...fields, ...(reason ? { _reason: reason } : {}) })
   });
   return r.json();
 }
@@ -50,10 +50,11 @@ export async function createRecord(token: string, table: string, fields: Record<
   return r.json();
 }
 
-export async function deleteRecord(token: string, table: string, id: number) {
+export async function deleteRecord(token: string, table: string, id: number, reason?: string) {
   const r = await fetch(`/penguin-api/crud.php?action=delete&table=${table}&id=${id}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: reason ? JSON.stringify({ _reason: reason }) : undefined
   });
   return r.json();
 }
@@ -63,4 +64,12 @@ export async function fetchHistory(token: string, table: string, id: number) {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   return r.json();
+}
+
+export async function fetchDay(date: string) {
+  return (await fetch(`/penguin-api/day.php?date=${date}&_=${Date.now()}`, { headers: { 'X-API-Key': API_KEY } })).json();
+}
+
+export async function fetchReport(report: string) {
+  return (await fetch(`/penguin-api/reports.php?report=${report}&_=${Date.now()}`, { headers: { 'X-API-Key': API_KEY } })).json();
 }

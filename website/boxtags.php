@@ -38,6 +38,12 @@ switch ($method) {
  * GET - Retrieve box tags
  */
 function handleGet($pdo) {
+    if (isset($_GET['count'])) {
+        $stmt = $pdo->query("SELECT COUNT(*) as c FROM observation_locations WHERE pit_id IS NOT NULL");
+        echo json_encode(['success' => true, 'count' => (int)$stmt->fetch()['c']]);
+        return;
+    }
+
     $boxId = $_GET['box_id'] ?? null;
 
     if ($boxId) {

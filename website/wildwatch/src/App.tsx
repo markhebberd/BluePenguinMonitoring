@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats } from './api/boxtags';
+import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchDay, fetchReport } from './api/boxtags';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -331,6 +331,17 @@ function isChickAtObsDate(chipDate?: string|null, chippedAsAdult?: number|null, 
   return ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
 }
 
+/** Sort scans: M first, F second, chicks/unknown last */
+function scanSortMFC(a: any, b: any): number {
+  const order = (s: any) => {
+    const sex = (s.sex || '').toUpperCase();
+    if (sex === 'M') return 0;
+    if (sex === 'F') return 1;
+    return 2;
+  };
+  return order(a) - order(b);
+}
+
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
   if (isChickAtObsDate(chipDate, chippedAsAdult, observationDate)) return 'chick';
   const s = (sex || '').toUpperCase();
@@ -343,7 +354,19 @@ function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chip
   return s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
 }
 
-function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string }) {
+/** Navigate on click, allow ctrl+click to open in new tab */
+function navClick(e: React.MouseEvent, action: () => void) {
+  if (e.ctrlKey || e.metaKey || e.button === 1) return; // let browser handle new tab
+  e.preventDefault();
+  action();
+}
+
+function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: string) => void }) {
+  const day = date.length > 10 ? toNzDateStr(date) : date;
+  return <a className="date-link" href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}>{formatDate(date)}</a>;
+}
+
+function PenguinMini({ scan, onClick, observationDate, navigateDirectly }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean }) {
   const sex = (scan.sex || '').toUpperCase();
   const cls = penguinSexClass(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
@@ -355,10 +378,11 @@ function PenguinMini({ scan, onClick, observationDate }: { scan: Scan | ChippedH
   const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
   const grayCls = unprovenAdult ? 'unproven' : '';
   const sizeCode = scan.chick_size_code || '';
+  const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
-    <span className={`scan clickable ${cls} ${chipCls} ${grayCls}`} onClick={onClick}>
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
       {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{sizeCode ? ` ${sizeCode} ` : (num || icon) && chip ? ' ' : ''}{chip}
-    </span>
+    </a>
   );
 }
 
@@ -430,7 +454,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
     const birdMap = seasonBirds.get(label)!;
     const key = p.pit_id.slice(-8);
     if (!birdMap.has(key)) {
-      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: p.scan_count || 0 });
+      const count = p.scan_count || (p.is_chipped_here ? 1 : 0);
+      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: count });
     }
   }
 
@@ -523,7 +548,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
   );
 }
 
-function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPenguins }: { obs: Observation; onBirdClick?: (tag:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
+function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, canEdit, allPenguins, hideDate, onDataChange }: { obs: Observation; onBirdClick?: (tag:string)=>void; onDayClick?: (day:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[]; hideDate?: boolean; onDataChange?: ()=>void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -545,8 +570,13 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
   const [localObs, setLocalObs] = useState(obs);
   const saveObs = (field: string) => async (val: any) => {
     if (!obsId) return;
-    const result = await updateRecord(token || '', 'observations', obsId, {[field]: val});
-    if (result?.changed) setLocalObs((o: any) => ({...o, [field]: val}));
+    const oldVal = localObs[field as keyof typeof localObs] ?? '';
+    if (String(oldVal) === String(val ?? '')) return { changed: 0 };
+    const desc = `Change ${field} from "${oldVal}" to "${val ?? ''}"${obs.observation_time_utc ? ` (${formatDate(obs.observation_time_utc)})` : ''}`;
+    const reason = prompt(`${desc}\n\nReason for change (optional):`);
+    if (reason === null) return { changed: 0 }; // cancelled
+    const result = await updateRecord(token || '', 'observations', obsId, {[field]: val}, reason || undefined);
+    if (result?.changed) { setLocalObs((o: any) => ({...o, [field]: val})); onDataChange?.(); }
     return result;
   };
   const [editing, setEditing] = useState(false);
@@ -591,16 +621,26 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
   return (
     <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`}>
       <div className="obs-top">
-        <span><b>{fmtDateTime(obs.observation_time_utc)}</b> <span className="muted small">{obs.monitor_filename}</span></span>
+        {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b> <span className="muted small">{obs.monitor_filename}</span></span>}
         <span className="obs-top-right">
-          {editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
+          {canEdit && editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
           {canEdit && obsId && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
-          {editing && <><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></>}
+          {editing && <>
+            <button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button>
+            <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={async () => {
+              const reason = prompt(`Delete observation from ${formatDate(obs.observation_time_utc)}?\n\nReason for deletion (optional):`);
+              if (reason === null) return;
+              await deleteRecord(token || '', 'observations', obsId!, reason || undefined);
+              onDataChange?.();
+            }}>Delete</button>
+          </>}
         </span>
       </div>
       {!editing ? (
         <>
           <div className="obs-nums">
+            {localObs.adults === 0 && localObs.eggs === 0 && localObs.chicks === 0 && <span className="muted">Empty</span>}
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
@@ -643,7 +683,7 @@ function ObsCard({ obs, onBirdClick, highlight, scrollTo, token, canEdit, allPen
       )}
       {!editing && obs.scans.length>0 && (
         <div className="scans">
-          {obs.scans.map((s,j) => (
+          {[...obs.scans].sort(scanSortMFC).map((s,j) => (
             <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
           ))}
         </div>
@@ -764,7 +804,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
@@ -784,9 +824,23 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
       fetchHistory(token, 'penguins', p.peng_num).then(d => setHasHistory(Array.isArray(d) && d.length > 0));
     }
   }, [token, p.peng_num]);
-  const savePenguin = (field: string) => (val: any) => updateRecord(token || '', 'penguins', p.peng_num, {[field]: val});
-  const saveChip = (pitId: string, field: string) => (val: any) => updateRecord(token || '', 'penguin_chips', pitId, {[field]: val});
-  const saveBio = (bioId: number, field: string) => (val: any) => updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val});
+  const savePenguin = (field: string) => async (val: any) => {
+    const oldVal = p[field] ?? '';
+    if (String(oldVal) === String(val ?? '')) return;
+    const reason = prompt(`Change ${field} on penguin #${p.peng_num} from "${oldVal}" to "${val ?? ''}"?\n\nReason (optional):`);
+    if (reason === null) return;
+    return updateRecord(token || '', 'penguins', p.peng_num, {[field]: val}, reason || undefined);
+  };
+  const saveChip = (pitId: string, field: string) => async (val: any) => {
+    const reason = prompt(`Change ${field} on chip ${pitId.slice(-8)}?\n\nReason (optional):`);
+    if (reason === null) return;
+    return updateRecord(token || '', 'penguin_chips', pitId, {[field]: val}, reason || undefined);
+  };
+  const saveBio = (bioId: number, field: string) => async (val: any) => {
+    const reason = prompt(`Change ${field} on biometric record?\n\nReason (optional):`);
+    if (reason === null) return;
+    return updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val}, reason || undefined);
+  };
 
 
   return (
@@ -810,7 +864,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
           <tbody>
             <tr><td className="muted">Sex</td><td>{!editing ? (p.sex || <span className="muted">-</span>) : <EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />}</td></tr>
             <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>
-            <tr><td className="muted">Initial Chip Date</td><td>{chips.length > 0 ? chips[0].chip_date || <span className="muted">-</span> : <span className="muted">-</span>}</td></tr>
+            <tr><td className="muted">Initial Chip Date</td><td>{chips.length > 0 && chips[0].chip_date ? <DateLink date={chips[0].chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>}</td></tr>
             <tr><td className="muted">Chick Size Code</td><td>{!editing ? (p.chick_size_code || <span className="muted">-</span>) : <EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
@@ -819,8 +873,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
               const prefix = i === 0 ? '' : re.toLowerCase();
               return (<Fragment key={`chip${i}`}>
               <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
-              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>{!editing ? (c.chip_date || <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
-              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td>{!editing ? (c.chip_box ? <span className="clickable" onClick={() => onBoxClick(c.chip_box)}>{c.chip_box}</span> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
+              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>{!editing ? (c.chip_date ? <DateLink date={c.chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
+              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td>{!editing ? (c.chip_box ? <a className="clickable" href={`/box/${c.chip_box}`} onClick={e => navClick(e, () => onBoxClick(c.chip_box))}>{c.chip_box}</a> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
             </Fragment>);
             })}
@@ -886,11 +940,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
           const boxSightings = sightings.filter((s: any) => s.box === b);
           return (
             <div key={b} className="obs-card" style={{marginBottom:6}}>
-              <div className="obs-top"><b className="clickable" onClick={() => onBoxClick(b)}>Box {b}</b> <span className="muted">{boxSightings.length} visit{boxSightings.length !== 1 ? 's' : ''}</span></div>
+              <div className="obs-top"><a className="clickable" href={`/box/${b}`} onClick={e => navClick(e, () => onBoxClick(b))}><b>Box {b}</b></a> <span className="muted">{boxSightings.length} visit{boxSightings.length !== 1 ? 's' : ''}</span></div>
               {boxSightings.map((sg: any, i: number) => (
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
-                    <span>{fmtDateTime(sg.date)}</span>
+                    <DateLink date={sg.date} onDayClick={onDayClick} />
                     {(sg.seen_with || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
                     ))}
@@ -910,10 +964,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
         {sightings.map((s: any, i: number) => (
           <div key={i} className="obs-card">
             <div className="obs-top">
-              <b>{fmtDateTime(s.date)}</b>
-              <span className="bird-chip clickable" onClick={() => onBoxClick(s.box)}>Box {s.box}</span>
+              <b><DateLink date={s.date} onDayClick={onDayClick} /></b>
+              <a className="bird-chip clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onBoxClick(s.box))}>Box {s.box}</a>
             </div>
             <div className="obs-nums">
+              {s.adults === 0 && s.eggs === 0 && s.chicks === 0 && <span className="muted">Empty</span>}
               {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
@@ -941,8 +996,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
               </div>
               <div className="partner-sightings">
                 {pt.sightings.map((s: any, i: number) => (
-                  <div key={i} className="partner-row clickable" onClick={() => onSightingClick(s.box, s.date)}>
-                    <span>{fmtDateTime(s.date)}</span>
+                  <a key={i} className="partner-row clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>
+                    <DateLink date={s.date} onDayClick={onDayClick} />
                     <span className="bird-chip">Box {s.box}</span>
                     {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 4))}</span>}
                     {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 4))}</span>}
@@ -950,7 +1005,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
                     {(s.also_seen || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
                     ))}
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
@@ -964,6 +1019,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onNavigateTo
 function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   penguins: any[]; search: string; onSearchChange: (s:string)=>void; onBirdClick: (tag:string)=>void;
 }) {
+  const [open, setOpen] = useState(false);
   const filtered = useMemo(() => {
     if (search.length === 0) return { exact: [] as any[], pit: [] as any[] };
     const exact = penguins.filter(p => p.peng_num && p.peng_num === search);
@@ -971,16 +1027,26 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
     return { exact, pit };
   }, [penguins, search]);
 
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      const first = filtered.exact[0] || filtered.pit[0];
+      if (first) { onBirdClick(first.peng_num || first.pit_id); onSearchChange(''); setOpen(false); }
+    } else if (e.key === 'Escape') { setOpen(false); }
+  };
+
   return (
     <div className="penguin-search">
       <input
         type="text"
         placeholder="Search penguin"
         value={search}
-        onChange={e => onSearchChange(e.target.value.replace(/[^0-9A-Za-z]/g, ''))}
+        onChange={e => { onSearchChange(e.target.value.replace(/[^0-9A-Za-z]/g, '')); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        onKeyDown={handleKey}
         className="penguin-search-input"
       />
-      {(filtered.exact.length > 0 || filtered.pit.length > 0) && (
+      {open && (filtered.exact.length > 0 || filtered.pit.length > 0) && (
         <div className="penguin-results">
           {filtered.exact.map((p: any) => (
             <div key={p.peng_num} className={`penguin-result clickable ${penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult)}`} onClick={() => { onBirdClick(p.peng_num); onSearchChange(''); }}>
@@ -1002,8 +1068,169 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
           {filtered.pit.length > 20 && <div className="muted" style={{padding:'4px 8px'}}>+{filtered.pit.length - 20} more</div>}
         </div>
       )}
-      {search.length > 0 && filtered.exact.length === 0 && filtered.pit.length === 0 && (
+      {open && search.length > 0 && filtered.exact.length === 0 && filtered.pit.length === 0 && (
         <div className="penguin-results"><div className="muted" style={{padding:'8px'}}>No penguins match "{search}"</div></div>
+      )}
+    </div>
+  );
+}
+
+/** Parse flexible date input into YYYY-MM-DD. Accepts d/m/yy, dd/mm/yyyy, d-m-yy, d m yy, yyyy-mm-dd, yy-m-d etc. */
+function parseDateInput(input: string): string | null {
+  const s = input.trim();
+  if (!s) return null;
+
+  // Split on /, -, space, or .
+  const parts = s.split(/[\/\-\.\s]+/);
+  if (parts.length !== 3) return null;
+
+  let day: number, month: number, year: number;
+
+  // Detect format: if first part is 4 digits, it's yyyy-mm-dd
+  if (parts[0].length === 4) {
+    year = parseInt(parts[0]); month = parseInt(parts[1]); day = parseInt(parts[2]);
+  } else if (parts[2].length === 4) {
+    // d/m/yyyy
+    day = parseInt(parts[0]); month = parseInt(parts[1]); year = parseInt(parts[2]);
+  } else {
+    // Ambiguous short year: assume d/m/yy (NZ convention)
+    day = parseInt(parts[0]); month = parseInt(parts[1]); year = parseInt(parts[2]);
+    if (year < 100) year += 2000;
+  }
+
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+
+function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return [];
+    const parsed = parseDateInput(search);
+    const MONTHS: Record<string, number> = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+
+    return dates.filter(d => {
+      const [yr, mo, dy] = d.split('-').map(Number);
+
+      // Exact full date match
+      if (parsed && d === parsed) return true;
+
+      // Match against formatted display (e.g. "5 Sep 2025")
+      const display = formatDate(d).toLowerCase();
+      const terms = search.toLowerCase().trim();
+      if (display.includes(terms)) return true;
+
+      // Split input into parts
+      const parts = search.split(/[\/\-\.\s]+/).filter(Boolean);
+
+      if (parts.length === 1) {
+        const p = parts[0].toLowerCase();
+        const n = parseInt(p);
+        // Single number: match day or month
+        if (!isNaN(n)) {
+          if (n === dy || n === mo) return true;
+          // 2-digit year
+          if (n >= 20 && n < 100 && n + 2000 === yr) return true;
+          // 4-digit year
+          if (n === yr) return true;
+        }
+        // Month name
+        if (MONTHS[p.slice(0, 3)] === mo) return true;
+      }
+
+      if (parts.length === 2) {
+        const [a, b] = parts.map(p => p.toLowerCase());
+        const na = parseInt(a), nb = parseInt(b);
+
+        // Resolve month names
+        const ma = MONTHS[a.slice(0, 3)];
+        const mb = MONTHS[b.slice(0, 3)];
+
+        // year + month: "2025 12", "25 12", "25 dec"
+        if (!isNaN(na) && (na >= 2000 || (na >= 20 && na < 100))) {
+          const year = na >= 2000 ? na : na + 2000;
+          if (year === yr) {
+            if (!isNaN(nb) && nb === mo) return true;
+            if (mb === mo) return true;
+          }
+        }
+        // month + year: "12 2025", "dec 25"
+        if (!isNaN(nb) && (nb >= 2000 || (nb >= 20 && nb < 100))) {
+          const year = nb >= 2000 ? nb : nb + 2000;
+          if (year === yr) {
+            if (!isNaN(na) && na === mo) return true;
+            if (ma === mo) return true;
+          }
+        }
+        // d/m: "5/9", "28/12"
+        if (!isNaN(na) && !isNaN(nb) && na <= 31 && nb <= 12) {
+          if (na === dy && nb === mo) return true;
+        }
+        // month + day: "dec 28"
+        if (ma && !isNaN(nb) && ma === mo && nb === dy) return true;
+        // day + month: "28 dec"
+        if (mb && !isNaN(na) && mb === mo && na === dy) return true;
+      }
+
+      if (parts.length === 3 && parsed) {
+        return d.startsWith(parsed);
+      }
+
+      return false;
+    }).slice(0, 12);
+  }, [dates, search]);
+
+  const go = (day: string) => {
+    onDayClick(day);
+    setSearch('');
+    setOpen(false);
+  };
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (filtered.length > 0) {
+        go(filtered[0]);
+      } else {
+        const parsed = parseDateInput(search);
+        if (parsed) go(parsed);
+      }
+    } else if (e.key === 'Escape') {
+      setSearch('');
+      setOpen(false);
+    }
+  };
+
+  const sorted = useMemo(() => [...dates].sort(), [dates]);
+  const centerDate = filtered.length > 0 ? filtered[0] : sorted[sorted.length - 1] || '';
+
+  useEffect(() => {
+    onFocusChange?.(open, centerDate);
+  }, [open, centerDate]);
+
+  return (
+    <div className="date-search">
+      <input
+        type="text"
+        placeholder="Date"
+        value={search}
+        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 300)}
+        onKeyDown={handleKey}
+        className="date-search-input"
+      />
+      {open && filtered.length > 0 && (
+        <div className="date-results">
+          {filtered.map((d, i) => (
+            <div key={d} className={`date-result clickable${i === 0 ? ' focused' : ''}`} onClick={() => go(d)}>
+              {formatDate(d)}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1040,7 +1267,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
             body: JSON.stringify({ email, password })
           });
           const d2 = await r2.json();
-          if (d2.token) onLogin(d2.token, d2.name, d2.observer_id, d2.role);
+          if (d2.token) { if (d2.email) localStorage.setItem('ww_email', d2.email); onLogin(d2.token, d2.name, d2.observer_id, d2.role); }
           else setError('Registered but login failed');
         } else {
           setError(data.error || 'Registration failed');
@@ -1054,7 +1281,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
         const text = await r.text();
         try {
           const data = JSON.parse(text);
-          if (data.token) onLogin(data.token, data.name, data.observer_id, data.role);
+          if (data.token) { if (data.email) localStorage.setItem('ww_email', data.email); onLogin(data.token, data.name, data.observer_id, data.role); }
           else setError(data.error || 'Login failed');
         } catch {
           setError('Server returned unexpected response: ' + text.substring(0, 100));
@@ -1069,7 +1296,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1>WildWatch</h1>
+        <h1>Wildwatch</h1>
         <p className="login-sub">Penguin Colony Monitoring</p>
         <form onSubmit={handleSubmit}>
           {isRegister && <input type="text" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />}
@@ -1123,6 +1350,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [scannedBirds, setScannedBirds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [lastSavedObsId, setLastSavedObsId] = useState<number|null>(null);
 
   // Load date mappings for season
   useEffect(() => {
@@ -1253,12 +1481,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         body: JSON.stringify({
           location_id: locationId,
           observer_id: observerId,
-          observation_time_utc: parsedDate + ' 12:00:00',
+          observation_time_utc: parsedDate + ' 02:00:00',
           adults, eggs, chicks,
           breeding_status: breedingStatus || null,
           gate_status: gateStatus || null,
           notes,
-          monitor_filename: 'web-entry'
+          monitor_filename: `web-entry, ${localStorage.getItem('ww_email') || 'unknown'}`
         })
       });
       const obsData = await obsRes.json();
@@ -1278,12 +1506,13 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           body: JSON.stringify({
             observation_id: obsData.id,
             pit_id: knownBird.pit_id,
-            scan_time_utc: parsedDate + ' 12:00:00'
+            scan_time_utc: parsedDate + ' 02:00:00'
           })
         });
       }
 
-      setMessage(`Saved: Box ${box}, ${parsedDate}, ${scannedBirds.length} birds`);
+      setMessage(`Saved: Box ${box}, ${formatDate(parsedDate)}, ${scannedBirds.length} birds`);
+      setLastSavedObsId(obsData.id);
       // Reset form
       setAdults(0); setEggs(0); setChicks(0); setGateStatus(''); setBreedingStatus('');
       setNotes(''); setScannedBirds([]); setDateInput('');
@@ -1332,13 +1561,23 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         </div>
       </div>
 
-      {/* Date mappings - always visible */}
+      {/* Breeding status bar - always visible */}
+      {box && allBoxObs.length > 0 && (
+        <div className="entry-context">
+          <BreedingStatusBar observations={allBoxObs} />
+        </div>
+      )}
+
+      <div className="entry-split">
+      {/* LEFT: date table + existing data */}
+      <div className="entry-left">
+      {/* Date mappings */}
       <div className="entry-context">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px'}}>
           <span style={{fontSize:'13px', fontWeight:600, color:'#1a5276'}}>Date table (season {String(season).slice(-2)})</span>
           <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m => {
                 const d = m.actual_date;
-                return `${m.date_number} ${parseInt(d.slice(8))}/${parseInt(d.slice(5,7))}/${d.slice(2,4)}`;
+                return `${m.date_number} ${formatDate(d)}`;
               }).join('\n')); setShowDateEditor(true); }}>
             {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
           </button>
@@ -1347,7 +1586,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
             {dateMappings.map(m => (
               <span key={m.date_number} style={{background:'#e8ecef', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(String(m.date_number))}>
-                <b>{m.date_number}</b> = {m.actual_date.slice(8)+'/'+m.actual_date.slice(5,7)+'/'+m.actual_date.slice(2,4)}
+                <b>{m.date_number}</b> = {formatDate(m.actual_date)}
               </span>
             ))}
           </div>
@@ -1390,29 +1629,28 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         )}
       </div>
 
-      <div className="entry-split">
-      {/* LEFT: graph + existing data */}
-      <div className="entry-left">
-      {/* Breeding status bar */}
-      {box && allBoxObs.length > 0 && (
-        <div className="entry-context">
-          <BreedingStatusBar observations={allBoxObs} />
-        </div>
-      )}
-
       {/* Existing observations for this box+season */}
       {box && existingObs.length > 0 && (
         <div className="entry-existing">
-          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''} for Box {box} ({season})</h3>
+          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {existingObs.map((o: any, i: number) => (
             <div key={i} className="entry-existing-row">
-              <span>{fmtDateNZ(o.observation_time_utc)}</span>
+              <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
               {(o.scans || []).map((s: any, j: number) => (
-                <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} />
+                <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} navigateDirectly />
               ))}
+              {o.monitor_filename?.startsWith('web-entry') && o.observation_id && (
+                <button className="remove-scan" style={{marginLeft:'auto'}} onClick={async () => {
+                  const reason = prompt(`Delete observation from ${formatDate(o.observation_time_utc)}?\n\nReason (optional):`);
+                  if (reason === null) return;
+                  await deleteRecord(token, 'observations', o.observation_id, reason || undefined);
+                  setAllBoxObs(prev => prev.filter(ob => ob.observation_id !== o.observation_id));
+                }}>&times;</button>
+              )}
+              <span className="muted" style={{fontSize:10, marginLeft:4}}>{o.monitor_filename}</span>
             </div>
           ))}
         </div>
@@ -1426,46 +1664,52 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         <div className="entry-row">
           <label>Date (# or d/m/yy)</label>
           <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} />
-          {parsedDate && <span className="date-preview">{parsedDate}{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
+          {parsedDate && <span className="date-preview"><DateLink date={parsedDate} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
           {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
         </div>
 
-        <div className="entry-row">
-          <label>Add penguins</label>
-          <input type="text" value={birdSearch} onChange={e => setBirdSearch(e.target.value.replace(/[^0-9A-Za-z]/g,''))} onKeyDown={handleSearchKey} placeholder="Search by ID" />
-          {/* Quick add - penguins seen this season */}
-          {box && existingObs.length > 0 && (() => {
-            const seenBirds = new Map<string, any>();
-            for (const o of existingObs) {
-              for (const s of (o.scans || [])) {
-                const tag = s.pit_id.slice(-8);
-                if (!seenBirds.has(tag)) seenBirds.set(tag, s);
-              }
+        {/* Previously seen in this box - sorted M by count, F by count */}
+        {box && existingObs.length > 0 && (() => {
+          const seenBirds = new Map<string, any & { count: number }>();
+          for (const o of existingObs) {
+            for (const s of (o.scans || [])) {
+              const tag = s.pit_id.slice(-8);
+              if (seenBirds.has(tag)) { seenBirds.get(tag)!.count++; }
+              else seenBirds.set(tag, { ...s, count: 1 });
             }
-            return seenBirds.size > 0 ? (
-              <div className="bird-row" style={{marginTop:'6px'}}>
-                {Array.from(seenBirds.entries()).map(([tag, scan]) => {
+          }
+          const sorted = Array.from(seenBirds.entries()).sort(([,a], [,b]) => {
+            const sexOrder = (s: any) => (s.sex || '').toUpperCase() === 'M' ? 0 : (s.sex || '').toUpperCase() === 'F' ? 1 : 2;
+            const diff = sexOrder(a) - sexOrder(b);
+            return diff !== 0 ? diff : b.count - a.count;
+          });
+          return sorted.length > 0 ? (
+            <div className="entry-row">
+              <label>Previously seen</label>
+              <div className="bird-row">
+                {sorted.map(([tag, scan]) => {
                   const already = scannedBirds.includes(tag);
-                  return <span key={tag} className={already ? 'added' : ''} style={{opacity: already ? 0.4 : 1}}>
+                  return <span key={tag} className={`bird-with-count ${already ? 'added' : ''}`} style={{opacity: already ? 0.4 : 1}}>
                     <PenguinMini scan={scan} onClick={() => { if (!already) addBird(tag); }} />
+                    <span className="scan-count">{scan.count}x</span>
                   </span>;
                 })}
               </div>
-            ) : null;
-          })()}
-          {filteredBirds.length > 0 && (
-            <div className="penguin-results">
-              {filteredBirds.map((p: any, idx: number) => (
-                <div key={p.pit_id} className={`penguin-result clickable ${penguinSexClass(p.sex, p.chip_date, p.chipped_as_adult)} ${idx === searchIdx ? 'focused' : ''}`}
-                  onClick={() => addBird(p.pit_id)}>
-                  <PenguinMini scan={p} onClick={() => addBird(p.pit_id)} />
-                </div>
-              ))}
             </div>
-          )}
+          ) : null;
+        })()}
+
+        <div className="entry-row">
+          <label>Search by ID</label>
+          <PenguinSearch penguins={allPenguins} search={birdSearch} onSearchChange={setBirdSearch} onBirdClick={(num) => {
+            const bird = allPenguins.find((p: any) => p.peng_num === num || p.pit_id === num);
+            if (bird) addBird(bird.pit_id.slice(-8));
+            setBirdSearch('');
+          }} />
         </div>
 
-        {scannedBirds.length > 0 && (
+        <div className="entry-row">
+          <label>Observed</label>
           <div className="entry-birds">
             {scannedBirds.map(b => {
               const bird = allPenguins.find((p: any) => p.pit_id.slice(-8) === b || p.pit_id === b);
@@ -1474,8 +1718,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                 <button className="remove-scan" onClick={() => removeBird(b)}>&times;</button>
               </span>;
             })}
+            {scannedBirds.length === 0 && <span className="muted">Click birds above or search to add</span>}
           </div>
-        )}
+        </div>
 
         <div className="entry-row-group">
           <div className="entry-field">
@@ -1520,7 +1765,16 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
         </div>
 
-        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') ? 'login-error' : 'entry-success'}>{message}</div>}
+        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') ? 'login-error' : 'entry-success'}>
+          {message}
+          {lastSavedObsId && !message.startsWith('Error') && !message.startsWith('Failed') && (
+            <button style={{marginLeft:8, padding:'2px 10px', fontSize:'12px', background:'#F44336', color:'#fff', border:'none', borderRadius:'4px', cursor:'pointer'}} onClick={async () => {
+              await deleteRecord(token, 'observations', lastSavedObsId, 'Undo - entry made in error');
+              setMessage('Undone');
+              setLastSavedObsId(null);
+            }}>Undo</button>
+          )}
+        </div>}
 
         <button className="entry-save" onClick={handleSave} disabled={saving || !box || !parsedDate}>
           {saving ? 'Saving...' : 'Save observation'}
@@ -1534,11 +1788,247 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   );
 }
 
-function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean } {
+const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B'];
+
+function EggArrivalChart() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('egg_arrival').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (data.length === 0) return <div className="report-card"><p className="muted">No egg data available</p></div>;
+
+  // Chart dimensions
+  const W = 800, H = 400, PAD = { top: 30, right: 120, bottom: 50, left: 50 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  // Find axis ranges
+  const allDays = data.flatMap(s => s.data.map((d: any) => d.day));
+  const minDay = Math.min(...allDays);
+  const maxDay = Math.max(...allDays);
+  const maxEggs = Math.max(...data.map(s => s.max_eggs));
+
+  // X-axis: months relative to Apr 1
+  const monthTicks = [
+    { day: 61, label: 'Jun' }, { day: 92, label: 'Jul' }, { day: 122, label: 'Aug' },
+    { day: 153, label: 'Sep' }, { day: 183, label: 'Oct' }, { day: 214, label: 'Nov' },
+    { day: 245, label: 'Dec' }, { day: 276, label: 'Jan' }, { day: 306, label: 'Feb' },
+  ].filter(t => t.day >= minDay - 10 && t.day <= maxDay + 10);
+
+  const xRange = maxDay - minDay + 20;
+  const xScale = (day: number) => PAD.left + ((day - minDay + 10) / xRange) * plotW;
+  const yScale = (eggs: number) => PAD.top + plotH - (eggs / maxEggs) * plotH;
+
+  return (
+    <div className="report-card">
+      <h3>Eggs in Colony</h3>
+      <p className="muted">Total eggs across all boxes over each breeding season — shows laying, hatching, and loss</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {/* Grid lines */}
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(maxEggs * frac)} y2={yScale(maxEggs * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {/* Y axis labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+          <text key={frac} x={PAD.left - 8} y={yScale(maxEggs * frac) + 4} textAnchor="end" fontSize="11" fill="#888">{Math.round(maxEggs * frac)}</text>
+        ))}
+        {/* X axis month labels */}
+        {monthTicks.map(t => (
+          <Fragment key={t.day}>
+            <line x1={xScale(t.day)} x2={xScale(t.day)} y1={PAD.top} y2={PAD.top + plotH} stroke="#f0f0f0" strokeWidth="1" />
+            <text x={xScale(t.day)} y={PAD.top + plotH + 18} textAnchor="middle" fontSize="11" fill="#888">{t.label}</text>
+          </Fragment>
+        ))}
+        {/* Lines per season */}
+        {data.map((season, i) => {
+          const color = SEASON_COLORS[i % SEASON_COLORS.length];
+          const points = season.data.map((d: any) => `${xScale(d.day)},${yScale(d.eggs)}`).join(' ');
+          // Find peak point for label
+          const peak = season.data.reduce((best: any, d: any) => d.eggs > best.eggs ? d : best, season.data[0]);
+          return (
+            <Fragment key={season.season}>
+              <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" opacity="0.85" />
+              {peak && (
+                <text x={xScale(peak.day)} y={yScale(peak.eggs) - 8} textAnchor="middle" fontSize="10" fill={color} fontWeight="600">{season.season}</text>
+              )}
+            </Fragment>
+          );
+        })}
+        {/* Axes */}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <text x={PAD.left + plotW / 2} y={H - 5} textAnchor="middle" fontSize="12" fill="#666">Month</text>
+        <text x={14} y={PAD.top + plotH / 2} textAnchor="middle" fontSize="12" fill="#666" transform={`rotate(-90, 14, ${PAD.top + plotH / 2})`}>Total eggs</text>
+      </svg>
+    </div>
+  );
+}
+
+function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[]; onDayClick: (day: string) => void }) {
+  const dateSet = useMemo(() => new Set(dates), [dates]);
+
+  // Group dates by month, show months around current date
+  const current = new Date(date + 'T00:00:00');
+  const currentMonth = current.getFullYear() * 12 + current.getMonth();
+
+  // All months from first to last date (inclusive, no gaps)
+  const allMonths = useMemo(() => {
+    if (dates.length === 0) return [];
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    const [fy, fm] = first.split('-').map(Number);
+    const [ly, lm] = last.split('-').map(Number);
+    const start = fy * 12 + (fm - 1);
+    const end = ly * 12 + (lm - 1);
+    const months: number[] = [];
+    for (let m = start; m <= end; m++) months.push(m);
+    return months;
+  }, [dates]);
+
+  const calRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (calRef.current) {
+      const active = calRef.current.querySelector('.cal-day.active');
+      if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [date]);
+
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  return (
+    <div className="day-calendar" ref={calRef}>
+      {allMonths.map(monthKey => {
+        const year = Math.floor(monthKey / 12);
+        const month = monthKey % 12;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const isCurrentMonth = monthKey === currentMonth;
+
+        // Build weeks (Mon=0 ... Sun=6)
+        const weeks: (number | null)[][] = [];
+        let week: (number | null)[] = [];
+        const firstDow = (new Date(year, month, 1).getDay() + 6) % 7; // Mon=0
+        for (let i = 0; i < firstDow; i++) week.push(null);
+        for (let day = 1; day <= daysInMonth; day++) {
+          week.push(day);
+          if (week.length === 7) { weeks.push(week); week = []; }
+        }
+        if (week.length > 0) { while (week.length < 7) week.push(null); weeks.push(week); }
+
+        return (
+          <div key={monthKey} className={`cal-month${isCurrentMonth ? ' current' : ''}`}>
+            <div className="cal-month-label">{MONTH_NAMES[month]} {year}</div>
+            <div className="cal-weeks">
+              {weeks.map((w, wi) => (
+                <div key={wi} className="cal-week">
+                  {w.map((day, di) => {
+                    if (day === null) return <span key={di} className="cal-day empty" />;
+                    const d = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const hasData = dateSet.has(d);
+                    const isActive = d === date;
+                    return (
+                      <span
+                        key={di}
+                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}`}
+                        onClick={hasData ? () => onDayClick(d) : undefined}
+                      >{day}</span>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchDay(date).then(d => { setData(d); setLoading(false); });
+  }, [date]);
+
+  if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
+
+  // Find prev/next dates with data
+  const sorted = [...dates].sort();
+  const idx = sorted.indexOf(date);
+  const prevStr = idx > 0 ? sorted[idx - 1] : (idx === -1 ? sorted.filter(d => d < date).pop() : null);
+  const nextStr = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : (idx === -1 ? sorted.find(d => d > date) : null);
+
+  // Group observations and chippings by box
+  const byBox: Record<string, { obs: any[]; chips: any[] }> = {};
+  for (const obs of data.observations) {
+    const box = obs.box_name;
+    if (!byBox[box]) byBox[box] = { obs: [], chips: [] };
+    byBox[box].obs.push(obs);
+  }
+  for (const c of data.chippings) {
+    const box = c.chip_box || '?';
+    if (!byBox[box]) byBox[box] = { obs: [], chips: [] };
+    byBox[box].chips.push(c);
+  }
+  const sortedBoxes = Object.keys(byBox).sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+  });
+
+  const totalObs = data.observations.length;
+  const totalChips = data.chippings.length;
+
+  return (
+    <div className="day-page">
+      <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
+
+      {(totalObs > 0 || totalChips > 0) && (
+        <div className="day-section">
+          <h3>{formatDate(date)} — {sortedBoxes.length} boxes{totalChips > 0 ? `, ${totalChips} chipped` : ''}</h3>
+          {sortedBoxes.map(box => (
+            <div key={box} className="day-box-group">
+              <div className="day-box-heading">
+                <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>
+              </div>
+              {byBox[box].obs.map((obs: any) => (
+                <ObsCard key={obs.observation_id} obs={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} hideDate />
+              ))}
+              {byBox[box].chips.length > 0 && (
+                <div className="day-chips">
+                  <span className="muted">Chipped:</span>
+                  {byBox[box].chips.map((c: any) => (
+                    <span key={c.pit_id} className="day-chip-entry">
+                      <PenguinMini scan={c} onClick={() => onBirdClick(c.peng_num)} observationDate={date} />
+                      {c.chip_by && <span className="muted">by {c.chip_by}</span>}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {totalObs === 0 && totalChips === 0 && (
+        <p className="muted">No activity recorded on this date.</p>
+      )}
+    </div>
+  );
+}
+
+function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; day?: string } {
   const path = window.location.pathname;
   const boxMatch = path.match(/^\/box\/(.+)/);
   const birdMatch = path.match(/^\/bird\/(.+)/);
-  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin' };
+  const dayMatch = path.match(/^\/day\/(.+)/);
+  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', day: dayMatch?.[1] };
 }
 
 function App() {
@@ -1604,11 +2094,23 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
         body: JSON.stringify({ current_password: current, new_password: newPass })
       });
       const d = await r.json();
-      if (d.success) { setMsg('Password changed'); setCurrent(''); setNewPass(''); }
+      if (d.success) { setMsg('success'); setCurrent(''); setNewPass(''); }
       else setMsg(d.error || 'Failed');
     } catch { setMsg('Connection failed'); }
     setSaving(false);
   };
+
+  if (msg === 'success') {
+    return (
+      <div className="login-page" onClick={onClose}>
+        <div className="login-card" onClick={e => e.stopPropagation()}>
+          <h2>Password Changed</h2>
+          <p style={{textAlign:'center', color:'#4CAF50', fontSize:'16px', margin:'20px 0'}}>Your password has been updated.</p>
+          <button onClick={onClose}>Done</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="login-page" onClick={onClose}>
@@ -1623,7 +2125,7 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
             <input type={showNew ? 'text' : 'password'} placeholder="New password (6+ chars)" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={6} />
             <button type="button" className="toggle-pw" onClick={() => setShowNew(!showNew)}>{'\u{1F441}'}</button>
           </div>
-          {msg && <div className={msg === 'Password changed' ? 'entry-success' : 'login-error'}>{msg}</div>}
+          {msg && <div className="login-error">{msg}</div>}
           <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Change password'}</button>
         </form>
         <button className="toggle-auth" onClick={onClose}>Cancel</button>
@@ -1632,17 +2134,17 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   );
 }
 
-function CollapsibleSeason({ label, observations, onBirdClick, highlightObs, scrollToObs, token, canEdit, allPenguins }: any) {
+function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highlightObs, scrollToObs, token, canEdit, allPenguins, onDataChange }: any) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div>
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
-      {expanded && observations.map((o: any, i: number) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={onBirdClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} />)}
+      {expanded && observations.map((o: any, i: number) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
 }
 
-function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) {
+function AdminPanel({ token }: { token: string }) {
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
@@ -1650,11 +2152,16 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
   const [reimporting, setReimporting] = useState(false);
   const [sightingResult, setSightingResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [diskTest, setDiskTest] = useState<any>(null);
+  const [diskTesting, setDiskTesting] = useState(false);
+  const [serverDisk, setServerDisk] = useState<any>(null);
 
   useEffect(() => {
     fetch('/penguin-api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
+    fetch(`/penguin-api/server_stats.php?_=${Date.now()}`)
+      .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
   }, [token]);
 
   const updateUser = async (id: number, field: string, value: string) => {
@@ -1700,7 +2207,6 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
     <div className="admin-panel">
       <div className="admin-header">
         <h2>Admin</h2>
-        <button className="page-back" onClick={onClose}>&times;</button>
       </div>
 
       <div className="admin-section">
@@ -1846,6 +2352,62 @@ function AdminPanel({ token, onClose }: { token: string; onClose: () => void }) 
           </div>
         )}
       </div>
+
+      <div className="admin-section">
+        <h3>Disk Write Test</h3>
+        {serverDisk && <p className="muted">Account: {serverDisk.files_mb} MB files + {serverDisk.db_mb} MB DB = {serverDisk.used_mb} MB / {serverDisk.quota_mb} MB ({serverDisk.pct}%) · {serverDisk.observations} observations · {serverDisk.penguins} penguins</p>}
+        <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+          {[1, 10, 100, 1000, 5000].map(mb => (
+            <button key={mb} className="edit-btn" disabled={diskTesting} onClick={() => {
+              setDiskTesting(true);
+              setDiskTest({ status: 'starting', target_mb: mb });
+              let completed = false;
+              const es = new EventSource(`/penguin-api/disk_check.php?mb=${mb}&token=${token}`);
+              es.onmessage = (e) => {
+                const d = JSON.parse(e.data);
+                if (d.type === 'error') { completed = true; setDiskTest({ status: 'error', error: d.msg }); es.close(); setDiskTesting(false); }
+                else if (d.type === 'start') { setDiskTest({ status: 'writing', target_mb: d.target_mb, server: d.server }); }
+                else if (d.type === 'progress') { setDiskTest((prev: any) => ({ ...prev, status: 'writing', ...d })); }
+                else if (d.type === 'done') { completed = true; setDiskTest({ status: d.status === 'OK' ? 'done' : 'failed', ...d }); es.close(); setDiskTesting(false); }
+              };
+              es.onerror = () => { if (!completed) { setDiskTest((prev: any) => ({ ...prev, status: 'error', error: 'Connection lost — test may still be running on server' })); } es.close(); setDiskTesting(false); };
+            }}>{mb} MB</button>
+          ))}
+        </div>
+        {diskTest && (
+          <div className="obs-card" style={{marginTop:8}}>
+            {diskTest.status === 'starting' && <div className="muted">Connecting...</div>}
+            {diskTest.status === 'writing' && (
+              <>
+                <div style={{fontWeight:600}}>Writing {diskTest.target_mb} MB... {diskTest.pct || 0}%</div>
+                <div style={{background:'#e8ecef', borderRadius:4, height:8, marginTop:4}}>
+                  <div style={{background:'#2196F3', borderRadius:4, height:8, width:`${diskTest.pct || 0}%`, transition:'width 0.3s'}} />
+                </div>
+                <div className="muted" style={{marginTop:4}}>
+                  {diskTest.written_mb || 0} MB written · {diskTest.speed_mbs || 0} MB/s · Free: {diskTest.disk_free_mb ?? '?'} MB
+                </div>
+              </>
+            )}
+            {diskTest.status === 'done' && (
+              <>
+                <div style={{color:'#4CAF50', fontWeight:600}}>OK — {diskTest.wrote_mb} MB in {diskTest.total_sec}s ({diskTest.speed_mbs} MB/s)</div>
+                <div className="muted">Free before delete: {diskTest.disk_free_before_delete} MB · After: {diskTest.disk_free_after_delete} MB</div>
+              </>
+            )}
+            {diskTest.status === 'failed' && (
+              <div style={{color:'#F44336', fontWeight:600}}>FAILED: {diskTest.error}</div>
+            )}
+            {diskTest.status === 'error' && (
+              <div style={{color:'#F44336', fontWeight:600}}>Error: {diskTest.error}</div>
+            )}
+            {diskTest.server && (
+              <div className="muted" style={{marginTop:4, borderTop:'1px solid #e8ecef', paddingTop:4}}>
+                Server: {diskTest.server.disk_free_mb} MB free · DB: {diskTest.server.db_mb} MB · {diskTest.server.observations} observations
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1857,6 +2419,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [stats, setStats] = useState<any>(null);
   const [selectedBox, setSelectedBox] = useState<string|null>(initial.box || null);
   const [boxDetail, setBoxDetail] = useState<BoxDetailData|null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedObs, setDeletedObs] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedBird, setSelectedBird] = useState<string|null>(initial.bird || null);
@@ -1869,6 +2433,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [showAdmin, setShowAdmin] = useState(initial.admin || false);
+  const [showReports, setShowReports] = useState(initial.reports || false);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [datePickerCenter, setDatePickerCenter] = useState('');
+  const [selectedDay, setSelectedDay] = useState<string|null>(initial.day || null);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
 
@@ -1876,25 +2444,33 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   useEffect(() => {
     let path = '/';
     if (showAdmin) path = '/admin';
+    else if (showReports) path = '/reports';
     else if (showEntry) path = '/enter';
+    else if (selectedDay) path = `/day/${selectedDay}`;
     else if (selectedBox) path = `/box/${selectedBox}`;
     else if (selectedBird) path = `/bird/${selectedBird}`;
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry, showAdmin]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, enter, admin: adm } = parseUrl();
+      const { box, bird, enter, admin: adm, reports, day } = parseUrl();
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
       setShowAdmin(adm || false);
+      setShowReports(reports || false);
+      setSelectedDay(day || null);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const refreshStats = useCallback(() => {
+    fetchOverview().then(ov => setStats(ov));
   }, []);
 
   useEffect(() => {
@@ -1904,7 +2480,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, []);
 
   useEffect(() => {
-    if (!selectedBox) { setBoxDetail(null); setHighlightObs(null); return; }
+    if (!selectedBox) { setBoxDetail(null); setHighlightObs(null); refreshStats(); return; }
     setDetailLoading(true);
     fetchBoxDetail(selectedBox).then(d => {
       setBoxDetail(d);
@@ -2002,34 +2578,89 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
 
-  // Data entry page
-  if (showAdmin) {
+  const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter') => {
+    setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
+    setShowAdmin(section === 'admin');
+    setShowReports(section === 'reports');
+    setShowEntry(section === 'enter');
+  };
+
+  const goToDay = (day: string) => {
+    setSelectedBox(null); setSelectedBird(null);
+    setShowAdmin(false); setShowReports(false); setShowEntry(false);
+    setSelectedDay(day);
+  };
+
+  const currentSection = showAdmin ? 'admin' : showReports ? 'reports' : 'colony';
+
+  const siteNav = (
+    <nav className="site-nav">
+      <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => goTo('colony'))}>Colony</a>
+      <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => goTo('reports'))}>Reports</a>
+      {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => goTo('admin'))}>Admin</a>}
+    </nav>
+  );
+
+  const fmtSize = (mb: number) => mb >= 1024 ? `${(mb/1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+
+  const siteHeader = (
+    <header>
+      <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
+      {siteNav}
+      {serverStats && <span className="header-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</span>}
+      <span className="header-user">
+        {userName}
+        <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
+        <button className="logout-btn" onClick={onLogout}>Logout</button>
+      </span>
+    </header>
+  );
+
+  // Admin page
+  if (showAdmin && userRole === 'admin') {
     return (
       <div className="app">
-        <header>
-          <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
-          <span className="sub">Tarakohe Penguin Colony</span>
-          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
-        </header>
-        <AdminPanel token={token} onClose={() => setShowAdmin(false)} />
+        {siteHeader}
+        <AdminPanel token={token} />
         {passwordDialog}
       </div>
     );
   }
 
-  if (showEntry) {
+  if (showEntry && userRole !== 'viewer') {
     return (
       <div className="app">
-        <header>
-          <h1 className="logo clickable" onClick={() => { setShowEntry(false); }}>WildWatch</h1>
-          <span className="sub">Tarakohe Penguin Colony</span>
-          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
-          <span className="header-user">{userName}
-            <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
-            <button className="logout-btn" onClick={onLogout}>Logout</button>
-          </span>
-        </header>
-        <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => setShowEntry(false)} />
+        {siteHeader}
+        <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => goTo('colony')} />
+        {passwordDialog}
+      </div>
+    );
+  }
+
+  // Reports page
+  if (showReports) {
+    return (
+      <div className="app">
+        {siteHeader}
+        <div className="reports-page">
+          <EggArrivalChart />
+        </div>
+        {passwordDialog}
+      </div>
+    );
+  }
+
+  // Daily view - everything that happened on a date
+  if (selectedDay) {
+    return (
+      <div className="app">
+        {siteHeader}
+        <div className="colony-toolbar">
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        </div>
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box) => { setSelectedDay(null); setSelectedBox(box); }} onBirdClick={openBird} onDayClick={goToDay} />
         {passwordDialog}
       </div>
     );
@@ -2039,28 +2670,21 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   if (selectedBird && !selectedBox) {
     return (
       <div className="app">
-        <header>
-          <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
-          <span className="sub">Tarakohe Penguin Colony</span>
-          {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
-          <span className="header-nav">
-            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-            <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-          </span>
-        </header>
+        {siteHeader}
+        <div className="colony-toolbar">
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        </div>
         <div className="bird-page">
           <div className="page-header">
-            <button className="page-back" onClick={() => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } }}>&larr; {previousBox ? `Box ${previousBox}` : 'Overview'}</button>
-            <div className="bird-nav">
-              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) <= 1} onClick={() => setSelectedBird(String(parseInt(selectedBird!) - 1))}>&lsaquo; Prev</button>
-              <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { setSelectedBird(num); setPenguinSearch(''); }} />
-              <button className="bird-nav-btn" disabled={!selectedBird || parseInt(selectedBird) >= allPenguins.length} onClick={() => setSelectedBird(String(parseInt(selectedBird!) + 1))}>Next &rsaquo;</button>
-            </div>
+            <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
           </div>
           {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
-              onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }} />
+              onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
+              onDayClick={goToDay} />
           ) : <p className="muted">Bird not found</p>}
         </div>
       </div>
@@ -2069,31 +2693,23 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   return (
     <div className="app">
-      <header>
-        <h1 className="logo clickable" onClick={() => { setSelectedBox(null); setSelectedBird(null); setShowAdmin(false); setShowEntry(false); }}>WildWatch</h1>
-        <span className="sub">Tarakohe Penguin Colony</span>
-        {stats && <span className="hstats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season{serverStats ? ` · disk ${serverStats.pct}%` : ''}</span>}
-        <span className="header-nav">
-          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-        </span>
-        <span className="header-user">
-          <button className="logout-btn" onClick={() => setShowEntry(true)}>Enter data</button>
-          {userRole === 'admin' && <button className="logout-btn" onClick={() => setShowAdmin(!showAdmin)}>Admin</button>}
-          {userName}
-          <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
-          <button className="logout-btn" onClick={onLogout}>Logout</button>
-        </span>
-      </header>
+      {siteHeader}
+      <div className="colony-toolbar">
+        <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+        <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
+        {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
+      </div>
+      {datePickerVisible && datePickerCenter && (
+        <DayCalendar date={datePickerCenter} dates={[...(stats?.observation_dates || [])].sort()} onDayClick={goToDay} />
+      )}
 
       {!selectedBox && (
         <>
           <div className="top-row">
             <ColonyMap boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} />
             <StatsPanel boxTags={boxTags} selectedBox={selectedBox} stats={stats} />
-          </div>
-          <div className="search-section">
-            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
           </div>
         </>
       )}
@@ -2111,7 +2727,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <div className="detail-full">
             <div className="page-header">
               <h2>Box {selectedBox}</h2>
-              <button className="page-back" onClick={() => { setScrollToBox(selectedBox); setSelectedBox(null); }}>&larr; Overview</button>
+              <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
             </div>
             {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
@@ -2132,7 +2748,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-obs">
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
                 {(() => {
-                  const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here);
+                  const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
                   return chipped.length > 0 && (
                   <div className="chipped-here">
                     <div className="muted">Chipped in this box: {chipped.length}</div>
@@ -2162,12 +2778,36 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 }
                 const sortedPrev = Array.from(prevSeasons.entries()).sort((a, b) => b[0].localeCompare(a[0]));
 
+                const deletedCount = (boxDetail as any)?.deleted_count || 0;
                 return (<>
-                  <h3 className="season-heading">{thisLabel} ({thisSeason.length})</h3>
+                  <h3 className="season-heading">{thisLabel} ({thisSeason.length})
+                    {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
+                      if (!showDeleted && deletedObs.length === 0) {
+                        const r = await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`);
+                        const d = await r.json();
+                        setDeletedObs(d.deleted || []);
+                      }
+                      setShowDeleted(!showDeleted);
+                    }}> · {deletedCount} deleted</span>}
+                  </h3>
                   {thisSeason.length === 0 && <p className="muted">No observations this season</p>}
-                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />)}
+                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />)}
+                  {showDeleted && deletedObs.length > 0 && (
+                    <div className="deleted-section">
+                      {deletedObs.map((o: any) => (
+                        <div key={o.observation_id} className="obs-card deleted-obs">
+                          <div className="obs-top">
+                            <span><s>{formatDate(o.observation_time_utc)}</s></span>
+                            <span className="muted">{o.adults}A {o.eggs}E {o.chicks}C</span>
+                            <span className="muted">deleted {o.deleted_at ? formatDate(o.deleted_at) : ''} by {o.deleted_by_name || '?'}</span>
+                          </div>
+                          {o.notes && <div className="obs-notes"><s>{o.notes}</s></div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {sortedPrev.map(([label, obs]) => (
-                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
+                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={goToDay} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
                 </>);
               })()}
@@ -2177,6 +2817,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
+                  onDayClick={goToDay}
                   onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }} />
               ) : birdLoading ? <p className="muted">Loading bird...</p> : <p className="muted">Select a bird</p>}
             </div>
@@ -2194,11 +2835,17 @@ function parseDate(d: string): Date {
   // MySQL "YYYY-MM-DD HH:MM:SS" → ISO format for reliable cross-browser parsing
   return new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z');
 }
-function fmtDateTime(d:string) {
+function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
+function fmtDateTime(d:string) { return formatDate(d); }
 function fmtDateNZ(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'Pacific/Auckland'});
+}
+/** Returns YYYY-MM-DD in NZ timezone for a datetime string */
+function toNzDateStr(d: string): string {
+  const nz = parseDate(d).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); // en-CA gives YYYY-MM-DD
+  return nz;
 }
 
 export default App;

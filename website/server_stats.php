@@ -39,12 +39,15 @@ if ($memInfo && preg_match('/MemTotal:\s+(\d+)/', $memInfo, $mt) && preg_match('
     $ramUsedMb = round(($mt[1] - $ma[1]) / 1024);
 }
 
+$diskFreeGb = round(@disk_free_space(__DIR__) / 1073741824, 1);
+
 echo json_encode([
     'db_mb' => $dbMb,
     'files_mb' => $fileMb,
     'used_mb' => $usedMb,
     'quota_mb' => $quotaMb,
     'pct' => round($usedMb / $quotaMb * 100, 1),
+    'disk_free_gb' => $diskFreeGb,
     'error_log_mb' => $errorLogMb,
     'cpu_pct' => $cpuPct,
     'ram_used_mb' => $ramUsedMb,

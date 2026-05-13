@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { BoxTag } from '../types';
 
 const STATUS_COLORS: Record<string,string> = {
-  UNL:'#FDD835', POT:'#FF9800', CON:'#E53935', BR:'#4CAF50',
-  ABN:'#9E9E9E', DCM:'#795548', NO:'#E0E0E0', '':'#F5F5F5',
+  NO:'#E0E0E0', UNL:'#FFF9C4', POT:'#FFF176', CON:'#FFD54F',
+  BR:'#66BB6A', I:'#A5D6A7', G:'#4CAF50', PG:'#2E7D32',
+  MOULT:'#42A5F5', ABN:'#F44336', DCM:'#795548', '':'#F5F5F5',
 };
 
 interface BoxInfo { s: string; a: number; e: number; c: number; }
@@ -49,15 +50,17 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
           const adults = info?.a || 0;
           const eggs = info?.e || 0;
           const chicks = info?.c || 0;
-          const darkText = status === 'CON' || status === 'DCM';
+          const lightBg = ['NO','UNL','POT','CON','I','','BR'].includes(status);
+          const darkText = !lightBg;
 
           return (
-            <div
+            <a
               key={boxId}
               data-box={boxId}
               className={`box-card ${boxId === selectedBox ? 'selected' : ''} ${boxId === flashBox ? 'flash-highlight' : ''}`}
               style={{ backgroundColor: bg, color: darkText ? '#fff' : undefined }}
-              onClick={() => onBoxSelect(boxId)}
+              href={`/box/${boxId}`}
+              onClick={e => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); onBoxSelect(boxId); }}
             >
               <div className="box-number">{boxId}</div>
               {(adults > 0 || eggs > 0 || chicks > 0) && (
@@ -67,7 +70,7 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
                   {'\uD83D\uDC23'.repeat(Math.min(chicks, 4))}
                 </div>
               )}
-            </div>
+            </a>
           );
         })}
       </div>

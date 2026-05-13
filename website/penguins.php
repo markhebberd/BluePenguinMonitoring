@@ -7,6 +7,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $pdo = getDbConnection();
 
+// Count-only endpoint for validation
+if (isset($_GET['count'])) {
+    $stmt = $pdo->query("SELECT COUNT(*) as c FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1");
+    echo json_encode(['count' => (int)$stmt->fetch()['c']]);
+    exit;
+}
+
 $chipId = $_GET['chip_id'] ?? null;
 
 if ($chipId) {

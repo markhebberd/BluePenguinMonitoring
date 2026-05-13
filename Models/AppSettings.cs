@@ -25,10 +25,10 @@ namespace PenguinMonitor.Models
         {
             this.filesDir = filesDir;
         }
-        private string allBoxSetsString;
+        private string allBoxSetsString = "{1-150,AA-AC}";
         public string AllBoxSetsString
         {
-            get => allBoxSetsString;
+            get => string.IsNullOrWhiteSpace(allBoxSetsString) ? "{1-150,AA-AC}" : allBoxSetsString;
             set
             {
                 if (allBoxSetsString != value)
@@ -103,7 +103,7 @@ namespace PenguinMonitor.Models
                 }
             }
         }
-        private bool showAllBoxesInMultiBoxView;
+        private bool showAllBoxesInMultiBoxView = true;
         public bool ShowAllBoxesInMultiBoxView
         {
             get => showAllBoxesInMultiBoxView;
@@ -572,7 +572,7 @@ namespace PenguinMonitor.Models
         private string boxTagsApiUrl = Secrets.BoxTagsApiUrl;
         public string BoxTagsApiUrl
         {
-            get => boxTagsApiUrl;
+            get => string.IsNullOrWhiteSpace(boxTagsApiUrl) ? Secrets.BoxTagsApiUrl : boxTagsApiUrl;
             set
             {
                 if (boxTagsApiUrl != value)
@@ -586,7 +586,7 @@ namespace PenguinMonitor.Models
         private string boxTagsApiKey = Secrets.BoxTagsApiKey;
         public string BoxTagsApiKey
         {
-            get => boxTagsApiKey;
+            get => string.IsNullOrWhiteSpace(boxTagsApiKey) ? Secrets.BoxTagsApiKey : boxTagsApiKey;
             set
             {
                 if (boxTagsApiKey != value)

@@ -100,11 +100,11 @@ function setHeaders() {
  * Fetch CSV from Google Sheets using curl (file_get_contents fails on this host)
  */
 function fetchGoogleSheet($gid) {
-    $url = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/gviz/tq?tqx=out:csv&gid=$gid";
+    $url = "https://docs.google.com/spreadsheets/d/1A2j56iz0_VNHiWNJORAzGDqTbZsEd76j-YI_gQZsDEE/export?format=csv&gid=$gid";
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
     $csv = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -142,18 +142,17 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     // Co-scanned birds per observation (penguin queries only — box view has scans inline)
     $coScans = [];
     if ($pengNum) {
-    $obsIds = array_unique(array_column($scans, 'observation_id'));
+    $obsIds = array_values(array_unique(array_column($scans, 'observation_id')));
     if (!empty($obsIds)) {
         $ph = implode(',', array_fill(0, count($obsIds), '?'));
         $coStmt = $pdo->prepare("SELECT ps.observation_id, pc.peng_num, p.sex, p.chipped_as_adult, pc.pit_id, pc.chip_date, p.chick_size_code
-            FROM penguin_scans ps
+            FROM penguin_scans ps USE INDEX (idx_observation)
             JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
             JOIN penguins p ON pc.peng_num = p.peng_num
-            WHERE ps.observation_id IN ($ph)" . ($pengNum ? " AND pc.peng_num != ?" : "") . "
-            ORDER BY pc.peng_num");
+            WHERE ps.observation_id IN ($ph)" . ($pengNum ? " AND pc.peng_num != ?" : ""));
         $params = $obsIds;
         if ($pengNum) $params[] = $pengNum;
-        $coStmt->execute($params);
+        $coStmt->execute(array_values($params));
         foreach ($coStmt->fetchAll() as $row) {
             $coScans[$row['observation_id']][] = $row;
         }
