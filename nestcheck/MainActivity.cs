@@ -2339,7 +2339,7 @@ namespace PenguinMonitor
 
             _setTimeActiveSessionCheckBox = new CheckBox(this)
             {
-                Text = "Set time for monitor: " + _appSettings.ActiveSessionLocalTimeStamp.ToString("HH:mm, d MMM yyyy"),
+                Text = "Set time for monitor: " + ToNzTime(_appSettings.ActiveSessionLocalTimeStamp).ToString("HH:mm, d MMM yyyy"),
                 Checked = _appSettings.ActiveSessionTimeStampActive
             };
             _setTimeActiveSessionCheckBox.SetTextColor(Color.Black);
@@ -3415,7 +3415,7 @@ namespace PenguinMonitor
             {
                 DateTime newEntryTime;
                 if (_appSettings.ActiveSessionTimeStampActive)
-                    newEntryTime = _appSettings.ActiveSessionLocalTimeStamp.ToUniversalTime();
+                    newEntryTime = TimeZoneInfo.ConvertTimeToUtc(_appSettings.ActiveSessionLocalTimeStamp, NzTimeZone);
                 else
                     newEntryTime = DateTime.UtcNow;
 
@@ -3993,7 +3993,7 @@ namespace PenguinMonitor
                 var scanRecord = new ScanRecord
                 {
                     BirdId = shortId,
-                    Timestamp = (isManualEntry && _appSettings.ActiveSessionTimeStampActive) ? _appSettings.ActiveSessionLocalTimeStamp.ToUniversalTime() : DateTime.UtcNow,
+                    Timestamp = (isManualEntry && _appSettings.ActiveSessionTimeStampActive) ? TimeZoneInfo.ConvertTimeToUtc(_appSettings.ActiveSessionLocalTimeStamp, NzTimeZone) : DateTime.UtcNow,
                     Latitude = _currentLocation?.Latitude ?? 0,
                     Longitude = _currentLocation?.Longitude ?? 0,
                     Accuracy = _currentLocation?.Accuracy ?? -1

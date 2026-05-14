@@ -2144,7 +2144,7 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   );
 }
 
-function AdminPanel({ token }: { token: string }) {
+function AdminPanel({ token, observationDates }: { token: string; observationDates?: string[] }) {
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
@@ -2155,6 +2155,15 @@ function AdminPanel({ token }: { token: string }) {
   const [diskTest, setDiskTest] = useState<any>(null);
   const [diskTesting, setDiskTesting] = useState(false);
   const [serverDisk, setServerDisk] = useState<any>(null);
+  const [datePreview, setDatePreview] = useState<any>(null);
+
+  const previewDate = async (date: string) => {
+    setDatePreview({ loading: true, date });
+    const r = await fetch(`/penguin-api/admin.php?action=preview_date&date=${date}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    if (d.error) { setDatePreview(null); alert(d.error); return; }
+    setDatePreview(d);
+  };
 
   useEffect(() => {
     fetch('/penguin-api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -2234,44 +2243,99 @@ function AdminPanel({ token }: { token: string }) {
       </div>
 
       <div className="admin-section">
+        <h3>Delete Observations by Date</h3>
+        <p className="muted">Preview and delete all observations from a specific date, then re-sync from server</p>
+        <DateSearch dates={observationDates || []} onDayClick={previewDate} />
+        {datePreview?.loading && <p className="muted" style={{marginTop:8}}>Loading {formatDate(datePreview.date)}...</p>}
+        {datePreview && !datePreview.loading && (
+          <div className="obs-card" style={{marginTop:8}}>
+            <div style={{fontWeight:600, marginBottom:6}}>{formatDate(datePreview.date)}: {datePreview.totals.boxes} observations</div>
+            <div className="muted" style={{marginBottom:6}}>
+              🐧 {datePreview.totals.adults} adults · 🥚 {datePreview.totals.eggs} eggs · 🐣 {datePreview.totals.chicks} chicks · 📡 {datePreview.totals.scans} scans
+              {datePreview.totals.without_breeding > 0 && <span style={{color:'#F44336'}}> · ⚠️ {datePreview.totals.without_breeding} missing breeding status</span>}
+            </div>
+            <div style={{maxHeight:200, overflowY:'auto', fontSize:12}}>
+              {datePreview.observations.map((o: any) => (
+                <div key={o.observation_id} style={{padding:'2px 0', borderBottom:'1px solid #f0f0f0'}}>
+                  Box {o.box_name}: {o.adults}A {o.eggs}E {o.chicks}C {o.scan_count > 0 ? `📡${o.scan_count}` : ''} {o.breeding_status || <span style={{color:'#F44336'}}>no status</span>} <span className="muted">{o.monitor_filename}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex', gap:6, marginTop:8}}>
+              <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={() => {
+                const reason = prompt(`Delete all ${datePreview.totals.boxes} observations from ${formatDate(datePreview.date)}?\n\nReason (optional):`);
+                if (reason === null) return;
+                fetch('/penguin-api/admin.php?action=delete_date', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                  body: JSON.stringify({ date: datePreview.date, _reason: reason })
+                }).then(r => r.json()).then(d => {
+                  if (d.success) { setDatePreview(null); alert(`Deleted ${d.deleted} observations. Run Sync to re-import.`); }
+                  else alert(d.error || 'Failed');
+                });
+              }}>Delete {datePreview.totals.boxes} observations</button>
+              <button className="edit-btn" onClick={() => setDatePreview(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="admin-section">
         <h3>Sync Monitors (TCP Server)</h3>
-        <p className="muted">Pull latest from old TCP server (210.54.37.120)</p>
-        <button className="edit-btn" onClick={() => doSync('trial_sync')} disabled={syncing}>
-          {syncing ? 'Working...' : 'Trial'}
-        </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations?')) doSync('wipe_monitors'); }} disabled={syncing} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {syncing ? 'Working...' : 'Wipe'}
-        </button>
-        <button className="edit-btn done-btn" onClick={() => doSync('sync_monitors')} disabled={syncing} style={{marginLeft:6}}>
-          {syncing ? 'Working...' : 'Import'}
-        </button>
+        <p className="muted">Pull from TCP server (210.54.37.120). Query first, then import individual monitors.</p>
+        <div style={{display:'flex', gap:6}}>
+          <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations?')) doSync('wipe_monitors'); }} disabled={syncing} style={{background:'#F44336', color:'#fff'}}>
+            Wipe
+          </button>
+          <button className="edit-btn" onClick={async () => {
+            setSyncing(true); setSyncResult(null);
+            try {
+              const r = await fetch('/penguin-api/admin.php?action=query_server', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+              setSyncResult(await r.json());
+            } catch (e: any) { setSyncResult({ error: e.message }); }
+            setSyncing(false);
+          }} disabled={syncing}>
+            {syncing ? 'Querying...' : 'Query Server'}
+          </button>
+        </div>
         {syncResult && (
           <div style={{marginTop:8}}>
             {syncResult.error ? (
               <div style={{color:'#F44336'}}>{syncResult.error}</div>
             ) : (
               <>
-                <div className="obs-card" style={{marginBottom:8, borderLeftColor: syncResult.dry_run ? '#FF9800' : '#4CAF50'}}>
-                  {syncResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
-                  <b>Summary:</b> {syncResult.totals?.imported || 0} would import, {syncResult.totals?.already_imported || 0} already imported, {syncResult.totals?.deleted || 0} deleted, {syncResult.totals?.new_obs || 0} new obs, {syncResult.totals?.scans || 0} scans
-                </div>
+                <div className="muted" style={{marginBottom:6}}>{syncResult.monitors?.length || 0} monitors on server</div>
                 {(syncResult.monitors || []).map((m: any, i: number) => (
-                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'already_imported' ? 0.5 : 1}}>
-                    <div className="obs-top">
+                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'exists' ? 0.6 : m.status === 'deleted' ? 0.3 : 1}}>
+                    <div className="obs-top" style={{flexWrap:'wrap', gap:4}}>
                       <b>{m.filename}</b>
-                      <span className={`badge ${m.status === 'already_imported' || m.status === 'empty' ? 'bordered' : ''}`} style={{
-                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : m.status === 'would_import' ? '#FF9800' : '#E0E0E0',
-                        color: m.status === 'already_imported' || m.status === 'empty' ? '#333' : '#fff'
-                      }}>{m.status === 'already_imported' ? 'exists' : m.status === 'would_import' ? 'new' : m.status}</span>
+                      <span className="badge" style={{
+                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : m.status === 'new' ? '#FF9800' : '#E0E0E0',
+                        color: m.status === 'exists' || m.status === 'empty' ? '#333' : '#fff'
+                      }}>{m.status === 'new' ? `${m.new} new` : m.status}</span>
+                      {(m.status === 'new' || m.status === 'exists') && m.status !== 'imported' && (
+                        <button className="edit-btn done-btn" style={{padding:'1px 8px', fontSize:11}} onClick={async () => {
+                          const r = await fetch('/penguin-api/admin.php?action=import_monitor', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ index: m.index })
+                          });
+                          const d = await r.json();
+                          if (d.success) {
+                            setSyncResult((prev: any) => ({...prev, monitors: prev.monitors.map((mon: any) => mon.index === m.index ? {...mon, status: 'imported', new: d.imported} : mon)}));
+                          } else { alert(d.error || 'Import failed'); }
+                        }}>Import</button>
+                      )}
                     </div>
                     <div className="obs-nums" style={{fontSize:11}}>
-                      <span>{m.date ? fmtDateTime(m.date) : ''}</span>
-                      <span>{m.boxes_imported || 0}/{m.boxes} boxes</span>
-                      {m.scans > 0 && <span>{m.scans} penguins</span>}
-                      {m.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(m.adults, 3))}{m.adults}</span>}
-                      {m.eggs > 0 && <span>{'\uD83E\uDD5A'}{m.eggs}</span>}
-                      {m.chicks > 0 && <span>{'\uD83D\uDC23'}{m.chicks}</span>}
+                      <span>{m.date ? formatDate(m.date) : ''}</span>
+                      <span>{m.boxes} boxes ({m.new || 0} new, {m.exists || 0} exist)</span>
+                      {m.scans > 0 && <span>📡{m.scans}</span>}
+                      {m.adults > 0 && <span>🐧{m.adults}</span>}
+                      {m.eggs > 0 && <span>🥚{m.eggs}</span>}
+                      {m.chicks > 0 && <span>🐣{m.chicks}</span>}
                     </div>
+                    {m.breeding_statuses && Object.keys(m.breeding_statuses).length > 0 && (
+                      <div className="muted" style={{fontSize:10}}>{Object.entries(m.breeding_statuses).map(([k, v]) => `${k}:${v}`).join(' · ')}</div>
+                    )}
                   </div>
                 ))}
               </>
@@ -2621,7 +2685,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return (
       <div className="app">
         {siteHeader}
-        <AdminPanel token={token} />
+        <AdminPanel token={token} observationDates={stats?.observation_dates} />
         {passwordDialog}
       </div>
     );
@@ -2779,6 +2843,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 const sortedPrev = Array.from(prevSeasons.entries()).sort((a, b) => b[0].localeCompare(a[0]));
 
                 const deletedCount = (boxDetail as any)?.deleted_count || 0;
+
+                // Merge deleted into date-sorted list when showing
+                const mergedObs = showDeleted && deletedObs.length > 0
+                  ? [...thisSeason.map(o => ({...o, _deleted: false})), ...deletedObs.map(o => ({...o, _deleted: true}))]
+                    .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
+                  : thisSeason;
+
                 return (<>
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
@@ -2788,24 +2859,27 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                         setDeletedObs(d.deleted || []);
                       }
                       setShowDeleted(!showDeleted);
-                    }}> · {deletedCount} deleted</span>}
+                    }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
                   </h3>
-                  {thisSeason.length === 0 && <p className="muted">No observations this season</p>}
-                  {thisSeason.map((obs,i) => <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />)}
-                  {showDeleted && deletedObs.length > 0 && (
-                    <div className="deleted-section">
-                      {deletedObs.map((o: any) => (
-                        <div key={o.observation_id} className="obs-card deleted-obs">
-                          <div className="obs-top">
-                            <span><s>{formatDate(o.observation_time_utc)}</s></span>
-                            <span className="muted">{o.adults}A {o.eggs}E {o.chicks}C</span>
-                            <span className="muted">deleted {o.deleted_at ? formatDate(o.deleted_at) : ''} by {o.deleted_by_name || '?'}</span>
-                          </div>
-                          {o.notes && <div className="obs-notes"><s>{o.notes}</s></div>}
-                        </div>
-                      ))}
+                  {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
+                  {mergedObs.map((obs: any, i: number) => obs._deleted ? (
+                    <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
+                      <div className="obs-top">
+                        <span><s><DateLink date={obs.observation_time_utc} onDayClick={goToDay} /></s></span>
+                        <span className="muted">deleted {obs.deleted_at ? formatDate(obs.deleted_at) : ''} by {obs.deleted_by_name || '?'}{obs.delete_reason ? ` — ${obs.delete_reason}` : ''}</span>
+                      </div>
+                      <div className="obs-nums">
+                        {obs.adults === 0 && obs.eggs === 0 && obs.chicks === 0 && <span className="muted">Empty</span>}
+                        {obs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(obs.adults, 6))}</span>}
+                        {obs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(obs.eggs, 6))}</span>}
+                        {obs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(obs.chicks, 6))}</span>}
+                        {obs.breeding_status && <span className="badge bordered" style={{background:'#E0E0E0', color:'#333'}}>{obs.breeding_status}</span>}
+                      </div>
+                      {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
-                  )}
+                  ) : (
+                    <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
+                  ))}
                   {sortedPrev.map(([label, obs]) => (
                     <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={goToDay} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}

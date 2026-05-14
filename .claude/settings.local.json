@@ -43,7 +43,10 @@
       "Bash(chmod +x /home/mark/src/PenguinMonitor/deploy-web.sh)",
       "Bash(/home/mark/src/PenguinMonitor/deploy-web.sh)",
       "Bash(ls /home/mark/Downloads/wa0009* /home/mark/Downloads/WA0009*)",
-      "Bash(ls /home/mark/src/PenguinMonitor/website/wildwatch/.eslintrc* /home/mark/src/PenguinMonitor/website/wildwatch/eslint.config*)"
+      "Bash(ls /home/mark/src/PenguinMonitor/website/wildwatch/.eslintrc* /home/mark/src/PenguinMonitor/website/wildwatch/eslint.config*)",
+      "Bash(gzip -c /tmp/wildwatch_full_backup.sql)",
+      "Bash(ls:*)",
+      "Bash(git mv:*)"
     ]
   }
 }
