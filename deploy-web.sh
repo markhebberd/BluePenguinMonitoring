@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/website/wildwatch"
+cd "$(dirname "$0")/wildwatch_web/wildwatch"
 
 # Lint: check for unstyled <a> tags
 echo "Checking for unstyled links..."
@@ -44,7 +44,7 @@ done
 # Deploy PHP
 cd ../..
 echo "Deploying PHP..."
-for f in website/*.php; do
+for f in wildwatch_web/*.php; do
     [ -f "$f" ] && upload "$f" /public_html/penguin-api
 done
 

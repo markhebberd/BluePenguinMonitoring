@@ -3,5 +3,5 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/wildwatch/public_html/penguin-api
     - /bin/mkdir -p $DEPLOYPATH
-    - /bin/cp website/*.php $DEPLOYPATH/
-    - /bin/cp website/*.sql $DEPLOYPATH/
+    - /bin/cp wildwatch_web/*.php $DEPLOYPATH/
+    - /bin/cp wildwatch_web/*.sql $DEPLOYPATH/
