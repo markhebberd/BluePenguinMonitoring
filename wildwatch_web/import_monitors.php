@@ -93,10 +93,17 @@ foreach ($monitors as $mi => $monitor) {
     }
 }
 
-echo json_encode([
+$result = [
     'observations_imported' => $imported,
     'scans_created' => $scansCreated,
     'scans_skipped_unknown' => $scansSkipped,
     'box_tags_skipped' => $boxTagsSkipped,
     'unknown_penguins' => $unknownPenguins,
-], JSON_PRETTY_PRINT);
+];
+
+if ($imported > 0 || $scansCreated > 0) {
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', 'bulk', 'INSERT', 0, ?)")
+        ->execute([json_encode(['action'=>'import_monitors', 'observations'=>$imported, 'scans'=>$scansCreated, 'source'=>'import_monitors.php'])]);
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT);

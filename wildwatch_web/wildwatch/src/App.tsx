@@ -1,5 +1,6 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchBoxDetail, fetchOverview, fetchBirdDetail, fetchAllPenguins, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchDay, fetchReport } from './api/boxtags';
+import React, { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchDay, fetchReport } from './api/boxtags';
+import { syncDatabase, queryBoxDetail, queryBirdDetail, queryAllPenguins, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, getObservationDates, triggerSync, startPolling, stopPolling } from './api/localdb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -87,7 +88,7 @@ const STATUS_COLORS: Record<string,string> = {
   PG:'#2E7D32',       // darkest green - post guard
   MOULT:'#42A5F5',    // blue - moulting
   ABN:'#F44336',      // red - alert
-  DCM:'#795548',      // brown
+  DCM:'#BCAAA4',      // light brown
   '':'#F5F5F5',
 };
 
@@ -361,9 +362,77 @@ function navClick(e: React.MouseEvent, action: () => void) {
   action();
 }
 
+function useDateTooltip() {
+  const [tip, setTip] = useState<{ date: string; x: number; y: number } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const show = useCallback((date: string, e: React.MouseEvent) => {
+    clearTimeout(timerRef.current);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    timerRef.current = setTimeout(() => setTip({ date, x: rect.left, y: rect.bottom + 4 }), 350);
+  }, []);
+  const hide = useCallback(() => { clearTimeout(timerRef.current); setTip(null); }, []);
+  return { tip, show, hide };
+}
+
+const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any> }>({ show: () => {}, hide: () => {}, statsCache: new Map() });
+
+function computeDateStats(date: string) {
+  const day = queryDay(date);
+  const obs = day.observations || [];
+  const boxes = new Set(obs.map((o: any) => o.box_name));
+  const totalAdults = obs.reduce((s: number, o: any) => s + (o.adults || 0), 0);
+  const totalEggs = obs.reduce((s: number, o: any) => s + (o.eggs || 0), 0);
+  const totalChicks = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
+  const allScans = obs.flatMap((o: any) => o.scans || []);
+  const uniquePenguins = new Set(allScans.filter((s: any) => s.peng_num).map((s: any) => s.peng_num));
+  const chippings = day.chippings || [];
+  const nameCounts: Record<string, number> = {};
+  for (const o of obs) { if (o.monitor_filename) nameCounts[o.monitor_filename] = (nameCounts[o.monitor_filename] || 0) + 1; }
+  const topName = Object.entries(nameCounts).sort((a, b) => b[1] - a[1])[0];
+  const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
+  const allLocs = queryAllLocations();
+  const dcmBoxes = getDcmBoxes(date);
+  const requiredBoxes = allLocs.filter(l => !dcmBoxes.has(l.location_name)).map(l => l.location_name);
+  const isFullMonitor = requiredBoxes.length > 0 && requiredBoxes.every(b => boxes.has(b));
+  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, totalLocations: allLocs.length };
+}
+
+function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
+  const multiObs = stats.obs > stats.boxes;
+  return (<>
+    {showDate && date && <b>{formatDate(date)}</b>}
+    {stats.isFullMonitor
+      ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
+      : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
+    {multiObs && <span>, {stats.obs} obs</span>}
+    {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
+    {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}
+    {stats.chicks > 0 && <span> {'\uD83D\uDC23'}{stats.chicks}</span>}
+    {stats.penguins > 0 && <span> {stats.penguins} scanned</span>}
+    {stats.chipped > 0 && <span> {stats.chipped} chipped</span>}
+    {stats.label && <span className="muted"> {stats.label}</span>}
+  </>);
+}
+
+function DateTooltipPortal({ tip, statsCache }: { tip: { date: string; x: number; y: number } | null; statsCache: Map<string, any> }) {
+  if (!tip) return null;
+  const stats = statsCache.get(tip.date) || computeDateStats(tip.date);
+  if (!stats) return null;
+  const left = Math.min(tip.x, window.innerWidth - 260);
+  const above = tip.y + 120 > window.innerHeight;
+  const top = above ? tip.y - 128 : tip.y;
+  return (
+    <div className="date-tooltip" style={{ left, top }}>
+      <div><DateStatsLine stats={stats} showDate date={tip.date} /></div>
+    </div>
+  );
+}
+
 function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: string) => void }) {
   const day = date.length > 10 ? toNzDateStr(date) : date;
-  return <a className="date-link" href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}>{formatDate(date)}</a>;
+  const { show, hide } = useContext(DateTooltipCtx);
+  return <a className="date-link" href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
+    onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}</a>;
 }
 
 function PenguinMini({ scan, onClick, observationDate, navigateDirectly }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean }) {
@@ -377,11 +446,13 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly }: { sca
   const unprovenAdult = wasChippedAsChick && !isChickNow && !sex && !observationDate;
   const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
   const grayCls = unprovenAdult ? 'unproven' : '';
-  const sizeCode = scan.chick_size_code || '';
+  // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
+  const sc = scan.chick_size_code || '';
+  const sizeLabel = sc ? (sex ? sc + sex.charAt(0) : (scan.hasReturned ? sc + 'U' : sc)) : '';
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
-      {num}{num && icon ? ' ' : ''}{icon && <span className="sex-icon">{icon}</span>}{sizeCode ? ` ${sizeCode} ` : (num || icon) && chip ? ' ' : ''}{chip}
+      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{sizeLabel ? ` ${sizeLabel} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );
 }
@@ -445,17 +516,17 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
     }
   }
 
-  // Merge allPenguinsInBox (includes chipped birds not in scans)
+  // Merge allPenguinsInBox — only add birds chipped HERE to the chipping season
+  // Birds chipped elsewhere will already appear from their scan data in the correct season
   for (const p of (allPenguinsInBox || [])) {
-    if (!p.chip_date || !p.pit_id) continue;
+    if (!p.chip_date || !p.pit_id || !p.is_chipped_here) continue;
     const chipDate = parseDate(p.chip_date);
     const label = getSeasonLabel(chipDate);
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
     const key = p.pit_id.slice(-8);
     if (!birdMap.has(key)) {
-      const count = p.scan_count || (p.is_chipped_here ? 1 : 0);
-      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: count });
+      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: p.scan_count || 1 });
     }
   }
 
@@ -514,6 +585,18 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return true;
         });
 
+        // For season context: a bird is a chick if chipped as chick during this season
+        const seasonYear = parseInt(label);
+        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
+        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+        const seasonObsDate = (b: any) => {
+          if (!b.chipped_as_adult && b.chip_date) {
+            const cd = new Date(b.chip_date);
+            if (cd >= seasonStart && cd < seasonEnd) return b.chip_date; // chipped as chick this season → show as chick
+          }
+          return undefined;
+        };
+
         return (
           <div key={label} className="season-birds">
             <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
@@ -522,13 +605,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
                   {chicks.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={b.lastSeen} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
@@ -536,7 +619,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
               )}
               {others.map(b => (
                 <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                   <span className="scan-count">{b.scanCount}x</span>
                 </span>
               ))}
@@ -735,8 +818,8 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit }: {
   if (type === 'select') {
     return (
       <select ref={ref as any} className="ef-input" value={draft} disabled={saving}
-        onChange={e => { setDraft(e.target.value); }}
-        onBlur={save} onKeyDown={e => { if (e.key === 'Escape') cancel(); }}>
+        onChange={async e => { const v = e.target.value; setDraft(v); setSaving(true); const val = v || null; await onSave(val); setSaving(false); setEditing(false); setSaved(true); setTimeout(() => setSaved(false), 2000); }}
+        onKeyDown={e => { if (e.key === 'Escape') cancel(); }}>
         {(options || []).map(o => <option key={o} value={o}>{o || '(none)'}</option>)}
       </select>
     );
@@ -775,6 +858,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                   <span className={`history-action ${e.action.toLowerCase()}`}>{e.action}</span>
                   <span className="muted">{e.observer_name}</span>
                   <span className="muted">{parseDate(e.change_timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'})}</span>
+                  {e.change_reason && <span className="muted" style={{fontStyle:'italic'}}>"{e.change_reason}"</span>}
                 </div>
                 {e.action === 'UPDATE' && (
                   <div className="history-fields">
@@ -804,7 +888,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, onNavigateToBird, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean }) {
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, onNavigateToBird, token, canEdit, penguinList }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean; penguinList?: string[] }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
@@ -819,6 +903,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showBio, setShowBio] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (key: string) => setExpandedSections(s => ({...s, [key]: !s[key]}));
   useEffect(() => {
     if (token && p.peng_num) {
       fetchHistory(token, 'penguins', p.peng_num).then(d => setHasHistory(Array.isArray(d) && d.length > 0));
@@ -847,7 +933,16 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     <div className="bird-detail">
       <div className="bird-title-row">
         <span className="bird-title-peng">
-          Penguin: <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => onNavigateToBird?.(p.peng_num)} />
+          {(() => {
+            const idx = penguinList?.indexOf(p.peng_num) ?? -1;
+            const prev = idx > 0 ? penguinList![idx - 1] : null;
+            const next = penguinList && idx >= 0 && idx < penguinList.length - 1 ? penguinList[idx + 1] : null;
+            return <>
+              {prev ? <button className="bird-nav-btn" onClick={() => onNavigateToBird?.(prev)}>&larr;</button> : <span className="bird-nav-btn disabled">&larr;</span>}
+              <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => {}} />
+              {next ? <button className="bird-nav-btn" onClick={() => onNavigateToBird?.(next)}>&rarr;</button> : <span className="bird-nav-btn disabled">&rarr;</span>}
+            </>;
+          })()}
         </span>
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -857,6 +952,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       </div>
 
       {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
+
+      {/* Last seen */}
+      {sightings.length > 0 && (() => {
+        const last = sightings[0];
+        return <div className="bird-last-seen">Last seen <DateLink date={last.date} onDayClick={onDayClick} /> at <a className="clickable" href={`/box/${last.box}`} onClick={e => navClick(e, () => onBoxClick(last.box))}>{last.box}</a></div>;
+      })()}
 
       {/* All penguin data */}
       <div className="bird-section">
@@ -914,11 +1015,14 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         </table>
       </div>
 
+      {/* Sightings loading indicator */}
+      {sightings.length === 0 && <p className="muted">Loading sighting history...</p>}
+
       {/* Breeding history by season */}
       {breedingStats.length > 0 && (
         <div className="bird-section">
-          <h3>Breeding history</h3>
-          {breedingStats.map((bs: any) => (
+          <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history</h3>
+          {expandedSections.breeding && breedingStats.map((bs: any) => (
             <div key={bs.season} className="obs-card">
               <b>{bs.season}</b>
               <div className="obs-nums">
@@ -934,9 +1038,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       )}
 
       {/* Locations with sightings */}
-      <div className="bird-section">
-        <h3>Seen in {boxes.length} box{boxes.length !== 1 ? 'es' : ''}</h3>
-        {boxes.map((b: string) => {
+      {sightings.length > 0 && <div className="bird-section">
+        <h3 className="collapsible" onClick={() => toggleSection('boxes')}>{expandedSections.boxes ? '▾' : '▸'} Seen in {boxes.length} box{boxes.length !== 1 ? 'es' : ''}</h3>
+        {expandedSections.boxes && boxes.map((b: string) => {
           const boxSightings = sightings.filter((s: any) => s.box === b);
           return (
             <div key={b} className="obs-card" style={{marginBottom:6}}>
@@ -945,6 +1049,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
                     <DateLink date={sg.date} onDayClick={onDayClick} />
+                    {(sg.seen_with || []).length > 0 && <span className="muted">with</span>}
                     {(sg.seen_with || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
                     ))}
@@ -956,12 +1061,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* Sighting history */}
-      <div className="bird-section">
-        <h3>Sighting history ({sightings.length})</h3>
-        {sightings.map((s: any, i: number) => (
+      {sightings.length > 0 && <div className="bird-section">
+        <h3 className="collapsible" onClick={() => toggleSection('sightings')}>{expandedSections.sightings ? '▾' : '▸'} Sighting history ({sightings.length})</h3>
+        {expandedSections.sightings && sightings.map((s: any, i: number) => (
           <div key={i} className="obs-card">
             <div className="obs-top">
               <b><DateLink date={s.date} onDayClick={onDayClick} /></b>
@@ -980,15 +1085,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {s.notes && <div className="obs-notes">{s.notes}</div>}
           </div>
         ))}
-      </div>
+      </div>}
 
 
-      {/* Partners */}
+      {/* Shared sightings */}
       {partners.length > 0 && (
         <div className="bird-section">
-          <h3>Partners ({partners.length})</h3>
-          <p className="muted">Birds scanned in the same box at the same time</p>
-          {partners.map((pt: any) => (
+          <h3 className="collapsible" onClick={() => toggleSection('partners')}>{expandedSections.partners ? '▾' : '▸'} Shared sightings ({partners.length})</h3>
+          {expandedSections.partners && <p className="muted">Birds scanned in the same box at the same time</p>}
+          {expandedSections.partners && partners.map((pt: any) => (
             <div key={pt.peng_num} className="partner-card">
               <div className="partner-head">
                 <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} />
@@ -1022,8 +1127,9 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   const [open, setOpen] = useState(false);
   const filtered = useMemo(() => {
     if (search.length === 0) return { exact: [] as any[], pit: [] as any[] };
-    const exact = penguins.filter(p => p.peng_num && p.peng_num === search);
-    const pit = penguins.filter(p => p.pit_id && p.pit_id.includes(search) && !(p.peng_num && p.peng_num === search));
+    const s = search.toUpperCase();
+    const exact = penguins.filter(p => p.peng_num && p.peng_num.toUpperCase() === s);
+    const pit = penguins.filter(p => p.pit_id && p.pit_id.toUpperCase().includes(s) && !(p.peng_num && p.peng_num.toUpperCase() === s));
     return { exact, pit };
   }, [penguins, search]);
 
@@ -1038,7 +1144,7 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
     <div className="penguin-search">
       <input
         type="text"
-        placeholder="Search penguin"
+        placeholder="Penguin"
         value={search}
         onChange={e => { onSearchChange(e.target.value.replace(/[^0-9A-Za-z]/g, '')); setOpen(true); }}
         onFocus={() => setOpen(true)}
@@ -1079,6 +1185,14 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
 function parseDateInput(input: string): string | null {
   const s = input.trim();
   if (!s) return null;
+  const MONTHS: Record<string, number> = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+  const parseMonth = (p: string): number => {
+    const n = parseInt(p);
+    if (!isNaN(n)) return n;
+    const lc = p.toLowerCase();
+    for (const [name, num] of Object.entries(MONTHS)) { if (name.startsWith(lc) || lc.startsWith(name)) return num; }
+    return NaN;
+  };
 
   // Split on /, -, space, or .
   const parts = s.split(/[\/\-\.\s]+/);
@@ -1087,15 +1201,15 @@ function parseDateInput(input: string): string | null {
   let day: number, month: number, year: number;
 
   // Detect format: if first part is 4 digits, it's yyyy-mm-dd
-  if (parts[0].length === 4) {
-    year = parseInt(parts[0]); month = parseInt(parts[1]); day = parseInt(parts[2]);
-  } else if (parts[2].length === 4) {
-    // d/m/yyyy
-    day = parseInt(parts[0]); month = parseInt(parts[1]); year = parseInt(parts[2]);
+  if (parts[0].length === 4 && !isNaN(parseInt(parts[0]))) {
+    year = parseInt(parts[0]); month = parseMonth(parts[1]); day = parseInt(parts[2]);
+  } else if (parts[2].length === 4 && !isNaN(parseInt(parts[2]))) {
+    // d/m/yyyy or d/mon/yyyy
+    day = parseInt(parts[0]); month = parseMonth(parts[1]); year = parseInt(parts[2]);
   } else {
-    // Ambiguous short year: assume d/m/yy (NZ convention)
-    day = parseInt(parts[0]); month = parseInt(parts[1]); year = parseInt(parts[2]);
-    if (year < 100) year += 2000;
+    // Ambiguous short year: assume d/m/yy or d/mon/yy
+    day = parseInt(parts[0]); month = parseMonth(parts[1]); year = parseInt(parts[2]);
+    if (!isNaN(year) && year < 100) year += 2000;
   }
 
   if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
@@ -1112,6 +1226,11 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
     if (!search.trim()) return [];
     const parsed = parseDateInput(search);
     const MONTHS: Record<string, number> = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+    const matchMonths = (s: string): number[] => {
+      if (!s || s.length < 1) return [];
+      const lc = s.toLowerCase();
+      return Object.entries(MONTHS).filter(([name]) => name.startsWith(lc) || lc.startsWith(name)).map(([, num]) => num);
+    };
 
     return dates.filter(d => {
       const [yr, mo, dy] = d.split('-').map(Number);
@@ -1119,10 +1238,12 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
       // Exact full date match
       if (parsed && d === parsed) return true;
 
-      // Match against formatted display (e.g. "5 Sep 2025")
+      // Match against formatted display (e.g. "5 Sep 2025") using word boundary
       const display = formatDate(d).toLowerCase();
       const terms = search.toLowerCase().trim();
-      if (display.includes(terms)) return true;
+      // Use regex word boundary so "2 may" doesn't match "12 may"
+      try { if (new RegExp('\\b' + terms.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(display)) return true; } catch {}
+      if (display === terms) return true;
 
       // Split input into parts
       const parts = search.split(/[\/\-\.\s]+/).filter(Boolean);
@@ -1138,24 +1259,24 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
           // 4-digit year
           if (n === yr) return true;
         }
-        // Month name
-        if (MONTHS[p.slice(0, 3)] === mo) return true;
+        // Month name (partial: "j" matches jan/jun/jul)
+        if (matchMonths(p).includes(mo)) return true;
       }
 
       if (parts.length === 2) {
         const [a, b] = parts.map(p => p.toLowerCase());
         const na = parseInt(a), nb = parseInt(b);
 
-        // Resolve month names
-        const ma = MONTHS[a.slice(0, 3)];
-        const mb = MONTHS[b.slice(0, 3)];
+        // Resolve month names (partial match, may return multiple)
+        const ma = matchMonths(a);
+        const mb = matchMonths(b);
 
         // year + month: "2025 12", "25 12", "25 dec"
         if (!isNaN(na) && (na >= 2000 || (na >= 20 && na < 100))) {
           const year = na >= 2000 ? na : na + 2000;
           if (year === yr) {
             if (!isNaN(nb) && nb === mo) return true;
-            if (mb === mo) return true;
+            if (mb.includes(mo)) return true;
           }
         }
         // month + year: "12 2025", "dec 25"
@@ -1163,7 +1284,7 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
           const year = nb >= 2000 ? nb : nb + 2000;
           if (year === yr) {
             if (!isNaN(na) && na === mo) return true;
-            if (ma === mo) return true;
+            if (ma.includes(mo)) return true;
           }
         }
         // d/m: "5/9", "28/12"
@@ -1171,16 +1292,42 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
           if (na === dy && nb === mo) return true;
         }
         // month + day: "dec 28"
-        if (ma && !isNaN(nb) && ma === mo && nb === dy) return true;
-        // day + month: "28 dec"
-        if (mb && !isNaN(na) && mb === mo && na === dy) return true;
+        if (ma.length > 0 && !isNaN(nb) && ma.includes(mo) && nb === dy) return true;
+        // day + month: "28 dec", "13 j"
+        if (mb.length > 0 && !isNaN(na) && mb.includes(mo) && na === dy) return true;
       }
 
-      if (parts.length === 3 && parsed) {
-        return d.startsWith(parsed);
+      if (parts.length === 3) {
+        if (parsed) return d.startsWith(parsed);
+        const [p0, p1, p2] = parts.map(p => p.toLowerCase());
+        const n0 = parseInt(p0), n1 = parseInt(p1), n2 = parseInt(p2);
+        const m0 = matchMonths(p0), m1 = matchMonths(p1), m2 = matchMonths(p2);
+
+        // day month year: "20 f 2024", "20 feb 24"
+        if (!isNaN(n0) && m1.length > 0) {
+          const yearVal = !isNaN(n2) ? (n2 < 100 ? n2 + 2000 : n2) : null;
+          if (yearVal && n0 === dy && m1.includes(mo) && yearVal === yr) return true;
+        }
+        // day month year: "20 2 2024" (numeric month)
+        if (!isNaN(n0) && !isNaN(n1) && !isNaN(n2) && n0 <= 31 && n1 <= 12) {
+          const yearVal = n2 < 100 ? n2 + 2000 : n2;
+          if (n0 === dy && n1 === mo && yearVal === yr) return true;
+        }
+        // year month day: "2024 feb 20"
+        if (!isNaN(n0) && m1.length > 0 && !isNaN(n2)) {
+          const yearVal = n0 < 100 ? n0 + 2000 : n0;
+          if (yearVal === yr && m1.includes(mo) && n2 === dy) return true;
+        }
       }
 
       return false;
+    }).sort((a, b) => {
+      // Exact parse match first, then most recent
+      if (parsed) {
+        if (a === parsed) return -1;
+        if (b === parsed) return 1;
+      }
+      return b.localeCompare(a);
     }).slice(0, 12);
   }, [dates, search]);
 
@@ -1868,8 +2015,308 @@ function EggArrivalChart() {
   );
 }
 
+function ChickSexChart() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('chick_sex').then(d => { setData(d); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+
+  const sizes = ['BC', 'LC', 'SC'] as const;
+  const sizeLabels: Record<string, string> = { LC: 'Little Chick', BC: 'Big Chick', SC: 'Single Chick' };
+  const sexColors = { M: '#2196F3', F: '#E91E63' };
+  const sexLabels: Record<string, string> = { M: 'Male', F: 'Female' };
+
+  const W = 600, H = 320, PAD = { top: 30, right: 20, bottom: 60, left: 50 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const barGroupW = plotW / sizes.length;
+  const barW = barGroupW * 0.3;
+
+  const maxKnown = Math.max(...sizes.map(s => { const g = data[s]; return g ? g.M + g.F : 0; }));
+  const maxTotal = maxKnown;
+  const yScale = (v: number) => PAD.top + plotH - (maxTotal > 0 ? (v / maxTotal) * plotH : 0);
+
+  return (
+    <div className="report-card">
+      <h3>Chick Size vs Sex</h3>
+      <p className="muted">Sex distribution of penguins chipped as LC, BC, or SC chicks</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {/* Grid lines */}
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(maxTotal * frac)} y2={yScale(maxTotal * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {/* Y axis labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+          <text key={frac} x={PAD.left - 8} y={yScale(maxTotal * frac) + 4} textAnchor="end" fontSize="11" fill="#888">{Math.round(maxTotal * frac)}</text>
+        ))}
+        {/* Bars */}
+        {sizes.map((size, gi) => {
+          const g = data[size];
+          if (!g) return null;
+          const cx = PAD.left + barGroupW * gi + barGroupW / 2;
+          const sexKeys = ['M', 'F'] as const;
+          return (
+            <Fragment key={size}>
+              {sexKeys.map((sex, si) => {
+                const count = g[sex] || 0;
+                if (count === 0) return null;
+                const x = cx - barW + si * barW;
+                const barH = maxTotal > 0 ? (count / maxTotal) * plotH : 0;
+                return (
+                  <Fragment key={sex}>
+                    <rect x={x} y={yScale(count)} width={barW - 2} height={barH} fill={sexColors[sex]} opacity="0.85" rx="2" />
+                    <text x={x + (barW - 2) / 2} y={yScale(count) - 4} textAnchor="middle" fontSize="10" fill={sexColors[sex]} fontWeight="600">{count}</text>
+                  </Fragment>
+                );
+              })}
+              <text x={cx} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="12" fill="#666" fontWeight="600">{sizeLabels[size]}</text>
+              <text x={cx} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="10" fill="#888">n={g.M + g.F}</text>
+            </Fragment>
+          );
+        })}
+        {/* Axes */}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      </svg>
+      {/* Legend */}
+      <div style={{display:'flex', gap:'1.5em', justifyContent:'center', marginTop:'0.5em'}}>
+        {(['M','F'] as const).map(sex => (
+          <span key={sex} style={{display:'flex', alignItems:'center', gap:'0.3em', fontSize:'0.85em'}}>
+            <span style={{width:12,height:12,borderRadius:2,background:sexColors[sex],display:'inline-block'}} />
+            {sexLabels[sex]}
+          </span>
+        ))}
+      </div>
+      {/* Percentage table */}
+      <table style={{margin:'1em auto', borderCollapse:'collapse', fontSize:'0.85em'}}>
+        <thead>
+          <tr style={{borderBottom:'1px solid #ddd'}}>
+            <th style={{padding:'0.3em 1em', textAlign:'left'}}>Size</th>
+            <th style={{padding:'0.3em 1em'}}>Total</th>
+            <th style={{padding:'0.3em 1em'}}>Male</th>
+            <th style={{padding:'0.3em 1em'}}>Female</th>
+            <th style={{padding:'0.3em 1em'}}>% Male</th>
+            <th style={{padding:'0.3em 1em'}}>% Female</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sizes.map(size => {
+            const g = data[size];
+            if (!g) return null;
+            const known = g.M + g.F;
+            return (
+              <tr key={size} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'0.3em 1em', fontWeight:600}}>{sizeLabels[size]}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center', color:sexColors.M}}>{g.M}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center', color:sexColors.F}}>{g.F}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known > 0 ? (g.M / known * 100).toFixed(1) + '%' : '—'}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known > 0 ? (g.F / known * 100).toFixed(1) + '%' : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ChickReturnChart() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('chick_return').then(d => { setData(d); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+
+  const sizes = ['LC', 'BC', 'SC'] as const;
+  const sizeLabels: Record<string, string> = { LC: 'Little Chick', BC: 'Big Chick', SC: 'Single Chick' };
+  const sizeColors: Record<string, string> = { LC: '#4CAF50', BC: '#FF9800', SC: '#9C27B0' };
+  const totals = data.totals;
+  const bySeason = data.by_season;
+  const seasons = Object.keys(bySeason).sort();
+
+  // Bar chart: overall return rate per size
+  const W = 500, H = 280, PAD = { top: 30, right: 20, bottom: 50, left: 50 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const barGroupW = plotW / sizes.length;
+  const barW = barGroupW * 0.5;
+  const maxPct = Math.max(...sizes.map(s => { const t = totals[s]; return t && t.chipped > 0 ? (t.returned / t.chipped) * 100 : 0; }));
+  const yMax = Math.ceil(maxPct / 10) * 10 + 5; // round up to next 10 + a little headroom
+  const yScale = (v: number) => PAD.top + plotH - (v / yMax) * plotH;
+  const yTicks = Array.from({ length: Math.floor(yMax / 10) + 1 }, (_, i) => i * 10).filter(v => v <= yMax);
+
+  return (
+    <div className="report-card">
+      <h3>Chick Return Rate by Size</h3>
+      <p className="muted">Percentage of chicks that returned to the colony in a later season, by size at chipping</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {/* Grid lines */}
+        {yTicks.filter(v => v > 0).map(pct => (
+          <line key={pct} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(pct)} y2={yScale(pct)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {/* Y axis labels */}
+        {yTicks.map(pct => (
+          <text key={pct} x={PAD.left - 8} y={yScale(pct) + 4} textAnchor="end" fontSize="11" fill="#888">{pct}%</text>
+        ))}
+        {/* Bars */}
+        {sizes.map((size, i) => {
+          const t = totals[size];
+          if (!t || t.chipped === 0) return null;
+          const pct = (t.returned / t.chipped) * 100;
+          const cx = PAD.left + barGroupW * i + barGroupW / 2;
+          const x = cx - barW / 2;
+          const barH = (pct / yMax) * plotH;
+          return (
+            <Fragment key={size}>
+              <rect x={x} y={yScale(pct)} width={barW} height={barH} fill={sizeColors[size]} opacity="0.85" rx="2" />
+              <text x={cx} y={yScale(pct) - 6} textAnchor="middle" fontSize="12" fill={sizeColors[size]} fontWeight="700">{pct.toFixed(1)}%</text>
+              <text x={cx} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="12" fill="#666" fontWeight="600">{sizeLabels[size]}</text>
+              <text x={cx} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="10" fill="#888">{t.returned}/{t.chipped}</text>
+            </Fragment>
+          );
+        })}
+        {/* Axes */}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      </svg>
+      {/* Average return age */}
+      <div style={{display:'flex', gap:'2em', justifyContent:'center', margin:'0.8em 0', flexWrap:'wrap'}}>
+        {sizes.map(size => {
+          const t = totals[size];
+          if (!t || !t.avg_return_age) return null;
+          return (
+            <div key={size} style={{textAlign:'center'}}>
+              <div style={{fontSize:'1.4em', fontWeight:700, color:sizeColors[size]}}>{t.avg_return_age}y</div>
+              <div style={{fontSize:'0.8em', color:'#888'}}>{sizeLabels[size]} avg return age</div>
+              <div style={{fontSize:'0.75em', color:'#aaa'}}>median {t.median_return_age}y</div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="muted" style={{fontSize:'0.8em', textAlign:'center', margin:'0.5em 1em'}}>Chicks from the 2025/26 season are excluded as they haven't had a chance to return yet.</p>
+      {/* Season breakdown table */}
+      {seasons.length > 0 && (
+        <table style={{margin:'1em auto', borderCollapse:'collapse', fontSize:'0.85em'}}>
+          <thead>
+            <tr style={{borderBottom:'1px solid #ddd'}}>
+              <th style={{padding:'0.3em 0.8em', textAlign:'left'}}>Season</th>
+              {sizes.map(s => (
+                <th key={s} colSpan={2} style={{padding:'0.3em 0.8em', textAlign:'center', color: sizeColors[s]}}>{sizeLabels[s]}</th>
+              ))}
+            </tr>
+            <tr style={{borderBottom:'1px solid #eee'}}>
+              <th></th>
+              {sizes.map(s => (
+                <Fragment key={s}>
+                  <th style={{padding:'0.2em 0.5em', fontSize:'0.85em', color:'#888'}}>Return</th>
+                  <th style={{padding:'0.2em 0.5em', fontSize:'0.85em', color:'#888'}}>Total</th>
+                </Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {seasons.map(season => (
+              <tr key={season} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'0.3em 0.8em', fontWeight:600}}>{season}</td>
+                {sizes.map(size => {
+                  const g = bySeason[season]?.[size];
+                  return (
+                    <Fragment key={size}>
+                      <td style={{padding:'0.3em 0.5em', textAlign:'center'}}>{g ? g.returned : '—'}</td>
+                      <td style={{padding:'0.3em 0.5em', textAlign:'center', color:'#888'}}>{g ? g.chipped : '—'}</td>
+                    </Fragment>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Histogram: age at first return */}
+      {data.points && data.points.length > 0 && (() => {
+        const pts = (data.points as { size: string; age: number; peng_num: string }[]).filter(p => p.age > 0);
+        if (pts.length === 0) return null;
+
+        // Bucket into 1-month bins
+        const ageMonths = pts.map(p => Math.round(p.age * 12));
+        const maxMonth = Math.max(...ageMonths);
+        const bins: number[] = Array(maxMonth + 1).fill(0);
+        for (const m of ageMonths) bins[m]++;
+        const maxCount = Math.max(...bins);
+
+        const SW = 800, SH = 300, SP = { top: 30, right: 20, bottom: 45, left: 50 };
+        const spW = SW - SP.left - SP.right;
+        const spH = SH - SP.top - SP.bottom;
+        const barW = spW / maxMonth;
+        const xScale2 = (m: number) => SP.left + (m - 1) * barW;
+        const yScale2 = (v: number) => SP.top + spH - (v / maxCount) * spH;
+
+        // Year markers for x axis
+        const yearMarkers = Array.from({ length: Math.floor(maxMonth / 12) + 1 }, (_, i) => (i + 1) * 12).filter(m => m <= maxMonth);
+
+        return (
+          <div className="report-card" style={{marginTop: '0.5em'}}>
+            <h3>Age at First Return</h3>
+            <p className="muted">How old penguins were when first scanned back at the colony (n={pts.length})</p>
+            <svg viewBox={`0 0 ${SW} ${SH}`} className="report-chart">
+              {/* X axis labels - every 6 months, with year lines */}
+              {Array.from({ length: Math.floor(maxMonth / 6) + 1 }, (_, i) => (i + 1) * 6).filter(m => m <= maxMonth).map(m => (
+                <Fragment key={m}>
+                  <line x1={xScale2(m) + barW / 2} x2={xScale2(m) + barW / 2} y1={SP.top} y2={SP.top + spH} stroke={m % 12 === 0 ? '#d0d0d0' : '#ececec'} strokeWidth="1" />
+                  <text x={xScale2(m) + barW / 2} y={SP.top + spH + 16} textAnchor="middle" fontSize="10" fill={m % 12 === 0 ? '#666' : '#999'} fontWeight={m % 12 === 0 ? '600' : '400'}>{m}m</text>
+                </Fragment>
+              ))}
+              {/* Y grid */}
+              {[0.25, 0.5, 0.75, 1].map(frac => (
+                <line key={frac} x1={SP.left} x2={SP.left + spW} y1={yScale2(maxCount * frac)} y2={yScale2(maxCount * frac)} stroke="#e8ecef" strokeWidth="1" />
+              ))}
+              {/* Y axis labels */}
+              {[0, 0.25, 0.5, 0.75, 1].map(frac => {
+                const v = Math.round(maxCount * frac);
+                return <text key={frac} x={SP.left - 8} y={yScale2(v) + 4} textAnchor="end" fontSize="11" fill="#888">{v}</text>;
+              })}
+              {/* Bars */}
+              {bins.map((count, m) => {
+                if (m === 0 || count === 0) return null;
+                const barH = (count / maxCount) * spH;
+                return (
+                  <Fragment key={m}>
+                    <rect x={xScale2(m)} y={yScale2(count)} width={Math.max(barW - 1, 1)} height={barH} fill="#2196F3" opacity="0.75" rx="1" />
+                    {count >= 3 && <text x={xScale2(m) + barW / 2} y={yScale2(count) - 3} textAnchor="middle" fontSize="8" fill="#2196F3" fontWeight="600">{count}</text>}
+                  </Fragment>
+                );
+              })}
+              {/* Axes */}
+              <line x1={SP.left} x2={SP.left} y1={SP.top} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
+              <line x1={SP.left} x2={SP.left + spW} y1={SP.top + spH} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
+              <text x={SP.left + spW / 2} y={SH - 2} textAnchor="middle" fontSize="12" fill="#666">Age at first return (months)</text>
+            </svg>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[]; onDayClick: (day: string) => void }) {
+  const { show: showTip, hide: hideTip, statsCache } = useContext(DateTooltipCtx);
   const dateSet = useMemo(() => new Set(dates), [dates]);
+  const fullMonitorDates = useMemo(() => {
+    const fm = new Set<string>();
+    for (const d of dates) { const s = statsCache.get(d); if (s?.isFullMonitor) fm.add(d); }
+    return fm;
+  }, [dates, statsCache]);
 
   // Group dates by month, show months around current date
   const current = new Date(date + 'T00:00:00');
@@ -1932,8 +2379,10 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
                     return (
                       <span
                         key={di}
-                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}`}
+                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}${fullMonitorDates.has(d) ? ' full-monitor' : ''}`}
                         onClick={hasData ? () => onDayClick(d) : undefined}
+                        onMouseEnter={hasData ? e => showTip(d, e) : undefined}
+                        onMouseLeave={hasData ? hideTip : undefined}
                       >{day}</span>
                     );
                   })}
@@ -1947,14 +2396,31 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void }) {
+function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [sideBird, setSideBird] = useState<string|null>(null);
+  const [sideBirdData, setSideBirdData] = useState<any>(null);
+  const [expandedBox, setExpandedBox] = useState<string|null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    fetchDay(date).then(d => { setData(d); setLoading(false); });
+    setData(queryDay(date));
+    setLoading(false);
+    setSideBird(null);
   }, [date]);
+
+  useEffect(() => {
+    if (externalBird) setSideBird(externalBird);
+  }, [externalBird]);
+
+  useEffect(() => {
+    if (!sideBird) { setSideBirdData(null); return; }
+    queryBirdDetail(sideBird).then(d => setSideBirdData(d));
+  }, [sideBird]);
+
+  const handleBirdClick = (num: string) => setSideBird(num);
+  const [showCarryForward, setShowCarryForward] = useState(false);
+  const [hideDcm, setHideDcm] = useState(false);
 
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
@@ -1991,34 +2457,103 @@ function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick }: { date: s
 
       {(totalObs > 0 || totalChips > 0) && (
         <div className="day-section">
-          <h3>{formatDate(date)} — {sortedBoxes.length} boxes{totalChips > 0 ? `, ${totalChips} chipped` : ''}</h3>
-          {sortedBoxes.map(box => (
-            <div key={box} className="day-box-group">
-              <div className="day-box-heading">
-                <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>
-              </div>
-              {byBox[box].obs.map((obs: any) => (
-                <ObsCard key={obs.observation_id} obs={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} hideDate />
-              ))}
-              {byBox[box].chips.length > 0 && (
-                <div className="day-chips">
-                  <span className="muted">Chipped:</span>
-                  {byBox[box].chips.map((c: any) => (
-                    <span key={c.pit_id} className="day-chip-entry">
-                      <PenguinMini scan={c} onClick={() => onBirdClick(c.peng_num)} observationDate={date} />
-                      {c.chip_by && <span className="muted">by {c.chip_by}</span>}
-                    </span>
-                  ))}
+          <h3 className="day-header-row">
+            <span><DateStatsLine stats={getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, chipped:0, label:null, isFullMonitor:false, totalLocations:0 }} showDate date={date} /></span>
+            <span className="day-cf-toggles">
+              <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
+              <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => setShowCarryForward(e.target.checked)} /> Show all</label>
+            </span>
+          </h3>
+          <div className="day-grid">
+          {(() => {
+            // DCM boxes for this date
+            const dcmBoxes = hideDcm ? getDcmBoxes(date) : new Set<string>();
+            // Build carry-forward data if enabled
+            const observedBoxes = new Set(sortedBoxes);
+            const cfData = showCarryForward ? queryCarryForward(date, observedBoxes) : [];
+            const cfByBox: Record<string, any> = {};
+            for (const cf of cfData) cfByBox[cf.box_name] = cf;
+
+            // Merge all boxes: observed + carry-forward, filter out DCM if enabled
+            const allBoxNames = (showCarryForward
+              ? [...new Set([...sortedBoxes, ...cfData.map((c: any) => c.box_name)])]
+              : [...sortedBoxes]
+            ).filter(b => !dcmBoxes.has(b)).sort((a, b) => {
+              const na = parseInt(a), nb = parseInt(b);
+              return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+            });
+
+            return allBoxNames.map(box => {
+              const cf = cfByBox[box];
+              if (cf && !observedBoxes.has(box)) {
+                // Carry-forward row (orange)
+                const cfScans = (cf.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
+                  .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+                const cfDs = displayStatus(cf.breeding_status, cf.eggs, cf.chicks);
+                return (
+                  <div key={box} className="day-row day-row-cf">
+                    <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}><b>Box {box}</b></a>
+                    {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
+                    {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
+                    {cf.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(cf.chicks, 4))}</span>}
+                    {cfDs && cfDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs)?'bordered':''}`} style={{background:STATUS_COLORS[cfDs]||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{cfDs}</span>}
+                    {cfScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={cf.observation_time_utc} />)}
+                    {cf.gate_status && <span>{cf.gate_status}</span>}
+                    <span className="day-cf-date">{formatDate(cf.observation_time_utc)}</span>
+                  </div>
+                );
+              }
+              // Normal row (today's data)
+              const { obs, chips } = byBox[box];
+              const totalAdults = obs.reduce((s: number, o: any) => s + (o.adults || 0), 0);
+              const totalEggs = obs.reduce((s: number, o: any) => s + (o.eggs || 0), 0);
+              const totalChicks2 = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
+              const status = obs.find((o: any) => o.breeding_status)?.breeding_status || '';
+              const gate = obs.find((o: any) => o.gate_status)?.gate_status || '';
+              const allScans = obs.flatMap((o: any) => o.scans || []);
+              const uniqueScans = allScans.filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
+                .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+              const ds = displayStatus(status, totalEggs, totalChicks2);
+              return (
+              <div key={box}>
+                <div className="day-row" onClick={() => setExpandedBox(expandedBox === box ? null : box)} style={{cursor:'pointer'}}>
+                  <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>
+                  {totalAdults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(totalAdults, 4))}</span>}
+                  {totalEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(totalEggs, 4))}</span>}
+                  {totalChicks2 > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(totalChicks2, 4))}</span>}
+                  {ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{ds}</span>}
+                  {uniqueScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />)}
+                  {chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
+                  {gate && <span className="muted">{gate}</span>}
+                  {obs.filter((o: any) => o.notes).map((o: any, i: number) => <span key={i} className="day-note">{o.notes}</span>)}
                 </div>
-              )}
-            </div>
-          ))}
+                {expandedBox === box && obs.map((o: any, i: number) => (
+                  <ObsCard key={o.observation_id || i} obs={o} onBirdClick={handleBirdClick} onDayClick={onDayClick} token={token} canEdit={canEdit} allPenguins={allPenguins} hideDate />
+                ))}
+              </div>
+              );
+            });
+          })()}
+          </div>
         </div>
       )}
 
       {totalObs === 0 && totalChips === 0 && (
         <p className="muted">No activity recorded on this date.</p>
       )}
+
+      {sideBird && sideBirdData?.penguin && (<>
+        <div className="day-bird-backdrop" onClick={() => setSideBird(null)} />
+        <div className="day-bird-panel">
+          <BirdPage data={sideBirdData} onBirdClick={handleBirdClick}
+            onBoxClick={(box: string) => onBoxClick(box)}
+            onSightingClick={(box: string) => onBoxClick(box)}
+            onDayClick={onDayClick}
+            onNavigateToBird={handleBirdClick}
+            token={token} canEdit={canEdit}
+            penguinList={data.observations.flatMap((o: any) => (o.scans || []).map((s: any) => s.peng_num)).filter((v: any, i: number, a: any[]) => v && a.indexOf(v) === i).sort((a: string, b: string) => { const na = parseInt(a), nb = parseInt(b); return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b); })} />
+        </div>
+      </>)}
     </div>
   );
 }
@@ -2073,7 +2608,7 @@ function App() {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
-  return <AuthenticatedApp token={authToken} userName={userName || ''} userRole={userRole} onLogout={handleLogout} />;
+  return <AuthenticatedAppWithTooltip token={authToken} userName={userName || ''} userRole={userRole} onLogout={handleLogout} />;
 }
 
 function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () => void }) {
@@ -2156,6 +2691,15 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [diskTesting, setDiskTesting] = useState(false);
   const [serverDisk, setServerDisk] = useState<any>(null);
   const [datePreview, setDatePreview] = useState<any>(null);
+  const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
+  const [changesLoading, setChangesLoading] = useState(false);
+
+  const loadRecentChanges = async () => {
+    setChangesLoading(true);
+    const r = await fetch('/penguin-api/admin.php?action=recent_changes&limit=50', { headers: { 'Authorization': `Bearer ${token}` } });
+    setRecentChanges(await r.json());
+    setChangesLoading(false);
+  };
 
   const previewDate = async (date: string) => {
     setDatePreview({ loading: true, date });
@@ -2239,6 +2783,38 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="admin-section">
+        <h3>Recent Changes</h3>
+        <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
+          {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
+        </button>
+        {recentChanges && (
+          <div style={{marginTop:8, maxHeight:400, overflowY:'auto'}}>
+            {recentChanges.map((e: any, i: number) => {
+              const fields = typeof e.changed_fields === 'string' ? (() => { try { return JSON.parse(e.changed_fields); } catch { return null; } })() : e.changed_fields;
+              return (
+                <div key={i} className="obs-card" style={{marginBottom:4, padding:'6px 10px'}}>
+                  <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
+                    <span className={`badge`} style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : '#2196F3', color:'#fff', fontSize:10}}>{e.action}</span>
+                    <span>{e.table_name}{e.box_name ? ` · Box ${e.box_name}` : ''} #{e.record_id}</span>
+                    <span className="muted">{e.observer_name}</span>
+                    <span className="muted">{formatDate(e.change_timestamp)}</span>
+                    {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
+                  </div>
+                  {e.action === 'UPDATE' && fields && (
+                    <div style={{fontSize:11, marginTop:2}}>
+                      {Object.entries(fields).map(([k, v]: [string, any]) => (
+                        <span key={k} className="muted" style={{marginRight:8}}>{k}: <s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -2493,6 +3069,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const [allPenguins, setAllPenguins] = useState<any[]>([]);
+  const allPenguinNums = useMemo(() => allPenguins.map(p => p.peng_num).filter(Boolean).sort((a: string, b: string) => {
+    const na = parseInt(a), nb = parseInt(b);
+    return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+  }), [allPenguins]);
   const [penguinSearch, setPenguinSearch] = useState('');
   const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
@@ -2503,6 +3083,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [selectedDay, setSelectedDay] = useState<string|null>(initial.day || null);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
+  const [dbVersion, setDbVersion] = useState(0); // bumped on sync to trigger re-queries
+  const [loadProgress, setLoadProgress] = useState('');
+  const [loadPct, setLoadPct] = useState<number|null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -2537,16 +3120,49 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     fetchOverview().then(ov => setStats(ov));
   }, []);
 
+  // Date stats are precomputed in localdb on sync — just read the cache
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const dateStatsCache = useMemo(() => getDateStats(), [dbVersion, loading]);
+
+  const dateTip = useDateTooltip();
+  const dateTipCtx = useMemo(() => ({ ...dateTip, statsCache: dateStatsCache }), [dateTip, dateStatsCache]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuClosing, setMenuClosing] = useState(false);
+  const [menuSide, setMenuSide] = useState<'left'|'right'>(() => (localStorage.getItem('ww_menu_side') as 'left'|'right') || 'right');
+  const closeMenu = useCallback(() => {
+    setMenuClosing(true);
+    setTimeout(() => { setMenuOpen(false); setMenuClosing(false); }, 300);
+  }, []);
+
   useEffect(() => {
-    Promise.all([fetchBoxTags(), fetchOverview(), fetchAllPenguins(), fetchServerStats()])
-      .then(([tags, ov, pgs, ss]) => { setBoxTags(tags); setStats(ov); setAllPenguins(pgs); setServerStats(ss); setLoading(false); })
-      .catch(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      // Load local DB — incremental sync loads from IDB first (instant), then checks for changes
+      await syncDatabase((msg, pct) => { if (!cancelled) { setLoadProgress(msg); setLoadPct(pct ?? null); } });
+
+      if (cancelled) return;
+      setAllPenguins(queryAllPenguins());
+
+      // Phase 2: Load overview/tags/stats from API (fast, small payloads)
+      const [tags, ov, ss] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchServerStats()]);
+      if (cancelled) return;
+      setBoxTags(tags); setStats(ov); setServerStats(ss);
+      setLoading(false);
+
+      // Start polling for changes
+      startPolling(() => {
+        setAllPenguins(queryAllPenguins());
+        setDbVersion(v => v + 1);
+      });
+    })().catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; stopPolling(); };
   }, []);
 
   useEffect(() => {
     if (!selectedBox) { setBoxDetail(null); setHighlightObs(null); refreshStats(); return; }
+    if (loading) return; // wait for snapshot to load
     setDetailLoading(true);
-    fetchBoxDetail(selectedBox).then(d => {
+    queryBoxDetail(selectedBox).then((d: any) => {
       setBoxDetail(d);
       setDetailLoading(false);
       if (window.innerWidth < 900) { setSelectedBird(null); return; }
@@ -2590,19 +3206,24 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         }
       }
     });
-  }, [selectedBox]);
+  }, [selectedBox, dbVersion, loading]);
 
   useEffect(() => {
     if (!selectedBird) { setBirdData(null); return; }
+    if (loading) return;
     setBirdLoading(true);
-    fetchBirdDetail(selectedBird).then(d => { setBirdData(d); setBirdLoading(false); });
-  }, [selectedBird]);
+    queryBirdDetail(selectedBird).then(d => {
+      setBirdData(d);
+      setBirdLoading(false);
+    });
+  }, [selectedBird, dbVersion, loading]);
 
   const openBird = (pengNum: string) => {
     if (window.innerWidth < 900 && selectedBox) {
       setPreviousBox(selectedBox);
       setSelectedBox(null);
     }
+    setBirdData(null);
     setSelectedBird(pengNum);
   };
 
@@ -2637,7 +3258,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  if (loading) return <div className="center"><div className="spinner"/><p>Loading colony data...</p></div>;
+  if (loading) return <div className="center loading-screen">
+    {loadPct === null && <div className="spinner"/>}
+    <p>{loadProgress || 'Loading colony data...'}</p>
+    {loadPct !== null && <div className="progress-bar"><div className="progress-fill" style={{width: `${Math.round(loadPct * 100)}%`}}/></div>}
+    <p className="muted" style={{fontSize:14, position:'absolute', bottom:16, right:16}}>Photo: Marty Melville</p>
+  </div>;
+
+  // Wrap any return with tooltip provider + portal
+  const wrap = (content: React.ReactNode) => (
+    <DateTooltipCtx.Provider value={dateTipCtx}>
+      {content}
+      <DateTooltipPortal tip={dateTip.tip} statsCache={dateStatsCache} />
+    </DateTooltipCtx.Provider>
+  );
 
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
@@ -2670,19 +3304,54 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const siteHeader = (
     <header>
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
-      {siteNav}
-      {serverStats && <span className="header-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</span>}
-      <span className="header-user">
-        {userName}
-        <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
-        <button className="logout-btn" onClick={onLogout}>Logout</button>
+      <span className="header-desktop">
+        {siteNav}
+        {serverStats && <span className="header-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</span>}
+        <span className="header-user">
+          {userName}
+          <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
+          <button className="logout-btn" onClick={onLogout}>Logout</button>
+        </span>
       </span>
+      <button className={`hamburger hamburger-${menuSide}`} onClick={() => setMenuOpen(o => !o)}>{'\u2630'}</button>
+      {menuOpen && <>
+        <div className={`mobile-backdrop${menuClosing ? ' closing' : ''}`} onClick={() => closeMenu()} />
+        <div className={`mobile-panel mobile-panel-${menuSide}${menuClosing ? ' closing' : ''}`}>
+          <nav className="mobile-nav">
+            <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => { goTo('colony'); closeMenu(); })}>Colony</a>
+          </nav>
+          <div className="mobile-search-group">
+            <label className="mobile-label">Penguin</label>
+            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />
+          </div>
+          <div className="mobile-search-group">
+            <label className="mobile-label">Box</label>
+            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
+          </div>
+          <div className="mobile-search-group">
+            <label className="mobile-label">Date</label>
+            <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+          </div>
+          <nav className="mobile-nav">
+            <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => { goTo('reports'); closeMenu(); })}>Reports</a>
+            {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin</a>}
+            {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
+          </nav>
+          <nav className="mobile-nav mobile-nav-user">
+            <span className="mobile-username">{userName}</span>
+            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); const next = menuSide === 'right' ? 'left' : 'right'; setMenuSide(next); localStorage.setItem('ww_menu_side', next); }}>Menu on {menuSide === 'right' ? 'left' : 'right'}</a>
+            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); setShowChangePassword(true); closeMenu(); }}>Change password</a>
+            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); onLogout(); }}>Logout</a>
+          </nav>
+          {serverStats && <div className="mobile-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</div>}
+        </div>
+      </>}
     </header>
   );
 
   // Admin page
   if (showAdmin && userRole === 'admin') {
-    return (
+    return wrap(
       <div className="app">
         {siteHeader}
         <AdminPanel token={token} observationDates={stats?.observation_dates} />
@@ -2692,7 +3361,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }
 
   if (showEntry && userRole !== 'viewer') {
-    return (
+    return wrap(
       <div className="app">
         {siteHeader}
         <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => goTo('colony')} />
@@ -2703,11 +3372,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // Reports page
   if (showReports) {
-    return (
+    return wrap(
       <div className="app">
         {siteHeader}
         <div className="reports-page">
           <EggArrivalChart />
+          <ChickReturnChart />
+          <ChickSexChart />
         </div>
         {passwordDialog}
       </div>
@@ -2716,15 +3387,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // Daily view - everything that happened on a date
   if (selectedDay) {
-    return (
+    return wrap(
       <div className="app">
         {siteHeader}
         <div className="colony-toolbar">
-          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box) => { setSelectedDay(null); setSelectedBox(box); }} onBirdClick={openBird} onDayClick={goToDay} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box) => { setSelectedDay(null); setSelectedBox(box); }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
         {passwordDialog}
       </div>
     );
@@ -2732,41 +3403,42 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // Bird page - replaces everything (only when no box is selected)
   if (selectedBird && !selectedBox) {
-    return (
+    return wrap(
       <div className="app">
         {siteHeader}
         <div className="colony-toolbar">
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
         <div className="bird-page">
           <div className="page-header">
             <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
           </div>
-          {birdLoading ? <p className="muted">Loading bird data...</p> : birdData?.penguin ? (
+          {birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
-              onDayClick={goToDay} />
-          ) : <p className="muted">Bird not found</p>}
+              onDayClick={goToDay} penguinList={allPenguinNums} onNavigateToBird={openBird} />
+          ) : birdLoading ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
+          : <p className="muted">Bird not found</p>}
         </div>
       </div>
     );
   }
 
-  return (
+  return wrap(
     <div className="app">
       {siteHeader}
       <div className="colony-toolbar">
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-        <input className="box-search-input" type="text" placeholder="Box #" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
       </div>
-      {datePickerVisible && datePickerCenter && (
-        <DayCalendar date={datePickerCenter} dates={[...(stats?.observation_dates || [])].sort()} onDayClick={goToDay} />
+      {(datePickerVisible || (!selectedBox && !selectedBird && !selectedDay)) && (
+        <DayCalendar date={datePickerCenter || new Date().toLocaleDateString('en-CA', {timeZone:'Pacific/Auckland'})} dates={[...(stats?.observation_dates || [])].sort()} onDayClick={goToDay} />
       )}
 
       {!selectedBox && (
@@ -2795,7 +3467,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             </div>
             {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
-                {boxDetail.location?.pit_id && <div className="tag-info">Tag: {boxDetail.location.pit_id.slice(-8)}</div>}
                 {boxDetail.location && (
                   <div className="persistent-notes">
                     <EditableField value={boxDetail.location.persistent_notes || ''} onSave={(val) => updateRecord(token, 'observation_locations', boxDetail.location!.location_id, {persistent_notes: val})} placeholder="Box notes (persistent)" canEdit={userRole !== 'viewer'} />
@@ -2892,8 +3563,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
                   onDayClick={goToDay}
-                  onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }} />
-              ) : birdLoading ? <p className="muted">Loading bird...</p> : <p className="muted">Select a bird</p>}
+                  onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }}
+                  penguinList={allPenguinNums} />
+              ) : birdLoading ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird...</p>; })()
+              : <p className="muted">Select a bird</p>}
             </div>
           </div>
           )}
@@ -2920,6 +3593,10 @@ function fmtDateNZ(d:string) {
 function toNzDateStr(d: string): string {
   const nz = parseDate(d).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); // en-CA gives YYYY-MM-DD
   return nz;
+}
+
+function AuthenticatedAppWithTooltip(props: { token: string; userName: string; userRole: string; onLogout: () => void }) {
+  return <AuthenticatedApp {...props} />;
 }
 
 export default App;

@@ -1,0 +1,151 @@
+<?php
+/**
+ * Full database snapshot for client-side caching.
+ * Returns all tables needed for box/bird views in one response.
+ *
+ * GET /penguin-api/snapshot.php              - Full dump
+ * GET /penguin-api/snapshot.php?since=<ISO>  - Incremental (rows changed since timestamp)
+ */
+ini_set('display_errors', 0);
+set_exception_handler(function($e) {
+    http_response_code(500);
+    echo json_encode(['error' => $e->getMessage(), 'line' => $e->getLine()]);
+    exit;
+});
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+});
+require_once 'config.php';
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+
+$pdo = getDbConnection();
+$colonyId = 1;
+$since = $_GET['since'] ?? null;
+
+function getTotalCounts($pdo, $colonyId) {
+    $c = function($sql, $params = []) use ($pdo) {
+        $s = $pdo->prepare($sql); $s->execute($params); return (int)$s->fetchColumn();
+    };
+    return [
+        'observations' => $c("SELECT COUNT(*) FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId]),
+        'scans' => $c("SELECT COUNT(*) FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId]),
+        'penguins' => $c("SELECT COUNT(*) FROM penguins"),
+        'chips' => $c("SELECT COUNT(*) FROM penguin_chips"),
+        'locations' => $c("SELECT COUNT(*) FROM observation_locations WHERE colony_id = ?", [$colonyId]),
+        'biometrics' => $c("SELECT COUNT(*) FROM penguin_biometric_data"),
+    ];
+}
+
+if ($since) {
+    // Incremental sync: only rows updated since the given timestamp
+    $ts = date('Y-m-d H:i:s', strtotime($since));
+
+    $obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.is_deleted, o.updated_at
+        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.updated_at >= ?");
+    $obs->execute([$colonyId, $ts]);
+
+    // Scans belonging to changed observations
+    $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.updated_at >= ?");
+    $scans->execute([$colonyId, $ts]);
+
+    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins WHERE updated_at >= ?");
+    $penguins->execute([$ts]);
+
+    // Chips don't have updated_at — use audit_log to find recently changed ones
+    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.chip_by, pc.rechip_by, pc.solo
+        FROM penguin_chips pc
+        WHERE pc.pit_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_chips' AND change_timestamp >= ?)
+           OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");
+    $chips->execute([$ts, $ts]);
+
+    $locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND updated_at >= ?");
+    $locations->execute([$colonyId, $ts]);
+
+    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_underweight, condition_ticks, condition_dead, condition_dog_attacked, condition_attacked, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
+    $bio->execute([$ts]);
+
+    $obsRows = $obs->fetchAll();
+    $changedObsIds = array_column($obsRows, 'observation_id');
+    $editCounts = [];
+    if (!empty($changedObsIds)) {
+        $ph = implode(',', array_fill(0, count($changedObsIds), '?'));
+        $ec = $pdo->prepare("SELECT record_id, COUNT(*) as c FROM audit_log WHERE table_name = 'observations' AND action = 'UPDATE' AND record_id IN ($ph) GROUP BY record_id");
+        $ec->execute(array_values($changedObsIds));
+        foreach ($ec->fetchAll() as $row) $editCounts[(int)$row['record_id']] = (int)$row['c'];
+    }
+
+    echo json_encode([
+        'incremental' => true,
+        'since' => $ts,
+        'snapshot_time' => date('c'),
+        'observations' => $obsRows,
+        'scans' => $scans->fetchAll(),
+        'penguins' => $penguins->fetchAll(),
+        'chips' => $chips->fetchAll(),
+        'locations' => $locations->fetchAll(),
+        'biometrics' => $bio->fetchAll(),
+        'edit_counts' => $editCounts,
+        '_counts' => getTotalCounts($pdo, $colonyId),
+    ]);
+    exit;
+}
+
+// Full snapshot
+$t0 = microtime(true);
+
+$obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.is_deleted
+    FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
+    WHERE ol.colony_id = ?");
+$obs->execute([$colonyId]);
+$observations = $obs->fetchAll();
+
+// Edit counts in one query
+$ec = $pdo->query("SELECT record_id, COUNT(*) as c FROM audit_log WHERE table_name = 'observations' AND action = 'UPDATE' GROUP BY record_id");
+$editCounts = [];
+foreach ($ec->fetchAll() as $row) $editCounts[(int)$row['record_id']] = (int)$row['c'];
+
+$scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id
+    FROM penguin_scans ps
+    JOIN observations o ON ps.observation_id = o.observation_id
+    JOIN observation_locations ol ON o.location_id = ol.location_id
+    WHERE ol.colony_id = ?");
+$scans->execute([$colonyId]);
+
+$penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins");
+
+$chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, chip_by, rechip_by, solo FROM penguin_chips");
+
+$locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ?");
+$locations->execute([$colonyId]);
+
+$bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_underweight, condition_ticks, condition_dead, condition_dog_attacked, condition_attacked, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data");
+
+$elapsed = round((microtime(true) - $t0) * 1000);
+
+$json = json_encode([
+    'incremental' => false,
+    'snapshot_time' => date('c'),
+    'query_ms' => $elapsed,
+    'observations' => $observations,
+    'scans' => $scans->fetchAll(),
+    'penguins' => $penguins->fetchAll(),
+    'chips' => $chips->fetchAll(),
+    'locations' => $locations->fetchAll(),
+    'biometrics' => $bio->fetchAll(),
+    'edit_counts' => $editCounts,
+    '_counts' => getTotalCounts($pdo, $colonyId),
+]);
+
+// Manual gzip with known Content-Length for accurate client progress
+$gz = gzencode($json, 6);
+header('Content-Encoding: identity'); // prevent double-gzip by server
+header('Content-Type: application/gzip');
+header('Content-Length: ' . strlen($gz));
+header('X-Uncompressed-Length: ' . strlen($json));
+echo $gz;

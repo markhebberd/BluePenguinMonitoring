@@ -58,10 +58,16 @@ namespace PenguinMonitor.Services
 
                 string response = "No Response";
                 response = Backend.RequestServerResponse("PenguinRequest-Saved:");
-                
+
+                if (string.IsNullOrEmpty(response) || response == "No Response" || response == "fail")
+                    throw new Exception($"TCP server returned: {(string.IsNullOrEmpty(response) ? "(empty)" : response.Substring(0, Math.Min(response.Length, 100)))}");
+
                 foreach (string json in response.Split("~~~~", StringSplitOptions.RemoveEmptyEntries))
-                {   
-                    MonitorDetails monitor = Newtonsoft.Json.JsonConvert.DeserializeObject<MonitorDetails>(json);
+                {
+                    var trimmed = json.Trim();
+                    if (string.IsNullOrEmpty(trimmed) || !trimmed.StartsWith("{"))
+                        throw new Exception($"TCP monitor data: expected JSON object, got: {trimmed.Substring(0, Math.Min(trimmed.Length, 100))}");
+                    MonitorDetails monitor = Newtonsoft.Json.JsonConvert.DeserializeObject<MonitorDetails>(trimmed);
                             
                     /// Don't import deleted monitors
                     if(monitor.IsDeleted)
@@ -284,6 +290,8 @@ namespace PenguinMonitor.Services
                 HttpResponseMessage responseBirds = await responseBirdsTask;
                 responseBirds.EnsureSuccessStatusCode();
                 var jsonContent = await responseBirds.Content.ReadAsStringAsync();
+                if (string.IsNullOrEmpty(jsonContent) || !jsonContent.TrimStart().StartsWith("["))
+                    throw new Exception($"Penguins API: expected JSON array, got: {jsonContent?.Substring(0, Math.Min(jsonContent?.Length ?? 0, 100))}");
                 var penguinRecords = JsonConvert.DeserializeObject<List<WildWatchPenguin>>(jsonContent);
 
                 Dictionary<string, PenguinData> remotePenguinData = new Dictionary<string, PenguinData>();
@@ -323,6 +331,8 @@ namespace PenguinMonitor.Services
                 if (responseLocations.IsSuccessStatusCode)
                 {
                     var locationsJson = await responseLocations.Content.ReadAsStringAsync();
+                    if (string.IsNullOrEmpty(locationsJson) || !locationsJson.TrimStart().StartsWith("["))
+                        throw new Exception($"Locations API: expected JSON array, got: {locationsJson?.Substring(0, Math.Min(locationsJson?.Length ?? 0, 100))}");
                     var locations = JsonConvert.DeserializeObject<List<WildWatchLocation>>(locationsJson);
                     var boxNotes = new Dictionary<string, BoxNoteData>();
                     foreach (var loc in locations)
@@ -337,6 +347,27 @@ namespace PenguinMonitor.Services
                             };
                         }
                     }
+                    // Merge latest breeding status from overview (separate fetch, won't break other data)
+                    try {
+                        var overviewResp = await _httpClient.GetAsync(WILDWATCH_PENGUINS_URL.Replace("penguins.php", "dashboard.php") + "?view=overview");
+                        if (overviewResp.IsSuccessStatusCode) {
+                            var overviewJson = await overviewResp.Content.ReadAsStringAsync();
+                            var overview = JsonConvert.DeserializeObject<Dictionary<string, object>>(overviewJson);
+                            if (overview != null && overview.ContainsKey("box_info")) {
+                                var boxInfo = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, object>>>(overview["box_info"].ToString());
+                                if (boxInfo != null) {
+                                    foreach (var kvp in boxInfo) {
+                                        if (boxNotes.ContainsKey(kvp.Key) && kvp.Value.ContainsKey("s")) {
+                                            var status = kvp.Value["s"]?.ToString();
+                                            if (!string.IsNullOrEmpty(status))
+                                                boxNotes[kvp.Key].BreedingStatus = status;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch { }
+
                     var boxNotesJson = JsonConvert.SerializeObject(boxNotes, Formatting.Indented);
                     File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), boxNotesJson);
                 }

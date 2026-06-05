@@ -959,12 +959,16 @@ namespace PenguinMonitor
         {
             if (!string.IsNullOrEmpty(result.Error))
             {
-                new AlertDialog.Builder(this)
+                var errDialog = new AlertDialog.Builder(this)
                     .SetTitle("Bird Stats Failed")
                     .SetMessage($"❌ {result.Error}")
                     .SetPositiveButton("OK", (s, e) => { })
-                    .SetNeutralButton("Retry", (s, e) => OnBirdStatsClick(null, EventArgs.Empty))
-                    .Show();
+                    .SetNeutralButton("Retry", (s, e) => OnBirdStatsClick(null, EventArgs.Empty));
+                if (result.Error.Contains("<!") || result.Error.Contains("doctype") || result.Error.Contains("Human"))
+                    errDialog.SetNegativeButton("Open Website", (s, e) => {
+                        StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse("https://wildwatch.co.nz")));
+                    });
+                errDialog.Show();
                 return;
             }
 
@@ -2693,8 +2697,10 @@ namespace PenguinMonitor
                     // Calculate the monitor index based on historical navigation
                     int displayMonitorIndex = _appSettings.CurrentlyVisibleMonitor + _currentHistoricalDataIndex;
 
-                    _boxSavedTimeTextView.Text = _allMonitorData.ContainsKey(displayMonitorIndex) && _allMonitorData[displayMonitorIndex].BoxData.ContainsKey(_currentBoxName) ?
+                    var timeStr = _allMonitorData.ContainsKey(displayMonitorIndex) && _allMonitorData[displayMonitorIndex].BoxData.ContainsKey(_currentBoxName) ?
                         ToNzTime(_allMonitorData[displayMonitorIndex].BoxData[_currentBoxName].whenDataCollectedUtc).ToString("d MMM yyyy\nHH:mm") : "";
+                    var tagStr = _boxTags.TryGetValue(_currentBoxName, out var bt) ? bt.TagNumber : "";
+                    _boxSavedTimeTextView.Text = (timeStr + (timeStr != "" && tagStr != "" ? "\n" : "") + tagStr).Trim();
                     // Show date in red if viewing historical data
                     _boxSavedTimeTextView.SetTextColor(_currentHistoricalDataIndex > 0 ? UIFactory.DANGER_RED : Color.Black);
                     _boxSavedTimeTextView.Gravity = GravityFlags.Right;
@@ -2727,7 +2733,9 @@ namespace PenguinMonitor
                         SetSpinnerStatus(_gateStatusSpinner[0], boxData.GateStatus);
                         if (_notesEditText != null) _notesEditText[0].Text = boxData.Notes;
                         buildScannedIdsLayout(boxData.ScannedIds);
-                        SetSpinnerStatus(_breedingChanceSpinner[0], !string.IsNullOrWhiteSpace(boxData.BreedingChance) ? boxData.BreedingChance : "");
+                        var breedingVal = !string.IsNullOrWhiteSpace(boxData.BreedingChance) ? boxData.BreedingChance
+                            : (_boxNotes.TryGetValue(_currentBoxName, out var bn1) && !string.IsNullOrEmpty(bn1.BreedingStatus) ? bn1.BreedingStatus : "");
+                        SetSpinnerStatus(_breedingChanceSpinner[0], breedingVal);
                     }
                     else
                     {
@@ -2738,14 +2746,8 @@ namespace PenguinMonitor
                         if (_notesEditText != null) _notesEditText[0].Text = "";
                         buildScannedIdsLayout(new List<ScanRecord>());
 
-                        SetSpinnerStatus(_breedingChanceSpinner[0], "");
-                        var olderBoxDatas = DataStorageService.getOlderBoxDatas(_allMonitorData, displayMonitorIndex, _currentBoxName);
-                        foreach (var older in olderBoxDatas)
-                            if (!string.IsNullOrEmpty(older.BreedingChance))
-                            {
-                                SetSpinnerStatus(_breedingChanceSpinner[0], older.BreedingChance);
-                                break;
-                            }
+                        var breedingFallback = _boxNotes.TryGetValue(_currentBoxName, out var bn2) && !string.IsNullOrEmpty(bn2.BreedingStatus) ? bn2.BreedingStatus : "";
+                        SetSpinnerStatus(_breedingChanceSpinner[0], breedingFallback);
                     }
 
                     foreach (var editText in editTexts)

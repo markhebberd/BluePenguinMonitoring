@@ -198,42 +198,9 @@ namespace PenguinMonitor.Services
                     }
                 }
 
-                // Upload any local tags that are valid and don't exist remotely or are newer
-                foreach (var kvp in localTags)
-                {
-                    if (!IsValidBox(kvp.Key))
-                        continue;
+                // Download only — no upload. Box tags are managed server-side.
 
-                    bool shouldUpload = false;
-                    if (!remoteTags.ContainsKey(kvp.Key))
-                    {
-                        shouldUpload = true;
-                    }
-                    else
-                    {
-                        // Compare with 1 second tolerance to handle datetime precision differences
-                        var diff = kvp.Value.ScanTimeUTC - remoteTags[kvp.Key].ScanTimeUTC;
-                        shouldUpload = diff.TotalSeconds > 1;
-                    }
-
-                    if (shouldUpload)
-                    {
-                        try
-                        {
-                            await _apiService.SaveBoxTagAsync(kvp.Value);
-                            remoteTags[kvp.Key] = kvp.Value;
-                            result.Uploaded++;
-                            System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Uploaded {kvp.Key}");
-                        }
-                        catch (Exception ex)
-                        {
-                            result.Failed++;
-                            System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Failed to upload {kvp.Key}: {ex.Message}");
-                        }
-                    }
-                }
-
-                // Merge: keep only valid tags from remote, plus existing local tags for valid boxes
+                // Use remote tags as source of truth
                 var mergedTags = new Dictionary<string, BoxTag>();
                 foreach (var kvp in remoteTags)
                 {
@@ -268,35 +235,8 @@ namespace PenguinMonitor.Services
             float accuracy,
             string filesDir)
         {
-            var boxTag = new BoxTag
-            {
-                BoxID = boxId,
-                TagNumber = tagNumber,
-                ScanTimeUTC = DateTime.UtcNow,
-                Latitude = latitude,
-                Longitude = longitude,
-                Accuracy = accuracy
-            };
-
-            boxTags[boxId] = boxTag;
-
-            // Save locally first
-            SaveBoxTags(boxTags, filesDir);
-
-            // Then try to save remotely
-            if (_apiService != null)
-            {
-                try
-                {
-                    await _apiService.SaveBoxTagAsync(boxTag);
-                    System.Diagnostics.Debug.WriteLine($"BoxTagService.AssignBoxTagAsync: Saved {boxId} to remote");
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"BoxTagService.AssignBoxTagAsync: Remote save failed: {ex.Message}");
-                    // Local save already done, will sync later
-                }
-            }
+            // Disabled — box tags are read-only from server
+            return;
         }
 
         /// <summary>
@@ -314,8 +254,8 @@ namespace PenguinMonitor.Services
                 // Save locally first
                 SaveBoxTags(boxTags, filesDir);
 
-                // Then try to delete remotely
-                if (_apiService != null)
+                // Remote delete disabled — box tags are managed server-side
+                if (false)
                 {
                     try
                     {

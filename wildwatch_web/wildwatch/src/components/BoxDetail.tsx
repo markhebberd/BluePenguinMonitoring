@@ -26,9 +26,9 @@ interface Observation {
 interface LocationInfo {
   location_name: string;
   pit_id: string | null;
-  pit_latitude: number | null;
-  pit_longitude: number | null;
-  pit_accuracy: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
 }
 
 interface BoxDetailProps {
@@ -75,7 +75,7 @@ export function BoxDetail({ boxName, onClose }: BoxDetailProps) {
       {location?.pit_id && (
         <div className="box-tag-info">
           Tag: {location.pit_id.slice(-8)}
-          {location.pit_latitude ? ` | ${location.pit_latitude.toFixed(5)}, ${location.pit_longitude?.toFixed(5)}` : ''}
+          {location.latitude ? ` | ${location.latitude.toFixed(5)}, ${location.longitude?.toFixed(5)}` : ''}
         </div>
       )}
 

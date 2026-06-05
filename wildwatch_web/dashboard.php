@@ -33,21 +33,74 @@ function handleTimeline($pdo, $colonyId) {
 
 function handleBox($pdo, $colonyId, $boxName) {
     if (empty($boxName)) { echo json_encode(['error'=>'name required']); return; }
-    $sql = "SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes,
-            (SELECT COUNT(*) FROM audit_log a WHERE a.table_name = 'observations' AND a.record_id = o.observation_id AND a.action = 'UPDATE') as edit_count
+    $sql = "SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
             FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = FALSE ORDER BY o.observation_time_utc DESC";
     $stmt = $pdo->prepare($sql); $stmt->execute([$colonyId, $boxName]); $observations = $stmt->fetchAll();
-    foreach ($observations as &$obs) {
-        $s = $pdo->prepare("SELECT ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ?");
-        $s->execute([$obs['observation_id']]); $obs['scans'] = $s->fetchAll();
+
+    $obsIds = array_column($observations, 'observation_id');
+
+    // Batch fetch edit counts
+    $editCounts = [];
+    if (!empty($obsIds)) {
+        $ph = implode(',', array_fill(0, count($obsIds), '?'));
+        $ec = $pdo->prepare("SELECT record_id, COUNT(*) as c FROM audit_log WHERE table_name = 'observations' AND action = 'UPDATE' AND record_id IN ($ph) GROUP BY record_id");
+        $ec->execute(array_values($obsIds));
+        foreach ($ec->fetchAll() as $row) $editCounts[$row['record_id']] = (int)$row['c'];
     }
-    $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, pit_latitude, pit_longitude, pit_accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+    foreach ($observations as &$obs) {
+        $obs['edit_count'] = $editCounts[$obs['observation_id']] ?? 0;
+    }
+    unset($obs);
+
+    // Batch fetch all scans for all observations in one query
+    $scansByObs = [];
+    if (!empty($obsIds)) {
+        $ph = implode(',', array_fill(0, count($obsIds), '?'));
+        $s = $pdo->prepare("SELECT ps.observation_id, ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id IN ($ph)");
+        $s->execute(array_values($obsIds));
+        foreach ($s->fetchAll() as $scan) {
+            $scansByObs[$scan['observation_id']][] = $scan;
+        }
+    }
+    foreach ($observations as &$obs) {
+        $obs['scans'] = $scansByObs[$obs['observation_id']] ?? [];
+    }
+
+    $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $l->execute([$colonyId, $boxName]);
 
-    // All penguins associated with this box (unified: scans + chipped)
-    $result = getSightings($pdo, null, $boxName, $colonyId);
-    $allPenguins = $result['penguins'];
+    // Build allPenguins from already-fetched scans + chipped-here birds
+    $allPenguins = [];
+    foreach ($scansByObs as $scans) {
+        foreach ($scans as $scan) {
+            $pnum = $scan['peng_num'];
+            if (!$pnum) continue;
+            if (!isset($allPenguins[$pnum])) {
+                $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$scan['pit_id'], 'sex'=>$scan['sex'],
+                    'life_stage'=>$scan['life_stage'], 'chipped_as_adult'=>$scan['chipped_as_adult'],
+                    'chick_size_code'=>$scan['chick_size_code'], 'chip_date'=>$scan['chip_date'],
+                    'scan_count'=>0, 'last_seen'=>null, 'is_chipped_here'=>false];
+            }
+            $allPenguins[$pnum]['scan_count']++;
+        }
+    }
+    // Add birds chipped in this box
+    $chipStmt = $pdo->prepare("SELECT pc.peng_num, pc.pit_id, pc.chip_date, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_by
+        FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE pc.chip_box = ?");
+    $chipStmt->execute([$boxName]);
+    foreach ($chipStmt->fetchAll() as $c) {
+        $pnum = $c['peng_num'];
+        if (!isset($allPenguins[$pnum])) {
+            $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$c['pit_id'], 'sex'=>$c['sex'],
+                'life_stage'=>$c['life_stage'], 'chipped_as_adult'=>$c['chipped_as_adult'],
+                'chick_size_code'=>$c['chick_size_code'], 'chip_date'=>$c['chip_date'],
+                'scan_count'=>0, 'last_seen'=>$c['chip_date'], 'is_chipped_here'=>true];
+        } else {
+            $allPenguins[$pnum]['is_chipped_here'] = true;
+        }
+    }
+    $allPenguins = array_values($allPenguins);
 
     // Count deleted observations
     $delStmt = $pdo->prepare("SELECT COUNT(*) as c FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = TRUE");

@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-cd "$(dirname "$0")/wildwatch_web/wildwatch"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/wildwatch_web/wildwatch"
 
 # Lint: check for unstyled <a> tags
 echo "Checking for unstyled links..."
@@ -17,7 +18,7 @@ echo "Building..."
 npx vite build 2>&1 | tail -5
 
 # Load FTP creds
-source /home/mark/PenguinMonitor/.env
+source "$SCRIPT_DIR/.env"
 CPANEL_URL="https://wildwatch.co.nz:2083"
 CPANEL_AUTH="wildwatch:${FTP_PASS}"
 
@@ -42,7 +43,7 @@ for f in dist/assets/*; do
 done
 
 # Deploy PHP
-cd ../..
+cd "$SCRIPT_DIR"
 echo "Deploying PHP..."
 for f in wildwatch_web/*.php; do
     [ -f "$f" ] && upload "$f" /public_html/penguin-api

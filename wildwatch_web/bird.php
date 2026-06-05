@@ -28,14 +28,26 @@ $chipsStmt = $pdo->prepare("SELECT pit_id, chip_date, is_active, chip_box, chip_
 $chipsStmt->execute([$pid]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 
-// Unified sightings (shared function)
-$result = getSightings($pdo, $pid);
-$sightings = $result['sightings'];
-
-// Biometrics
+// Biometrics (fast — no observation joins)
 $stmt = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? ORDER BY observation_date DESC");
 $stmt->execute([$pid]);
 $biometrics = $stmt->fetchAll();
+
+// Quick mode: return penguin + chips + biometrics only (no sightings/partners)
+if (isset($_GET['quick'])) {
+    echo json_encode([
+        'penguin' => $penguin,
+        'biometrics' => $biometrics,
+        'sightings' => [],
+        'partners' => [],
+        'breeding_stats' => [],
+    ]);
+    exit;
+}
+
+// Unified sightings (shared function)
+$result = getSightings($pdo, $pid);
+$sightings = $result['sightings'];
 
 // Partners (from sightings seen_with, with full observation context)
 $partners = [];

@@ -4,7 +4,7 @@ import type { BoxTag } from '../types';
 const STATUS_COLORS: Record<string,string> = {
   NO:'#E0E0E0', UNL:'#FFF9C4', POT:'#FFF176', CON:'#FFD54F',
   BR:'#66BB6A', I:'#A5D6A7', G:'#4CAF50', PG:'#2E7D32',
-  MOULT:'#42A5F5', ABN:'#F44336', DCM:'#795548', '':'#F5F5F5',
+  MOULT:'#42A5F5', ABN:'#F44336', DCM:'#BCAAA4', '':'#F5F5F5',
 };
 
 interface BoxInfo { s: string; a: number; e: number; c: number; }

@@ -1,4 +1,5 @@
 import type { BoxTag } from '../types';
+import { triggerSync } from './localdb';
 
 const API_KEY = 'tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf';
 
@@ -28,6 +29,10 @@ export async function fetchAllPenguins() {
   return (await fetch(`/penguin-api/penguins.php?_=${Date.now()}`)).json();
 }
 
+export async function fetchBirdQuick(pengNum: string) {
+  return (await fetch(`/penguin-api/bird.php?num=${encodeURIComponent(pengNum)}&quick=1&_=${Date.now()}`)).json();
+}
+
 export async function fetchBirdDetail(pengNum: string) {
   return (await fetch(`/penguin-api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`)).json();
 }
@@ -38,7 +43,9 @@ export async function updateRecord(token: string, table: string, id: number | st
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify({ ...fields, ...(reason ? { _reason: reason } : {}) })
   });
-  return r.json();
+  const result = await r.json();
+  triggerSync(); // sync local DB with server changes
+  return result;
 }
 
 export async function createRecord(token: string, table: string, fields: Record<string, any>) {
@@ -47,7 +54,9 @@ export async function createRecord(token: string, table: string, fields: Record<
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify(fields)
   });
-  return r.json();
+  const result = await r.json();
+  triggerSync();
+  return result;
 }
 
 export async function deleteRecord(token: string, table: string, id: number, reason?: string) {
@@ -56,7 +65,9 @@ export async function deleteRecord(token: string, table: string, id: number, rea
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: reason ? JSON.stringify({ _reason: reason }) : undefined
   });
-  return r.json();
+  const result = await r.json();
+  triggerSync();
+  return result;
 }
 
 export async function fetchHistory(token: string, table: string, id: number) {

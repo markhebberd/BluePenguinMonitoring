@@ -28,10 +28,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     }
     $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
     $stmt->execute([$m[1]]);
-    if (!$stmt->fetch()) { http_response_code(401); echo json_encode(['error'=>'Invalid token']); exit; }
+    $observer = $stmt->fetch();
+    if (!$observer) { http_response_code(401); echo json_encode(['error'=>'Invalid token']); exit; }
 
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !is_array($input)) { http_response_code(400); echo json_encode(['error'=>'JSON array required']); exit; }
+
+    // Get old mappings for audit
+    $oldStmt = $pdo->prepare("SELECT date_number, actual_date FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $oldStmt->execute([$season]);
+    $oldMappings = $oldStmt->fetchAll();
 
     $pdo->beginTransaction();
     try {
@@ -40,6 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         foreach ($input as $row) {
             $stmt->execute([$season, $row['n'], $row['date']]);
         }
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('date_mappings', ?, 'UPDATE', ?, ?)")
+            ->execute([$season, $observer['observer_id'], json_encode(['season'=>$season, 'old_count'=>count($oldMappings), 'new_count'=>count($input)])]);
         $pdo->commit();
         echo json_encode(['success'=>true, 'count'=>count($input)]);
     } catch (Exception $e) {

@@ -402,3 +402,4 @@ FodyWeavers.xsd
 /secrets.props
 my-release-key.keystore
 .env
+backups/

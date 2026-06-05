@@ -120,8 +120,8 @@ function handleColonyOverview($pdo, $colonyId) {
     $sql = "SELECT
                 ol.location_name,
                 ol.pit_id,
-                ol.pit_latitude,
-                ol.pit_longitude,
+                ol.latitude,
+                ol.longitude,
                 o.observation_time_utc,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes,

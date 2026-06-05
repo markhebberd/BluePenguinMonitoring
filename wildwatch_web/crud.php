@@ -210,8 +210,10 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     $old = $stmt->fetch();
     if (!$old) { http_response_code(404); echo json_encode(['error'=>'Not found']); return; }
 
+    $reason = $input['_reason'] ?? null;
     $sets = []; $params = []; $changed = [];
     foreach ($input as $col => $newVal) {
+        if ($col === '_reason') continue;
         $sets[] = "$col = ?"; $params[] = $newVal;
         if (($old[$col] ?? null) != $newVal) $changed[$col] = ['old'=>$old[$col] ?? null, 'new'=>$newVal];
     }
@@ -221,7 +223,6 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE $table SET " . implode(',', $sets) . " WHERE $pk = ?")->execute($params);
-        $reason = $body['_reason'] ?? null;
         $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'UPDATE', ?, ?, ?)")
             ->execute([$table, $id, $observer['observer_id'], json_encode($changed), $reason]);
         $pdo->commit();

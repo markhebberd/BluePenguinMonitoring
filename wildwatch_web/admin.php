@@ -29,6 +29,20 @@ if (($observer['role'] ?? '') !== 'admin') { http_response_code(403); echo json_
 
 $action = $_GET['action'] ?? '';
 
+if ($action === 'recent_changes') {
+    $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
+    $stmt = $pdo->prepare("SELECT a.*, o.observer_name,
+        CASE WHEN a.table_name = 'observations' THEN
+            (SELECT ol.location_name FROM observations obs JOIN observation_locations ol ON obs.location_id = ol.location_id WHERE obs.observation_id = a.record_id LIMIT 1)
+        END as box_name
+        FROM audit_log a
+        JOIN observers o ON a.observer_id = o.observer_id
+        ORDER BY a.change_timestamp DESC LIMIT ?");
+    $stmt->execute([$limit]);
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
 if ($action === 'users') {
     $stmt = $pdo->query("SELECT observer_id, observer_name, email, role, created_at FROM observers ORDER BY observer_id");
     echo json_encode($stmt->fetchAll());
@@ -43,8 +57,22 @@ if ($action === 'update_user') {
         if (isset($input[$field])) { $sets[] = "$field = ?"; $params[] = $input[$field]; }
     }
     if (empty($sets)) { echo json_encode(['success'=>true]); exit; }
-    $params[] = $input['observer_id'];
+    $targetId = $input['observer_id'];
+    // Get old values for audit
+    $oldStmt = $pdo->prepare("SELECT role, observer_name, email FROM observers WHERE observer_id = ?");
+    $oldStmt->execute([$targetId]);
+    $oldRow = $oldStmt->fetch();
+    $params[] = $targetId;
     $pdo->prepare("UPDATE observers SET " . implode(', ', $sets) . " WHERE observer_id = ?")->execute($params);
+    $changed = [];
+    foreach (['role', 'observer_name', 'email'] as $field) {
+        if (isset($input[$field]) && ($oldRow[$field] ?? null) != $input[$field])
+            $changed[$field] = ['old' => $oldRow[$field] ?? null, 'new' => $input[$field]];
+    }
+    if (!empty($changed)) {
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
+            ->execute([$targetId, $observer['observer_id'], json_encode($changed)]);
+    }
     echo json_encode(['success'=>true]);
     exit;
 }
@@ -54,6 +82,8 @@ if ($action === 'wipe_monitors') {
     $del1 = $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename NOT LIKE 'sheet-import%'");
     $del2 = $pdo->exec("DELETE FROM observations WHERE monitor_filename NOT LIKE 'sheet-import%'");
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', 'bulk', 'DELETE', ?, ?)")
+        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_monitors', 'deleted_scans'=>$del1, 'deleted_observations'=>$del2])]);
     echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_observations'=>$del2]);
     exit;
 }
@@ -64,17 +94,27 @@ if ($action === 'wipe_sightings') {
     $del2 = $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE 'sheet-import%'");
     $del3 = $pdo->exec("DELETE FROM observations WHERE monitor_filename LIKE 'sheet-import%'");
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', 'bulk', 'DELETE', ?, ?)")
+        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_sightings', 'deleted_scans'=>$del1, 'deleted_biometrics'=>$del2, 'deleted_observations'=>$del3])]);
     echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_biometrics'=>$del2, 'deleted_observations'=>$del3]);
     exit;
 }
 
 if ($action === 'wipe_penguins') {
+    $counts = [
+        'penguins' => (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn(),
+        'chips' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn(),
+        'scans' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_scans")->fetchColumn(),
+        'biometrics' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_biometric_data")->fetchColumn(),
+    ];
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
     $pdo->exec("DELETE FROM penguin_scans");
     $pdo->exec("DELETE FROM penguin_biometric_data");
     $pdo->exec("DELETE FROM penguin_chips");
     $pdo->exec("DELETE FROM penguins");
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('penguins', 'bulk', 'DELETE', ?, ?)")
+        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_penguins', 'deleted'=>$counts])]);
     echo json_encode(['success'=>true, 'message'=>'All penguins, chips, scans and biometrics deleted']);
     exit;
 }
@@ -154,6 +194,8 @@ if ($action === 'resync_monitor') {
         $del2->execute([$monitorName]);
         $obsDel = $del2->rowCount();
 
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, 'DELETE', ?, ?)")
+            ->execute([$monitorName, $observer['observer_id'], json_encode(['action'=>'resync_monitor', 'monitor'=>$monitorName, 'deleted_scans'=>$scansDel, 'deleted_observations'=>$obsDel])]);
         $pdo->commit();
         echo json_encode(['success' => true, 'deleted_scans' => $scansDel, 'deleted_observations' => $obsDel, 'message' => "Deleted $obsDel observations and $scansDel scans for '$monitorName'. Run Sync to re-import."]);
     } catch (Exception $e) {
@@ -252,9 +294,19 @@ function importMonitor($pdo, $monitor, $colonyId = 1, $observerId = 1) {
             if (substr($short8, 0, 4) === '9130') continue;
             if (isset($chipLookup[$short8])) {
                 $scanTime = $scan['Timestamp'] ?? $obsTime;
-                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")
-                    ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime))]);
+                $lat = isset($scan['Latitude']) && $scan['Latitude'] != 0 ? $scan['Latitude'] : null;
+                $lon = isset($scan['Longitude']) && $scan['Longitude'] != 0 ? $scan['Longitude'] : null;
+                $acc = isset($scan['Accuracy']) && $scan['Accuracy'] > 0 ? $scan['Accuracy'] : null;
+                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
+                    ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime)), $lat, $lon, $acc]);
                 $scans++;
+
+                // Update box GPS if null or >50% more accurate
+                if ($lat && $lon && $acc) {
+                    $pdo->prepare("UPDATE observation_locations SET latitude = ?, longitude = ?, accuracy = ?, scan_time_utc = ?
+                        WHERE location_id = ? AND (latitude IS NULL OR accuracy > ? * 2)")
+                        ->execute([$lat, $lon, $acc, date('Y-m-d H:i:s', strtotime($scanTime)), $locationId, $acc]);
+                }
             }
         }
     }
