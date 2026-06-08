@@ -560,6 +560,50 @@ namespace PenguinMonitor.Models
             }
         }
 
+        // Auth credentials (persisted)
+        private string authToken = "";
+        public string AuthToken
+        {
+            get => authToken;
+            set
+            {
+                if (authToken != value)
+                {
+                    authToken = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private int observerId;
+        public int ObserverId
+        {
+            get => observerId;
+            set
+            {
+                if (observerId != value)
+                {
+                    observerId = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private string observerName = "";
+        public string ObserverName
+        {
+            get => observerName;
+            set
+            {
+                if (observerName != value)
+                {
+                    observerName = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public bool IsAuthenticated => !string.IsNullOrEmpty(AuthToken);
+
         // Transient property - not saved to JSON
         [JsonIgnore]
         public bool ShowDifferencesWithPreviousMonitor { get; set; } = false;

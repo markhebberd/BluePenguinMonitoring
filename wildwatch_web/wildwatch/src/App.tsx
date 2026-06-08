@@ -2683,6 +2683,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
+  const [showDeletedMonitors, setShowDeletedMonitors] = useState(false);
+  const [monitorSearch, setMonitorSearch] = useState<any>({ loading: false, date: null, results: null });
   const [reimportResult, setReimportResult] = useState<any>(null);
   const [reimporting, setReimporting] = useState(false);
   const [sightingResult, setSightingResult] = useState<any>(null);
@@ -2856,12 +2858,64 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       <div className="admin-section">
+        <h3>Delete Monitor by Date</h3>
+        <p className="muted">Search for monitors imported on a specific date, then delete individually.</p>
+        <div style={{display:'flex', gap:6, alignItems:'center'}}>
+          <input type="date" id="monitor-date-search" style={{padding:'4px 8px', borderRadius:4, border:'1px solid #ccc'}} />
+          <button className="edit-btn" onClick={async () => {
+            const dateInput = (document.getElementById('monitor-date-search') as HTMLInputElement)?.value;
+            if (!dateInput) { alert('Pick a date'); return; }
+            setMonitorSearch({ loading: true, date: dateInput, results: null });
+            try {
+              const r = await fetch(`/penguin-api/admin.php?action=list_monitors&date=${dateInput}`, { headers: { 'Authorization': `Bearer ${token}` } });
+              const d = await r.json();
+              setMonitorSearch({ loading: false, date: dateInput, results: d });
+            } catch (e: any) { setMonitorSearch({ loading: false, date: dateInput, results: { error: e.message } }); }
+          }}>Search</button>
+        </div>
+        {monitorSearch.loading && <p className="muted">Searching...</p>}
+        {monitorSearch.results && !monitorSearch.results.error && Array.isArray(monitorSearch.results) && (
+          <div style={{marginTop:8}}>
+            {monitorSearch.results.length === 0 ? <p className="muted">No monitors found on {monitorSearch.date}</p> : (
+              monitorSearch.results.map((m: any) => (
+                <div key={m.monitor_filename} className="obs-card" style={{marginBottom:4}}>
+                  <div className="obs-top" style={{flexWrap:'wrap', gap:4}}>
+                    <b>{m.monitor_filename}</b>
+                    <span className="muted" style={{fontSize:11}}>{m.obs_count} obs, {m.scan_count || 0} scans</span>
+                    <button className="edit-btn" style={{padding:'1px 8px', fontSize:11, background:'#F44336', color:'#fff'}} onClick={async () => {
+                      const pr = await fetch('/penguin-api/admin.php?action=preview_monitor', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ monitor: m.monitor_filename })
+                      });
+                      const preview = await pr.json();
+                      if (preview.error) { alert(preview.error); return; }
+                      let msg = `Delete all data from "${m.monitor_filename}"?\n\n${preview.observations} observations, ${preview.scans} scans\nDates: ${preview.dates?.join(', ')}\nBoxes: ${preview.boxes?.join(', ')}`;
+                      if (preview.multi_day) msg += `\n\n⚠️ WARNING: This spans MULTIPLE DAYS!`;
+                      msg += '\n\nThis action is logged and audited.';
+                      if (!confirm(msg)) return;
+                      if (preview.multi_day && !confirm('This will delete data from multiple days. Confirm again to proceed.')) return;
+                      const dr = await fetch('/penguin-api/admin.php?action=delete_monitor', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ monitor: m.monitor_filename })
+                      });
+                      const d = await dr.json();
+                      if (d.success) {
+                        setMonitorSearch((prev: any) => ({...prev, results: prev.results.filter((r: any) => r.monitor_filename !== m.monitor_filename)}));
+                      } else { alert(d.error || 'Delete failed'); }
+                    }}>Delete</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {monitorSearch.results?.error && <div style={{color:'#F44336', marginTop:8}}>{monitorSearch.results.error}</div>}
+      </div>
+
+      <div className="admin-section">
         <h3>Sync Monitors (TCP Server)</h3>
         <p className="muted">Pull from TCP server (210.54.37.120). Query first, then import individual monitors.</p>
-        <div style={{display:'flex', gap:6}}>
-          <button className="edit-btn" onClick={() => { if (confirm('DELETE all monitor-imported observations?')) doSync('wipe_monitors'); }} disabled={syncing} style={{background:'#F44336', color:'#fff'}}>
-            Wipe
-          </button>
+        <div>
           <button className="edit-btn" onClick={async () => {
             setSyncing(true); setSyncResult(null);
             try {
@@ -2879,16 +2933,16 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
               <div style={{color:'#F44336'}}>{syncResult.error}</div>
             ) : (
               <>
-                <div className="muted" style={{marginBottom:6}}>{syncResult.monitors?.length || 0} monitors on server</div>
-                {(syncResult.monitors || []).map((m: any, i: number) => (
-                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'exists' ? 0.6 : m.status === 'deleted' ? 0.3 : 1}}>
+                <div className="muted" style={{marginBottom:6}}>{syncResult.monitors?.filter((m: any) => m.status !== 'deleted').length || 0} monitors on server</div>
+                {(syncResult.monitors || []).filter((m: any) => m.status !== 'deleted').map((m: any, i: number) => (
+                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'exists' ? 0.6 : 1}}>
                     <div className="obs-top" style={{flexWrap:'wrap', gap:4}}>
                       <b>{m.filename}</b>
                       <span className="badge" style={{
                         background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : m.status === 'new' ? '#FF9800' : '#E0E0E0',
                         color: m.status === 'exists' || m.status === 'empty' ? '#333' : '#fff'
                       }}>{m.status === 'new' ? `${m.new} new` : m.status}</span>
-                      {(m.status === 'new' || m.status === 'exists') && m.status !== 'imported' && (
+                      {m.status === 'new' && (
                         <button className="edit-btn done-btn" style={{padding:'1px 8px', fontSize:11}} onClick={async () => {
                           const r = await fetch('/penguin-api/admin.php?action=import_monitor', {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2926,9 +2980,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial'}
         </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all sheet-imported observations?')) doReimport('wipe_sightings'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe'}
-        </button>
         <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
           {reimporting ? 'Working...' : 'Import'}
         </button>
@@ -2960,9 +3011,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <p className="muted">Penguin reference data from Google Sheets (1004 birds)</p>
         <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
           {reimporting ? 'Working...' : 'Trial'}
-        </button>
-        <button className="edit-btn" onClick={() => { if (confirm('DELETE all penguins, chips, scans and biometrics?')) doReimport('wipe_penguins'); }} disabled={reimporting} style={{marginLeft:6, background:'#F44336', color:'#fff'}}>
-          {reimporting ? 'Working...' : 'Wipe'}
         </button>
         <button className="edit-btn done-btn" onClick={() => doReimport('import_penguins')} disabled={reimporting} style={{marginLeft:6}}>
           {reimporting ? 'Working...' : 'Import'}

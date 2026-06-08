@@ -205,6 +205,86 @@ if ($action === 'resync_monitor') {
     exit;
 }
 
+// List monitor filenames that have data on a given NZ date
+if ($action === 'list_monitors') {
+    $date = $_GET['date'] ?? '';
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { echo json_encode(['error' => 'date required (YYYY-MM-DD)']); exit; }
+
+    $utcStart = date('Y-m-d H:i:s', strtotime($date) - 13 * 3600); // NZ is UTC+12/+13
+    $utcEnd = date('Y-m-d H:i:s', strtotime($date) + 14 * 3600);
+
+    $stmt = $pdo->prepare("SELECT monitor_filename, COUNT(*) as obs_count,
+        SUM((SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id)) as scan_count,
+        MIN(observation_time_utc) as earliest, MAX(observation_time_utc) as latest
+        FROM observations o
+        WHERE observation_time_utc >= ? AND observation_time_utc < ? AND is_deleted = FALSE
+        GROUP BY monitor_filename
+        ORDER BY monitor_filename");
+    $stmt->execute([$utcStart, $utcEnd]);
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
+// Preview or delete all data from a specific monitor filename
+if ($action === 'preview_monitor' || $action === 'delete_monitor') {
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    $monitor = $body['monitor'] ?? $_GET['monitor'] ?? '';
+    if (empty($monitor)) { echo json_encode(['error' => 'monitor filename required']); exit; }
+
+    // Find all observations for this monitor
+    $stmt = $pdo->prepare("SELECT o.observation_id,
+        DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as nz_date,
+        ol.location_name as box, o.adults, o.eggs, o.chicks, o.breeding_status,
+        (SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id) as scan_count
+        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE o.monitor_filename = ? AND o.is_deleted = FALSE
+        ORDER BY o.observation_time_utc");
+    $stmt->execute([$monitor]);
+    $observations = $stmt->fetchAll();
+
+    $dates = array_values(array_unique(array_column($observations, 'nz_date')));
+    $totalScans = array_sum(array_column($observations, 'scan_count'));
+
+    if ($action === 'preview_monitor') {
+        echo json_encode([
+            'monitor' => $monitor,
+            'observations' => count($observations),
+            'scans' => $totalScans,
+            'dates' => $dates,
+            'multi_day' => count($dates) > 1,
+            'boxes' => array_values(array_unique(array_column($observations, 'box'))),
+        ]);
+        exit;
+    }
+
+    // Hard delete scans + observations for this monitor
+    $pdo->beginTransaction();
+    try {
+        $obsIds = array_column($observations, 'observation_id');
+        $scansDel = 0;
+        if (!empty($obsIds)) {
+            $ph = implode(',', array_fill(0, count($obsIds), '?'));
+            $s = $pdo->prepare("DELETE FROM penguin_scans WHERE observation_id IN ($ph)");
+            $s->execute(array_values($obsIds));
+            $scansDel = $s->rowCount();
+            $o = $pdo->prepare("DELETE FROM observations WHERE observation_id IN ($ph)");
+            $o->execute(array_values($obsIds));
+        }
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, 'DELETE', ?, ?)")
+            ->execute([$monitor, $observer['observer_id'], json_encode([
+                'action'=>'delete_monitor', 'monitor'=>$monitor,
+                'deleted_observations'=>count($obsIds), 'deleted_scans'=>$scansDel,
+                'dates'=>$dates
+            ])]);
+        $pdo->commit();
+        echo json_encode(['success'=>true, 'deleted_observations'=>count($obsIds), 'deleted_scans'=>$scansDel, 'monitor'=>$monitor]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        echo json_encode(['error'=>$e->getMessage()]);
+    }
+    exit;
+}
+
 // Shared: fetch monitors from TCP server
 function fetchTcpMonitors() {
     $host = '210.54.37.120'; $port = 8080; $passphrase = 'bbnmdsfhsecureafdgsadsadff';
@@ -236,8 +316,13 @@ function summariseMonitor($pdo, $monitor, $colonyId = 1, $observerId = 1) {
     $filename = $monitor['filename'] ?? 'unknown';
     $lastSaved = $monitor['LastSaved'] ?? null;
     $boxCount = count($monitor['BoxData'] ?? []);
-    if ($monitor['IsDeleted'] ?? false)
-        return ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'scans'=>0, 'adults'=>0, 'eggs'=>0, 'chicks'=>0, 'breeding_statuses'=>[]];
+    if ($monitor['IsDeleted'] ?? false) {
+        // Check if data from this monitor still exists in our DB
+        $dbCheck = $pdo->prepare("SELECT COUNT(*) FROM observations WHERE monitor_filename = ? AND is_deleted = FALSE");
+        $dbCheck->execute([$filename]);
+        $dbCount = (int)$dbCheck->fetchColumn();
+        return ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'db_exists'=>$dbCount, 'scans'=>0, 'adults'=>0, 'eggs'=>0, 'chicks'=>0, 'breeding_statuses'=>[]];
+    }
 
     $adults = 0; $eggs = 0; $chicks = 0; $scans = 0; $new = 0; $exists = 0;
     $breedingCounts = [];
