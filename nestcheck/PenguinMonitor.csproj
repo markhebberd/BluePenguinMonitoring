@@ -11,6 +11,7 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>false</Deterministic>
 	  
     <ApplicationId>nz.co.wildwatch.nestcheck</ApplicationId>
     <ApplicationTitle>NestCheck</ApplicationTitle>

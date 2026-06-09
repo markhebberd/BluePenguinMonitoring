@@ -90,11 +90,13 @@ namespace PenguinMonitor
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
-        private Button? _standaloneExitTagModeButton;
         private ImageButton? _expandButton;
         private LinearLayout? _prevObsSummaryLayout;
         private TextView? _prevObsHeaderText;
         private LinearLayout? _prevObsDetailLayout;
+        private LinearLayout? _tagModeContentLayout;
+        private TextView? _tagModeInstructionText;
+        private LinearLayout? _tagModeTodayCard;
 
         private List<LinearLayout?> _scannedIdsLayout;
         private EditText? _manualScanEditText;
@@ -1060,20 +1062,6 @@ namespace PenguinMonitor
             _standaloneDailyLabelWarning.Gravity = GravityFlags.Center;
             _standaloneDailyLabelWarning.Visibility = ViewStates.Gone;
             headerStatusSettingsCard.AddView(_standaloneDailyLabelWarning);
-
-            // Exit box tag mode button (below buttons, visible even when settings collapsed)
-            _standaloneExitTagModeButton = _uiFactory.CreateStyledButton("Exit Box Tag Mode", UIFactory.DANGER_RED);
-            var standaloneExitParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            standaloneExitParams.SetMargins(16, 4, 16, 4);
-            _standaloneExitTagModeButton.LayoutParameters = standaloneExitParams;
-            _standaloneExitTagModeButton.TextSize = 16;
-            _standaloneExitTagModeButton.Visibility = ViewStates.Gone;
-            _standaloneExitTagModeButton.Click += (s, e) =>
-            {
-                _appSettings.EditBoxTagsMode = false;
-                DrawPageLayouts();
-            };
-            headerStatusSettingsCard.AddView(_standaloneExitTagModeButton);
 
             parentLinearLayout.AddView(headerStatusSettingsCard);
 
@@ -2381,10 +2369,10 @@ namespace PenguinMonitor
             _settingsCard.AddView(dailyLabelLayout);
             // 3. Bluetooth
             _settingsCard.AddView(_isBluetoothEnabledCheckBox);
-            // 4. Edit box tags (above logout)
-            _settingsCard.AddView(editBoxTagsButton);
-            // 5. Legacy incremental backups
+            // 4. Legacy incremental backups
             _settingsCard.AddView(tcpCheckBox);
+            // 5. Edit box tags (above logout)
+            _settingsCard.AddView(editBoxTagsButton);
             // 6. Logout/Login (bottom)
             _settingsCard.AddView(authButton);
         }
@@ -2530,28 +2518,66 @@ namespace PenguinMonitor
                     if (_prevObsSummaryLayout != null)
                         _prevObsSummaryLayout.Visibility = tagMode ? ViewStates.Visible : _prevObsSummaryLayout.Visibility;
 
-                    // Force single box view and locked state in tag mode
+                    // Force single box view in tag mode
                     if (tagMode)
                     {
                         selectedPage = UIFactory.selectedPage.BoxDataSingle;
-                        _isBoxLocked = true;
                     }
 
                     // Warnings below action buttons (always visible regardless of settings collapse)
                     UpdateDailyLabelWarnings();
-                    if (_standaloneExitTagModeButton != null)
-                        _standaloneExitTagModeButton.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+
+                    // Tag mode content: today's data card + instruction text
+                    if (_tagModeContentLayout != null)
+                    {
+                        _tagModeContentLayout.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                        if (tagMode)
+                        {
+                            var tagCurrentObs = _colonyState.GetTodayForBox(_currentBoxName);
+                            _tagModeTodayCard.RemoveAllViews();
+                            if (tagCurrentObs != null)
+                            {
+                                var todayHeader = new TextView(this) { TextSize = 13, Text = BuildObsHeaderText(tagCurrentObs, "Today", true) };
+                                todayHeader.SetTextColor(Color.Black);
+                                todayHeader.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                                _tagModeTodayCard.AddView(todayHeader);
+                                _tagModeTodayCard.AddView(BuildObsDetailView(tagCurrentObs));
+                                _tagModeTodayCard.Visibility = ViewStates.Visible;
+                            }
+                            else
+                            {
+                                _tagModeTodayCard.Visibility = ViewStates.Gone;
+                            }
+
+                            var currentTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) ? tagInfo.TagNumber : "";
+                            var displayTag = !string.IsNullOrEmpty(currentTag)
+                                ? (currentTag.Length > 8 ? currentTag.Substring(currentTag.Length - 8) : currentTag)
+                                : "";
+
+                            if (_isBoxLocked)
+                            {
+                                _tagModeInstructionText.Text = !string.IsNullOrEmpty(displayTag)
+                                    ? $"Current tag: {displayTag}\nUnlock the box to edit the tag."
+                                    : "No tag assigned.\nUnlock the box to scan a new tag.";
+                                _tagModeInstructionText.SetTextColor(Color.DarkGray);
+                            }
+                            else
+                            {
+                                _tagModeInstructionText.Text = !string.IsNullOrEmpty(displayTag)
+                                    ? $"Current tag: {displayTag}\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag."
+                                    : "No tag assigned.\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag.";
+                                _tagModeInstructionText.SetTextColor(UIFactory.PRIMARY_BLUE);
+                            }
+                        }
+                    }
 
                     ///Single Box Card
-                    // Update lock icon
+                    // Hide expand/collapse button in tag mode, but keep lock icon and click area
                     if (_expandButton != null)
                         _expandButton.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
-                    if (_singleBoxDataTitleLayout != null)
-                        _singleBoxDataTitleLayout.Clickable = !tagMode;
 
                     if (_dataCardLockIconView != null)
                     {
-                        _dataCardLockIconView.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
                         _dataCardLockIconView.SetColorFilter(null);
                         if (!(_colonyState.GetTodayForBox(_currentBoxName) != null) && _isBoxLocked)
                         {
@@ -3105,6 +3131,25 @@ namespace PenguinMonitor
             // Container for red unsynced cards (older pending observations)
             _unsyncedCardsContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _singleBoxDataOuterLayout.AddView(_unsyncedCardsContainer);
+
+            // Tag mode content — shown instead of normal data entry when editing box tags
+            _tagModeContentLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _tagModeContentLayout.SetPadding(12, 8, 12, 8);
+            _tagModeContentLayout.Visibility = ViewStates.Gone;
+
+            _tagModeTodayCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _tagModeTodayCard.SetPadding(12, 8, 12, 8);
+            _tagModeTodayCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
+            var todayCardParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            todayCardParams.SetMargins(0, 0, 0, 8);
+            _tagModeTodayCard.LayoutParameters = todayCardParams;
+            _tagModeContentLayout.AddView(_tagModeTodayCard);
+
+            _tagModeInstructionText = new TextView(this) { TextSize = 14 };
+            _tagModeInstructionText.SetPadding(0, 8, 0, 8);
+            _tagModeContentLayout.AddView(_tagModeInstructionText);
+
+            _singleBoxDataOuterLayout.AddView(_tagModeContentLayout);
 
             _scannedIdsLayout = new List<LinearLayout?>();
             // Scanned birds container
