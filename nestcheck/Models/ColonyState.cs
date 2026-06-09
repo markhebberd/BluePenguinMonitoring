@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace PenguinMonitor.Models
 {
@@ -10,30 +11,120 @@ namespace PenguinMonitor.Models
         public string DailyLabelDate { get; set; } = "";
 
         /// <summary>
-        /// Current observations being edited (today's fieldwork).
-        /// Keyed by box name (e.g. "1", "49", "AA").
+        /// Pending observations not yet uploaded to server.
+        /// Can have multiple per box (across different days while offline).
         /// </summary>
-        public Dictionary<string, BoxObservation> CurrentBoxes { get; set; } = new();
+        public List<BoxObservation> PendingObservations { get; set; } = new();
 
         /// <summary>
         /// Previous state from server (last known observation per box).
-        /// Shown as read-only summary. Not uploaded.
+        /// Shown as read-only orange summary. Not uploaded.
         /// </summary>
         public Dictionary<string, BoxObservation> PreviousBoxes { get; set; } = new();
 
         /// <summary>
-        /// Location name → location_id mapping from server.
+        /// Today's confirmed observations (uploaded to server today, or downloaded as today's data).
+        /// One per box. Shown in edit fields when revisiting.
         /// </summary>
-        public Dictionary<string, int> LocationIds { get; set; } = new();
+        public Dictionary<string, BoxObservation> TodayBoxes { get; set; } = new();
 
-        public int DirtyCount => CountDirty();
+        public int DirtyCount => PendingObservations.Count(o => o.IsDirty);
 
-        private int CountDirty()
+        /// <summary>
+        /// Get all pending observations for a specific box, newest first.
+        /// </summary>
+        public List<BoxObservation> GetPendingForBox(string boxName)
         {
-            int count = 0;
-            foreach (var box in CurrentBoxes.Values)
-                if (box.IsDirty) count++;
-            return count;
+            return PendingObservations
+                .Where(o => o.BoxName == boxName)
+                .OrderByDescending(o => o.WhenDataCollectedUtc)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Get or create today's observation for a box.
+        /// If one exists in TodayBoxes, return it. Otherwise check pending for today.
+        /// </summary>
+        public BoxObservation? GetTodayForBox(string boxName)
+        {
+            if (TodayBoxes.TryGetValue(boxName, out var today))
+                return today;
+            // Check pending for today's date
+            var nzToday = MainActivity.NzToday;
+            return PendingObservations
+                .Where(o => o.BoxName == boxName && MainActivity.ToNzTime(o.WhenDataCollectedUtc).Date == nzToday)
+                .OrderByDescending(o => o.WhenDataCollectedUtc)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Save a box observation. If same box + same NZ day exists in pending, update it.
+        /// Otherwise add new.
+        /// </summary>
+        public void SaveBoxObservation(string boxName, BoxObservation obs)
+        {
+            obs.BoxName = boxName;
+            var nzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
+            var existing = PendingObservations.FirstOrDefault(o =>
+                o.BoxName == boxName && MainActivity.ToNzTime(o.WhenDataCollectedUtc).Date == nzDate);
+            if (existing != null)
+            {
+                // Update in place
+                var idx = PendingObservations.IndexOf(existing);
+                PendingObservations[idx] = obs;
+            }
+            else
+            {
+                PendingObservations.Add(obs);
+            }
+        }
+
+        /// <summary>
+        /// Build a MonitorDetails from today's observations for TCP incremental upload.
+        /// Includes both pending and synced (TodayBoxes) observations.
+        /// </summary>
+        public MonitorDetails BuildTodayMonitor(string filename)
+        {
+            var monitor = new MonitorDetails
+            {
+                filename = filename,
+                LastSaved = DateTime.UtcNow,
+                BoxData = new Dictionary<string, BoxData>()
+            };
+
+            var nzToday = MainActivity.NzToday;
+
+            // Add today's synced observations
+            foreach (var kvp in TodayBoxes)
+            {
+                monitor.BoxData[kvp.Key] = ToBoxData(kvp.Value);
+            }
+
+            // Overlay pending observations from today (these take priority)
+            foreach (var obs in PendingObservations)
+            {
+                if (MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date == nzToday && !string.IsNullOrEmpty(obs.BoxName))
+                {
+                    monitor.BoxData[obs.BoxName] = ToBoxData(obs);
+                }
+            }
+
+            return monitor;
+        }
+
+        private static BoxData ToBoxData(BoxObservation obs)
+        {
+            return new BoxData
+            {
+                Adults = obs.Adults,
+                Eggs = obs.Eggs,
+                Chicks = obs.Chicks,
+                GateStatus = obs.GateStatus,
+                BreedingChance = obs.BreedingStatus,
+                Notes = obs.Notes,
+                whenDataCollectedUtc = obs.WhenDataCollectedUtc,
+                ScannedIds = obs.ScannedIds,
+            };
         }
     }
 }

@@ -46,7 +46,31 @@
       "Bash(ls /home/mark/src/PenguinMonitor/website/wildwatch/.eslintrc* /home/mark/src/PenguinMonitor/website/wildwatch/eslint.config*)",
       "Bash(gzip -c /tmp/wildwatch_full_backup.sql)",
       "Bash(ls:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(pkill -f \"curl.*wildwatch.co.nz\")",
+      "Bash(bash deploy-web.sh)",
+      "Bash(bash ./deploy-web.sh)",
+      "Bash(sed -i '2879s/return \\(/return wrap\\(/' src/App.tsx)",
+      "Bash(sed -i '2889s/return \\(/return wrap\\(/' src/App.tsx)",
+      "Bash(sed -i '2900s/return \\(/return wrap\\(/' src/App.tsx)",
+      "Bash(sed -i '2913s/return \\(/return wrap\\(/' src/App.tsx)",
+      "Bash(sed -i '2929s/return \\(/return wrap\\(/' src/App.tsx)",
+      "Bash(find:*)",
+      "Bash(zcat /home/mark/src/PenguinMonitor/backups/2026/05/2026-05-23.sql.gz)",
+      "Bash(crontab -)",
+      "Bash(crontab:*)",
+      "Bash(timedatectl)",
+      "Read(//etc/**)",
+      "Bash(gh issue:*)",
+      "Bash(timeout 5 bash -c 'echo \"\" | nc -w 3 210.54.37.120 8080')",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(keytool:*)",
+      "Bash(gem list:*)",
+      "Bash(git reset:*)",
+      "Bash(sort -t'\\(' -k2 -n)",
+      "Bash(rclone delete:*)",
+      "Bash(php:*)",
+      "Bash(zcat /home/mark/src/PenguinMonitor/backups/2026/06/2026-06-08.sql.gz)"
     ]
   }
 }

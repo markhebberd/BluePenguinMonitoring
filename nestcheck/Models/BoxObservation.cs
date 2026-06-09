@@ -9,6 +9,7 @@ namespace PenguinMonitor.Models
         public int? ObservationId { get; set; }
 
         public int LocationId { get; set; }
+        public string? BoxName { get; set; }
 
         public List<ScanRecord> ScannedIds { get; set; } = new();
         public int Adults { get; set; }
@@ -19,6 +20,7 @@ namespace PenguinMonitor.Models
         public DateTime WhenDataCollectedUtc { get; set; }
         public string? BreedingStatus { get; set; }
         public string? MonitorFilename { get; set; }
+        public string? ObserverName { get; set; }
 
         /// <summary>True if this observation has been modified locally and not yet uploaded.</summary>
         public bool IsDirty { get; set; }
@@ -36,14 +38,15 @@ namespace PenguinMonitor.Models
         /// </summary>
         public static BoxObservation FromServerData(int observationId, int locationId,
             string observationTimeUtc, int adults, int eggs, int chicks,
-            string? breedingStatus, string? gateStatus, string notes, string? monitorFilename)
+            string? breedingStatus, string? gateStatus, string notes, string? monitorFilename,
+            string? observerName = null)
         {
-            DateTime.TryParse(observationTimeUtc, out var parsedTime);
+            DateTime.TryParse(observationTimeUtc, null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsedTime);
             return new BoxObservation
             {
                 ObservationId = observationId,
                 LocationId = locationId,
-                WhenDataCollectedUtc = parsedTime != default ? parsedTime.ToUniversalTime() : DateTime.UtcNow,
+                WhenDataCollectedUtc = parsedTime != default ? parsedTime : DateTime.UtcNow,
                 Adults = adults,
                 Eggs = eggs,
                 Chicks = chicks,
@@ -51,6 +54,7 @@ namespace PenguinMonitor.Models
                 GateStatus = gateStatus,
                 Notes = notes ?? "",
                 MonitorFilename = monitorFilename,
+                ObserverName = observerName,
                 IsDirty = false,
             };
         }

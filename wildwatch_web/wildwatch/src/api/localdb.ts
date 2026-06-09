@@ -352,7 +352,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     if (!mem) await loadMemFromIDB();
 
     // Then check for changes in background
-    const resp = await fetch(`/penguin-api/snapshot.php?since=${encodeURIComponent(lastSync)}&_=${Date.now()}`);
+    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&_=${Date.now()}`);
     const data = await resp.json();
     const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0;
     if (hasChanges) {
@@ -374,7 +374,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
         console.warn('Sync count mismatch, doing full re-sync', { server: data._counts, local });
         onProgress?.('Data mismatch — reloading...');
         await resetDatabase();
-        const full = await fetchWithProgress(`/penguin-api/snapshot.php?_=${Date.now()}`, (pct, label) => {
+        const full = await fetchWithProgress(`/api/snapshot.php?_=${Date.now()}`, (pct, label) => {
           onProgress?.(`Reloading colony data... ${label}`, pct);
         });
         await storeSnapshot(full, true);
@@ -386,7 +386,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
   } else {
     onProgress?.('Downloading colony data...', 0);
     console.time('fetch+parse');
-    const data = await fetchWithProgress(`/penguin-api/snapshot.php?_=${Date.now()}`, (pct, label) => {
+    const data = await fetchWithProgress(`/api/snapshot.php?_=${Date.now()}`, (pct, label) => {
       onProgress?.(`Downloading colony data... ${label}`, pct);
     });
     console.timeEnd('fetch+parse');
@@ -422,7 +422,7 @@ export function startPolling(onChanged: () => void, intervalMs = 30000): void {
   stopPolling();
   pollTimer = setInterval(async () => {
     try {
-      const resp = await fetch(`/penguin-api/events.php?wm=${encodeURIComponent(lastWatermark)}&_=${Date.now()}`);
+      const resp = await fetch(`/api/events.php?wm=${encodeURIComponent(lastWatermark)}&_=${Date.now()}`);
       const data = await resp.json();
       if (data.wm) lastWatermark = data.wm;
       if (data.changed) {
@@ -432,7 +432,7 @@ export function startPolling(onChanged: () => void, intervalMs = 30000): void {
     } catch {}
   }, intervalMs);
   // Also fetch initial watermark
-  fetch(`/penguin-api/events.php?_=${Date.now()}`).then(r => r.json()).then(d => { if (d.wm) lastWatermark = d.wm; }).catch(() => {});
+  fetch(`/api/events.php?_=${Date.now()}`).then(r => r.json()).then(d => { if (d.wm) lastWatermark = d.wm; }).catch(() => {});
 }
 
 export function stopPolling(): void {

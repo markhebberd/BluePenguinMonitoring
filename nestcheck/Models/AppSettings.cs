@@ -604,6 +604,61 @@ namespace PenguinMonitor.Models
         [JsonIgnore]
         public bool IsAuthenticated => !string.IsNullOrEmpty(AuthToken);
 
+        private int selectedColonyId = 0;
+        public int SelectedColonyId
+        {
+            get => selectedColonyId;
+            set
+            {
+                if (selectedColonyId != value)
+                {
+                    selectedColonyId = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+        private string selectedColonyName = "";
+        public string SelectedColonyName
+        {
+            get => selectedColonyName;
+            set
+            {
+                if (selectedColonyName != value)
+                {
+                    selectedColonyName = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
+        private bool showDailyLabelWarning = true;
+        public bool ShowDailyLabelWarning
+        {
+            get => showDailyLabelWarning;
+            set
+            {
+                if (showDailyLabelWarning != value)
+                {
+                    showDailyLabelWarning = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
+        private bool tcpIncrementalEnabled = true;
+        public bool TcpIncrementalEnabled
+        {
+            get => tcpIncrementalEnabled;
+            set
+            {
+                if (tcpIncrementalEnabled != value)
+                {
+                    tcpIncrementalEnabled = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
         // Transient property - not saved to JSON
         [JsonIgnore]
         public bool ShowDifferencesWithPreviousMonitor { get; set; } = false;

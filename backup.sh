@@ -28,7 +28,7 @@ mkdir -p "$BACKUP_DIR"
 echo -n "Backing up $DATE..."
 HTTP_CODE=$(curl -s -o "$BACKUP_FILE" -w "%{http_code}" \
     -H "X-API-Key: $API_KEY" \
-    "https://wildwatch.co.nz/penguin-api/backup.php" \
+    "https://wildwatch.co.nz/api/backup.php" \
     --max-time 120)
 
 if [ "$HTTP_CODE" != "200" ]; then

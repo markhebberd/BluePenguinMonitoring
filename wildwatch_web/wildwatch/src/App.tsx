@@ -665,6 +665,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const [editing, setEditing] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
   const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
+  useEffect(() => { setLocalScans(obs.scans); setLocalObs(obs); }, [obs.observation_id]);
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
@@ -864,7 +865,9 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                   <div className="history-fields">
                     {Object.entries(fields).map(([k, v]: [string, any]) => (
                       <div key={k} className="history-field">
-                        <span className="muted">{k}:</span> <s>{String(v.old ?? '')}</s> &rarr; {String(v.new ?? '')}
+                        <span className="muted">{k}:</span> {v && typeof v === 'object' && 'old' in v
+                          ? <><s>{String(v.old ?? '')}</s> &rarr; {String(v.new ?? '')}</>
+                          : <>{String(v ?? '')}</>}
                       </div>
                     ))}
                   </div>
@@ -1398,7 +1401,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
     setSubmitting(true);
     try {
       if (isRegister) {
-        const r = await fetch('/penguin-api/crud.php?action=register', {
+        const r = await fetch('/api/crud.php?action=register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, password })
@@ -1408,7 +1411,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
           // Auto-login after register
           setIsRegister(false);
           setError('');
-          const r2 = await fetch('/penguin-api/crud.php?action=login', {
+          const r2 = await fetch('/api/crud.php?action=login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
@@ -1420,7 +1423,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
           setError(data.error || 'Registration failed');
         }
       } else {
-        const r = await fetch('/penguin-api/crud.php?action=login', {
+        const r = await fetch('/api/crud.php?action=login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
@@ -1502,7 +1505,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   // Load date mappings for season
   useEffect(() => {
     if (season < 2020) return;
-    fetch(`/penguin-api/dates.php?season=${season}`)
+    fetch(`/api/dates.php?season=${season}`)
       .then(r => r.json())
       .then(d => setDateMappings(d))
       .catch(() => setDateMappings([]));
@@ -1613,7 +1616,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
     try {
       // Find location_id for this box
-      const dashRes = await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`);
+      const dashRes = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`);
       const dashData = await dashRes.json();
       const locationId = dashData.location?.location_id;
 
@@ -1622,7 +1625,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       const observerId = parseInt(localStorage.getItem('ww_observer_id') || '3');
 
       // Create observation
-      const obsRes = await fetch('/penguin-api/crud.php?action=create&table=observations', {
+      const obsRes = await fetch('/api/crud.php?action=create&table=observations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
@@ -1647,7 +1650,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           setMessage(`Unknown penguin ${birdId} - not in database`);
           continue;
         }
-        await fetch('/penguin-api/crud.php?action=create&table=penguin_scans', {
+        await fetch('/api/crud.php?action=create&table=penguin_scans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({
@@ -1673,7 +1676,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
   useEffect(() => {
     if (!box) { setAllBoxObs([]); return; }
-    fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(box)}`)
+    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}`)
       .then(r => r.json())
       .then(d => setAllBoxObs(d.observations || []))
       .catch(() => setAllBoxObs([]));
@@ -1762,7 +1765,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                   const parsed = parseDateFlex(rest);
                   return { n: parseInt(first), date: parsed };
                 }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string}[];
-                await fetch(`/penguin-api/dates.php?season=${season}`, {
+                await fetch(`/api/dates.php?season=${season}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                   body: JSON.stringify(mappings)
@@ -2593,7 +2596,7 @@ function App() {
   // Refresh role from server on load (in case it changed since login)
   useEffect(() => {
     if (!authToken) return;
-    fetch('/penguin-api/crud.php?action=me', { headers: { 'Authorization': `Bearer ${authToken}` } })
+    fetch('/api/crud.php?action=me', { headers: { 'Authorization': `Bearer ${authToken}` } })
       .then(r => r.json())
       .then(d => {
         if (d.role && d.role !== userRole) {
@@ -2623,7 +2626,7 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
     e.preventDefault();
     setSaving(true); setMsg('');
     try {
-      const r = await fetch('/penguin-api/crud.php?action=change_password', {
+      const r = await fetch('/api/crud.php?action=change_password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ current_password: current, new_password: newPass })
@@ -2698,29 +2701,29 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
   const loadRecentChanges = async () => {
     setChangesLoading(true);
-    const r = await fetch('/penguin-api/admin.php?action=recent_changes&limit=50', { headers: { 'Authorization': `Bearer ${token}` } });
+    const r = await fetch('/api/admin.php?action=recent_changes&limit=50', { headers: { 'Authorization': `Bearer ${token}` } });
     setRecentChanges(await r.json());
     setChangesLoading(false);
   };
 
   const previewDate = async (date: string) => {
     setDatePreview({ loading: true, date });
-    const r = await fetch(`/penguin-api/admin.php?action=preview_date&date=${date}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    const r = await fetch(`/api/admin.php?action=preview_date&date=${date}`, { headers: { 'Authorization': `Bearer ${token}` } });
     const d = await r.json();
     if (d.error) { setDatePreview(null); alert(d.error); return; }
     setDatePreview(d);
   };
 
   useEffect(() => {
-    fetch('/penguin-api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch('/api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
-    fetch(`/penguin-api/server_stats.php?_=${Date.now()}`)
+    fetch(`/api/server_stats.php?_=${Date.now()}`)
       .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
   }, [token]);
 
   const updateUser = async (id: number, field: string, value: string) => {
-    await fetch('/penguin-api/admin.php?action=update_user', {
+    await fetch('/api/admin.php?action=update_user', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ observer_id: id, [field]: value })
     });
@@ -2730,7 +2733,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const doSync = async (action: string) => {
     setSyncing(true); setSyncResult(null);
     try {
-      const r = await fetch(`/penguin-api/admin.php?action=${action}`, {
+      const r = await fetch(`/api/admin.php?action=${action}`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
       });
       const result = await r.json();
@@ -2745,7 +2748,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setReimporting(true);
     if (isSighting) setSightingResult(null); else setReimportResult(null);
     try {
-      const r = await fetch(`/penguin-api/admin.php?action=${action}`, {
+      const r = await fetch(`/api/admin.php?action=${action}`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
       });
       const result = await r.json();
@@ -2843,7 +2846,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
               <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={() => {
                 const reason = prompt(`Delete all ${datePreview.totals.boxes} observations from ${formatDate(datePreview.date)}?\n\nReason (optional):`);
                 if (reason === null) return;
-                fetch('/penguin-api/admin.php?action=delete_date', {
+                fetch('/api/admin.php?action=delete_date', {
                   method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                   body: JSON.stringify({ date: datePreview.date, _reason: reason })
                 }).then(r => r.json()).then(d => {
@@ -2867,7 +2870,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             if (!dateInput) { alert('Pick a date'); return; }
             setMonitorSearch({ loading: true, date: dateInput, results: null });
             try {
-              const r = await fetch(`/penguin-api/admin.php?action=list_monitors&date=${dateInput}`, { headers: { 'Authorization': `Bearer ${token}` } });
+              const r = await fetch(`/api/admin.php?action=list_monitors&date=${dateInput}`, { headers: { 'Authorization': `Bearer ${token}` } });
               const d = await r.json();
               setMonitorSearch({ loading: false, date: dateInput, results: d });
             } catch (e: any) { setMonitorSearch({ loading: false, date: dateInput, results: { error: e.message } }); }
@@ -2883,7 +2886,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                     <b>{m.monitor_filename}</b>
                     <span className="muted" style={{fontSize:11}}>{m.obs_count} obs, {m.scan_count || 0} scans</span>
                     <button className="edit-btn" style={{padding:'1px 8px', fontSize:11, background:'#F44336', color:'#fff'}} onClick={async () => {
-                      const pr = await fetch('/penguin-api/admin.php?action=preview_monitor', {
+                      const pr = await fetch('/api/admin.php?action=preview_monitor', {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ monitor: m.monitor_filename })
                       });
@@ -2894,7 +2897,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                       msg += '\n\nThis action is logged and audited.';
                       if (!confirm(msg)) return;
                       if (preview.multi_day && !confirm('This will delete data from multiple days. Confirm again to proceed.')) return;
-                      const dr = await fetch('/penguin-api/admin.php?action=delete_monitor', {
+                      const dr = await fetch('/api/admin.php?action=delete_monitor', {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ monitor: m.monitor_filename })
                       });
@@ -2919,7 +2922,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           <button className="edit-btn" onClick={async () => {
             setSyncing(true); setSyncResult(null);
             try {
-              const r = await fetch('/penguin-api/admin.php?action=query_server', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+              const r = await fetch('/api/admin.php?action=query_server', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
               setSyncResult(await r.json());
             } catch (e: any) { setSyncResult({ error: e.message }); }
             setSyncing(false);
@@ -2944,7 +2947,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                       }}>{m.status === 'new' ? `${m.new} new` : m.status}</span>
                       {m.status === 'new' && (
                         <button className="edit-btn done-btn" style={{padding:'1px 8px', fontSize:11}} onClick={async () => {
-                          const r = await fetch('/penguin-api/admin.php?action=import_monitor', {
+                          const r = await fetch('/api/admin.php?action=import_monitor', {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                             body: JSON.stringify({ index: m.index })
                           });
@@ -3050,7 +3053,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
               setDiskTesting(true);
               setDiskTest({ status: 'starting', target_mb: mb });
               let completed = false;
-              const es = new EventSource(`/penguin-api/disk_check.php?mb=${mb}&token=${token}`);
+              const es = new EventSource(`/api/disk_check.php?mb=${mb}&token=${token}`);
               es.onmessage = (e) => {
                 const d = JSON.parse(e.data);
                 if (d.type === 'error') { completed = true; setDiskTest({ status: 'error', error: d.msg }); es.close(); setDiskTesting(false); }
@@ -3573,7 +3576,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
                       if (!showDeleted && deletedObs.length === 0) {
-                        const r = await fetch(`/penguin-api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`);
+                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`);
                         const d = await r.json();
                         setDeletedObs(d.deleted || []);
                       }

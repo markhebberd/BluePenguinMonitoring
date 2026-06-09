@@ -41,7 +41,7 @@ function getDbConnection($attemptsRemaining = 4) {
                 // Shared hosting optimizations
                 PDO::ATTR_PERSISTENT => false,  // Avoid stale connections on shared hosting
                 PDO::ATTR_TIMEOUT => 5,          // Connection timeout (5 seconds)
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION wait_timeout=30"  // Keep session alive
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION wait_timeout=30, time_zone='+00:00'"  // Keep session alive, force UTC
             ]
         );
         return $pdo;

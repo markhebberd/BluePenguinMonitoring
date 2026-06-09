@@ -5,5 +5,5 @@ RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 # SPA fallback: serve index.html for client-side routes
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_URI} !^/penguin-api/
+RewriteCond %{REQUEST_URI} !^/api/
 RewriteRule ^(.*)$ /index.html [L]

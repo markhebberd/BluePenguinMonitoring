@@ -24,7 +24,7 @@ $colonyId = 1;
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === '') {
     handleDownload($pdo, $colonyId, $observer);
-} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'upload') {
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($action === 'upload' || $action === 'confirm')) {
     handleUpload($pdo, $colonyId, $observer);
 } else {
     echo json_encode(['error' => 'Unknown action']);
@@ -56,13 +56,18 @@ function authenticate($pdo) {
  * GET: Download latest observation per box with scans.
  */
 function handleDownload($pdo, $colonyId, $observer) {
-    // Latest observation per box (most recent non-deleted)
+    // Latest observation per box, plus second-most-recent for boxes where latest is today
+    $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
+
+    // First: get latest per box
     $stmt = $pdo->prepare("
         SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
-            o.observation_time_utc, o.monitor_filename,
+            o.observation_time_utc, o.monitor_filename, o.observer_id,
+            ob.observer_name,
             o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
+        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
         WHERE ol.colony_id = ? AND o.is_deleted = FALSE
         AND o.observation_id = (
             SELECT o2.observation_id FROM observations o2
@@ -72,7 +77,39 @@ function handleDownload($pdo, $colonyId, $observer) {
         ORDER BY ol.location_name + 0, ol.location_name
     ");
     $stmt->execute([$colonyId]);
-    $observations = $stmt->fetchAll();
+    $latestObs = $stmt->fetchAll();
+
+    // Find boxes where latest is from today — fetch their second-most-recent
+    $todayBoxLocationIds = [];
+    foreach ($latestObs as $obs) {
+        $obsNzDate = (new DateTime($obs['observation_time_utc'], new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('Y-m-d');
+        if ($obsNzDate === $nzToday) $todayBoxLocationIds[] = $obs['location_id'];
+    }
+
+    $previousObs = [];
+    if (!empty($todayBoxLocationIds)) {
+        $ph = implode(',', array_fill(0, count($todayBoxLocationIds), '?'));
+        $prevStmt = $pdo->prepare("
+            SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
+                o.observation_time_utc, o.monitor_filename, o.observer_id,
+                ob.observer_name,
+                o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
+            FROM observations o
+            JOIN observation_locations ol ON o.location_id = ol.location_id
+            LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+            WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+            AND o.location_id IN ($ph)
+            AND o.observation_id = (
+                SELECT o3.observation_id FROM observations o3
+                WHERE o3.location_id = o.location_id AND o3.is_deleted = FALSE
+                ORDER BY o3.observation_time_utc DESC LIMIT 1 OFFSET 1
+            )
+        ");
+        $prevStmt->execute(array_merge([$colonyId], $todayBoxLocationIds));
+        $previousObs = $prevStmt->fetchAll();
+    }
+
+    $observations = array_merge($latestObs, $previousObs);
 
     // Batch fetch scans for all these observations
     $obsIds = array_column($observations, 'observation_id');
@@ -98,14 +135,35 @@ function handleDownload($pdo, $colonyId, $observer) {
         }
     }
 
-    // Build boxes response
+    // Build response: latest per box + previous for today's boxes
     $boxes = [];
-    foreach ($observations as $obs) {
-        $boxes[$obs['box_name']] = [
+    $previous = [];
+    $latestIds = [];
+    foreach ($latestObs as $obs) {
+        $boxName = $obs['box_name'];
+        $boxes[$boxName] = [
             'observation_id' => (int)$obs['observation_id'],
             'location_id' => (int)$obs['location_id'],
             'observation_time_utc' => $obs['observation_time_utc'],
             'monitor_filename' => $obs['monitor_filename'],
+            'observer_name' => $obs['observer_name'],
+            'adults' => (int)$obs['adults'],
+            'eggs' => (int)$obs['eggs'],
+            'chicks' => (int)$obs['chicks'],
+            'breeding_status' => $obs['breeding_status'],
+            'gate_status' => $obs['gate_status'],
+            'notes' => $obs['notes'],
+            'scans' => $scansByObs[$obs['observation_id']] ?? [],
+        ];
+    }
+    foreach ($previousObs as $obs) {
+        $boxName = $obs['box_name'];
+        $previous[$boxName] = [
+            'observation_id' => (int)$obs['observation_id'],
+            'location_id' => (int)$obs['location_id'],
+            'observation_time_utc' => $obs['observation_time_utc'],
+            'monitor_filename' => $obs['monitor_filename'],
+            'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
             'eggs' => (int)$obs['eggs'],
             'chicks' => (int)$obs['chicks'],
@@ -116,7 +174,7 @@ function handleDownload($pdo, $colonyId, $observer) {
         ];
     }
 
-    // Locations (for box name → location_id mapping)
+    // Locations
     $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes FROM observation_locations WHERE colony_id = ?");
     $locStmt->execute([$colonyId]);
 
@@ -124,12 +182,15 @@ function handleDownload($pdo, $colonyId, $observer) {
         'snapshot_time' => date('c'),
         'observer' => ['observer_id' => (int)$observer['observer_id'], 'name' => $observer['observer_name']],
         'boxes' => (object)$boxes,
+        'previous' => (object)$previous,
         'locations' => $locStmt->fetchAll(),
     ]);
 }
 
 /**
  * POST ?action=upload: Upload dirty observations from app.
+ * If a box already has today's observation on the server, returns it as a conflict
+ * instead of overwriting. Use ?action=confirm to force-replace conflicts.
  */
 function handleUpload($pdo, $colonyId, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
@@ -139,10 +200,14 @@ function handleUpload($pdo, $colonyId, $observer) {
         return;
     }
 
+    $forceReplace = ($_GET['action'] === 'confirm');
     $dailyLabel = $input['daily_label'] ?? '';
     $observerId = (int)$observer['observer_id'];
     $created = [];
+    $conflicts = [];
     $errors = [];
+
+    $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
 
     // Build chip lookup for validating pit_ids
     $chipLookup = [];
@@ -150,6 +215,15 @@ function handleUpload($pdo, $colonyId, $observer) {
         $chipLookup[strtoupper($c['pit_id'])] = $c['pit_id'];
         $chipLookup[strtoupper(substr($c['pit_id'], -8))] = $c['pit_id'];
     }
+
+    // Batch-fetch scans for conflict display
+    $fetchScansForObs = function($obsId) use ($pdo, $chipLookup) {
+        $s = $pdo->prepare("SELECT ps.pit_id, ps.scan_time_utc, pc.peng_num, p.sex, p.chick_size_code
+            FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+            LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ?");
+        $s->execute([$obsId]);
+        return $s->fetchAll();
+    };
 
     $pdo->beginTransaction();
     try {
@@ -162,7 +236,6 @@ function handleUpload($pdo, $colonyId, $observer) {
             $locStmt->execute([$colonyId, $boxName]);
             $locationId = $locStmt->fetchColumn();
             if (!$locationId) {
-                // Create location if it doesn't exist
                 $pdo->prepare("INSERT INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")
                     ->execute([$colonyId, $boxName]);
                 $locationId = $pdo->lastInsertId();
@@ -170,19 +243,80 @@ function handleUpload($pdo, $colonyId, $observer) {
 
             $obsTime = $obs['observation_time_utc'] ?? date('Y-m-d H:i:s');
 
-            // Create observation
-            $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([
-                $locationId, $observerId, $obsTime,
-                (int)($obs['adults'] ?? 0),
-                (int)($obs['eggs'] ?? 0),
-                (int)($obs['chicks'] ?? 0),
-                $obs['breeding_status'] ?? null,
-                $obs['gate_status'] ?? null,
-                $obs['notes'] ?? '',
-                $dailyLabel ?: null,
-            ]);
-            $observationId = $pdo->lastInsertId();
+            // Check if this box already has today's observation on the server
+            if (!$forceReplace) {
+                $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
+                    o.breeding_status, o.gate_status, o.notes, o.monitor_filename, ob.observer_name
+                    FROM observations o LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+                    WHERE o.location_id = ? AND o.is_deleted = FALSE
+                    AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?
+                    ORDER BY o.observation_time_utc DESC LIMIT 1");
+                $existingStmt->execute([$locationId, $nzToday]);
+                $existing = $existingStmt->fetch();
+
+                if ($existing) {
+                    // Conflict: server already has today's data for this box
+                    $conflicts[] = [
+                        'box_name' => $boxName,
+                        'server' => [
+                            'observation_id' => (int)$existing['observation_id'],
+                            'observation_time_utc' => $existing['observation_time_utc'],
+                            'observer_name' => $existing['observer_name'],
+                            'adults' => (int)$existing['adults'],
+                            'eggs' => (int)$existing['eggs'],
+                            'chicks' => (int)$existing['chicks'],
+                            'breeding_status' => $existing['breeding_status'],
+                            'gate_status' => $existing['gate_status'],
+                            'notes' => $existing['notes'],
+                            'monitor_filename' => $existing['monitor_filename'],
+                            'scans' => $fetchScansForObs($existing['observation_id']),
+                        ],
+                        'incoming' => $obs,
+                    ];
+                    continue; // Skip — don't write
+                }
+            }
+
+            // Create or force-replace (update in-place to preserve audit trail)
+            if ($forceReplace) {
+                $existingStmt = $pdo->prepare("SELECT observation_id FROM observations
+                    WHERE location_id = ? AND is_deleted = FALSE
+                    AND DATE(CONVERT_TZ(observation_time_utc, '+00:00', '+12:00')) = ?
+                    ORDER BY observation_time_utc DESC LIMIT 1");
+                $existingStmt->execute([$locationId, $nzToday]);
+                $existingId = $existingStmt->fetchColumn();
+
+                if ($existingId) {
+                    // Update existing observation in-place
+                    $pdo->prepare("UPDATE observations SET observer_id=?, observation_time_utc=?, adults=?, eggs=?, chicks=?, breeding_status=?, gate_status=?, notes=?, monitor_filename=? WHERE observation_id=?")
+                        ->execute([
+                            $observerId, $obsTime,
+                            (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
+                            $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
+                            $dailyLabel ?: null, $existingId,
+                        ]);
+                    $observationId = $existingId;
+                    // Remove old scans — will be recreated below
+                    $pdo->prepare("DELETE FROM penguin_scans WHERE observation_id = ?")->execute([$observationId]);
+                } else {
+                    // No existing — create new
+                    $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                        ->execute([$locationId, $observerId, $obsTime,
+                            (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
+                            $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
+                            $dailyLabel ?: null]);
+                    $observationId = $pdo->lastInsertId();
+                }
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
+                $stmt->execute([
+                    $locationId, $observerId, $obsTime,
+                    (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
+                    $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
+                    $dailyLabel ?: null,
+                ]);
+                $observationId = $pdo->lastInsertId();
+            }
 
             // Create penguin scans
             $scansCreated = 0;
@@ -205,11 +339,18 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $scansCreated++;
             }
 
-            // Audit log
-            $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, 'INSERT', ?, ?)")
-                ->execute([$observationId, $observerId, json_encode([
+            // Audit log — record actual observation data
+            $action = $forceReplace ? 'UPDATE' : 'INSERT';
+            $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, ?, ?, ?)")
+                ->execute([$observationId, $action, $observerId, json_encode([
                     'source' => 'nestcheck_sync',
                     'box' => $boxName,
+                    'adults' => (int)($obs['adults'] ?? 0),
+                    'eggs' => (int)($obs['eggs'] ?? 0),
+                    'chicks' => (int)($obs['chicks'] ?? 0),
+                    'breeding_status' => $obs['breeding_status'] ?? null,
+                    'gate_status' => $obs['gate_status'] ?? null,
+                    'notes' => $obs['notes'] ?? '',
                     'daily_label' => $dailyLabel,
                     'scans' => $scansCreated,
                 ])]);
@@ -218,7 +359,9 @@ function handleUpload($pdo, $colonyId, $observer) {
         }
 
         $pdo->commit();
-        echo json_encode(['success' => true, 'created' => $created, 'errors' => $errors]);
+        $response = ['success' => true, 'created' => $created, 'errors' => $errors];
+        if (!empty($conflicts)) $response['conflicts'] = $conflicts;
+        echo json_encode($response);
     } catch (Exception $e) {
         $pdo->rollBack();
         http_response_code(500);

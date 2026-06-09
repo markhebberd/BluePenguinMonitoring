@@ -21,11 +21,11 @@ namespace PenguinMonitor.Services
         internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
-        private static readonly HttpClient _httpClient = new HttpClient();
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         internal const string WILDWATCH_BASE_URL = "https://wildwatch.co.nz/penguin-api";
-        internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/penguin-api/penguins.php";
-        internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/penguin-api/crud.php";
-        internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/penguin-api/sync.php";
+        internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/api/penguins.php";
+        internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
+        internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/api/sync.php";
         internal const string WILDWATCH_API_KEY = "b30181424b2d70102fb90a32af6c013e63e7b0d49ae466ebf90aa0f969ddbe02";
 
         // ===== Sync Result =====
@@ -41,6 +41,10 @@ namespace PenguinMonitor.Services
             public int UploadErrors { get; set; }
             public string? Error { get; set; }
             public bool AuthFailed { get; set; }
+            /// <summary>
+            /// Server-detected conflicts: box already has today's data.
+            /// </summary>
+            public List<SyncConflict>? Conflicts { get; set; }
         }
 
         // ===== Main Sync: Upload dirty, download fresh state =====
@@ -60,13 +64,45 @@ namespace PenguinMonitor.Services
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
 
-                // Step 1: Upload dirty boxes
-                var dirtyBoxes = new List<object>();
-                foreach (var kvp in colonyState.CurrentBoxes)
+                // Fetch default colony if not set
+                if (appSettings.SelectedColonyId == 0 || string.IsNullOrEmpty(appSettings.SelectedColonyName))
                 {
-                    if (!kvp.Value.IsDirty) continue;
+                    try
+                    {
+                        var colonyRequest = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_BASE_URL}/colonies.php");
+                        colonyRequest.Headers.Add("Authorization", $"Bearer {token}");
+                        var colonyResponse = await _httpClient.SendAsync(colonyRequest);
+                        if (colonyResponse.IsSuccessStatusCode)
+                        {
+                            var colonyJson = await colonyResponse.Content.ReadAsStringAsync();
+                            var colonies = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(colonyJson);
+                            if (colonies != null && colonies.Count > 0)
+                            {
+                                var first = colonies[0];
+                                appSettings.SelectedColonyId = Convert.ToInt32(first["colony_id"]);
+                                appSettings.SelectedColonyName = first["colony_name"]?.ToString() ?? "";
+                                appSettings.AllBoxSetsString = first["location_sets_string"]?.ToString() ?? "";
+                                appSettings.BoxSetString = "All";
+                            }
+                            else
+                            {
+                                // No permissions — clear colony
+                                appSettings.SelectedColonyId = 0;
+                                appSettings.SelectedColonyName = "";
+                                appSettings.AllBoxSetsString = "";
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                // Step 1: Upload ALL pending observations — server detects conflicts
+                var dirtyBoxes = new List<object>();
+                foreach (var pending in colonyState.PendingObservations)
+                {
+                    if (!pending.IsDirty || string.IsNullOrEmpty(pending.BoxName)) continue;
                     var scans = new List<object>();
-                    foreach (var scan in kvp.Value.ScannedIds)
+                    foreach (var scan in pending.ScannedIds)
                     {
                         scans.Add(new {
                             pit_id = scan.BirdId,
@@ -77,14 +113,14 @@ namespace PenguinMonitor.Services
                         });
                     }
                     dirtyBoxes.Add(new {
-                        box_name = kvp.Key,
-                        observation_time_utc = kvp.Value.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                        adults = kvp.Value.Adults,
-                        eggs = kvp.Value.Eggs,
-                        chicks = kvp.Value.Chicks,
-                        breeding_status = kvp.Value.BreedingStatus,
-                        gate_status = kvp.Value.GateStatus,
-                        notes = kvp.Value.Notes,
+                        box_name = pending.BoxName,
+                        observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        adults = pending.Adults,
+                        eggs = pending.Eggs,
+                        chicks = pending.Chicks,
+                        breeding_status = pending.BreedingStatus,
+                        gate_status = pending.GateStatus,
+                        notes = pending.Notes,
                         scans = scans,
                     });
                 }
@@ -115,16 +151,16 @@ namespace PenguinMonitor.Services
                         var created = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(uploadResult["created"].ToString());
                         result.Uploaded = created?.Count ?? 0;
 
-                        // Clear dirty flags for successfully uploaded boxes
+                        // Remove successfully uploaded observations from pending
                         foreach (var c in created ?? new())
                         {
                             var boxName = c["box_name"]?.ToString();
-                            if (boxName != null && colonyState.CurrentBoxes.ContainsKey(boxName))
+                            if (boxName != null)
                             {
-                                colonyState.CurrentBoxes[boxName].IsDirty = false;
-                                colonyState.CurrentBoxes[boxName].DirtyTimestampUtc = null;
-                                if (c.ContainsKey("observation_id"))
-                                    colonyState.CurrentBoxes[boxName].ObservationId = Convert.ToInt32(c["observation_id"]);
+                                // Remove the matching pending observation
+                                var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                                if (match != null)
+                                    colonyState.PendingObservations.Remove(match);
                             }
                         }
                     }
@@ -132,6 +168,11 @@ namespace PenguinMonitor.Services
                     {
                         var errors = JsonConvert.DeserializeObject<List<object>>(uploadResult["errors"].ToString());
                         result.UploadErrors = errors?.Count ?? 0;
+                    }
+                    // Server-detected conflicts (box already has today's data)
+                    if (uploadResult != null && uploadResult.ContainsKey("conflicts"))
+                    {
+                        result.Conflicts = JsonConvert.DeserializeObject<List<SyncConflict>>(uploadResult["conflicts"].ToString());
                     }
                 }
 
@@ -168,9 +209,10 @@ namespace PenguinMonitor.Services
 
                 var serverState = JsonConvert.DeserializeObject<SyncResponse>(stateJson);
 
-                // Update previous boxes from server
+                // Update from server — additive, never remove local data
+                // PreviousBoxes can be fully replaced (read-only server data)
                 colonyState.PreviousBoxes.Clear();
-                colonyState.LocationIds.Clear();
+                var nzToday = MainActivity.NzToday;
                 if (serverState?.boxes != null)
                 {
                     foreach (var kvp in serverState.boxes)
@@ -179,7 +221,9 @@ namespace PenguinMonitor.Services
                         var obs = BoxObservation.FromServerData(
                             b.observation_id, b.location_id, b.observation_time_utc,
                             b.adults, b.eggs, b.chicks,
-                            b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename);
+                            b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
+                            b.observer_name);
+                        obs.BoxName = kvp.Key;
 
                         // Add scans from server
                         if (b.scans != null)
@@ -194,29 +238,57 @@ namespace PenguinMonitor.Services
                             }
                         }
 
-                        colonyState.PreviousBoxes[kvp.Key] = obs;
+                        var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
+                        if (obsNzDate == nzToday)
+                        {
+                            // Don't overwrite if there's a local pending edit for this box today
+                            bool hasPendingEdit = colonyState.PendingObservations.Any(p =>
+                                p.BoxName == kvp.Key && p.IsDirty &&
+                                MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzToday);
+                            if (!hasPendingEdit)
+                            {
+                                obs.IsDirty = false;
+                                colonyState.TodayBoxes[kvp.Key] = obs;
+                            }
+                        }
+                        else
+                        {
+                            colonyState.PreviousBoxes[kvp.Key] = obs;
+                        }
                     }
                     result.BoxCount = serverState.boxes.Count;
                 }
 
-                // Update location ID mapping
-                if (serverState?.locations != null)
+                // Process previous observations (for boxes where latest is today)
+                if (serverState?.previous != null)
                 {
-                    foreach (var loc in serverState.locations)
+                    foreach (var kvp in serverState.previous)
                     {
-                        if (!string.IsNullOrEmpty(loc.location_name))
-                            colonyState.LocationIds[loc.location_name] = loc.location_id;
+                        var b = kvp.Value;
+                        var obs = BoxObservation.FromServerData(
+                            b.observation_id, b.location_id, b.observation_time_utc,
+                            b.adults, b.eggs, b.chicks,
+                            b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
+                            b.observer_name);
+                        obs.BoxName = kvp.Key;
+
+                        if (b.scans != null)
+                        {
+                            foreach (var scan in b.scans)
+                            {
+                                obs.ScannedIds.Add(new ScanRecord
+                                {
+                                    BirdId = scan.pit_id ?? "",
+                                    Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow,
+                                });
+                            }
+                        }
+
+                        colonyState.PreviousBoxes[kvp.Key] = obs;
                     }
                 }
 
                 colonyState.LastSyncedUtc = DateTime.UtcNow;
-
-                // Clear uploaded current boxes (they're now in PreviousBoxes from server)
-                var toRemove = new List<string>();
-                foreach (var kvp in colonyState.CurrentBoxes)
-                    if (!kvp.Value.IsDirty) toRemove.Add(kvp.Key);
-                foreach (var key in toRemove)
-                    colonyState.CurrentBoxes.Remove(key);
 
                 // Step 2b: Process penguin data
                 var birdsResponse = await birdsTask;
@@ -241,11 +313,13 @@ namespace PenguinMonitor.Services
                     remotePenguinData[eightDigitId] = new PenguinData
                     {
                         ScannedId = eightDigitId,
+                        PengNum = record.peng_num ?? "",
                         LastKnownLifeStage = lifeStage,
                         Sex = record.sex ?? "",
                         VidForScanner = record.vid_for_scanner ?? "",
                         ChipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue,
-                        ChipAs = record.chipped_as_adult == 1 ? "Adult" : ""
+                        ChipAs = record.chipped_as_adult == 1 ? "Adult" : "",
+                        ChickSizeCode = record.chick_size_code ?? ""
                     };
                 }
 
@@ -272,12 +346,162 @@ namespace PenguinMonitor.Services
             return result;
         }
 
+        /// <summary>
+        /// Upload confirmed edits after user approval.
+        /// </summary>
+        internal async Task<int> UploadConfirmedEdits(ColonyState colonyState, AppSettings appSettings, List<string> confirmedBoxNames)
+        {
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return 0;
+
+            var uploads = new List<object>();
+            foreach (var boxName in confirmedBoxNames)
+            {
+                var pending = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                if (pending == null) continue;
+
+                var scans = new List<object>();
+                foreach (var scan in pending.ScannedIds)
+                {
+                    scans.Add(new {
+                        pit_id = scan.BirdId,
+                        scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        latitude = scan.Latitude, longitude = scan.Longitude, accuracy = scan.Accuracy,
+                    });
+                }
+                uploads.Add(new {
+                    box_name = pending.BoxName,
+                    observation_id = pending.ObservationId,
+                    observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    adults = pending.Adults, eggs = pending.Eggs, chicks = pending.Chicks,
+                    breeding_status = pending.BreedingStatus, gate_status = pending.GateStatus,
+                    notes = pending.Notes, scans = scans,
+                });
+            }
+
+            if (uploads.Count == 0) return 0;
+
+            var body = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = uploads });
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=confirm");
+            request.Headers.Add("Authorization", $"Bearer {token}");
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.SendAsync(request);
+            var json = await response.Content.ReadAsStringAsync();
+            var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+
+            int uploaded = 0;
+            if (uploadResult != null && uploadResult.ContainsKey("created"))
+            {
+                var created = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(uploadResult["created"].ToString());
+                foreach (var c in created ?? new())
+                {
+                    var boxName = c["box_name"]?.ToString();
+                    if (boxName != null)
+                    {
+                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                        if (match != null) colonyState.PendingObservations.Remove(match);
+                        uploaded++;
+                    }
+                }
+            }
+            return uploaded;
+        }
+
+        /// <summary>
+        /// Upload-only: send pending observations to server, check for conflicts. No download.
+        /// </summary>
+        internal async Task<SyncResult> UploadPendingOnly(ColonyState colonyState, AppSettings appSettings)
+        {
+            var result = new SyncResult();
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
+            if (colonyState.PendingObservations.Count(p => p.IsDirty) == 0) return result;
+
+            var dirtyBoxes = new List<object>();
+            foreach (var pending in colonyState.PendingObservations)
+            {
+                if (!pending.IsDirty || string.IsNullOrEmpty(pending.BoxName)) continue;
+                var scans = pending.ScannedIds.Select(scan => (object)new {
+                    pit_id = scan.BirdId,
+                    scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    latitude = scan.Latitude, longitude = scan.Longitude, accuracy = scan.Accuracy,
+                }).ToList();
+                dirtyBoxes.Add(new {
+                    box_name = pending.BoxName,
+                    observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    adults = pending.Adults, eggs = pending.Eggs, chicks = pending.Chicks,
+                    breeding_status = pending.BreedingStatus, gate_status = pending.GateStatus,
+                    notes = pending.Notes, scans = scans,
+                });
+            }
+
+            var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = dirtyBoxes });
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload");
+            request.Headers.Add("Authorization", $"Bearer {token}");
+            request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.SendAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { result.Error = "Session expired"; result.AuthFailed = true; return result; }
+
+            var json = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrEmpty(json) || !json.TrimStart().StartsWith("{"))
+            { result.Error = $"Upload failed: {json?.Substring(0, Math.Min(json?.Length ?? 0, 100))}"; return result; }
+
+            var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+            if (uploadResult != null && uploadResult.ContainsKey("created"))
+            {
+                var created = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(uploadResult["created"].ToString());
+                result.Uploaded = created?.Count ?? 0;
+                foreach (var c in created ?? new())
+                {
+                    var boxName = c["box_name"]?.ToString();
+                    if (boxName != null)
+                    {
+                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                        if (match != null) colonyState.PendingObservations.Remove(match);
+                    }
+                }
+            }
+            if (uploadResult != null && uploadResult.ContainsKey("errors"))
+            {
+                var errors = JsonConvert.DeserializeObject<List<object>>(uploadResult["errors"].ToString());
+                result.UploadErrors = errors?.Count ?? 0;
+            }
+            if (uploadResult != null && uploadResult.ContainsKey("conflicts"))
+                result.Conflicts = JsonConvert.DeserializeObject<List<SyncConflict>>(uploadResult["conflicts"].ToString());
+
+            return result;
+        }
+
+        public class SyncConflict
+        {
+            public string? box_name { get; set; }
+            public SyncConflictObs? server { get; set; }
+            public Dictionary<string, object>? incoming { get; set; }
+        }
+        public class SyncConflictObs
+        {
+            public int observation_id { get; set; }
+            public string? observation_time_utc { get; set; }
+            public string? observer_name { get; set; }
+            public int adults { get; set; }
+            public int eggs { get; set; }
+            public int chicks { get; set; }
+            public string? breeding_status { get; set; }
+            public string? gate_status { get; set; }
+            public string? notes { get; set; }
+            public string? monitor_filename { get; set; }
+            public List<SyncScan>? scans { get; set; }
+        }
+
         // ===== JSON models for sync.php response =====
 
         private class SyncResponse
         {
             public string? snapshot_time { get; set; }
             public Dictionary<string, SyncBox>? boxes { get; set; }
+            public Dictionary<string, SyncBox>? previous { get; set; }
             public List<SyncLocation>? locations { get; set; }
         }
         private class SyncBox
@@ -286,6 +510,7 @@ namespace PenguinMonitor.Services
             public int location_id { get; set; }
             public string? observation_time_utc { get; set; }
             public string? monitor_filename { get; set; }
+            public string? observer_name { get; set; }
             public int adults { get; set; }
             public int eggs { get; set; }
             public int chicks { get; set; }
@@ -294,7 +519,7 @@ namespace PenguinMonitor.Services
             public string? notes { get; set; }
             public List<SyncScan>? scans { get; set; }
         }
-        private class SyncScan
+        public class SyncScan
         {
             public string? pit_id { get; set; }
             public string? scan_time_utc { get; set; }
@@ -350,8 +575,9 @@ namespace PenguinMonitor.Services
                         var state = new ColonyState();
                         foreach (var kvp in legacy[0].BoxData)
                         {
-                            state.CurrentBoxes[kvp.Key] = new BoxObservation
+                            var obs = new BoxObservation
                             {
+                                BoxName = kvp.Key,
                                 ScannedIds = kvp.Value.ScannedIds,
                                 Adults = kvp.Value.Adults,
                                 Eggs = kvp.Value.Eggs,
@@ -363,8 +589,9 @@ namespace PenguinMonitor.Services
                                 IsDirty = true,
                                 DirtyTimestampUtc = DateTime.UtcNow,
                             };
+                            state.PendingObservations.Add(obs);
                         }
-                        System.Diagnostics.Debug.WriteLine($"Migrated {state.CurrentBoxes.Count} boxes from legacy format");
+                        System.Diagnostics.Debug.WriteLine($"Migrated {state.PendingObservations.Count} boxes from legacy format");
                         SaveColonyState(context, state);
                         return state;
                     }
