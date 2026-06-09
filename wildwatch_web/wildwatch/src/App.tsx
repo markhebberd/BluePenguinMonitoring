@@ -1940,6 +1940,52 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
 const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B'];
 
+function DistinctAdultsChart() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('distinct_adults').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (data.length === 0) return <div className="report-card"><p className="muted">No scan data available</p></div>;
+
+  const W = 800, H = 400, PAD = { top: 30, right: 30, bottom: 60, left: 55 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  const maxCount = Math.max(...data.map((d: any) => d.count));
+  const barW = Math.min(60, plotW / data.length - 4);
+  const xScale = (i: number) => PAD.left + (i + 0.5) * (plotW / data.length);
+  const yScale = (v: number) => PAD.top + plotH - (v / maxCount) * plotH;
+
+  return (
+    <div className="report-card">
+      <h3>Distinct Adults Scanned per Season</h3>
+      <p className="muted">Number of unique adult penguins scanned each breeding season (Apr–Mar)</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(maxCount * frac)} y2={yScale(maxCount * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+          <text key={frac} x={PAD.left - 8} y={yScale(maxCount * frac) + 4} textAnchor="end" fontSize="11" fill="#888">{Math.round(maxCount * frac)}</text>
+        ))}
+        {data.map((d: any, i: number) => (
+          <Fragment key={d.season}>
+            <rect x={xScale(i) - barW / 2} y={yScale(d.count)} width={barW} height={PAD.top + plotH - yScale(d.count)} fill="#2196F3" opacity="0.8" rx="3" />
+            <text x={xScale(i)} y={yScale(d.count) - 6} textAnchor="middle" fontSize="11" fill="#333" fontWeight="600">{d.count}</text>
+            <text x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#666" transform={`rotate(-35, ${xScale(i)}, ${PAD.top + plotH + 16})`}>{d.season}</text>
+          </Fragment>
+        ))}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <text x={14} y={PAD.top + plotH / 2} textAnchor="middle" fontSize="12" fill="#666" transform={`rotate(-90, 14, ${PAD.top + plotH / 2})`}>Distinct adults</text>
+      </svg>
+    </div>
+  );
+}
+
 function EggArrivalChart() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2216,6 +2262,7 @@ function ChickReturnChart() {
               {sizes.map(s => (
                 <th key={s} colSpan={2} style={{padding:'0.3em 0.8em', textAlign:'center', color: sizeColors[s]}}>{sizeLabels[s]}</th>
               ))}
+              <th style={{padding:'0.3em 0.8em', textAlign:'center'}}>Total</th>
             </tr>
             <tr style={{borderBottom:'1px solid #eee'}}>
               <th></th>
@@ -2225,6 +2272,7 @@ function ChickReturnChart() {
                   <th style={{padding:'0.2em 0.5em', fontSize:'0.85em', color:'#888'}}>Total</th>
                 </Fragment>
               ))}
+              <th style={{padding:'0.2em 0.5em', fontSize:'0.85em', color:'#888'}}>Chicks</th>
             </tr>
           </thead>
           <tbody>
@@ -2240,6 +2288,9 @@ function ChickReturnChart() {
                     </Fragment>
                   );
                 })}
+                <td style={{padding:'0.3em 0.5em', textAlign:'center', fontWeight:600}}>
+                  {sizes.reduce((sum, size) => sum + (bySeason[season]?.[size]?.chipped || 0), 0)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -3427,6 +3478,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
+          <DistinctAdultsChart />
           <EggArrivalChart />
           <ChickReturnChart />
           <ChickSexChart />

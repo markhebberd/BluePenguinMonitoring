@@ -70,6 +70,7 @@ namespace PenguinMonitor
         private LinearLayout? _settingsCard;
         private LinearLayout _overviewFiltersLayout;
         private CheckBox? _isBluetoothEnabledCheckBox;
+        private Button? _syncButton;
         private TextView? _interestingBoxTextView;
         private TextView? _stickyBulb1;
         private TextView? _stickyBulb2;
@@ -115,7 +116,7 @@ namespace PenguinMonitor
         {
             ("⚙️ Settings",      UIFactory.selectedPage.Settings),
             ("📦 Single box data",  UIFactory.selectedPage.BoxDataSingle),
-            ("📊 Monitor statistics", UIFactory.selectedPage.BoxOverview),
+            ("📊 Today's statistics", UIFactory.selectedPage.BoxOverview),
          };
 
         // Add gesture detection components
@@ -217,13 +218,13 @@ namespace PenguinMonitor
                 {
                     // All permissions already granted
                     System.Diagnostics.Debug.WriteLine("All permissions already granted");
-                    InitializeGPS();
+                    if (_appSettings?.IsBlueToothEnabled == true) InitializeGPS();
                 }
             }
             else
             {
                 // Pre-Android 6 or no permissions needed
-                InitializeGPS();
+                if (_appSettings?.IsBlueToothEnabled == true) InitializeGPS();
             }
         }
         private void InitializeVibrationAndSound()
@@ -357,13 +358,15 @@ namespace PenguinMonitor
                 btStatus = bluetoothStatus ?? (_bluetoothManager?.IsConnected == true ? "HR5 Connected" : "Connecting to HR5...");
             }
             var gpsStatus = _gpsAccuracy > 0 ? $" | GPS: ±{_gpsAccuracy:F1}m" : " | GPS: No signal";
-            var userStatus = _appSettings?.IsAuthenticated == true && !string.IsNullOrEmpty(_appSettings.ObserverName) ? $" | {_appSettings.ObserverName}" : "";
+            var syncStatus = _colonyState != null && _colonyState.DirtyCount > 0
+                ? $" | ⏳ {_colonyState.DirtyCount} pending"
+                : " | Synced";
 
             RunOnUiThread(() =>
             {
                 if (_statusText != null)
                 {
-                    _statusText.Text = btStatus + gpsStatus + userStatus;
+                    _statusText.Text = btStatus + gpsStatus + syncStatus;
 
                     // Update status color based on connection state
                     if (btStatus.Contains("Connected") && _gpsAccuracy > 0)
@@ -694,28 +697,32 @@ namespace PenguinMonitor
                 Toast.MakeText(this, "No boxes with data", ToastLength.Short)?.Show();
             else
                 ShowConfirmationDialog(
-                    "📊 Data summary",
+                    "📊 Today's Statistics",
                     GetSummaryText(),
                     ("OK", () => { }),
                     null);
         }
         private string GetSummaryText()
         {
-            // Merge current edits over previous state
-            var allBoxes = new Dictionary<string, BoxObservation>(_colonyState.PreviousBoxes);
-            foreach (var kvp in _colonyState.TodayBoxes)
-                allBoxes[kvp.Key] = kvp.Value;
+            // Today's data only (TodayBoxes + today's pending)
+            var todayBoxes = new Dictionary<string, BoxObservation>(_colonyState.TodayBoxes);
+            var nzToday = NzToday;
+            foreach (var obs in _colonyState.PendingObservations)
+            {
+                if (!string.IsNullOrEmpty(obs.BoxName) && ToNzTime(obs.WhenDataCollectedUtc).Date == nzToday)
+                    todayBoxes[obs.BoxName] = obs;
+            }
 
-            var totalScannedBirds = allBoxes.Values.Sum(box => box.ScannedIds.Count);
-            var totalAdults = allBoxes.Values.Sum(box => box.Adults);
-            var totalEggs = allBoxes.Values.Sum(box => box.Eggs);
-            var totalChicks = allBoxes.Values.Sum(box => box.Chicks);
-            var gateUpCount = allBoxes.Values.Count(box => box.GateStatus == "Gate up");
-            var regateCount = allBoxes.Values.Count(box => box.GateStatus == "Regate");
+            var totalScannedBirds = todayBoxes.Values.Sum(box => box.ScannedIds.Count);
+            var totalAdults = todayBoxes.Values.Sum(box => box.Adults);
+            var totalEggs = todayBoxes.Values.Sum(box => box.Eggs);
+            var totalChicks = todayBoxes.Values.Sum(box => box.Chicks);
+            var gateUpCount = todayBoxes.Values.Count(box => box.GateStatus == "Gate up");
+            var regateCount = todayBoxes.Values.Count(box => box.GateStatus == "Regate");
 
             var dirty = _colonyState.DirtyCount;
 
-            string summary = $"📦 {allBoxes.Count} boxes total\n" +
+            string summary = $"📦 {todayBoxes.Count} boxes today\n" +
                          (dirty > 0 ? $"⏳ {dirty} boxes pending upload\n" : "") +
                          $"🐧 {totalScannedBirds} bird scans\n" +
                          $"👥 {totalAdults} adults\n" +
@@ -731,57 +738,58 @@ namespace PenguinMonitor
                 return;
 
             _isDownloadingCsvData = true;
-            for (int i = 0; i < _topButtonLayout.ChildCount; i++)
+            UpdateStatusText("Syncing...");
+            if (_syncButton != null)
             {
-                Button child = (Button)_topButtonLayout.GetChildAt(i);
-                if (child.Text.Equals("Sync"))
-                {
-                    SetEnabledRecursive(child, false, 0.5f);
-                    child.Text = "Loading data";
-                    child.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
-                    _ = Task.Run(async () =>
-                    {
-                        DataStorageService.SyncResult result;
-                        try
-                        {
-                            result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
-
-                            _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
-                            _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
-
-                            if (result.BoxTags != null)
-                                _boxTags = result.BoxTags;
-                        }
-                        catch (Exception ex)
-                        {
-                            result = new DataStorageService.SyncResult { Error = ex.Message };
-                        }
-
-                        new Handler(Looper.MainLooper).Post(() =>
-                        {
-                            _isDownloadingCsvData = false;
-                            child.Text = "Sync";
-                            child.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
-                            DrawPageLayouts();
-
-                            if ((_colonyState.GetTodayForBox(_currentBoxName) != null))
-                            {
-                                var boxData = _colonyState.GetTodayForBox(_currentBoxName);
-                                buildScannedIdsLayout(boxData.ScannedIds);
-                            }
-
-                            SetEnabledRecursive(child, true, 1.0f);
-                            ShowSyncResultsDialog(result);
-
-                            if (result.Conflicts != null && result.Conflicts.Count > 0)
-                                ShowConflictDialog(result.Conflicts);
-
-                            if (result.AuthFailed)
-                                ShowLoginPrompt();
-                        });
-                    });
-                }
+                _syncButton.Text = "Syncing...";
+                _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
+                _syncButton.Enabled = false;
             }
+
+            _ = Task.Run(async () =>
+            {
+                DataStorageService.SyncResult result;
+                try
+                {
+                    result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
+
+                    _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+                    _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
+
+                    if (result.BoxTags != null)
+                        _boxTags = result.BoxTags;
+                }
+                catch (Exception ex)
+                {
+                    result = new DataStorageService.SyncResult { Error = ex.Message };
+                }
+
+                new Handler(Looper.MainLooper).Post(() =>
+                {
+                    _isDownloadingCsvData = false;
+                    if (_syncButton != null)
+                    {
+                        _syncButton.Text = "Sync";
+                        _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
+                        _syncButton.Enabled = true;
+                    }
+                    DrawPageLayouts();
+
+                    if ((_colonyState.GetTodayForBox(_currentBoxName) != null))
+                    {
+                        var boxData = _colonyState.GetTodayForBox(_currentBoxName);
+                        buildScannedIdsLayout(boxData.ScannedIds);
+                    }
+
+                    ShowSyncResultsDialog(result);
+
+                    if (result.Conflicts != null && result.Conflicts.Count > 0)
+                        ShowConflictDialog(result.Conflicts);
+
+                    if (result.AuthFailed)
+                        ShowLoginPrompt();
+                });
+            });
         }
 
         private void ShowSyncResultsDialog(DataStorageService.SyncResult result)
@@ -843,6 +851,7 @@ namespace PenguinMonitor
             var scrollView = new ScrollView(this);
             var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             container.SetPadding(16, 16, 16, 16);
+            container.SetBackgroundColor(Color.White);
             scrollView.AddView(container);
 
             var confirmedBoxes = new List<string>();
@@ -927,9 +936,29 @@ namespace PenguinMonitor
                 })
                 .SetNegativeButton("Discard", (s, e) =>
                 {
-                    // Drop the unconfirmed edits from pending
-                    foreach (var boxName in confirmedBoxes)
+                    // Drop the unconfirmed edits and restore server versions
+                    foreach (var conflict in conflicts)
+                    {
+                        var boxName = conflict.box_name ?? "";
                         _colonyState.PendingObservations.RemoveAll(p => p.BoxName == boxName && p.IsDirty);
+
+                        // Restore server version into TodayBoxes
+                        if (conflict.server != null)
+                        {
+                            var serverObs = BoxObservation.FromServerData(
+                                conflict.server.observation_id, 0, conflict.server.observation_time_utc ?? "",
+                                conflict.server.adults, conflict.server.eggs, conflict.server.chicks,
+                                conflict.server.breeding_status, conflict.server.gate_status,
+                                conflict.server.notes ?? "", conflict.server.monitor_filename,
+                                conflict.server.observer_name);
+                            serverObs.BoxName = boxName;
+                            if (conflict.server.scans != null)
+                                foreach (var scan in conflict.server.scans)
+                                    serverObs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                            serverObs.IsDirty = false;
+                            _colonyState.TodayBoxes[boxName] = serverObs;
+                        }
+                    }
                     DataStorageService.SaveColonyState(this, _colonyState);
                     UpdateSyncButtonLabel();
                     DrawPageLayouts();
@@ -1038,17 +1067,6 @@ namespace PenguinMonitor
             createSettingsCard();
             headerStatusSettingsCard.AddView(_settingsCard);
             CreateBoxSetsDictionary();
-
-            // Action buttons
-            _topButtonLayout = CreateStyledButtonLayout(
-                ("Clear all", OnClearBoxesClick, UIFactory.DANGER_RED),
-                ("Clear box", OnClearBoxClick, UIFactory.WARNING_YELLOW),
-                ("Sync", OnBirdStatsClick, UIFactory.PRIMARY_BLUE),
-                ("Save/Load", OnDataClick, UIFactory.SUCCESS_GREEN)
-            );
-            statusParams.SetMargins(0, 0, 0, 10);
-            _topButtonLayout.LayoutParameters = statusParams;
-            headerStatusSettingsCard.AddView(_topButtonLayout);
 
             // Daily label warning (below buttons, visible even when settings collapsed)
             _standaloneDailyLabelWarning = new TextView(this)
@@ -1568,6 +1586,12 @@ namespace PenguinMonitor
                 _overviewFiltersLayout.AddView(doneButton);
             }
 
+            // Today's statistics summary
+            var statsText = new TextView(this) { Text = GetSummaryText(), TextSize = 12 };
+            statsText.SetTextColor(Color.DarkGray);
+            statsText.SetPadding(12, 8, 12, 8);
+            _overviewFiltersLayout.AddView(statsText);
+
             OverviewHeaderCard.AddView(_overviewFiltersLayout);
             _multiBoxViewCard.AddView(OverviewHeaderCard);
 
@@ -1639,12 +1663,7 @@ namespace PenguinMonitor
                 if (shouldShow)
                 {
                     View? card;
-                    if (_appSettings.EditBoxTagsMode)
-                    {
-                        // Use box tag editing card
-                        card = CreateBoxTagEditCard(boxName);
-                    }
-                    else if (currentBoxDataFound)
+                    if (currentBoxDataFound)
                         card = CreateBoxSummaryCard(boxName, currentBoxData, _boxNamesAndIndexes[boxName] == _currentBoxIndex, previousBoxData);
                     else
                         card = CreateBoxSummaryCard(boxName, null, _boxNamesAndIndexes[boxName] == _currentBoxIndex, previousBoxData);
@@ -1697,26 +1716,41 @@ namespace PenguinMonitor
                 ScrollToTop();
             };
 
-            // Border: dirty=orange, changed from previous=blue, loss=red, default=grey
+            // Border: today=solid black, old data=orange border, loss=red, changed=blue, default=grey
             bool differenceFound = false;
-            if (thisBoxData?.IsDirty == true)
+            if (currentExists && thisBoxData?.IsDirty == true)
             {
+                // Unsynced today's edit — orange border
                 boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.WARNING_YELLOW, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
             }
-            else if (previousBoxData != null && thisBoxData != null && currentExists
-                && (thisBoxData.Eggs + thisBoxData.Chicks < previousBoxData.Eggs + previousBoxData.Chicks))
+            else if (currentExists)
             {
-                differenceFound = true;
-                boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.DANGER_RED, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                // Today's synced data — solid black border
+                if (previousBoxData != null && thisBoxData != null
+                    && (thisBoxData.Eggs + thisBoxData.Chicks < previousBoxData.Eggs + previousBoxData.Chicks))
+                {
+                    differenceFound = true;
+                    boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.DANGER_RED, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                }
+                else if (previousBoxData != null && thisBoxData != null
+                    && (thisBoxData.Eggs != previousBoxData.Eggs || thisBoxData.Chicks != previousBoxData.Chicks))
+                {
+                    differenceFound = true;
+                    boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.PRIMARY_BLUE, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                }
+                else
+                {
+                    boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: Color.Black, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                }
             }
-            else if (previousBoxData != null && thisBoxData != null
-                && (thisBoxData.Eggs != previousBoxData.Eggs || thisBoxData.Chicks != previousBoxData.Chicks))
+            else if (thisBoxData != null)
             {
-                differenceFound = true;
-                boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.PRIMARY_BLUE, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                // Old/previous data only — orange border
+                boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
             }
             else
             {
+                // No data — thin grey
                 boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 3, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
             }
 
@@ -1913,156 +1947,6 @@ namespace PenguinMonitor
         }
 
         /// <summary>
-        /// Creates a box card for the Edit Box Tags mode
-        /// Green = has tag, Yellow = no tag
-        /// </summary>
-        private View CreateBoxTagEditCard(string boxName)
-        {
-            bool hasTag = _boxTags.ContainsKey(boxName);
-
-            var boxCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            boxCard.SetPadding(8, 8, 8, 8);
-
-            int minWidth = Resources.DisplayMetrics.WidthPixels / 5;
-            var cardParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-            cardParams.SetMargins(5, 5, 5, 5);
-            boxCard.LayoutParameters = cardParams;
-            boxCard.SetMinimumWidth(minWidth);
-
-            // Set background color based on tag status
-            if (hasTag)
-            {
-                boxCard.Background = _uiFactory.CreateCardBackground(borderWidth: 3, backgroundColor: UIFactory.SUCCESS_GREEN);
-            }
-            else
-            {
-                boxCard.Background = _uiFactory.CreateCardBackground(borderWidth: 3, backgroundColor: UIFactory.WARNING_YELLOW);
-            }
-
-            // Box name title
-            var title = new TextView(this)
-            {
-                Text = $"Box {boxName}",
-                Gravity = GravityFlags.Center,
-                TextSize = 18
-            };
-            title.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Normal);
-            title.SetTextColor(Color.Black);
-            boxCard.AddView(title);
-
-            // Show tag info if exists
-            if (hasTag)
-            {
-                var tagNumber = _boxTags[boxName].TagNumber;
-                var displayTag = tagNumber.Length > 8 ? tagNumber.Substring(tagNumber.Length - 8) : tagNumber;
-                var tagInfo = new TextView(this)
-                {
-                    Text = displayTag,
-                    Gravity = GravityFlags.Center,
-                    TextSize = 12
-                };
-                tagInfo.SetTextColor(Color.DarkGray);
-                boxCard.AddView(tagInfo);
-            }
-            else
-            {
-                var noTag = new TextView(this)
-                {
-                    Text = "No tag",
-                    Gravity = GravityFlags.Center,
-                    TextSize = 12
-                };
-                noTag.SetTextColor(Color.DarkGray);
-                boxCard.AddView(noTag);
-            }
-
-            // Click handler
-            boxCard.Click += (sender, e) =>
-            {
-                if (hasTag)
-                {
-                    // Show confirmation dialog to clear the tag
-                    ShowClearBoxTagDialog(boxName);
-                }
-                else
-                {
-                    // Show data entry dialog to add a tag
-                    ShowAddBoxTagDialog(boxName);
-                }
-            };
-
-            return boxCard;
-        }
-
-        /// <summary>
-        /// Shows a confirmation dialog to clear a box tag
-        /// </summary>
-        private void ShowClearBoxTagDialog(string boxName)
-        {
-            var tagNumber = _boxTags.ContainsKey(boxName) ? _boxTags[boxName].TagNumber : "Unknown";
-            var builder = new AlertDialog.Builder(this);
-            builder.SetTitle($"Box {boxName} Tag");
-            builder.SetMessage($"Tag: {tagNumber}\n\nWould you like to clear this tag?");
-            builder.SetPositiveButton("Yes", (sender, args) =>
-            {
-                var internalPath = this.FilesDir?.AbsolutePath;
-                if (!string.IsNullOrEmpty(internalPath))
-                {
-                    _ = BoxTagService.RemoveBoxTagAsync(_boxTags, boxName, internalPath);
-                    Toast.MakeText(this, $"Box tag cleared for Box {boxName}", ToastLength.Short)?.Show();
-                    DrawPageLayouts();
-                }
-            });
-            builder.SetNegativeButton("Cancel", (sender, args) => { });
-            builder.Show();
-        }
-
-        /// <summary>
-        /// Shows a dialog to add a box tag
-        /// </summary>
-        private void ShowAddBoxTagDialog(string boxName)
-        {
-            var builder = new AlertDialog.Builder(this);
-            builder.SetTitle($"Add Box Tag for Box {boxName}");
-
-            // Create input field
-            var input = new EditText(this)
-            {
-                Hint = "Enter tag number (e.g., LA9000250001)",
-                InputType = Android.Text.InputTypes.ClassText
-            };
-            input.SetPadding(40, 20, 40, 20);
-            builder.SetView(input);
-
-            builder.SetPositiveButton("Save", (sender, args) =>
-            {
-                string tagNumber = input.Text?.Trim() ?? "";
-                if (string.IsNullOrWhiteSpace(tagNumber))
-                {
-                    Toast.MakeText(this, "Tag number cannot be empty", ToastLength.Short)?.Show();
-                    return;
-                }
-
-                var internalPath = this.FilesDir?.AbsolutePath;
-                if (!string.IsNullOrEmpty(internalPath))
-                {
-                    _ = BoxTagService.AssignBoxTagAsync(
-                        _boxTags,
-                        boxName,
-                        tagNumber,
-                        _currentLocation?.Latitude ?? 0,
-                        _currentLocation?.Longitude ?? 0,
-                        _currentLocation?.Accuracy ?? -1,
-                        internalPath
-                    );
-                    Toast.MakeText(this, $"Box tag saved for Box {boxName}", ToastLength.Short)?.Show();
-                    DrawPageLayouts();
-                }
-            });
-            builder.SetNegativeButton("Cancel", (sender, args) => { });
-            builder.Show();
-        }
-
         private void ScrollToTop()
         {
             if (_rootScrollView == null) return;
@@ -2149,6 +2033,7 @@ namespace PenguinMonitor
                 if (_isBluetoothEnabledCheckBox.Checked)
                 {
                     InitializeBluetooth();
+                    InitializeGPS();
                     _appSettings.IsBlueToothEnabled = true;
                 }
                 else
@@ -2156,7 +2041,9 @@ namespace PenguinMonitor
                     _appSettings.IsBlueToothEnabled = false;
                     _bluetoothManager?.Dispose();
                     _bluetoothManager = null;
-                    UpdateStatusText("Bluetooth Disabled");
+                    _locationManager?.RemoveUpdates(this);
+                    _gpsAccuracy = -1;
+                    UpdateStatusText("Bluetooth & GPS Disabled");
                 }
             };
             _isBluetoothEnabledCheckBox.Checked = _appSettings.IsBlueToothEnabled;
@@ -2220,7 +2107,10 @@ namespace PenguinMonitor
                 _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.PRIMARY_BLUE);
             editBoxTagsButton.Click += (s, e) =>
             {
-                _appSettings.EditBoxTagsMode = true;
+                _appSettings.EditBoxTagsMode = !_appSettings.EditBoxTagsMode;
+                editBoxTagsButton.Text = _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags";
+                editBoxTagsButton.Background = _uiFactory.CreateRoundedBackground(
+                    _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.PRIMARY_BLUE, 8);
                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
                 DrawPageLayouts();
             };
@@ -2371,10 +2261,26 @@ namespace PenguinMonitor
             _settingsCard.AddView(_isBluetoothEnabledCheckBox);
             // 4. Legacy incremental backups
             _settingsCard.AddView(tcpCheckBox);
-            // 5. Edit box tags (above logout)
-            _settingsCard.AddView(editBoxTagsButton);
-            // 6. Logout/Login (bottom)
-            _settingsCard.AddView(authButton);
+            // 5. Sync button
+            _syncButton = _uiFactory.CreateStyledButton("Sync", UIFactory.PRIMARY_BLUE);
+            _syncButton.Click += OnBirdStatsClick;
+            var syncButton = _syncButton;
+            var syncParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            syncParams.SetMargins(8, 4, 8, 4);
+            syncButton.LayoutParameters = syncParams;
+            _settingsCard.AddView(syncButton);
+            // 6. Edit box tags + Logout/Login (horizontal)
+            var tagAndAuthLayout = new LinearLayout(this);
+            var tagAndAuthParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            tagAndAuthParams.SetMargins(0, 4, 0, 4);
+            tagAndAuthLayout.LayoutParameters = tagAndAuthParams;
+            var halfParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            halfParams.SetMargins(4, 0, 4, 0);
+            editBoxTagsButton.LayoutParameters = halfParams;
+            authButton.LayoutParameters = halfParams;
+            tagAndAuthLayout.AddView(editBoxTagsButton);
+            tagAndAuthLayout.AddView(authButton);
+            _settingsCard.AddView(tagAndAuthLayout);
         }
 
         private void UpdateBoxSetsSelector()
@@ -2512,11 +2418,13 @@ namespace PenguinMonitor
                         _multiBoxViewCard.Visibility = tagMode ? ViewStates.Gone : _multiBoxViewCard.Visibility;
                     if (_settingsCard != null)
                         _settingsCard.Visibility = tagMode ? ViewStates.Gone : _settingsCard.Visibility;
-                    if (_topButtonLayout != null)
-                        _topButtonLayout.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
-                    // Keep prev obs and unsynced cards visible in tag mode
+                    if (_breedingDatesCard != null)
+                        _breedingDatesCard.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
+                    // Keep prev obs and unsynced cards visible in tag mode, expanded by default
                     if (_prevObsSummaryLayout != null)
                         _prevObsSummaryLayout.Visibility = tagMode ? ViewStates.Visible : _prevObsSummaryLayout.Visibility;
+                    if (tagMode && _prevObsDetailLayout != null)
+                        _prevObsDetailLayout.Visibility = ViewStates.Visible;
 
                     // Force single box view in tag mode
                     if (tagMode)
@@ -2550,9 +2458,7 @@ namespace PenguinMonitor
                             }
 
                             var currentTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) ? tagInfo.TagNumber : "";
-                            var displayTag = !string.IsNullOrEmpty(currentTag)
-                                ? (currentTag.Length > 8 ? currentTag.Substring(currentTag.Length - 8) : currentTag)
-                                : "";
+                            var displayTag = currentTag;
 
                             if (_isBoxLocked)
                             {
@@ -2628,13 +2534,15 @@ namespace PenguinMonitor
                     {
                         var nzTime = ToNzTime(currentObs.WhenDataCollectedUtc);
                         var who = !string.IsNullOrEmpty(currentObs.ObserverName) ? currentObs.ObserverName : "";
-                        _boxSavedTimeTextView.Text = $"Today {nzTime:HH:mm}" + (!string.IsNullOrEmpty(who) ? $"\n{who}" : "");
+                        var syncLine = currentObs.IsDirty ? "⏳ Unsynced" : "Synced";
+                        _boxSavedTimeTextView.Text = $"{syncLine}\n{nzTime:HH:mm}" + (!string.IsNullOrEmpty(who) ? $"\n{who}" : "");
+                        _boxSavedTimeTextView.SetTextColor(currentObs.IsDirty ? UIFactory.DANGER_RED : Color.Black);
                     }
                     else
                     {
                         _boxSavedTimeTextView.Text = tagStr;
+                        _boxSavedTimeTextView.SetTextColor(Color.Black);
                     }
-                    _boxSavedTimeTextView.SetTextColor(Color.Black);
                     _boxSavedTimeTextView.Gravity = GravityFlags.Right;
 
                     // Update sticky note bar
@@ -2691,27 +2599,12 @@ namespace PenguinMonitor
                     // Update previous observation summary
                     UpdatePreviousObsSummary();
 
-                    //disable/enable UI elememts according to _isBoxLocked
-                    for (int i = 0; i < _topButtonLayout.ChildCount; i++)
-                    {
-                        Button child = (Button) _topButtonLayout.GetChildAt(i);
-                        SetEnabledRecursive(child, _isBoxLocked, _isBoxLocked ? 1.0f : 0.5f);
-                        if ((child.Text.Equals("Clear all") || child.Text.Equals("Delete")))
-                        {
-                            child.Text = "Clear all" ;
-                            if (!_isBoxLocked || (_colonyState.TodayBoxes.Count == 0 && _colonyState.PendingObservations.Count == 0))
-                                SetEnabledRecursive(child, false, 0.5f); 
-                        }
-                        else if (_isBoxLocked && child.Text.Equals("Clear Box") && !(_colonyState.GetTodayForBox(_currentBoxName) != null))
-                            SetEnabledRecursive(child, false, 0.5f);
-                    }
-
-                    // title Layout "Box n" is item 0, which we don't want to disable!
-                    for (int i = 1; i < _singleBoxDataOuterLayout.ChildCount; i++)
+                    // Nav buttons are item 0, title layout is item 1 — don't disable either
+                    for (int i = 2; i < _singleBoxDataOuterLayout.ChildCount; i++)
                     {
                         var child = _singleBoxDataOuterLayout.GetChildAt(i);
-                        // Keep previous obs summary and unsynced cards always interactive
-                        if (child == _prevObsSummaryLayout || child == _unsyncedCardsContainer) continue;
+                        // Keep previous obs summary, unsynced cards, and tag mode content always interactive
+                        if (child == _prevObsSummaryLayout || child == _unsyncedCardsContainer || child == _tagModeContentLayout) continue;
                         // Disable editing when box is locked
                         bool shouldDisable = _isBoxLocked;
                         SetEnabledRecursive(child, !shouldDisable, shouldDisable ? 0.8f : 1.0f);
@@ -2799,15 +2692,15 @@ namespace PenguinMonitor
                     string sex = "";
                     bool isChick = false;
 
-                    // Try lookup by short 8-digit pit_id suffix
+                    // Try lookup by full pit_id
                     PenguinData pd = null;
                     if (_remotePenguinData != null)
                     {
-                        if (!_remotePenguinData.TryGetValue(shortId, out pd))
+                        if (!_remotePenguinData.TryGetValue(cleanId, out pd))
                         {
-                            // Fallback: search by VID match in case BirdId contains a VID
+                            // Fallback: search by VID match
                             pd = _remotePenguinData.Values.FirstOrDefault(p =>
-                                p.VidForScanner == s.BirdId || p.ScannedId == shortId);
+                                p.VidForScanner == s.BirdId);
                         }
                     }
 
@@ -2835,17 +2728,10 @@ namespace PenguinMonitor
                     badge.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
                     badge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
 
-                    // Click to open bird on website
-                    if (pd != null && !string.IsNullOrEmpty(pd.PengNum))
-                    {
-                        badge.Clickable = true;
-                        var pengNum = pd.PengNum;
-                        badge.Click += (s2, e2) =>
-                        {
-                            StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
-                                Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pengNum}")));
-                        };
-                    }
+                    // Click to show bird info dialog
+                    badge.Clickable = true;
+                    var badgeBirdId = s.BirdId;
+                    badge.Click += (s2, e2) => ShowBirdDialog(badgeBirdId);
 
                     scansRow.AddView(badge);
                 }
@@ -3008,13 +2894,14 @@ namespace PenguinMonitor
                 if (!_isBoxLocked)
                 {
                     DrawPageLayouts();
-                    _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                    if (!_appSettings.EditBoxTagsMode)
+                        _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                     _highOffspringCountConfirmed = false;
                 }
                 else
                 {
-                    // Don't save when viewing historical data
-                    if (false /* no historical view */)
+                    // In tag mode, just lock without saving box data
+                    if (_appSettings.EditBoxTagsMode)
                     {
                         DrawPageLayouts();
                         return;
@@ -3078,6 +2965,10 @@ namespace PenguinMonitor
             _boxSavedTimeTextView = new TextView(this);
             _singleBoxDataTitleLayout.AddView(_boxSavedTimeTextView);
 
+
+            // Navigation buttons above the box header
+            _boxNavigationButtonsLayout = CreateNavigationLayout();
+            _singleBoxDataOuterLayout.AddView(_boxNavigationButtonsLayout);
 
             _singleBoxDataOuterLayout.AddView(_singleBoxDataTitleLayout);
 
@@ -3288,10 +3179,6 @@ namespace PenguinMonitor
 
             _singleBoxDataOuterLayout.AddView(_singleBoxDataContentLayout);
 
-            // Navigation card
-            _boxNavigationButtonsLayout = CreateNavigationLayout();
-            _singleBoxDataOuterLayout.AddView(_boxNavigationButtonsLayout);
-
             // Box tag mode layout — shown instead of normal content when in tag editing mode
         }
         private void SetEnabledRecursive(View view, bool enabled, float alpha)
@@ -3350,42 +3237,6 @@ namespace PenguinMonitor
                 ("Confirm empty", onConfirm),
                 ("Lock without saving", onCancel)
             );
-        }
-        private void OnClearBoxClick(object? sender, EventArgs e)
-        {
-            ShowConfirmationDialog(
-                "Clear Box Data",
-                "Clear data for box " + _currentBoxName + "?",
-                ("Yes", () =>
-                {
-                    _colonyState.PendingObservations.RemoveAll(o => o.BoxName == _currentBoxName);
-                    SaveToAppDataDir();
-                    DrawPageLayouts();
-                }),
-                ("No", () => { } ));
-        }
-        private void OnClearBoxesClick(object? s, EventArgs e)
-        {
-            if (true /* always current */)
-            {
-                ShowConfirmationDialog(
-                    "Clear all data",
-                    "Clear data for all boxes?",
-                    ("Yes, clear all", new Action(() =>
-                    {
-                        _colonyState.PendingObservations.Clear();
-                        _currentBoxIndex = 1;
-                        ClearInternalStorageData();
-                        SaveToAppDataDir();
-                        DrawPageLayouts();
-                    })),
-                    ("Cancel", new Action(() => { }))
-                );
-            }
-            else //looking at an old monitor on the server.
-            {
-                Toast.MakeText(this, "Monitor deletion removed — manage via wildwatch.co.nz", ToastLength.Short)?.Show();
-            }
         }
         private void OnSaveDataClick(object? sender, EventArgs e)
         {
@@ -3777,12 +3628,18 @@ namespace PenguinMonitor
 
             // Scan info text with additional penguin information
             var timeStr = ToNzTime(scan.Timestamp).ToString("MMM dd, HH:mm");
+            var shortBirdId = scan.BirdId.Length > 8 ? scan.BirdId.Substring(scan.BirdId.Length - 8) : scan.BirdId;
+            var pengNum = _remotePenguinData != null && _remotePenguinData.TryGetValue(scan.BirdId, out var pd2) && !string.IsNullOrEmpty(pd2.PengNum)
+                ? $"#{pd2.PengNum} " : "";
             var scanText = new TextView(this)
             {
-                Text = $"• {scan.BirdId}{additionalInfo} at {timeStr}",
+                Text = $"• {pengNum}{shortBirdId}{additionalInfo} at {ToNzTime(scan.Timestamp):HH:mm}",
                 TextSize = 14
             };
             scanText.SetTextColor(UIFactory.TEXT_PRIMARY);
+            scanText.Clickable = true;
+            var birdIdForClick = scan.BirdId;
+            scanText.Click += (s, e) => ShowBirdDialog(birdIdForClick);
             var textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             scanText.LayoutParameters = textParams;
             scanLayout.AddView(scanText);
@@ -3831,6 +3688,452 @@ namespace PenguinMonitor
 
             return scanLayout;
         }
+        private void ShowBirdDialog(string birdId)
+        {
+            PenguinData? pd = null;
+            _remotePenguinData?.TryGetValue(birdId, out pd);
+            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
+            var pengNum = pd?.PengNum ?? "";
+            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} {shortId}" : shortId;
+            if (pd != null)
+            {
+                var sex = pd.Sex == "M" ? " ♂" : pd.Sex == "F" ? " ♀" : "";
+                title += sex;
+            }
+
+            var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            container.SetPadding(16, 16, 16, 16);
+
+            var bioButton = _uiFactory.CreateStyledButton("Enter biometric data", UIFactory.PRIMARY_BLUE);
+            var bioParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            bioParams.SetMargins(8, 8, 8, 8);
+            bioButton.LayoutParameters = bioParams;
+            container.AddView(bioButton);
+
+            var webButton = _uiFactory.CreateStyledButton("Open on website", UIFactory.SUCCESS_GREEN);
+            webButton.LayoutParameters = bioParams;
+            container.AddView(webButton);
+
+            var dialog = new AlertDialog.Builder(this)
+                .SetTitle(title)
+                .SetView(container)
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Create();
+
+            bioButton.Click += (s, e) => { dialog.Dismiss(); ShowBiometricForm(birdId, pd, pengNum); };
+            webButton.Click += (s, e) =>
+            {
+                dialog.Dismiss();
+                if (!string.IsNullOrEmpty(pengNum))
+                    StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
+                        Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pengNum}")));
+                else
+                    Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
+            };
+
+            dialog.Show();
+        }
+
+        private void ShowBiometricForm(string birdId, PenguinData? pd, string pengNum)
+        {
+            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
+            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} Biometrics" : $"{shortId} Biometrics";
+
+            var scrollView = new ScrollView(this);
+            var card = _uiFactory.CreateCard();
+            card.SetPadding(16, 16, 16, 16);
+            scrollView.AddView(card);
+
+            // Styled input helper
+            EditText createInput(string hint, Android.Text.InputTypes inputType)
+            {
+                var input = new EditText(this) { InputType = inputType, Hint = hint, TextSize = 14 };
+                input.SetTextColor(UIFactory.TEXT_PRIMARY);
+                input.SetHintTextColor(UIFactory.TEXT_SECONDARY);
+                input.SetPadding(16, 12, 16, 12);
+                input.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                p.SetMargins(0, 4, 0, 12);
+                input.LayoutParameters = p;
+                return input;
+            }
+
+            TextView createLabel(string text)
+            {
+                var lbl = new TextView(this) { Text = text, TextSize = 14 };
+                lbl.SetTextColor(UIFactory.TEXT_PRIMARY);
+                lbl.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                return lbl;
+            }
+
+            // Weight
+            card.AddView(createLabel("Weight (g)"));
+            var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            card.AddView(weightInput);
+
+            // Right flipper length
+            card.AddView(createLabel("Right flipper (mm)"));
+            var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            card.AddView(flipperInput);
+
+            // Sex
+            card.AddView(createLabel("Sex"));
+            var sexSpinner = _uiFactory.CreateSpinner(new List<string> { "", "M", "F" });
+            var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            spinnerParams.SetMargins(0, 4, 0, 12);
+            sexSpinner.LayoutParameters = spinnerParams;
+            card.AddView(sexSpinner);
+
+            // Conditions
+            card.AddView(createLabel("Condition"));
+            var conditions = new (string label, string field)[] {
+                ("Moulting", "condition_moulting"),
+                ("Underweight", "condition_underweight"),
+                ("Ticks", "condition_ticks"),
+                ("Dead", "condition_dead"),
+                ("Dog attacked", "condition_dog_attacked"),
+                ("Attacked", "condition_attacked"),
+            };
+            var conditionChecks = new Dictionary<string, CheckBox>();
+            foreach (var (label, field) in conditions)
+            {
+                var cb = new CheckBox(this) { Text = label };
+                cb.SetTextColor(Color.Black);
+                conditionChecks[field] = cb;
+                card.AddView(cb);
+            }
+
+            // Notes
+            card.AddView(createLabel("Notes"));
+            var notesInput = createInput("Observations about this bird",
+                Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
+            card.AddView(notesInput);
+
+            // Save button
+            var saveButton = _uiFactory.CreateStyledButton("Save", UIFactory.SUCCESS_GREEN);
+            var saveParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            saveParams.SetMargins(0, 16, 0, 0);
+            saveButton.LayoutParameters = saveParams;
+            card.AddView(saveButton);
+
+            var dialog = new AlertDialog.Builder(this)
+                .SetTitle(title)
+                .SetView(scrollView)
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Create();
+
+            saveButton.Click += (s, e) =>
+            {
+                if (string.IsNullOrEmpty(pengNum))
+                {
+                    Toast.MakeText(this, "Cannot save — penguin not in database", ToastLength.Short)?.Show();
+                    return;
+                }
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var fields = new Dictionary<string, object>();
+                        if (!string.IsNullOrEmpty(weightInput.Text)) fields["weight"] = weightInput.Text;
+                        if (!string.IsNullOrEmpty(flipperInput.Text)) fields["right_flipper_length"] = flipperInput.Text;
+                        var selectedSex = sexSpinner.SelectedItem?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(selectedSex)) fields["observed_sex"] = selectedSex;
+                        foreach (var (field, cb) in conditionChecks)
+                            if (cb.Checked) fields[field] = true;
+                        if (!string.IsNullOrEmpty(notesInput.Text)) fields["notes"] = notesInput.Text;
+                        fields["observation_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                        fields["peng_num"] = pengNum;
+
+                        var json = JsonConvert.SerializeObject(fields);
+                        var request = new HttpRequestMessage(HttpMethod.Post,
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
+                        request.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
+                        request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                        var response = await new HttpClient { Timeout = TimeSpan.FromSeconds(15) }.SendAsync(request);
+
+                        RunOnUiThread(() =>
+                        {
+                            if (response.IsSuccessStatusCode)
+                            {
+                                Toast.MakeText(this, $"Biometric data saved for #{pengNum}", ToastLength.Short)?.Show();
+                                dialog.Dismiss();
+                            }
+                            else
+                                Toast.MakeText(this, $"Save failed: {response.StatusCode}", ToastLength.Short)?.Show();
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, $"Save failed: {ex.Message}", ToastLength.Short)?.Show());
+                    }
+                });
+            };
+
+            dialog.Show();
+        }
+
+        private void ShowNewBirdDialog(string shortId, string fullPitId)
+        {
+            var scrollView = new ScrollView(this);
+            var card = _uiFactory.CreateCard();
+            card.SetPadding(16, 16, 16, 16);
+            scrollView.AddView(card);
+
+            EditText createInput(string hint, Android.Text.InputTypes inputType = Android.Text.InputTypes.ClassText)
+            {
+                var input = new EditText(this) { InputType = inputType, Hint = hint, TextSize = 14 };
+                input.SetTextColor(UIFactory.TEXT_PRIMARY);
+                input.SetHintTextColor(UIFactory.TEXT_SECONDARY);
+                input.SetPadding(16, 12, 16, 12);
+                input.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                p.SetMargins(0, 4, 0, 12);
+                input.LayoutParameters = p;
+                return input;
+            }
+
+            TextView createLabel(string text)
+            {
+                var lbl = new TextView(this) { Text = text, TextSize = 14 };
+                lbl.SetTextColor(UIFactory.TEXT_PRIMARY);
+                lbl.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                return lbl;
+            }
+
+            // PIT ID (read-only)
+            var pitInfo = new TextView(this) { Text = $"PIT ID: {fullPitId}", TextSize = 13 };
+            pitInfo.SetTextColor(Color.DarkGray);
+            pitInfo.SetPadding(0, 0, 0, 12);
+            card.AddView(pitInfo);
+
+            // Sex
+            card.AddView(createLabel("Sex"));
+            var sexSpinner = _uiFactory.CreateSpinner(new List<string> { "", "M", "F" });
+            var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            spinnerParams.SetMargins(0, 4, 0, 12);
+            sexSpinner.LayoutParameters = spinnerParams;
+            card.AddView(sexSpinner);
+
+            // Chipped as adult/chick toggle
+            card.AddView(createLabel("Chipped as"));
+            var chippedAsAdult = new RadioButton(this) { Text = "Adult" };
+            chippedAsAdult.SetTextColor(Color.Black);
+            var chippedAsChick = new RadioButton(this) { Text = "Chick" };
+            chippedAsChick.SetTextColor(Color.Black);
+            var chippedGroup = new RadioGroup(this);
+            chippedGroup.AddView(chippedAsAdult);
+            chippedGroup.AddView(chippedAsChick);
+            chippedAsAdult.Checked = true;
+            card.AddView(chippedGroup);
+
+            // Chick size options (hidden until "Chick" selected)
+            var chickSizeLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            chickSizeLayout.Visibility = ViewStates.Gone;
+            chickSizeLayout.SetPadding(16, 0, 0, 0);
+
+            var sizeLabel = createLabel("Chick size");
+            chickSizeLayout.AddView(sizeLabel);
+
+            var sizeGroup = new RadioGroup(this);
+            var sizeUnknown = new RadioButton(this) { Text = "Unknown" };
+            sizeUnknown.SetTextColor(Color.Black);
+            sizeUnknown.Checked = true;
+            var sizeSC = new RadioButton(this) { Text = "Single Chick (SC)" };
+            sizeSC.SetTextColor(Color.Black);
+            var sizeBC = new RadioButton(this) { Text = "Big Chick (BC)" };
+            sizeBC.SetTextColor(Color.Black);
+            var sizeLC = new RadioButton(this) { Text = "Little Chick (LC)" };
+            sizeLC.SetTextColor(Color.Black);
+            sizeGroup.AddView(sizeUnknown);
+            sizeGroup.AddView(sizeSC);
+            sizeGroup.AddView(sizeBC);
+            sizeGroup.AddView(sizeLC);
+            chickSizeLayout.AddView(sizeGroup);
+            card.AddView(chickSizeLayout);
+
+            chippedAsChick.CheckedChange += (s, e) =>
+                chickSizeLayout.Visibility = chippedAsChick.Checked ? ViewStates.Visible : ViewStates.Gone;
+
+            // Chip box (pre-filled with current box)
+            card.AddView(createLabel("Chip box"));
+            var chipBoxInput = createInput("Box name");
+            chipBoxInput.Text = _currentBoxName;
+            card.AddView(chipBoxInput);
+
+            // Chipped by (pre-filled with current observer)
+            card.AddView(createLabel("Chipped by"));
+            var chippedByInput = createInput("Observer name");
+            chippedByInput.Text = _appSettings?.ObserverName ?? "";
+            card.AddView(chippedByInput);
+
+            // --- Biometric data ---
+            var bioHeader = new TextView(this) { Text = "Biometric Data (optional)", TextSize = 15 };
+            bioHeader.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            bioHeader.SetTextColor(UIFactory.TEXT_PRIMARY);
+            bioHeader.SetPadding(0, 16, 0, 4);
+            card.AddView(bioHeader);
+
+            card.AddView(createLabel("Weight (g)"));
+            var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            card.AddView(weightInput);
+
+            card.AddView(createLabel("Right flipper (mm)"));
+            var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            card.AddView(flipperInput);
+
+            card.AddView(createLabel("Condition"));
+            var bioConditions = new (string label, string field)[] {
+                ("Moulting", "condition_moulting"),
+                ("Underweight", "condition_underweight"),
+                ("Ticks", "condition_ticks"),
+                ("Dead", "condition_dead"),
+                ("Dog attacked", "condition_dog_attacked"),
+                ("Attacked", "condition_attacked"),
+            };
+            var bioConditionChecks = new Dictionary<string, CheckBox>();
+            foreach (var (label, field) in bioConditions)
+            {
+                var cb = new CheckBox(this) { Text = label };
+                cb.SetTextColor(Color.Black);
+                bioConditionChecks[field] = cb;
+                card.AddView(cb);
+            }
+
+            card.AddView(createLabel("Notes"));
+            var notesInput = createInput("Notes",
+                Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
+            card.AddView(notesInput);
+
+            // Save button
+            var saveButton = _uiFactory.CreateStyledButton("Add to database", UIFactory.SUCCESS_GREEN);
+            var saveParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            saveParams.SetMargins(0, 16, 0, 0);
+            saveButton.LayoutParameters = saveParams;
+            card.AddView(saveButton);
+
+            var dialog = new AlertDialog.Builder(this)
+                .SetTitle($"New bird: {shortId}")
+                .SetView(scrollView)
+                .SetNegativeButton("Skip", (s, e) => { })
+                .Create();
+
+            saveButton.Click += (s, e) =>
+            {
+                var isChick = chippedAsChick.Checked;
+                var sex = sexSpinner.SelectedItem?.ToString() ?? "";
+                var chickSize = "";
+                if (isChick)
+                {
+                    if (sizeSC.Checked) chickSize = "SC";
+                    else if (sizeBC.Checked) chickSize = "BC";
+                    else if (sizeLC.Checked) chickSize = "LC";
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                        var token = _appSettings.AuthToken;
+
+                        // 1. Create penguin record
+                        var pengFields = new Dictionary<string, object>
+                        {
+                            ["chipped_as_adult"] = isChick ? 0 : 1,
+                            ["life_stage"] = isChick ? "Chick" : "Adult",
+                            ["chip_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                        };
+                        // sex goes to biometric data as observed_sex, not penguin table
+                        if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
+
+                        var pengReq = new HttpRequestMessage(HttpMethod.Post,
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins");
+                        pengReq.Headers.Add("Authorization", $"Bearer {token}");
+                        pengReq.Content = new StringContent(
+                            JsonConvert.SerializeObject(pengFields), System.Text.Encoding.UTF8, "application/json");
+                        var pengResp = await client.SendAsync(pengReq);
+                        var pengJson = await pengResp.Content.ReadAsStringAsync();
+                        var pengResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(pengJson);
+
+                        var pengNum = pengResult?.ContainsKey("peng_num") == true ? pengResult["peng_num"]?.ToString() : null;
+                        if (string.IsNullOrEmpty(pengNum))
+                        {
+                            RunOnUiThread(() => Toast.MakeText(this, $"Failed to create penguin: {pengJson}", ToastLength.Long)?.Show());
+                            return;
+                        }
+
+                        // 2. Create chip record
+                        var chipFields = new Dictionary<string, object>
+                        {
+                            ["peng_num"] = pengNum,
+                            ["pit_id"] = fullPitId,
+                            ["chip_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                            ["is_active"] = 1,
+                            ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
+                            ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
+                        };
+                        var chipReq = new HttpRequestMessage(HttpMethod.Post,
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips");
+                        chipReq.Headers.Add("Authorization", $"Bearer {token}");
+                        chipReq.Content = new StringContent(
+                            JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
+                        var chipResp = await client.SendAsync(chipReq);
+
+                        // 3. Create biometric record if any data entered
+                        var bioFields = new Dictionary<string, object>();
+                        if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
+                        if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["right_flipper_length"] = flipperInput.Text;
+                        if (!string.IsNullOrEmpty(sex)) bioFields["observed_sex"] = sex;
+                        foreach (var (field, cb) in bioConditionChecks)
+                            if (cb.Checked) bioFields[field] = true;
+                        if (bioFields.Count > 0)
+                        {
+                            bioFields["peng_num"] = pengNum;
+                            bioFields["observation_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                            var bioReq = new HttpRequestMessage(HttpMethod.Post,
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
+                            bioReq.Headers.Add("Authorization", $"Bearer {token}");
+                            bioReq.Content = new StringContent(
+                                JsonConvert.SerializeObject(bioFields), System.Text.Encoding.UTF8, "application/json");
+                            await client.SendAsync(bioReq);
+                        }
+
+                        // 4. Update local penguin data cache
+                        if (_remotePenguinData != null)
+                        {
+                            var pd = new PenguinData
+                            {
+                                ScannedId = shortId,
+                                PengNum = pengNum,
+                                Sex = sex,
+                                LastKnownLifeStage = isChick ? LifeStage.Chick : LifeStage.Adult,
+                                ChipDate = DateTime.UtcNow,
+                                ChipAs = isChick ? "Chick" : "Adult",
+                                ChickSizeCode = chickSize,
+                            };
+                            _remotePenguinData[fullPitId] = pd;
+                            _remotePenguinData[shortId] = pd;
+                        }
+
+                        RunOnUiThread(() =>
+                        {
+                            Toast.MakeText(this, $"#{pengNum} added to database", ToastLength.Short)?.Show();
+                            dialog.Dismiss();
+                            DrawPageLayouts();
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, $"Failed: {ex.Message}", ToastLength.Long)?.Show());
+                    }
+                });
+            };
+
+            dialog.Show();
+        }
+
         private void OnDeleteScanClick(ScanRecord scanToDelete)
         {
             ShowConfirmationDialog(
@@ -3849,8 +4152,8 @@ namespace PenguinMonitor
                         {
                             boxData.ScannedIds.Remove(scanToRemove);
                             if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData) && (
-                                LifeStage.Adult == penguinData.LastKnownLifeStage || 
-                                LifeStage.Returnee == penguinData.LastKnownLifeStage || 
+                                LifeStage.Adult == penguinData.LastKnownLifeStage ||
+                                LifeStage.Returnee == penguinData.LastKnownLifeStage ||
                                 NzNow > penguinData.ChipDate.AddMonths(3)))
                             {
                                 _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
@@ -4077,17 +4380,7 @@ namespace PenguinMonitor
 
         private void UpdateSyncButtonLabel()
         {
-            if (_topButtonLayout == null) return;
-            for (int i = 0; i < _topButtonLayout.ChildCount; i++)
-            {
-                if (_topButtonLayout.GetChildAt(i) is Button btn && (btn.Text.StartsWith("Sync")))
-                {
-                    var dirty = _colonyState.DirtyCount;
-                    btn.Text = dirty > 0 ? $"Sync {dirty}" : "Sync";
-                    btn.Background = _uiFactory.CreateRoundedBackground(dirty > 0 ? UIFactory.WARNING_YELLOW : UIFactory.PRIMARY_BLUE, 8);
-                    break;
-                }
-            }
+            UpdateStatusText();
         }
 
         private void TryBackgroundUpload()
@@ -4226,7 +4519,7 @@ namespace PenguinMonitor
                                     // Assign to current box
                                     BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
                                         _currentLocation?.Latitude ?? 0, _currentLocation?.Longitude ?? 0,
-                                        _currentLocation?.Accuracy ?? -1, internalPath);
+                                        _currentLocation?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
                                     Toast.MakeText(this, $"📌 Tag moved from Box {assignedBoxId} to Box {_currentBoxName}", ToastLength.Short)?.Show();
                                     DrawPageLayouts();
                                 }
@@ -4240,14 +4533,15 @@ namespace PenguinMonitor
                     var internalPath = this.FilesDir?.AbsolutePath;
                     if (!string.IsNullOrEmpty(internalPath))
                     {
-                        _ = BoxTagService.AssignBoxTagAsync(
+                        BoxTagService.AssignBoxTag(
                             _boxTags,
                             _currentBoxName,
                             cleanTagId,
                             _currentLocation?.Latitude ?? 0,
                             _currentLocation?.Longitude ?? 0,
                             _currentLocation?.Accuracy ?? -1,
-                            internalPath
+                            internalPath,
+                            _appSettings.ObserverId
                         );
                         Toast.MakeText(this, $"📌 Box tag assigned to Box {_currentBoxName}", ToastLength.Short)?.Show();
                         DrawPageLayouts(); // Refresh UI to show delete button if enabled
@@ -4388,6 +4682,7 @@ namespace PenguinMonitor
                     {
                         toastMessage += ", Unknown scan ID!";
                         triggerAlertAsync();
+                        ShowNewBirdDialog(shortId, cleanEid);
                     }
                     DrawPageLayouts();
                     Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
@@ -4530,7 +4825,7 @@ namespace PenguinMonitor
 
                     if (allPermissionsGranted)
                     {
-                        InitializeGPS();
+                        if (_appSettings?.IsBlueToothEnabled == true) InitializeGPS();
                         Toast.MakeText(this, "✅ All permissions granted", ToastLength.Short)?.Show();
                     }
                     else

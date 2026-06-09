@@ -62,14 +62,13 @@ function handleGet($pdo, $colonyId) {
 }
 
 function auditBoxTag($pdo, $action, $boxId, $changed) {
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observation_locations', ?, ?, 0, ?)")
-        ->execute([$boxId, $action, json_encode($changed)]);
+    $observerId = $changed['observer_id'] ?? 0;
+    unset($changed['observer_id']);
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observation_locations', ?, ?, ?, ?)")
+        ->execute([$boxId, $action, $observerId, json_encode($changed)]);
 }
 
 function handlePost($pdo, $colonyId) {
-    // Disabled: box tag writes are managed server-side only
-    echo json_encode(['success' => true, 'message' => 'Box tag sync disabled']);
-    return;
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'Invalid JSON body']); return; }
 
@@ -81,23 +80,27 @@ function handlePost($pdo, $colonyId) {
     $latitude = $input['Latitude'] ?? $input['latitude'] ?? null;
     $longitude = $input['Longitude'] ?? $input['longitude'] ?? null;
     $accuracy = $input['Accuracy'] ?? $input['accuracy'] ?? null;
+    $observerId = $input['ObserverId'] ?? $input['observer_id'] ?? 0;
 
     // Get old value for audit
-    $old = $pdo->prepare("SELECT pit_id, scan_time_utc FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+    $old = $pdo->prepare("SELECT pit_id, scan_time_utc, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $old->execute([$colonyId, $boxId]);
     $oldRow = $old->fetch();
 
     // Ensure location exists
     $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $boxId]);
 
-    // Update pit_id and scan time only — GPS is updated via TCP import
-    $pdo->prepare("UPDATE observation_locations SET pit_id = ?, scan_time_utc = ? WHERE colony_id = ? AND location_name = ?")
-        ->execute([$tagNumber, $scanTime, $colonyId, $boxId]);
+    // Update pit_id, scan time, and GPS
+    $pdo->prepare("UPDATE observation_locations SET pit_id = ?, scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
+        ->execute([$tagNumber, $scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
 
     auditBoxTag($pdo, 'UPDATE', $boxId, [
         'pit_id' => ['old' => $oldRow['pit_id'] ?? null, 'new' => $tagNumber],
         'scan_time_utc' => ['old' => $oldRow['scan_time_utc'] ?? null, 'new' => $scanTime],
-        'source' => 'boxtags_api',
+        'latitude' => ['old' => $oldRow['latitude'] ?? null, 'new' => $latitude],
+        'longitude' => ['old' => $oldRow['longitude'] ?? null, 'new' => $longitude],
+        'observer_id' => $observerId,
+        'source' => 'nestcheck_app',
     ]);
 
     echo json_encode(['success' => true, 'message' => 'Box tag saved', 'box_id' => $boxId]);

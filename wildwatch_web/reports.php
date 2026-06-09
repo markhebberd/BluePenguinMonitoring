@@ -11,6 +11,7 @@ switch ($report) {
     case 'egg_arrival': eggArrival($pdo, $colonyId); break;
     case 'chick_sex': chickSex($pdo); break;
     case 'chick_return': chickReturn($pdo); break;
+    case 'distinct_adults': distinctAdults($pdo, $colonyId); break;
     default: echo json_encode(['error' => 'Unknown report']); break;
 }
 
@@ -195,4 +196,43 @@ function chickReturn($pdo) {
     }
 
     echo json_encode(['by_season' => $bySeasonSize, 'totals' => $summary, 'points' => $points]);
+}
+
+function distinctAdults($pdo, $colonyId) {
+    // Count distinct adult penguins scanned per breeding season (Apr-Mar)
+    $stmt = $pdo->prepare("
+        SELECT
+            CASE WHEN MONTH(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) >= 4
+                 THEN YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
+                 ELSE YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) - 1 END AS season_year,
+            ps.pit_id
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+        JOIN penguins p ON pc.peng_num = p.peng_num
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+          AND (p.chipped_as_adult = 1
+               OR (pc.chip_date IS NOT NULL AND DATEDIFF(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'), pc.chip_date) > 90))
+        GROUP BY season_year, ps.pit_id
+    ");
+    $stmt->execute([$colonyId]);
+    $rows = $stmt->fetchAll();
+
+    $seasons = [];
+    foreach ($rows as $row) {
+        $sy = (int)$row['season_year'];
+        $label = $sy . '/' . substr($sy + 1, -2);
+        if (!isset($seasons[$label])) $seasons[$label] = 0;
+        $seasons[$label]++;
+    }
+
+    ksort($seasons);
+
+    $result = [];
+    foreach ($seasons as $season => $count) {
+        $result[] = ['season' => $season, 'count' => $count];
+    }
+
+    echo json_encode($result);
 }

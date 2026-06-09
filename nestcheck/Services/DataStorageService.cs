@@ -21,7 +21,7 @@ namespace PenguinMonitor.Services
         internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         internal const string WILDWATCH_BASE_URL = "https://wildwatch.co.nz/penguin-api";
         internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/api/penguins.php";
         internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
@@ -310,7 +310,8 @@ namespace PenguinMonitor.Services
                     if (!string.IsNullOrEmpty(record.life_stage))
                         Enum.TryParse<LifeStage>(record.life_stage, true, out lifeStage);
 
-                    remotePenguinData[eightDigitId] = new PenguinData
+                    var fullId = cleanId.ToUpper();
+                    var pengData = new PenguinData
                     {
                         ScannedId = eightDigitId,
                         PengNum = record.peng_num ?? "",
@@ -321,6 +322,7 @@ namespace PenguinMonitor.Services
                         ChipAs = record.chipped_as_adult == 1 ? "Adult" : "",
                         ChickSizeCode = record.chick_size_code ?? ""
                     };
+                    remotePenguinData[fullId] = pengData;
                 }
 
                 File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
@@ -400,7 +402,14 @@ namespace PenguinMonitor.Services
                     if (boxName != null)
                     {
                         var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
-                        if (match != null) colonyState.PendingObservations.Remove(match);
+                        if (match != null)
+                        {
+                            colonyState.PendingObservations.Remove(match);
+                            match.IsDirty = false;
+                            var nzDate = MainActivity.ToNzTime(match.WhenDataCollectedUtc).Date;
+                            if (nzDate == MainActivity.NzToday)
+                                colonyState.TodayBoxes[boxName] = match;
+                        }
                         uploaded++;
                     }
                 }
@@ -459,7 +468,15 @@ namespace PenguinMonitor.Services
                     if (boxName != null)
                     {
                         var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
-                        if (match != null) colonyState.PendingObservations.Remove(match);
+                        if (match != null)
+                        {
+                            colonyState.PendingObservations.Remove(match);
+                            // Move to TodayBoxes so it stays visible locally
+                            match.IsDirty = false;
+                            var nzDate = MainActivity.ToNzTime(match.WhenDataCollectedUtc).Date;
+                            if (nzDate == MainActivity.NzToday)
+                                colonyState.TodayBoxes[boxName] = match;
+                        }
                     }
                 }
             }

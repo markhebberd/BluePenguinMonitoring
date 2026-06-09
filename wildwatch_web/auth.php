@@ -1,6 +1,6 @@
 <?php
 /**
- * NestCheck deep-link authentication.
+ * Nestcheck deep-link authentication.
  *
  * Flow:
  * 1. App opens this page in default browser
@@ -64,7 +64,7 @@ function redirectToApp($pdo, $observer) {
     $oid = $observer['observer_id'];
     $role = urlencode($observer['role'] ?? 'viewer');
 
-    // Redirect to NestCheck deep link
+    // Redirect to Nestcheck deep link
     $deepLink = "nestcheck://auth?token=$token&name=$name&observer_id=$oid&role=$role";
     header("Location: $deepLink");
     exit;
@@ -77,7 +77,7 @@ function redirectToApp($pdo, $observer) {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Link NestCheck</title>
+    <title>Link Nestcheck</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f7fa; color:#333; display:flex; justify-content:center; align-items:center; min-height:100vh; }
@@ -94,7 +94,7 @@ function redirectToApp($pdo, $observer) {
 </head>
 <body>
     <div class="card">
-        <h1>Link NestCheck</h1>
+        <h1>Link Nestcheck</h1>
         <p class="subtitle">Sign in with your Wildwatch account to connect the app.</p>
         <form method="POST">
             <label for="email">Email</label>

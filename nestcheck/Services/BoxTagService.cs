@@ -67,7 +67,7 @@ namespace PenguinMonitor.Services
         /// Add or update a box tag
         /// </summary>
         public static void AssignBoxTag(Dictionary<string, BoxTag> boxTags, string boxId, string tagNumber,
-            double latitude, double longitude, float accuracy, string filesDir)
+            double latitude, double longitude, float accuracy, string filesDir, int observerId = 0)
         {
             boxTags[boxId] = new BoxTag
             {
@@ -76,9 +76,27 @@ namespace PenguinMonitor.Services
                 ScanTimeUTC = DateTime.UtcNow,
                 Latitude = latitude,
                 Longitude = longitude,
-                Accuracy = accuracy
+                Accuracy = accuracy,
+                ObserverId = observerId
             };
             SaveBoxTags(boxTags, filesDir);
+
+            // Upload to server (fire-and-forget)
+            if (_apiService != null)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _apiService.SaveBoxTagAsync(boxTags[boxId]);
+                        System.Diagnostics.Debug.WriteLine($"BoxTagService.AssignBoxTag: Uploaded {boxId} to remote");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"BoxTagService.AssignBoxTag: Remote upload failed: {ex.Message}");
+                    }
+                });
+            }
         }
 
         /// <summary>
@@ -223,21 +241,6 @@ namespace PenguinMonitor.Services
             }
         }
 
-        /// <summary>
-        /// Assign a box tag and save to both local and remote
-        /// </summary>
-        public static async Task AssignBoxTagAsync(
-            Dictionary<string, BoxTag> boxTags,
-            string boxId,
-            string tagNumber,
-            double latitude,
-            double longitude,
-            float accuracy,
-            string filesDir)
-        {
-            // Disabled — box tags are read-only from server
-            return;
-        }
 
         /// <summary>
         /// Remove a box tag from both local and remote
@@ -254,8 +257,7 @@ namespace PenguinMonitor.Services
                 // Save locally first
                 SaveBoxTags(boxTags, filesDir);
 
-                // Remote delete disabled — box tags are managed server-side
-                if (false)
+                if (_apiService != null)
                 {
                     try
                     {

@@ -10,5 +10,6 @@ namespace PenguinMonitor.Models
         public double Latitude { get; set; }
         public double Longitude { get; set; }
         public float Accuracy { get; set; } = -1;
+        public int ObserverId { get; set; }
     }
 }
