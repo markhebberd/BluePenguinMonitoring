@@ -238,7 +238,9 @@ namespace PenguinMonitor.Services
 
                 // Fetch penguins from WildWatch API
                 var birdsStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                Task<HttpResponseMessage> responseBirdsTask = _httpClient.GetAsync(WILDWATCH_PENGUINS_URL)
+                var birdsRequest = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL);
+                birdsRequest.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
+                Task<HttpResponseMessage> responseBirdsTask = _httpClient.SendAsync(birdsRequest)
                     .ContinueWith(t => { birdsStopwatch.Stop(); return t.Result; });
 
                 // Save monitor data
@@ -349,7 +351,9 @@ namespace PenguinMonitor.Services
                     }
                     // Merge latest breeding status from overview (separate fetch, won't break other data)
                     try {
-                        var overviewResp = await _httpClient.GetAsync(WILDWATCH_PENGUINS_URL.Replace("penguins.php", "dashboard.php") + "?view=overview");
+                        var overviewReq = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL.Replace("penguins.php", "dashboard.php") + "?view=overview");
+                        overviewReq.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
+                        var overviewResp = await _httpClient.SendAsync(overviewReq);
                         if (overviewResp.IsSuccessStatusCode) {
                             var overviewJson = await overviewResp.Content.ReadAsStringAsync();
                             var overview = JsonConvert.DeserializeObject<Dictionary<string, object>>(overviewJson);
@@ -404,7 +408,9 @@ namespace PenguinMonitor.Services
                 // Verify penguin count matches server
                 var errors = new List<string>();
                 try {
-                    var countResp = await _httpClient.GetAsync(WILDWATCH_PENGUINS_URL + "?count");
+                    var countReq = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL + "?count");
+                    countReq.Headers.Add("X-API-Key", WILDWATCH_API_KEY);
+                    var countResp = await _httpClient.SendAsync(countReq);
                     var countJson = await countResp.Content.ReadAsStringAsync();
                     var countObj = JsonConvert.DeserializeObject<Dictionary<string, int>>(countJson);
                     if (countObj != null && countObj.ContainsKey("count")) {
