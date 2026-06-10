@@ -1060,7 +1060,7 @@ namespace PenguinMonitor
 
             var titleText = new TextView(this)
             {
-                Text = "Penguin Nestcheck",
+                Text = "NestCheck",
                 TextSize = 28,
                 Gravity = GravityFlags.Center
             };
