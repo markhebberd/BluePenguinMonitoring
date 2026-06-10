@@ -16,10 +16,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $pdo = getDbConnection();
 
-// Auth
+// Auth (header or query param for downloads)
 $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
 if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-    http_response_code(401); echo json_encode(['error'=>'Auth required']); exit;
+    if (!empty($_GET['token'])) { $m = [null, $_GET['token']]; }
+    else { http_response_code(401); echo json_encode(['error'=>'Auth required']); exit; }
 }
 $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
 $stmt->execute([$m[1]]);
@@ -30,15 +31,18 @@ if (($observer['role'] ?? '') !== 'admin') { http_response_code(403); echo json_
 $action = $_GET['action'] ?? '';
 
 if ($action === 'recent_changes') {
-    $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
-    $stmt = $pdo->prepare("SELECT a.*, o.observer_name,
+    $days = min(30, max(1, (int)($_GET['days'] ?? 7)));
+    $stmt = $pdo->prepare("SELECT a.*,
+        o.observer_name,
+        DATE(CONVERT_TZ(a.change_timestamp, '+00:00', '+12:00')) as nz_date,
         CASE WHEN a.table_name = 'observations' THEN
             (SELECT ol.location_name FROM observations obs JOIN observation_locations ol ON obs.location_id = ol.location_id WHERE obs.observation_id = a.record_id LIMIT 1)
         END as box_name
         FROM audit_log a
-        JOIN observers o ON a.observer_id = o.observer_id
-        ORDER BY a.change_timestamp DESC LIMIT ?");
-    $stmt->execute([$limit]);
+        LEFT JOIN observers o ON a.observer_id = o.observer_id
+        WHERE a.change_timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        ORDER BY a.change_timestamp DESC");
+    $stmt->execute([$days]);
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -77,48 +81,6 @@ if ($action === 'update_user') {
     exit;
 }
 
-if ($action === 'wipe_monitors') {
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-    $del1 = $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename NOT LIKE 'sheet-import%'");
-    $del2 = $pdo->exec("DELETE FROM observations WHERE monitor_filename NOT LIKE 'sheet-import%'");
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', 'bulk', 'DELETE', ?, ?)")
-        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_monitors', 'deleted_scans'=>$del1, 'deleted_observations'=>$del2])]);
-    echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_observations'=>$del2]);
-    exit;
-}
-
-if ($action === 'wipe_sightings') {
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-    $del1 = $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE 'sheet-import%'");
-    $del2 = $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE 'sheet-import%'");
-    $del3 = $pdo->exec("DELETE FROM observations WHERE monitor_filename LIKE 'sheet-import%'");
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', 'bulk', 'DELETE', ?, ?)")
-        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_sightings', 'deleted_scans'=>$del1, 'deleted_biometrics'=>$del2, 'deleted_observations'=>$del3])]);
-    echo json_encode(['success'=>true, 'deleted_scans'=>$del1, 'deleted_biometrics'=>$del2, 'deleted_observations'=>$del3]);
-    exit;
-}
-
-if ($action === 'wipe_penguins') {
-    $counts = [
-        'penguins' => (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn(),
-        'chips' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn(),
-        'scans' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_scans")->fetchColumn(),
-        'biometrics' => (int)$pdo->query("SELECT COUNT(*) FROM penguin_biometric_data")->fetchColumn(),
-    ];
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-    $pdo->exec("DELETE FROM penguin_scans");
-    $pdo->exec("DELETE FROM penguin_biometric_data");
-    $pdo->exec("DELETE FROM penguin_chips");
-    $pdo->exec("DELETE FROM penguins");
-    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('penguins', 'bulk', 'DELETE', ?, ?)")
-        ->execute([$observer['observer_id'], json_encode(['action'=>'wipe_penguins', 'deleted'=>$counts])]);
-    echo json_encode(['success'=>true, 'message'=>'All penguins, chips, scans and biometrics deleted']);
-    exit;
-}
-
 // Preview or delete observations from a specific date
 if ($action === 'preview_date' || $action === 'delete_date') {
     $body = json_decode(file_get_contents('php://input'), true) ?? [];
@@ -131,7 +93,7 @@ if ($action === 'preview_date' || $action === 'delete_date') {
 
     $stmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
         o.breeding_status, o.notes, o.monitor_filename, ol.location_name AS box_name,
-        (SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id) as scan_count
+        (SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)) as scan_count
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
         WHERE o.observation_time_utc >= ? AND o.observation_time_utc < ? AND o.is_deleted = FALSE
         ORDER BY ol.location_name + 0");
@@ -161,11 +123,16 @@ if ($action === 'preview_date' || $action === 'delete_date') {
     try {
         $obsIds = array_column($observations, 'observation_id');
         $deleted = 0;
-        foreach ($obsIds as $oid) {
+        $oid = $observer['observer_id'];
+        foreach ($obsIds as $obsId) {
             $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
-                ->execute([$observer['observer_id'], $oid]);
+                ->execute([$oid, $obsId]);
+            $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
+                ->execute([$oid, $obsId]);
+            $pdo->prepare("UPDATE penguin_biometric_data SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
+                ->execute([$oid, $obsId]);
             $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'DELETE', ?, ?, ?)")
-                ->execute(['observations', $oid, $observer['observer_id'], json_encode(['date' => $date, 'bulk_delete' => true]), $reason]);
+                ->execute(['observations', $obsId, $oid, json_encode(['date' => $date, 'bulk_delete' => true]), $reason]);
             $deleted++;
         }
         $pdo->commit();
@@ -178,113 +145,8 @@ if ($action === 'preview_date' || $action === 'delete_date') {
 }
 
 // Re-sync a specific monitor: delete its observations and re-import from TCP
-if ($action === 'resync_monitor') {
-    $monitorName = $_POST['monitor'] ?? '';
-    if (empty($monitorName)) { echo json_encode(['error' => 'monitor name required']); exit; }
-
-    $pdo->beginTransaction();
-    try {
-        // Delete scans for this monitor's observations
-        $del1 = $pdo->prepare("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename = ?");
-        $del1->execute([$monitorName]);
-        $scansDel = $del1->rowCount();
-
-        // Delete the observations
-        $del2 = $pdo->prepare("DELETE FROM observations WHERE monitor_filename = ?");
-        $del2->execute([$monitorName]);
-        $obsDel = $del2->rowCount();
-
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, 'DELETE', ?, ?)")
-            ->execute([$monitorName, $observer['observer_id'], json_encode(['action'=>'resync_monitor', 'monitor'=>$monitorName, 'deleted_scans'=>$scansDel, 'deleted_observations'=>$obsDel])]);
-        $pdo->commit();
-        echo json_encode(['success' => true, 'deleted_scans' => $scansDel, 'deleted_observations' => $obsDel, 'message' => "Deleted $obsDel observations and $scansDel scans for '$monitorName'. Run Sync to re-import."]);
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        echo json_encode(['error' => $e->getMessage()]);
-    }
-    exit;
-}
-
 // List monitor filenames that have data on a given NZ date
-if ($action === 'list_monitors') {
-    $date = $_GET['date'] ?? '';
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { echo json_encode(['error' => 'date required (YYYY-MM-DD)']); exit; }
-
-    $utcStart = date('Y-m-d H:i:s', strtotime($date) - 13 * 3600); // NZ is UTC+12/+13
-    $utcEnd = date('Y-m-d H:i:s', strtotime($date) + 14 * 3600);
-
-    $stmt = $pdo->prepare("SELECT monitor_filename, COUNT(*) as obs_count,
-        SUM((SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id)) as scan_count,
-        MIN(observation_time_utc) as earliest, MAX(observation_time_utc) as latest
-        FROM observations o
-        WHERE observation_time_utc >= ? AND observation_time_utc < ? AND is_deleted = FALSE
-        GROUP BY monitor_filename
-        ORDER BY monitor_filename");
-    $stmt->execute([$utcStart, $utcEnd]);
-    echo json_encode($stmt->fetchAll());
-    exit;
-}
-
 // Preview or delete all data from a specific monitor filename
-if ($action === 'preview_monitor' || $action === 'delete_monitor') {
-    $body = json_decode(file_get_contents('php://input'), true) ?? [];
-    $monitor = $body['monitor'] ?? $_GET['monitor'] ?? '';
-    if (empty($monitor)) { echo json_encode(['error' => 'monitor filename required']); exit; }
-
-    // Find all observations for this monitor
-    $stmt = $pdo->prepare("SELECT o.observation_id,
-        DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as nz_date,
-        ol.location_name as box, o.adults, o.eggs, o.chicks, o.breeding_status,
-        (SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id) as scan_count
-        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
-        WHERE o.monitor_filename = ? AND o.is_deleted = FALSE
-        ORDER BY o.observation_time_utc");
-    $stmt->execute([$monitor]);
-    $observations = $stmt->fetchAll();
-
-    $dates = array_values(array_unique(array_column($observations, 'nz_date')));
-    $totalScans = array_sum(array_column($observations, 'scan_count'));
-
-    if ($action === 'preview_monitor') {
-        echo json_encode([
-            'monitor' => $monitor,
-            'observations' => count($observations),
-            'scans' => $totalScans,
-            'dates' => $dates,
-            'multi_day' => count($dates) > 1,
-            'boxes' => array_values(array_unique(array_column($observations, 'box'))),
-        ]);
-        exit;
-    }
-
-    // Hard delete scans + observations for this monitor
-    $pdo->beginTransaction();
-    try {
-        $obsIds = array_column($observations, 'observation_id');
-        $scansDel = 0;
-        if (!empty($obsIds)) {
-            $ph = implode(',', array_fill(0, count($obsIds), '?'));
-            $s = $pdo->prepare("DELETE FROM penguin_scans WHERE observation_id IN ($ph)");
-            $s->execute(array_values($obsIds));
-            $scansDel = $s->rowCount();
-            $o = $pdo->prepare("DELETE FROM observations WHERE observation_id IN ($ph)");
-            $o->execute(array_values($obsIds));
-        }
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, 'DELETE', ?, ?)")
-            ->execute([$monitor, $observer['observer_id'], json_encode([
-                'action'=>'delete_monitor', 'monitor'=>$monitor,
-                'deleted_observations'=>count($obsIds), 'deleted_scans'=>$scansDel,
-                'dates'=>$dates
-            ])]);
-        $pdo->commit();
-        echo json_encode(['success'=>true, 'deleted_observations'=>count($obsIds), 'deleted_scans'=>$scansDel, 'monitor'=>$monitor]);
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        echo json_encode(['error'=>$e->getMessage()]);
-    }
-    exit;
-}
-
 // Shared: fetch monitors from TCP server
 function fetchTcpMonitors() {
     $host = '210.54.37.120'; $port = 8080; $passphrase = 'bbnmdsfhsecureafdgsadsadff';
@@ -430,388 +292,86 @@ if ($action === 'import_monitor') {
 }
 
 // Legacy sync (import all) and trial
-if ($action === 'sync_monitors' || $action === 'trial_sync') {
-    $dryRun = ($action === 'trial_sync');
-    try { $monitors = fetchTcpMonitors(); } catch (Exception $e) { echo json_encode(['error'=>$e->getMessage()]); exit; }
 
-    $chipLookup = [];
-    foreach ($pdo->query("SELECT pit_id FROM penguin_chips")->fetchAll() as $c)
-        $chipLookup[strtoupper(substr($c['pit_id'], -8))] = $c['pit_id'];
+if ($action === 'export_nestcheck_zip') {
+    $colonyId = $_GET['colony'] ?? 1;
 
-    $colonyId = 1; $observerId = 1; $monitorResults = [];
-    foreach ($monitors as $monitor) {
-        $summary = summariseMonitor($pdo, $monitor);
-        if (!$dryRun && $summary['status'] === 'new') {
-            $importResult = importMonitor($pdo, $monitor);
-            $summary['status'] = 'imported';
-            $summary['new'] = $importResult['imported'];
-        }
-        $monitorResults[] = $summary;
-    }
-    echo json_encode(['success'=>true, 'monitors'=>$monitorResults]);
-    exit;
-}
+    // Get all observation dates (NZ time)
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) AS obs_date
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        ORDER BY obs_date
+    ");
+    $stmt->execute([$colonyId]);
+    $dates = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-if ($action === 'import_penguins' || $action === 'trial_reimport_penguins') {
-    $dryRun = ($action === 'trial_reimport_penguins');
+    // Build a MonitorDetails JSON for each date
+    $tmpFile = tempnam(sys_get_temp_dir(), 'nestcheck_export_');
+    $zip = new ZipArchive();
+    $zip->open($tmpFile, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
-    $csv = fetchGoogleSheet('406382921');
-    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
+    foreach ($dates as $date) {
+        $stmt = $pdo->prepare("
+            SELECT ol.location_name AS box_name,
+                o.observation_time_utc, o.adults, o.eggs, o.chicks,
+                o.breeding_status, o.gate_status, o.notes,
+                o.observation_id
+            FROM observations o
+            JOIN observation_locations ol ON o.location_id = ol.location_id
+            WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+              AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?
+            ORDER BY ol.location_name + 0, ol.location_name
+        ");
+        $stmt->execute([$colonyId, $date]);
+        $obs = $stmt->fetchAll();
 
-    $handle = fopen('php://temp', 'r+');
-    fwrite($handle, $csv);
-    rewind($handle);
-    $header = fgetcsv($handle);
-    $rows = [];
-    while (($row = fgetcsv($handle)) !== false) $rows[] = $row;
-    fclose($handle);
-
-    // Count current state
-    $currentPenguins = (int)$pdo->query("SELECT COUNT(*) FROM penguins")->fetchColumn();
-    $currentChips = (int)$pdo->query("SELECT COUNT(*) FROM penguin_chips")->fetchColumn();
-
-    $created = 0; $chipsCreated = 0; $rechips = 0; $skipped = 0;
-    $chipDateIssues = [];
-
-    // Compare chip dates: DB vs sheet BEFORE wiping
-    $existingChips = [];
-    foreach ($pdo->query("SELECT pit_id, peng_num, chip_date FROM penguin_chips")->fetchAll() as $c) {
-        $existingChips[$c['pit_id']] = $c;
-    }
-
-    // Build what the sheet will create
-    $sheetChips = [];
-    foreach ($rows as $cols) {
-        while (count($cols) < 40) $cols[] = '';
-        $number = trim($cols[0]);
-        if (empty($number) || !is_numeric($number)) continue;
-        $fullChipId = trim($cols[1]);
-        if (empty($fullChipId)) continue;
-        $fullIsoRaw = trim($cols[37] ?? '');
-        $reChipFlag = trim($cols[33] ?? '');
-        if (!empty($reChipFlag) && !empty($fullIsoRaw)) {
-            $sid = 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $fullChipId), 8, '0', STR_PAD_LEFT);
-        } elseif (!empty($fullIsoRaw)) {
-            $sid = 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw);
-        } else {
-            $sid = 'LA' . preg_replace('/[^0-9]/', '', $fullChipId);
-        }
-        $cd = trim($cols[2]);
-        $pd = null;
-        if (!empty($cd)) { $ts = strtotime($cd); if ($ts) $pd = date('Y-m-d', $ts); }
-        $sheetChips[$sid] = ['peng_num'=>$number, 'chip_date'=>$pd];
-
-        // Rechip
-        $ac2 = trim($cols[35] ?? '');
-        if (!empty($ac2) && !empty($reChipFlag)) {
-            $rid = !empty($fullIsoRaw) ? 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw) : 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $ac2), 8, '0', STR_PAD_LEFT);
-            $rcd = trim($cols[36] ?? '');
-            $rpd = null;
-            if (!empty($rcd)) { $ts = strtotime($rcd); if ($ts) $rpd = date('Y-m-d', $ts); }
-            if ($rid !== $sid) $sheetChips[$rid] = ['peng_num'=>$number, 'chip_date'=>$rpd];
-        }
-    }
-
-    // Find discrepancies
-    foreach ($existingChips as $pitId => $db) {
-        if (isset($sheetChips[$pitId])) {
-            $sheet = $sheetChips[$pitId];
-            if ($db['chip_date'] !== $sheet['chip_date']) {
-                $chipDateIssues[] = ['type'=>'date_mismatch', 'pit_id'=>$pitId, 'peng_num'=>$db['peng_num'], 'db_date'=>$db['chip_date'], 'sheet_date'=>$sheet['chip_date']];
+        $boxData = [];
+        foreach ($obs as $row) {
+            $scans = $pdo->prepare("SELECT pit_id, scan_time_utc, latitude, longitude, accuracy FROM penguin_scans WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+            $scans->execute([$row['observation_id']]);
+            $scanRecords = [];
+            foreach ($scans->fetchAll() as $scan) {
+                $scanRecords[] = [
+                    'BirdId' => $scan['pit_id'],
+                    'Timestamp' => $scan['scan_time_utc'] ? date('c', strtotime($scan['scan_time_utc'])) : date('c'),
+                    'Latitude' => (float)($scan['latitude'] ?? 0),
+                    'Longitude' => (float)($scan['longitude'] ?? 0),
+                    'Accuracy' => (float)($scan['accuracy'] ?? 0),
+                ];
             }
-        } else {
-            $chipDateIssues[] = ['type'=>'in_db_not_sheet', 'pit_id'=>$pitId, 'peng_num'=>$db['peng_num'], 'db_date'=>$db['chip_date']];
+            $boxData[$row['box_name']] = [
+                'ScannedIds' => $scanRecords,
+                'Adults' => (int)$row['adults'],
+                'Eggs' => (int)$row['eggs'],
+                'Chicks' => (int)$row['chicks'],
+                'GateStatus' => $row['gate_status'],
+                'Notes' => $row['notes'] ?? '',
+                'whenDataCollectedUtc' => date('c', strtotime($row['observation_time_utc'])),
+                'BreedingChance' => $row['breeding_status'],
+            ];
         }
-    }
-    foreach ($sheetChips as $pitId => $sheet) {
-        if (!isset($existingChips[$pitId])) {
-            $chipDateIssues[] = ['type'=>'in_sheet_not_db', 'pit_id'=>$pitId, 'peng_num'=>$sheet['peng_num'], 'sheet_date'=>$sheet['chip_date']];
-        }
-    }
 
-    // Wipe removed — use wipe_penguins action instead
+        $nzDate = date('d M Y', strtotime($date));
+        $monitor = [
+            'LastSaved' => date('c', strtotime($date . ' 23:59:59')),
+            'filename' => "PenguinMonitor $nzDate",
+            'BoxData' => (object)$boxData,
+        ];
 
-    foreach ($rows as $cols) {
-        while (count($cols) < 40) $cols[] = '';
-        $number = trim($cols[0]);
-        if (empty($number) || !is_numeric($number)) { $skipped++; continue; }
-        $fullChipId = trim($cols[1]);
-        if (empty($fullChipId)) { $skipped++; continue; }
-
-        $fullIsoRaw = trim($cols[37] ?? '');
-        $reChipFlag = trim($cols[33] ?? '');
-        if (!empty($reChipFlag) && !empty($fullIsoRaw)) {
-            $shortId = 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $fullChipId), 8, '0', STR_PAD_LEFT);
-        } elseif (!empty($fullIsoRaw)) {
-            $shortId = 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw);
-        } else {
-            $shortId = 'LA' . preg_replace('/[^0-9]/', '', $fullChipId);
-        }
-        if (strlen($shortId) < 4) { $skipped++; continue; }
-
-        $chipDate = trim($cols[2]);
-        $sex = trim($cols[3]);
-        $vid = trim($cols[4]);
-        $chipBox = trim($cols[6]);
-        $lifeStage = trim($cols[12]);
-        $chipBy = trim($cols[23]);
-        $chipAs = trim($cols[24]);
-        $chickSizeSex = trim($cols[31]);
-        $rechipBy = trim($cols[34] ?? '');
-        $activeChip2 = trim($cols[35] ?? '');
-        $rechipDateRaw = trim($cols[36] ?? '');
-        $solo = trim($cols[38] ?? '');
-        $kommentar = trim($cols[39] ?? '');
-
-        $parsedDate = null;
-        if (!empty($chipDate)) { $ts = strtotime($chipDate); if ($ts) $parsedDate = date('Y-m-d', $ts); }
-        $chippedAsAdult = 0;
-        if (!empty($chipAs)) $chippedAsAdult = (stripos($chipAs, 'chick') === false) ? 1 : 0;
-        $sexNorm = null;
-        if (strtoupper($sex) === 'F' || stripos($sex, 'female') !== false) $sexNorm = 'F';
-        elseif (strtoupper($sex) === 'M' || stripos($sex, 'male') !== false) $sexNorm = 'M';
-
-        if (!$dryRun) {
-            // Skip existing in additive mode
-            if (!$wipe) {
-                $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
-                $exists->execute([$number]);
-                if ($exists->fetchColumn()) { $skipped++; continue; }
-            }
-            $pdo->prepare("INSERT INTO penguins (peng_num, sex, chipped_as_adult, life_stage, vid_for_scanner, chick_size_code, kommentar) VALUES (?, ?, ?, ?, ?, ?, ?)")
-                ->execute([$number, $sexNorm, $chippedAsAdult, $lifeStage ?: null, $vid ?: null, $chickSizeSex ?: null, $kommentar ?: null]);
-        }
-        $created++;
-
-        $isActive = empty($reChipFlag) ? 1 : 0;
-        if (!$dryRun) {
-            $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, chip_box, chip_by, solo) VALUES (?, ?, ?, ?, ?, ?, ?)")
-                ->execute([$shortId, $number, $parsedDate, $isActive, $chipBox ?: null, $chipBy ?: null, $solo ?: null]);
-        }
-        $chipsCreated++;
-
-        if (!empty($activeChip2) && !empty($reChipFlag)) {
-            $rechipFullId = !empty($fullIsoRaw) ? 'LA' . preg_replace('/[^0-9]/', '', $fullIsoRaw) : 'LA9560000' . str_pad(preg_replace('/[^0-9]/', '', $activeChip2), 8, '0', STR_PAD_LEFT);
-            if ($rechipFullId !== $shortId) {
-                $rechipDate = null;
-                if (!empty($rechipDateRaw)) { $ts = strtotime($rechipDateRaw); if ($ts) $rechipDate = date('Y-m-d', $ts); }
-                if (!$dryRun) {
-                    $pdo->prepare("INSERT INTO penguin_chips (pit_id, peng_num, chip_date, is_active, rechip_by) VALUES (?, ?, ?, TRUE, ?)")
-                        ->execute([$rechipFullId, $number, $rechipDate, $rechipBy ?: null]);
-                }
-                $rechips++;
-                $chipsCreated++;
-            }
-        }
+        $json = json_encode($monitor, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $zip->addFromString("Nestcheck $date.json", $json);
     }
 
-    echo json_encode([
-        'success' => true,
-        'dry_run' => $dryRun,
-        'csv_rows' => count($rows),
-        'previous' => ['penguins'=>$currentPenguins, 'chips'=>$currentChips],
-        'result' => ['penguins'=>$created, 'chips'=>$chipsCreated, 'rechips'=>$rechips, 'skipped'=>$skipped],
-        'chip_date_issues' => $chipDateIssues,
-    ]);
-    exit;
-}
+    $zip->close();
 
-if ($action === 'import_sightings' || $action === 'trial_import_sightings') {
-    set_time_limit(300);
-    ini_set('memory_limit', '256M');
-    $dryRun = ($action === 'trial_import_sightings');
-    $monitorPrefix = 'sheet-import';
-    $colonyId = 1; $observerId = 1;
-
-    $csv = fetchGoogleSheet('325619240');
-    if (!$csv) { echo json_encode(['error'=>'Google Sheets export failed']); exit; }
-
-    $handle = fopen('php://temp', 'r+');
-    fwrite($handle, $csv);
-    rewind($handle);
-    fgetcsv($handle); // skip header
-    $rows = [];
-    while (($row = fgetcsv($handle)) !== false) $rows[] = $row;
-    fclose($handle);
-
-    // Build chip lookup
-    $chipLookup = []; $chipToPeng = [];
-    foreach ($pdo->query("SELECT pit_id, peng_num FROM penguin_chips")->fetchAll() as $c) {
-        $chipLookup[substr($c['pit_id'], -8)] = $c['pit_id'];
-        $chipToPeng[substr($c['pit_id'], -8)] = $c['peng_num'];
-    }
-
-    // Parse and group by date+box
-    $prevDate = null; $groups = [];
-    foreach ($rows as $i => $row) {
-        while (count($row) < 11) $row[] = '';
-        $dateStr = trim($row[0]);
-        if (!empty($dateStr)) {
-            $ts = DateTime::createFromFormat('d/m/y', $dateStr);
-            if (!$ts) { echo json_encode(['error'=>"Bad date '$dateStr' at row ".($i+2)]); exit; }
-            $date = $ts->format('Y-m-d');
-            $prevDate = $date;
-        } else {
-            $date = $prevDate;
-        }
-        if (!$date) continue;
-
-        $box = trim($row[2]);
-        if (empty($box)) continue;
-        $boxUsed = strtoupper(trim($row[1]));
-        $key = "$date|$box";
-        if (!isset($groups[$key])) $groups[$key] = ['date'=>$date, 'box'=>$box, 'summary'=>null, 'birds'=>[], 'decomm'=>false, 'comments'=>[]];
-        $g = &$groups[$key];
-        if ($boxUsed === 'DECOMM') $g['decomm'] = true;
-
-        $birdNum = trim($row[6]);
-        $comment = trim($row[10]);
-        if ($comment) $g['comments'][] = $comment;
-
-        if (!empty($birdNum)) {
-            $g['birds'][] = ['pit8'=>substr(preg_replace('/[^0-9]/', '', $birdNum), -8), 'sex'=>trim($row[7]), 'size_code'=>strtoupper(trim($row[8])), 'weight'=>trim($row[9]), 'comment'=>$comment];
-        } elseif (trim($row[3]) !== '' || trim($row[4]) !== '' || trim($row[5]) !== '') {
-            $g['summary'] = ['adults'=>(int)trim($row[3]), 'eggs'=>(int)trim($row[4]), 'chicks'=>(int)trim($row[5])];
-        }
-    }
-
-    // Legacy wipe path removed — use wipe_sightings action instead
-    if (false) {
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-        $pdo->exec("DELETE ps FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
-        $pdo->exec("DELETE bd FROM penguin_biometric_data bd JOIN observations o ON bd.observation_id = o.observation_id WHERE o.monitor_filename LIKE '{$monitorPrefix}%'");
-        $pdo->exec("DELETE FROM observations WHERE monitor_filename LIKE '{$monitorPrefix}%'");
-        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-    }
-
-    $stats = ['observations'=>0, 'empty_skipped'=>0, 'duplicates'=>0, 'scans'=>0, 'biometrics'=>0, 'unknown_count'=>0, 'unknown_pits'=>[], 'warnings'=>[]];
-
-    foreach ($groups as $g) {
-        $date = $g['date']; $box = $g['box'];
-        if ($g['summary'] === null && count($g['birds']) === 0 && empty(implode('', $g['comments'])) && !$g['decomm']) { $stats['empty_skipped']++; continue; }
-
-        $adults = $g['summary']['adults'] ?? count($g['birds']);
-        $eggs = $g['summary']['eggs'] ?? 0;
-        $chicks = $g['summary']['chicks'] ?? 0;
-        $breedingStatus = $g['decomm'] ? 'DCM' : null;
-        $notes = implode('; ', array_filter($g['comments']));
-        $obsTime = $date . ' 02:00:00';
-
-        $observationId = null;
-        if (!$dryRun) {
-            $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $box]);
-        }
-        $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-        $stmt->execute([$colonyId, $box]);
-        $locationId = $stmt->fetchColumn();
-
-        if ($locationId) {
-            // Check for existing observation
-            $dup = $pdo->prepare("SELECT observation_id, adults, eggs, chicks, notes FROM observations WHERE location_id = ? AND observation_time_utc = ? AND monitor_filename LIKE ?");
-            $dup->execute([$locationId, $obsTime, $monitorPrefix.'%']);
-            $existing = $dup->fetch();
-            if ($existing) {
-                $observationId = $existing['observation_id'];
-                // Check for content changes
-                $changed = ((int)$existing['adults'] !== $adults || (int)$existing['eggs'] !== $eggs || (int)$existing['chicks'] !== $chicks || ($existing['notes'] ?? '') !== $notes);
-                if ($changed) {
-                    if (!$dryRun) {
-                        $pdo->prepare("UPDATE observations SET adults=?, eggs=?, chicks=?, breeding_status=?, notes=? WHERE observation_id=?")
-                            ->execute([$adults, $eggs, $chicks, $breedingStatus, $notes, $observationId]);
-                    }
-                    if (!isset($stats['updated'])) $stats['updated'] = 0;
-                    $stats['updated']++;
-                } else {
-                    $stats['duplicates']++;
-                }
-                // Get existing scans for this observation to check for missing ones
-                $existingScans = [];
-                $scanStmt = $pdo->prepare("SELECT pit_id FROM penguin_scans WHERE observation_id = ?");
-                $scanStmt->execute([$observationId]);
-                foreach ($scanStmt->fetchAll() as $es) $existingScans[$es['pit_id']] = true;
-            } else {
-                $existingScans = [];
-            }
-        } else {
-            $existingScans = [];
-        }
-
-        if (!$existing) {
-            if (!$dryRun) {
-                if (!$locationId) continue;
-                $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                    ->execute([$locationId, $observerId, $obsTime, $adults, $eggs, $chicks, $breedingStatus, null, $notes, $monitorPrefix.'-'.$date]);
-                $observationId = $pdo->lastInsertId();
-            }
-            $stats['observations']++;
-        }
-
-        // 3+ penguins warning (only for new observations)
-        if (!$existing && count($g['birds']) >= 3) {
-            $birdNums = array_map(function($b) use ($chipToPeng) { return 'peng#'.($chipToPeng[$b['pit8']] ?? $b['pit8']); }, $g['birds']);
-            $stats['warnings'][] = "$date box $box: ".count($g['birds'])." penguins (".implode(', ', $birdNums).")";
-        }
-
-        foreach ($g['birds'] as $bird) {
-            $pit8 = $bird['pit8'];
-            if (!isset($chipLookup[$pit8])) {
-                $stats['unknown_count']++;
-                if (!isset($stats['unknown_pits'][$pit8])) {
-                    // Find close match
-                    $close = null;
-                    foreach ($chipLookup as $known => $fullPit) {
-                        $knownStr = (string)$known;
-                        if (strlen($knownStr) === strlen($pit8)) {
-                            $diff = 0;
-                            for ($d = 0; $d < strlen($pit8); $d++) { if ($pit8[$d] !== $knownStr[$d]) $diff++; }
-                            if ($diff === 1) { $close = $knownStr . ' (peng#' . ($chipToPeng[$knownStr] ?? $chipToPeng[$known] ?? '?') . ')'; break; }
-                        }
-                    }
-                    $stats['unknown_pits'][$pit8] = ['count'=>0, 'close'=>$close, 'first_date'=>$date, 'first_box'=>$box];
-                }
-                $stats['unknown_pits'][$pit8]['count']++;
-                continue;
-            }
-            $pitId = $chipLookup[$pit8]; $pengNum = $chipToPeng[$pit8];
-
-            // Skip if scan already exists for this observation
-            if (isset($existingScans[$pitId])) continue;
-
-            if (!$dryRun && $observationId) {
-                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)")->execute([$observationId, $pitId, $obsTime]);
-            }
-            $stats['scans']++;
-
-            $sex = strtoupper($bird['sex']);
-            $sexNorm = ($sex === 'M' || $sex === 'UM') ? 'M' : (($sex === 'F' || $sex === 'UF') ? 'F' : null);
-            $weight = $bird['weight'] !== '' ? (float)$bird['weight'] : null;
-            $flipper = null;
-            if ($bird['comment'] && preg_match('/flipper[:\s]*(\d+)/i', $bird['comment'], $m)) $flipper = (float)$m[1];
-
-            if (($weight || $sexNorm || $bird['comment'] || $flipper) && $pengNum) {
-                if (!$dryRun && $observationId) {
-                    $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, notes) VALUES (?,?,?,?,?,?,?)")
-                        ->execute([$pengNum, $observationId, $date, $sexNorm, $weight, $flipper, $bird['comment'] ?: null]);
-                }
-                $stats['biometrics']++;
-            }
-
-            // Update chick_size_code on penguin if available and not already set
-            $sizeCode = $bird['size_code'] ?? '';
-            if ($sizeCode && $pengNum && !$dryRun) {
-                $pdo->prepare("UPDATE penguins SET chick_size_code = ? WHERE peng_num = ? AND (chick_size_code IS NULL OR chick_size_code = '')")
-                    ->execute([$sizeCode, $pengNum]);
-            }
-        }
-    }
-
-    echo json_encode([
-        'success' => true,
-        'dry_run' => $dryRun,
-        'csv_rows' => count($rows),
-        'groups' => count($groups),
-        'stats' => $stats,
-    ]);
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="nestcheck-export-' . date('Y-m-d') . '.zip"');
+    header('Content-Length: ' . filesize($tmpFile));
+    header_remove('Access-Control-Allow-Origin');
+    readfile($tmpFile);
+    unlink($tmpFile);
     exit;
 }
 

@@ -37,6 +37,17 @@ $action = $_GET['action'] ?? '';
 if ($action === 'login') { handleLogin($pdo); exit; }
 if ($action === 'register') { handleRegister($pdo); exit; }
 
+// Season field-monitoring dates — public read, auth write
+if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $seasonInput = $_GET['season'] ?? '';
+    $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
+    if (!$season) { echo json_encode(['error' => 'season required']); exit; }
+    $stmt = $pdo->prepare("SELECT date_number, actual_date FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $stmt->execute([$season]);
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
 $observer = authenticate($pdo);
 if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
 
@@ -56,6 +67,40 @@ $tables = [
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
 if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'role'=>$observer['role'] ?? 'viewer']); exit; }
+
+// Season field-monitoring dates — write (POST) requires auth
+if ($action === 'season_fm_dates') {
+    $seasonInput = $_GET['season'] ?? '';
+    $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
+    if (!$season) { echo json_encode(['error' => 'season required']); exit; }
+    if (!$canWrite) { http_response_code(403); echo json_encode(['error'=>'Write access required']); exit; }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!$input || !is_array($input)) { http_response_code(400); echo json_encode(['error'=>'JSON array required']); exit; }
+
+    $oldStmt = $pdo->prepare("SELECT date_number, actual_date FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $oldStmt->execute([$season]);
+    $oldMappings = $oldStmt->fetchAll();
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM date_mappings WHERE season_year = ?")->execute([$season]);
+        $stmt = $pdo->prepare("INSERT INTO date_mappings (season_year, date_number, actual_date) VALUES (?, ?, ?)");
+        foreach ($input as $row) {
+            $stmt->execute([$season, $row['n'], $row['date']]);
+        }
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('date_mappings', ?, 'UPDATE', ?, ?)")
+            ->execute([$season, $observer['observer_id'], json_encode([
+                'season' => $season, 'old' => $oldMappings, 'new' => $input
+            ])]);
+        $pdo->commit();
+        echo json_encode(['success'=>true, 'count'=>count($input)]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);
+    }
+    exit;
+}
 
 if (!in_array($action, ['list','get','create','update','delete'])) { echo json_encode(['error'=>'Invalid action']); exit; }
 if (!isset($tables[$table])) { echo json_encode(['error'=>'Invalid table']); exit; }
@@ -240,9 +285,14 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
     $pdo->beginTransaction();
     try {
         if ($table === 'observations') {
-            // Soft delete for observations
-            $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
-                ->execute([$observer['observer_id'], $id]);
+            // Soft delete observation and its related scans/biometrics
+            $oid = $observer['observer_id'];
+            $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
+            $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
+            $pdo->prepare("UPDATE penguin_biometric_data SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
+        } elseif ($table === 'penguin_scans' || $table === 'penguin_biometric_data') {
+            // Soft delete
+            $pdo->prepare("UPDATE $table SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE $pk = ?")->execute([$observer['observer_id'], $id]);
         } else {
             $pdo->prepare("DELETE FROM $table WHERE $pk = ?")->execute([$id]);
         }

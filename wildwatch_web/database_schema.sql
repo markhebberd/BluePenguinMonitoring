@@ -119,12 +119,17 @@ CREATE TABLE IF NOT EXISTS penguin_scans (
     latitude DOUBLE,
     longitude DOUBLE,
     accuracy FLOAT,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL,
+    deleted_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (observation_id) REFERENCES observations(observation_id) ON DELETE CASCADE,
+    FOREIGN KEY (observation_id) REFERENCES observations(observation_id),
     FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
     FOREIGN KEY (chip_id) REFERENCES penguin_chips(chip_id),
+    FOREIGN KEY (deleted_by) REFERENCES observers(observer_id),
     INDEX idx_observation (observation_id),
-    INDEX idx_penguin (penguin_id)
+    INDEX idx_penguin (penguin_id),
+    INDEX idx_deleted (is_deleted)
 );
 
 CREATE TABLE IF NOT EXISTS penguin_biometric_data (
@@ -145,9 +150,13 @@ CREATE TABLE IF NOT EXISTS penguin_biometric_data (
     condition_dog_attacked BOOLEAN DEFAULT FALSE,
     condition_attacked BOOLEAN DEFAULT FALSE,
     notes TEXT,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL,
+    deleted_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
-    FOREIGN KEY (observation_id) REFERENCES observations(observation_id) ON DELETE SET NULL,
+    FOREIGN KEY (observation_id) REFERENCES observations(observation_id),
+    FOREIGN KEY (deleted_by) REFERENCES observers(observer_id),
     INDEX idx_penguin_date (penguin_id, observation_date)
 );
 

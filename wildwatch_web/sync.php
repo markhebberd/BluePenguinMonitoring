@@ -121,7 +121,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             FROM penguin_scans ps
             LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
             LEFT JOIN penguins p ON pc.peng_num = p.peng_num
-            WHERE ps.observation_id IN ($ph)");
+            WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $scanStmt->execute(array_values($obsIds));
         foreach ($scanStmt->fetchAll() as $scan) {
             $scansByObs[$scan['observation_id']][] = [
@@ -220,7 +220,7 @@ function handleUpload($pdo, $colonyId, $observer) {
     $fetchScansForObs = function($obsId) use ($pdo, $chipLookup) {
         $s = $pdo->prepare("SELECT ps.pit_id, ps.scan_time_utc, pc.peng_num, p.sex, p.chick_size_code
             FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
-            LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ?");
+            LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $s->execute([$obsId]);
         return $s->fetchAll();
     };
@@ -296,8 +296,9 @@ function handleUpload($pdo, $colonyId, $observer) {
                             $dailyLabel ?: null, $existingId,
                         ]);
                     $observationId = $existingId;
-                    // Remove old scans — will be recreated below
-                    $pdo->prepare("DELETE FROM penguin_scans WHERE observation_id = ?")->execute([$observationId]);
+                    // Soft-delete old scans — will be recreated below
+                    $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)")
+                        ->execute([$observerId, $observationId]);
                 } else {
                     // No existing — create new
                     $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")

@@ -744,7 +744,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
         </div>
         <div className="obs-edit-birds">
-          {localScans.map(s => (
+          {[...localScans].sort(scanSortMFC).map(s => (
             <span key={s.scan_id || s.pit_id} className="scan-removable">
               <PenguinMini scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
               <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
@@ -1505,7 +1505,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   // Load date mappings for season
   useEffect(() => {
     if (season < 2020) return;
-    fetch(`/api/dates.php?season=${season}`)
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season}`)
       .then(r => r.json())
       .then(d => setDateMappings(d))
       .catch(() => setDateMappings([]));
@@ -1765,7 +1765,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                   const parsed = parseDateFlex(rest);
                   return { n: parseInt(first), date: parsed };
                 }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string}[];
-                await fetch(`/api/dates.php?season=${season}`, {
+                await fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                   body: JSON.stringify(mappings)
@@ -2733,15 +2733,44 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   );
 }
 
+function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return <div style={{marginBottom:4}}>
+    <div className="clickable" style={{padding:'6px 10px', background:'#f5f5f5', borderRadius:6, fontWeight:600, fontSize:13, display:'flex', justifyContent:'space-between'}} onClick={() => setExpanded(!expanded)}>
+      <span>{expanded ? '▾' : '▸'} {dateLabel}</span>
+      <span className="muted">{entries.length} changes</span>
+    </div>
+    {expanded && <div style={{maxHeight:300, overflowY:'auto'}}>
+      {entries.map((e: any, i: number) => {
+        const fields = typeof e.changed_fields === 'string' ? (() => { try { return JSON.parse(e.changed_fields); } catch { return null; } })() : e.changed_fields;
+        return (
+          <div key={i} className="obs-card" style={{marginBottom:2, padding:'4px 10px', marginLeft:8}}>
+            <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
+              <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
+              <span>{e.table_name}{e.box_name ? ` · Box ${e.box_name}` : ''} #{e.record_id}</span>
+              <span className="muted">{e.observer_name || ''}</span>
+              {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
+            </div>
+            {e.action === 'UPDATE' && fields && (
+              <div style={{fontSize:11, marginTop:2}}>
+                {Object.entries(fields).map(([k, v]: [string, any]) => (
+                  <span key={k} className="muted" style={{marginRight:8}}>{k}: {v && typeof v === 'object' && 'old' in v ? <><s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</> : String(v ?? '')}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>}
+  </div>;
+}
+
 function AdminPanel({ token, observationDates }: { token: string; observationDates?: string[] }) {
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [showDeletedMonitors, setShowDeletedMonitors] = useState(false);
-  const [monitorSearch, setMonitorSearch] = useState<any>({ loading: false, date: null, results: null });
-  const [reimportResult, setReimportResult] = useState<any>(null);
-  const [reimporting, setReimporting] = useState(false);
-  const [sightingResult, setSightingResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [diskTest, setDiskTest] = useState<any>(null);
   const [diskTesting, setDiskTesting] = useState(false);
@@ -2749,10 +2778,11 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [datePreview, setDatePreview] = useState<any>(null);
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const loadRecentChanges = async () => {
     setChangesLoading(true);
-    const r = await fetch('/api/admin.php?action=recent_changes&limit=50', { headers: { 'Authorization': `Bearer ${token}` } });
+    const r = await fetch('/api/admin.php?action=recent_changes&days=7', { headers: { 'Authorization': `Bearer ${token}` } });
     setRecentChanges(await r.json());
     setChangesLoading(false);
   };
@@ -2794,28 +2824,29 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setSyncing(false);
   };
 
-  const doReimport = async (action: string) => {
-    const isSighting = action.includes('sighting');
-    setReimporting(true);
-    if (isSighting) setSightingResult(null); else setReimportResult(null);
-    try {
-      const r = await fetch(`/api/admin.php?action=${action}`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await r.json();
-      result.dry_run = action.startsWith('trial_');
-      if (isSighting) setSightingResult(result); else setReimportResult(result);
-    } catch (e: any) {
-      const err = { error: e.message };
-      if (isSighting) setSightingResult(err); else setReimportResult(err);
-    }
-    setReimporting(false);
-  };
 
   return (
     <div className="admin-panel">
       <div className="admin-header">
         <h2>Admin</h2>
+      </div>
+
+      <div className="admin-section">
+        <h3>Export</h3>
+        <button className="action-btn" disabled={exporting} onClick={async () => {
+          setExporting(true);
+          try {
+            const r = await fetch(`/api/admin.php?action=export_nestcheck_zip&token=${token}`);
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `nestcheck-export-${new Date().toISOString().slice(0,10)}.zip`;
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch (e: any) { alert('Export failed: ' + e.message); }
+          setExporting(false);
+        }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
       </div>
 
       <div className="admin-section">
@@ -2843,35 +2874,23 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       <div className="admin-section">
-        <h3>Recent Changes</h3>
+        <h3>Last 7 days DB changes</h3>
         <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
           {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
         </button>
-        {recentChanges && (
-          <div style={{marginTop:8, maxHeight:400, overflowY:'auto'}}>
-            {recentChanges.map((e: any, i: number) => {
-              const fields = typeof e.changed_fields === 'string' ? (() => { try { return JSON.parse(e.changed_fields); } catch { return null; } })() : e.changed_fields;
-              return (
-                <div key={i} className="obs-card" style={{marginBottom:4, padding:'6px 10px'}}>
-                  <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
-                    <span className={`badge`} style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : '#2196F3', color:'#fff', fontSize:10}}>{e.action}</span>
-                    <span>{e.table_name}{e.box_name ? ` · Box ${e.box_name}` : ''} #{e.record_id}</span>
-                    <span className="muted">{e.observer_name}</span>
-                    <span className="muted">{formatDate(e.change_timestamp)}</span>
-                    {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
-                  </div>
-                  {e.action === 'UPDATE' && fields && (
-                    <div style={{fontSize:11, marginTop:2}}>
-                      {Object.entries(fields).map(([k, v]: [string, any]) => (
-                        <span key={k} className="muted" style={{marginRight:8}}>{k}: <s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {recentChanges && (() => {
+          const byDate = new Map<string, any[]>();
+          for (const e of recentChanges) {
+            const d = e.nz_date || 'Unknown';
+            if (!byDate.has(d)) byDate.set(d, []);
+            byDate.get(d)!.push(e);
+          }
+          return <div style={{marginTop:8}}>
+            {Array.from(byDate.entries()).map(([date, entries]) => (
+              <ChangeDateGroup key={date} date={date} entries={entries} />
+            ))}
+          </div>;
+        })()}
       </div>
 
       <div className="admin-section">
@@ -2883,13 +2902,13 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           <div className="obs-card" style={{marginTop:8}}>
             <div style={{fontWeight:600, marginBottom:6}}>{formatDate(datePreview.date)}: {datePreview.totals.boxes} observations</div>
             <div className="muted" style={{marginBottom:6}}>
-              🐧 {datePreview.totals.adults} adults · 🥚 {datePreview.totals.eggs} eggs · 🐣 {datePreview.totals.chicks} chicks · 📡 {datePreview.totals.scans} scans
+              {'🐧'.repeat(datePreview.totals.adults)} {'🥚'.repeat(datePreview.totals.eggs)} {'🐣'.repeat(datePreview.totals.chicks)}
               {datePreview.totals.without_breeding > 0 && <span style={{color:'#F44336'}}> · ⚠️ {datePreview.totals.without_breeding} missing breeding status</span>}
             </div>
             <div style={{maxHeight:200, overflowY:'auto', fontSize:12}}>
               {datePreview.observations.map((o: any) => (
                 <div key={o.observation_id} style={{padding:'2px 0', borderBottom:'1px solid #f0f0f0'}}>
-                  Box {o.box_name}: {o.adults}A {o.eggs}E {o.chicks}C {o.scan_count > 0 ? `📡${o.scan_count}` : ''} {o.breeding_status || <span style={{color:'#F44336'}}>no status</span>} <span className="muted">{o.monitor_filename}</span>
+                  Box {o.box_name}: {'🐧'.repeat(o.adults)}{'🥚'.repeat(o.eggs)}{'🐣'.repeat(o.chicks)} {o.breeding_status || <span style={{color:'#F44336'}}>no status</span>} <span className="muted">{o.monitor_filename}</span>
                 </div>
               ))}
             </div>
@@ -2909,61 +2928,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             </div>
           </div>
         )}
-      </div>
-
-      <div className="admin-section">
-        <h3>Delete Monitor by Date</h3>
-        <p className="muted">Search for monitors imported on a specific date, then delete individually.</p>
-        <div style={{display:'flex', gap:6, alignItems:'center'}}>
-          <input type="date" id="monitor-date-search" style={{padding:'4px 8px', borderRadius:4, border:'1px solid #ccc'}} />
-          <button className="edit-btn" onClick={async () => {
-            const dateInput = (document.getElementById('monitor-date-search') as HTMLInputElement)?.value;
-            if (!dateInput) { alert('Pick a date'); return; }
-            setMonitorSearch({ loading: true, date: dateInput, results: null });
-            try {
-              const r = await fetch(`/api/admin.php?action=list_monitors&date=${dateInput}`, { headers: { 'Authorization': `Bearer ${token}` } });
-              const d = await r.json();
-              setMonitorSearch({ loading: false, date: dateInput, results: d });
-            } catch (e: any) { setMonitorSearch({ loading: false, date: dateInput, results: { error: e.message } }); }
-          }}>Search</button>
-        </div>
-        {monitorSearch.loading && <p className="muted">Searching...</p>}
-        {monitorSearch.results && !monitorSearch.results.error && Array.isArray(monitorSearch.results) && (
-          <div style={{marginTop:8}}>
-            {monitorSearch.results.length === 0 ? <p className="muted">No monitors found on {monitorSearch.date}</p> : (
-              monitorSearch.results.map((m: any) => (
-                <div key={m.monitor_filename} className="obs-card" style={{marginBottom:4}}>
-                  <div className="obs-top" style={{flexWrap:'wrap', gap:4}}>
-                    <b>{m.monitor_filename}</b>
-                    <span className="muted" style={{fontSize:11}}>{m.obs_count} obs, {m.scan_count || 0} scans</span>
-                    <button className="edit-btn" style={{padding:'1px 8px', fontSize:11, background:'#F44336', color:'#fff'}} onClick={async () => {
-                      const pr = await fetch('/api/admin.php?action=preview_monitor', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ monitor: m.monitor_filename })
-                      });
-                      const preview = await pr.json();
-                      if (preview.error) { alert(preview.error); return; }
-                      let msg = `Delete all data from "${m.monitor_filename}"?\n\n${preview.observations} observations, ${preview.scans} scans\nDates: ${preview.dates?.join(', ')}\nBoxes: ${preview.boxes?.join(', ')}`;
-                      if (preview.multi_day) msg += `\n\n⚠️ WARNING: This spans MULTIPLE DAYS!`;
-                      msg += '\n\nThis action is logged and audited.';
-                      if (!confirm(msg)) return;
-                      if (preview.multi_day && !confirm('This will delete data from multiple days. Confirm again to proceed.')) return;
-                      const dr = await fetch('/api/admin.php?action=delete_monitor', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ monitor: m.monitor_filename })
-                      });
-                      const d = await dr.json();
-                      if (d.success) {
-                        setMonitorSearch((prev: any) => ({...prev, results: prev.results.filter((r: any) => r.monitor_filename !== m.monitor_filename)}));
-                      } else { alert(d.error || 'Delete failed'); }
-                    }}>Delete</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-        {monitorSearch.results?.error && <div style={{color:'#F44336', marginTop:8}}>{monitorSearch.results.error}</div>}
       </div>
 
       <div className="admin-section">
@@ -3012,7 +2976,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                     <div className="obs-nums" style={{fontSize:11}}>
                       <span>{m.date ? formatDate(m.date) : ''}</span>
                       <span>{m.boxes} boxes ({m.new || 0} new, {m.exists || 0} exist)</span>
-                      {m.scans > 0 && <span>📡{m.scans}</span>}
+                      {m.scans > 0 && <span>{m.scans} scanned</span>}
                       {m.adults > 0 && <span>🐧{m.adults}</span>}
                       {m.eggs > 0 && <span>🥚{m.eggs}</span>}
                       {m.chicks > 0 && <span>🐣{m.chicks}</span>}
@@ -3022,73 +2986,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                     )}
                   </div>
                 ))}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="admin-section">
-        <h3>Import Sightings (Google Sheets)</h3>
-        <p className="muted">Historical observations from the spreadsheet (2021-2024)</p>
-        <button className="edit-btn" onClick={() => doReimport('trial_import_sightings')} disabled={reimporting}>
-          {reimporting ? 'Working...' : 'Trial'}
-        </button>
-        <button className="edit-btn done-btn" onClick={() => doReimport('import_sightings')} disabled={reimporting} style={{marginLeft:6}}>
-          {reimporting ? 'Working...' : 'Import'}
-        </button>
-        {sightingResult && (
-          <div className="obs-card" style={{marginTop:8, borderLeftColor: sightingResult.dry_run ? '#FF9800' : '#4CAF50'}}>
-            {sightingResult.error ? <div style={{color:'#F44336'}}>{sightingResult.error}</div> : <>
-              {sightingResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
-              <div>CSV: {sightingResult.csv_rows} rows, {sightingResult.groups} groups</div>
-              <div><b>New:</b> {sightingResult.stats?.observations || 0} observations, {sightingResult.stats?.scans || 0} scans, {sightingResult.stats?.biometrics || 0} biometrics{sightingResult.stats?.updated > 0 ? `, ${sightingResult.stats.updated} updated` : ''}</div>
-              <div className="muted">{sightingResult.stats?.duplicates || 0} unchanged, {sightingResult.stats?.empty_skipped || 0} empty</div>
-              {sightingResult.stats?.unknown_count > 0 && <div className="muted">{Object.keys(sightingResult.stats?.unknown_pits || {}).length} unknown PITs ({sightingResult.stats.unknown_count} occurrences)</div>}
-              {Object.keys(sightingResult.stats?.unknown_pits || {}).length > 0 && <>
-                <div style={{marginTop:4, fontWeight:600}}>Unknown PITs ({Object.keys(sightingResult.stats.unknown_pits).length}):</div>
-                {Object.entries(sightingResult.stats.unknown_pits).sort((a: any, b: any) => b[1].count - a[1].count).map(([pit8, info]: [string, any]) => (
-                  <div key={pit8} className="muted small">{pit8}: {info.count}x (first: {info.first_date} box {info.first_box}){info.close ? ` → ${info.close}` : ''}</div>
-                ))}
-              </>}
-              {sightingResult.stats?.warnings?.length > 0 && <>
-                <div style={{marginTop:4, fontWeight:600}}>Warnings ({sightingResult.stats.warnings.length}):</div>
-                {sightingResult.stats.warnings.map((w: string, i: number) => <div key={i} className="muted small">{w}</div>)}
-              </>}
-            </>}
-          </div>
-        )}
-      </div>
-
-      <div className="admin-section">
-        <h3>Reimport Penguins</h3>
-        <p className="muted">Penguin reference data from Google Sheets (1004 birds)</p>
-        <button className="edit-btn" onClick={() => doReimport('trial_reimport_penguins')} disabled={reimporting}>
-          {reimporting ? 'Working...' : 'Trial'}
-        </button>
-        <button className="edit-btn done-btn" onClick={() => doReimport('import_penguins')} disabled={reimporting} style={{marginLeft:6}}>
-          {reimporting ? 'Working...' : 'Import'}
-        </button>
-        {reimportResult && (
-          <div className="obs-card" style={{marginTop:8, borderLeftColor: reimportResult.dry_run ? '#FF9800' : '#4CAF50'}}>
-            {reimportResult.error ? (
-              <div style={{color:'#F44336'}}>{reimportResult.error}</div>
-            ) : (
-              <>
-                {reimportResult.dry_run && <div style={{color:'#FF9800', fontWeight:600, marginBottom:4}}>TRIAL RUN - no data changed</div>}
-                <div>CSV rows: {reimportResult.csv_rows}</div>
-                <div>Current DB: {reimportResult.previous?.penguins} penguins, {reimportResult.previous?.chips} chips</div>
-                <div>Would create: {reimportResult.result?.penguins} penguins, {reimportResult.result?.chips} chips ({reimportResult.result?.rechips} rechips), {reimportResult.result?.skipped} skipped</div>
-                {reimportResult.chip_date_issues?.length > 0 && <>
-                  <div style={{marginTop:6, fontWeight:600}}>Chip date issues ({reimportResult.chip_date_issues.length}):</div>
-                  {reimportResult.chip_date_issues.map((issue: any, i: number) => (
-                    <div key={i} className="muted small" style={{color: issue.type === 'date_mismatch' ? '#F44336' : '#FF9800'}}>
-                      {issue.type === 'date_mismatch' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: DB=${issue.db_date} Sheet=${issue.sheet_date}`}
-                      {issue.type === 'in_db_not_sheet' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: in DB (${issue.db_date}) but NOT in sheet`}
-                      {issue.type === 'in_sheet_not_db' && `peng#${issue.peng_num} ${issue.pit_id.slice(-8)}: in sheet (${issue.sheet_date}) but NOT in DB`}
-                    </div>
-                  ))}
-                </>}
               </>
             )}
           </div>

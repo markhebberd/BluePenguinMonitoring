@@ -34,7 +34,7 @@ if (!empty($obsIds)) {
         FROM penguin_scans ps
         JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
         JOIN penguins p ON pc.peng_num = p.peng_num
-        WHERE ps.observation_id IN ($ph)
+        WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
         GROUP BY ps.observation_id, pc.peng_num");
     $stmt->execute(array_values($obsIds));
     foreach ($stmt->fetchAll() as $row) {

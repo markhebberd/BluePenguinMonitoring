@@ -134,7 +134,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
         JOIN penguins p ON pc.peng_num = p.peng_num
         JOIN observations o ON ps.observation_id = o.observation_id
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        WHERE $whereStr
+        WHERE $whereStr AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
         ORDER BY o.observation_time_utc DESC");
     $stmt->execute($params);
     $scans = $stmt->fetchAll();
@@ -149,7 +149,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
             FROM penguin_scans ps USE INDEX (idx_observation)
             JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
             JOIN penguins p ON pc.peng_num = p.peng_num
-            WHERE ps.observation_id IN ($ph)" . ($pengNum ? " AND pc.peng_num != ?" : ""));
+            WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)" . ($pengNum ? " AND pc.peng_num != ?" : ""));
         $params = $obsIds;
         if ($pengNum) $params[] = $pengNum;
         $coStmt->execute(array_values($params));

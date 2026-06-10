@@ -81,7 +81,7 @@ function chickSex($pdo) {
             pc.chip_date, pc.chip_box,
             (SELECT COUNT(*) FROM penguin_scans ps2
              JOIN penguin_chips pc2 ON ps2.pit_id = pc2.pit_id
-             WHERE pc2.peng_num = p.peng_num) as total_scans
+             WHERE pc2.peng_num = p.peng_num AND (ps2.is_deleted = FALSE OR ps2.is_deleted IS NULL)) as total_scans
         FROM penguins p
         JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1
         WHERE p.chipped_as_adult = 0
@@ -115,7 +115,7 @@ function chickReturn($pdo) {
              FROM penguin_scans ps2
              JOIN penguin_chips pc2 ON ps2.pit_id = pc2.pit_id
              JOIN observations o ON ps2.observation_id = o.observation_id
-             WHERE pc2.peng_num = p.peng_num AND o.is_deleted = FALSE
+             WHERE pc2.peng_num = p.peng_num AND o.is_deleted = FALSE AND (ps2.is_deleted = FALSE OR ps2.is_deleted IS NULL)
              AND (CASE WHEN MONTH(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) >= 4
                        THEN YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
                        ELSE YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) - 1 END)
@@ -211,7 +211,7 @@ function distinctAdults($pdo, $colonyId) {
         JOIN observation_locations ol ON o.location_id = ol.location_id
         JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
         JOIN penguins p ON pc.peng_num = p.peng_num
-        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
           AND (p.chipped_as_adult = 1
                OR (pc.chip_date IS NOT NULL AND DATEDIFF(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'), pc.chip_date) > 90))
         GROUP BY season_year, ps.pit_id

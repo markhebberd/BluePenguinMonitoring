@@ -161,19 +161,19 @@ namespace PenguinMonitor.UI.Factories
             }
             public override View GetView(int position, View convertView, ViewGroup parent)
             {
-                // Show the actual values in the main spinner view
-                return base.GetView(position, convertView, parent);
+                var view = base.GetView(position, convertView, parent);
+                if (view is TextView tv) tv.Gravity = GravityFlags.Center;
+                return view;
             }
             public override View GetDropDownView(int position, View convertView, ViewGroup parent)
             {
-                // Get the base dropdown view
                 var view = base.GetDropDownView(position, convertView, parent);
-                
-                // Customize the display text for the first option (empty string)
-                if (view is TextView tv && position == 0 && _values[0] == "")
+                if (view is TextView tv)
                 {
-                    tv.Text = "Gate-open or no-data";
-                }                
+                    tv.Gravity = GravityFlags.Center;
+                    if (position == 0 && _values[0] == "")
+                        tv.Text = "Gate-open or no-data";
+                }
                 return view;
             }
         }

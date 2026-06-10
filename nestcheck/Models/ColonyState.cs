@@ -45,6 +45,32 @@ namespace PenguinMonitor.Models
         /// Get or create today's observation for a box.
         /// If one exists in TodayBoxes, return it. Otherwise check pending for today.
         /// </summary>
+        /// <summary>
+        /// Move yesterday's TodayBoxes into PreviousBoxes. Call on app resume or before display.
+        /// </summary>
+        public void RolloverDay()
+        {
+            var nzToday = MainActivity.NzToday;
+            var nzTodayStr = nzToday.ToString("yyyy-MM-dd");
+
+            var staleKeys = TodayBoxes
+                .Where(kvp => MainActivity.ToNzTime(kvp.Value.WhenDataCollectedUtc).Date < nzToday)
+                .Select(kvp => kvp.Key)
+                .ToList();
+            foreach (var key in staleKeys)
+            {
+                PreviousBoxes[key] = TodayBoxes[key];
+                TodayBoxes.Remove(key);
+            }
+
+            // Clear daily label if it was set on a previous day
+            if (!string.IsNullOrEmpty(DailyLabelDate) && DailyLabelDate != nzTodayStr)
+            {
+                DailyLabel = "";
+                DailyLabelDate = "";
+            }
+        }
+
         public BoxObservation? GetTodayForBox(string boxName)
         {
             if (TodayBoxes.TryGetValue(boxName, out var today))

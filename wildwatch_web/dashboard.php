@@ -57,7 +57,7 @@ function handleBox($pdo, $colonyId, $boxName) {
     $scansByObs = [];
     if (!empty($obsIds)) {
         $ph = implode(',', array_fill(0, count($obsIds), '?'));
-        $s = $pdo->prepare("SELECT ps.observation_id, ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id IN ($ph)");
+        $s = $pdo->prepare("SELECT ps.observation_id, ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $s->execute(array_values($obsIds));
         foreach ($s->fetchAll() as $scan) {
             $scansByObs[$scan['observation_id']][] = $scan;
@@ -129,7 +129,7 @@ function handleOverview($pdo, $colonyId) {
     $stmt = $pdo->prepare("SELECT COUNT(*) as c FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND o.is_deleted = FALSE AND o.observation_time_utc >= ?");
     $stmt->execute([$colonyId, $seasonStart]); $seasonObs = (int)$stmt->fetch()['c'];
 
-    $stmt = $pdo->prepare("SELECT COUNT(DISTINCT pc.peng_num) as c FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id JOIN observations o ON ps.observation_id = o.observation_id JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND o.is_deleted = FALSE AND o.observation_time_utc >= ?");
+    $stmt = $pdo->prepare("SELECT COUNT(DISTINCT pc.peng_num) as c FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id JOIN observations o ON ps.observation_id = o.observation_id JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL) AND o.observation_time_utc >= ?");
     $stmt->execute([$colonyId, $seasonStart]); $seasonPenguins = (int)$stmt->fetch()['c'];
 
     // Latest data per box

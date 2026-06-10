@@ -13,8 +13,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Deterministic>false</Deterministic>
 	  
-    <ApplicationId>nz.co.wildwatch.nestcheck</ApplicationId>
-    <ApplicationTitle>NestCheck</ApplicationTitle>
+    <ApplicationId>nz.co.wildwatch.nestcheck38</ApplicationId>
+    <ApplicationTitle>NestCheck38</ApplicationTitle>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>37.36</ApplicationDisplayVersion>
 
