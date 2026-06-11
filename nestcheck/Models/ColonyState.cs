@@ -28,7 +28,7 @@ namespace PenguinMonitor.Models
         /// </summary>
         public Dictionary<string, BoxObservation> TodayBoxes { get; set; } = new();
 
-        public int DirtyCount => PendingObservations.Count(o => o.IsDirty);
+        public int PendingUploadCount => PendingObservations.Count(o => o.IsPendingUpload);
 
         /// <summary>
         /// Get all pending observations for a specific box, newest first.

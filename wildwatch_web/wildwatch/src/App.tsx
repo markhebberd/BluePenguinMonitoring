@@ -1,6 +1,7 @@
 import React, { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchDay, fetchReport } from './api/boxtags';
 import { syncDatabase, queryBoxDetail, queryBirdDetail, queryAllPenguins, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, getObservationDates, triggerSync, startPolling, stopPolling } from './api/localdb';
+import { useDbVersion, useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -650,7 +651,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     }
   }, [highlight]);
   const obsId = obs.observation_id;
-  const [localObs, setLocalObs] = useState(obs);
+  const localObs = obs;
   const saveObs = (field: string) => async (val: any) => {
     if (!obsId) return;
     const oldVal = localObs[field as keyof typeof localObs] ?? '';
@@ -659,13 +660,13 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     const reason = prompt(`${desc}\n\nReason for change (optional):`);
     if (reason === null) return { changed: 0 }; // cancelled
     const result = await updateRecord(token || '', 'observations', obsId, {[field]: val}, reason || undefined);
-    if (result?.changed) { setLocalObs((o: any) => ({...o, [field]: val})); onDataChange?.(); }
+    if (result?.changed) { onDataChange?.(); }
     return result;
   };
   const [editing, setEditing] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
   const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
-  useEffect(() => { setLocalScans(obs.scans); setLocalObs(obs); }, [obs.observation_id]);
+  useEffect(() => { setLocalScans(obs.scans); }, [obs.observation_id]);
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
@@ -676,30 +677,23 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
 
   const addScan = async (p: any) => {
     if (!obsId || !token) return;
+    if (localScans.some(s => s.pit_id === p.pit_id)) return;
     const result = await createRecord(token, 'penguin_scans', {
       observation_id: obsId, pit_id: p.pit_id, scan_time_utc: obs.observation_time_utc
     });
     if (result?.id) {
       const newScan: Scan = { scan_id: result.id, peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
       setLocalScans([...localScans, newScan]);
-      obs.scans.push(newScan);
-      const isChick = isChickAtDate(p, obs.observation_time_utc);
-      if (isChick) await trackEdit('chicks')(obs.chicks + 1);
-      else await trackEdit('adults')(obs.adults + 1);
     }
     setBirdSearch('');
+    onDataChange?.();
   };
 
   const removeScan = async (scan: Scan) => {
     if (!scan.scan_id || !token) return;
     await deleteRecord(token, 'penguin_scans', scan.scan_id);
-    const updated = localScans.filter(s => s.scan_id !== scan.scan_id);
-    setLocalScans(updated);
-    obs.scans.splice(obs.scans.indexOf(scan), 1);
-    const bird = allPenguins?.find((p: any) => p.pit_id === scan.pit_id);
-    const isChick = isChickAtDate(bird || scan, obs.observation_time_utc);
-    if (isChick) await trackEdit('chicks')(Math.max(0, obs.chicks - 1));
-    else await trackEdit('adults')(Math.max(0, obs.adults - 1));
+    setLocalScans(localScans.filter(s => s.scan_id !== scan.scan_id));
+    onDataChange?.();
   };
 
   return (
@@ -2451,26 +2445,15 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
 }
 
 function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const data = useDayData(date);
+  const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
-  const [sideBirdData, setSideBirdData] = useState<any>(null);
+  const sideBirdData = useBirdDetail(sideBird);
   const [expandedBox, setExpandedBox] = useState<string|null>(null);
-
-  useEffect(() => {
-    setData(queryDay(date));
-    setLoading(false);
-    setSideBird(null);
-  }, [date]);
 
   useEffect(() => {
     if (externalBird) setSideBird(externalBird);
   }, [externalBird]);
-
-  useEffect(() => {
-    if (!sideBird) { setSideBirdData(null); return; }
-    queryBirdDetail(sideBird).then(d => setSideBirdData(d));
-  }, [sideBird]);
 
   const handleBirdClick = (num: string) => setSideBird(num);
   const [showCarryForward, setShowCarryForward] = useState(false);
@@ -2557,33 +2540,36 @@ function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick, externalBir
                   </div>
                 );
               }
-              // Normal row (today's data)
+              // Normal row(s) — show each observation separately
               const { obs, chips } = byBox[box];
-              const totalAdults = obs.reduce((s: number, o: any) => s + (o.adults || 0), 0);
-              const totalEggs = obs.reduce((s: number, o: any) => s + (o.eggs || 0), 0);
-              const totalChicks2 = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
-              const status = obs.find((o: any) => o.breeding_status)?.breeding_status || '';
-              const gate = obs.find((o: any) => o.gate_status)?.gate_status || '';
-              const allScans = obs.flatMap((o: any) => o.scans || []);
-              const uniqueScans = allScans.filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
-                .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
-              const ds = displayStatus(status, totalEggs, totalChicks2);
               return (
               <div key={box}>
-                <div className="day-row" onClick={() => setExpandedBox(expandedBox === box ? null : box)} style={{cursor:'pointer'}}>
-                  <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>
-                  {totalAdults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(totalAdults, 4))}</span>}
-                  {totalEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(totalEggs, 4))}</span>}
-                  {totalChicks2 > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(totalChicks2, 4))}</span>}
-                  {ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{ds}</span>}
-                  {uniqueScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />)}
-                  {chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
-                  {gate && <span className="muted">{gate}</span>}
-                  {obs.filter((o: any) => o.notes).map((o: any, i: number) => <span key={i} className="day-note">{o.notes}</span>)}
-                </div>
-                {expandedBox === box && obs.map((o: any, i: number) => (
-                  <ObsCard key={o.observation_id || i} obs={o} onBirdClick={handleBirdClick} onDayClick={onDayClick} token={token} canEdit={canEdit} allPenguins={allPenguins} hideDate />
-                ))}
+                {obs.map((o: any, oi: number) => {
+                  const oScans = (o.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
+                    .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+                  const oDs = displayStatus(o.breeding_status || '', o.eggs || 0, o.chicks || 0);
+                  const isDup = obs.length > 1;
+                  return (
+                  <div key={o.observation_id || oi}>
+                    <div className="day-row" onClick={() => setExpandedBox(expandedBox === `${box}-${oi}` ? null : `${box}-${oi}`)} style={{cursor:'pointer', borderLeft: isDup ? '3px solid #F44336' : undefined}}>
+                      {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>}
+                      {oi > 0 && <span className="day-box-link" style={{opacity:0.4}}>Box {box}</span>}
+                      {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
+                      {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
+                      {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
+                      {oDs && oDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(oDs)?'bordered':''}`} style={{background:STATUS_COLORS[oDs]||'#ccc',color:DARK_TEXT_STATUSES.has(oDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{oDs}</span>}
+                      {oScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />)}
+                      {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
+                      {o.gate_status && <span className="muted">{o.gate_status}</span>}
+                      {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
+                      {o.notes && <span className="day-note">{o.notes}</span>}
+                    </div>
+                    {expandedBox === `${box}-${oi}` && (
+                      <ObsCard obs={o} onBirdClick={handleBirdClick} onDayClick={onDayClick} token={token} canEdit={canEdit} allPenguins={allPenguins} hideDate />
+                    )}
+                  </div>
+                  );
+                })}
               </div>
               );
             });
@@ -2992,6 +2978,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
+      <DuplicateObservations token={token} />
+      <DuplicateScans token={token} />
+
       <div className="admin-section">
         <h3>Disk Write Test</h3>
         {serverDisk && <p className="muted">Account: {serverDisk.files_mb} MB files + {serverDisk.db_mb} MB DB = {serverDisk.used_mb} MB / {serverDisk.quota_mb} MB ({serverDisk.pct}%) · {serverDisk.observations} observations · {serverDisk.penguins} penguins</p>}
@@ -3051,23 +3040,124 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   );
 }
 
+function DuplicateObservations({ token }: { token: string }) {
+  const [duplicates, setDuplicates] = useState<any[]|null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const check = async () => {
+    setLoading(true); setResult(null);
+    const r = await fetch('/api/admin.php?action=duplicate_observations', { headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    setDuplicates(Array.isArray(d) ? d : []);
+    setLoading(false);
+  };
+
+  const cleanup = async () => {
+    if (!confirm(`Soft-delete duplicate observations from ${duplicates?.length} box/day groups? Keeps the most recent.`)) return;
+    setLoading(true);
+    const r = await fetch('/api/admin.php?action=cleanup_duplicate_observations', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    setResult(d);
+    setDuplicates(null);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
+      <h3 style={{margin:'0 0 8px'}}>Duplicate Observations</h3>
+      <p className="muted" style={{margin:'0 0 8px'}}>Multiple non-deleted observations for the same box on the same day</p>
+      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check'}</button>
+      {duplicates && duplicates.length === 0 && <span style={{color:'#4CAF50'}}>No duplicates found</span>}
+      {duplicates && duplicates.length > 0 && (<>
+        <p style={{color:'#F44336', fontWeight:600}}>{duplicates.length} box/day groups with multiple observations:</p>
+        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Count</th><th>By</th></tr></thead>
+          <tbody>{duplicates.map((d: any, i: number) => (
+            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
+              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
+              <td style={{color:'#F44336'}}>{d.cnt}x</td>
+              <td className="muted">{d.observers}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+        <button onClick={cleanup} disabled={loading} style={{marginTop:8, background:'#F44336', color:'#fff', border:'none', padding:'6px 16px', borderRadius:4, cursor:'pointer'}}>
+          Keep most recent, soft-delete rest
+        </button>
+      </>)}
+      {result && <p style={{color:'#4CAF50', marginTop:8}}>Soft-deleted {result.observations_deleted} duplicate observations from {result.duplicate_groups} groups</p>}
+    </div>
+  );
+}
+
+function DuplicateScans({ token }: { token: string }) {
+  const [duplicates, setDuplicates] = useState<any[]|null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const check = async () => {
+    setLoading(true); setResult(null);
+    const r = await fetch('/api/admin.php?action=duplicate_scans', { headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    setDuplicates(Array.isArray(d) ? d : []);
+    setLoading(false);
+  };
+
+  const cleanup = async () => {
+    if (!confirm(`Remove ${duplicates?.length} duplicate scan groups?`)) return;
+    setLoading(true);
+    const r = await fetch('/api/admin.php?action=cleanup_duplicate_scans', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    setResult(d);
+    setDuplicates(null);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
+      <h3 style={{margin:'0 0 8px'}}>Duplicate Scans</h3>
+      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check for duplicates'}</button>
+      {duplicates && duplicates.length === 0 && <span style={{color:'#4CAF50'}}>No duplicates found</span>}
+      {duplicates && duplicates.length > 0 && (<>
+        <p style={{color:'#F44336', fontWeight:600}}>{duplicates.length} duplicate groups found:</p>
+        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Penguin</th><th>Count</th><th>Type</th></tr></thead>
+          <tbody>{duplicates.map((d: any, i: number) => (
+            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
+              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
+              <td>#{d.peng_num}</td>
+              <td style={{color:'#F44336'}}>{d.cnt}x</td>
+              <td className="muted">{d.dup_type === 'peng_num' ? 'multi-chip' : 'exact'}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+        <button onClick={cleanup} disabled={loading} style={{marginTop:8, background:'#F44336', color:'#fff', border:'none', padding:'6px 16px', borderRadius:4, cursor:'pointer'}}>
+          Remove duplicates (keep earliest)
+        </button>
+      </>)}
+      {result && <p style={{color:'#4CAF50', marginTop:8}}>Cleaned up {result.scans_deleted} duplicate scans from {result.duplicate_groups} groups</p>}
+    </div>
+  );
+}
+
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const initial = parseUrl();
   const [boxTags, setBoxTags] = useState<Record<string, BoxTag>>({});
   const [stats, setStats] = useState<any>(null);
   const [selectedBox, setSelectedBox] = useState<string|null>(initial.box || null);
-  const [boxDetail, setBoxDetail] = useState<BoxDetailData|null>(null);
+  // boxDetail from useBoxDetail hook
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedObs, setDeletedObs] = useState<any[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  // false/false no longer needed — hooks return data synchronously
   const [loading, setLoading] = useState(true);
   const [selectedBird, setSelectedBird] = useState<string|null>(initial.bird || null);
-  const [birdData, setBirdData] = useState<any>(null);
-  const [birdLoading, setBirdLoading] = useState(false);
+  // birdData from useBirdDetail hook
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
-  const [allPenguins, setAllPenguins] = useState<any[]>([]);
+  const allPenguins = useAllPenguins();
   const allPenguinNums = useMemo(() => allPenguins.map(p => p.peng_num).filter(Boolean).sort((a: string, b: string) => {
     const na = parseInt(a), nb = parseInt(b);
     return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
@@ -3082,7 +3172,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [selectedDay, setSelectedDay] = useState<string|null>(initial.day || null);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
-  const [dbVersion, setDbVersion] = useState(0); // bumped on sync to trigger re-queries
+  // Data hooks — reactive, re-render automatically when localdb syncs
   const [loadProgress, setLoadProgress] = useState('');
   const [loadPct, setLoadPct] = useState<number|null>(null);
 
@@ -3120,8 +3210,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, []);
 
   // Date stats are precomputed in localdb on sync — just read the cache
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const dateStatsCache = useMemo(() => getDateStats(), [dbVersion, loading]);
+  const dateStatsCache = useDateStats();
 
   const dateTip = useDateTooltip();
   const dateTipCtx = useMemo(() => ({ ...dateTip, statsCache: dateStatsCache }), [dateTip, dateStatsCache]);
@@ -3140,7 +3229,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       await syncDatabase((msg, pct) => { if (!cancelled) { setLoadProgress(msg); setLoadPct(pct ?? null); } });
 
       if (cancelled) return;
-      setAllPenguins(queryAllPenguins());
 
       // Phase 2: Load overview/tags/stats from API (fast, small payloads)
       const [tags, ov, ss] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchServerStats()]);
@@ -3150,79 +3238,46 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
       // Start polling for changes
       startPolling(() => {
-        setAllPenguins(queryAllPenguins());
-        setDbVersion(v => v + 1);
+        fetchOverview().then(ov => setStats(ov));
       });
     })().catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; stopPolling(); };
   }, []);
 
-  useEffect(() => {
-    if (!selectedBox) { setBoxDetail(null); setHighlightObs(null); refreshStats(); return; }
-    if (loading) return; // wait for snapshot to load
-    setDetailLoading(true);
-    queryBoxDetail(selectedBox).then((d: any) => {
-      setBoxDetail(d);
-      setDetailLoading(false);
-      if (window.innerWidth < 900) { setSelectedBird(null); return; }
+  const boxDetail = useBoxDetail(loading ? null : selectedBox);
 
-      // Auto-open first bird from breeding pair, or first bird in box
-      const observations = d.observations || [];
-      // Find breeding pair: M+F seen together during eggs/chicks
-      const pairCounts = new Map<string, number>();
-      for (const obs of observations) {
-        if (obs.eggs > 0 || obs.chicks > 0) {
-          const males = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'M');
-          const females = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'F');
-          for (const m of males) {
-            for (const f of females) {
-              const key = `${m.peng_num}|${f.peng_num}`;
-              pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
-            }
-          }
-        }
-      }
-      let bestPair = '';
-      let bestCount = 0;
-      for (const [key, count] of pairCounts) {
-        if (count > bestCount) { bestCount = count; bestPair = key; }
-      }
-      if (bestPair) {
-        setSelectedBird(bestPair.split('|')[0]);
-      } else {
-        // No breeding pair — pick first scanned bird
-        for (const obs of observations) {
-          if (obs.scans.length > 0) {
-            setSelectedBird(obs.scans[0].peng_num || null);
-            return;
-          }
-        }
-        // No scans at all — try all_penguins
-        if (d.all_penguins?.length > 0) {
-          setSelectedBird(d.all_penguins[0].peng_num);
-        } else {
-          setSelectedBird(null);
-        }
-      }
-    });
-  }, [selectedBox, dbVersion, loading]);
-
+  // Auto-select bird when box changes
   useEffect(() => {
-    if (!selectedBird) { setBirdData(null); return; }
-    if (loading) return;
-    setBirdLoading(true);
-    queryBirdDetail(selectedBird).then(d => {
-      setBirdData(d);
-      setBirdLoading(false);
-    });
-  }, [selectedBird, dbVersion, loading]);
+    if (!selectedBox || !boxDetail) { setHighlightObs(null); return; }
+    if (window.innerWidth < 900) { setSelectedBird(null); return; }
+    const observations = boxDetail.observations || [];
+    const pairCounts = new Map<string, number>();
+    for (const obs of observations) {
+      if (obs.eggs > 0 || obs.chicks > 0) {
+        const males = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'M');
+        const females = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'F');
+        for (const m of males) for (const f of females) {
+          const key = `${m.peng_num}|${f.peng_num}`;
+          pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+        }
+      }
+    }
+    let bestPair = '', bestCount = 0;
+    for (const [key, count] of pairCounts) if (count > bestCount) { bestCount = count; bestPair = key; }
+    if (bestPair) { setSelectedBird(bestPair.split('|')[0]); }
+    else {
+      for (const obs of observations) if (obs.scans.length > 0) { setSelectedBird(obs.scans[0].peng_num || null); return; }
+      setSelectedBird(boxDetail.all_penguins?.[0]?.peng_num || null);
+    }
+  }, [selectedBox]);
+
+  const birdData = useBirdDetail(loading ? null : selectedBird);
 
   const openBird = (pengNum: string) => {
     if (window.innerWidth < 900 && selectedBox) {
       setPreviousBox(selectedBox);
       setSelectedBox(null);
     }
-    setBirdData(null);
     setSelectedBird(pengNum);
   };
 
@@ -3420,7 +3475,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
               onDayClick={goToDay} penguinList={allPenguinNums} onNavigateToBird={openBird} />
-          ) : birdLoading ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
+          ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
           : <p className="muted">Bird not found</p>}
         </div>
       </div>
@@ -3465,7 +3520,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               <h2>Box {selectedBox}</h2>
               <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
             </div>
-            {detailLoading ? <p className="muted">Loading...</p> : boxDetail ? (
+            {false ? <p className="muted">Loading...</p> : boxDetail ? (
               <>
                 {boxDetail.location && (
                   <div className="persistent-notes">
@@ -3478,7 +3533,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
 
           {/* Split: observations+birds left, penguin detail right */}
-          {!detailLoading && boxDetail && (
+          {!false && boxDetail && (
           <div className="detail-split">
             <div className="detail-obs">
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
@@ -3565,7 +3620,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   onDayClick={goToDay}
                   onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }}
                   penguinList={allPenguinNums} />
-              ) : birdLoading ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird...</p>; })()
+              ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird...</p>; })()
               : <p className="muted">Select a bird</p>}
             </div>
           </div>

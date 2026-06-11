@@ -228,6 +228,17 @@ function handleCreate($pdo, $table, $pk, $observer) {
     $cols = array_keys($input);
     $pdo->beginTransaction();
     try {
+        // Prevent duplicate penguin scans for same observation
+        if ($table === 'penguin_scans' && isset($input['observation_id']) && isset($input['pit_id'])) {
+            $dup = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+            $dup->execute([$input['observation_id'], $input['pit_id']]);
+            if ($dup->fetch()) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'error' => 'Penguin already scanned for this observation']);
+                return;
+            }
+        }
+
         $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
         $pdo->prepare($sql)->execute(array_values($input));
         $newId = $pdo->lastInsertId();

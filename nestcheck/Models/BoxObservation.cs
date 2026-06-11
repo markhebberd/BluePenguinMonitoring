@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace PenguinMonitor.Models
 {
@@ -23,10 +24,15 @@ namespace PenguinMonitor.Models
         public string? ObserverName { get; set; }
 
         /// <summary>True if this observation has been modified locally and not yet uploaded.</summary>
-        public bool IsDirty { get; set; }
+        [JsonProperty("IsDirty")]
+        public bool IsPendingUpload { get; set; }
 
         /// <summary>UTC timestamp of when this observation was first modified locally.</summary>
-        public DateTime? DirtyTimestampUtc { get; set; }
+        [JsonProperty("DirtyTimestampUtc")]
+        public DateTime? PendingUploadSinceUtc { get; set; }
+
+        /// <summary>Server observation_id this edit was confirmed against (for optimistic concurrency).</summary>
+        public int? ConfirmedAgainstObsId { get; set; }
 
         public BoxObservation()
         {
@@ -55,7 +61,7 @@ namespace PenguinMonitor.Models
                 Notes = notes ?? "",
                 MonitorFilename = monitorFilename,
                 ObserverName = observerName,
-                IsDirty = false,
+                IsPendingUpload = false,
             };
         }
     }

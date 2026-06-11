@@ -57,8 +57,9 @@ namespace PenguinMonitor
         private Location? _currentLocation;
         private float _gpsAccuracy = -1;
 
-        // Status refresh timer (updates "sync:Xm ago" display)
-        private System.Timers.Timer? _statusRefreshTimer;
+        // Status refresh (updates "sync:Xs ago" display)
+        private Handler? _statusRefreshHandler;
+        private Java.Lang.Runnable? _statusRefreshRunnable;
         private DateTime _lastSyncCheckUtc = DateTime.MinValue;
 
         // UI Components
@@ -86,7 +87,7 @@ namespace PenguinMonitor
         // Single box data 
         private bool _isBoxLocked;
         private bool _dataChangedSinceUnlock;
-        // Track server observation IDs that user already confirmed locally (to avoid duplicate conflict dialogs)
+        // Track server observation IDs that user already confirmed locally (fallback for non-optimistic paths)
         private Dictionary<string, int> _confirmedAgainstServerObsId = new();
         private bool _highOffspringCountConfirmed;
         private LinearLayout? _singleBoxDataOuterLayout;
@@ -100,6 +101,7 @@ namespace PenguinMonitor
         private TextView? _standaloneDailyLabelWarning;
         private ImageButton? _expandButton;
         private LinearLayout? _prevObsSummaryLayout;
+        private TextView? _todayMiniView;
         private TextView? _prevObsHeaderText;
         private LinearLayout? _prevObsDetailLayout;
         private LinearLayout? _tagModeContentLayout;
@@ -171,10 +173,13 @@ namespace PenguinMonitor
             HandleAuthDeepLink(Intent);
             CreateUI();
             UpdateStatusText();
-            _statusRefreshTimer = new System.Timers.Timer(60000); // 1 minute
-            _statusRefreshTimer.Elapsed += (s, e) => UpdateStatusText();
-            _statusRefreshTimer.AutoReset = true;
-            _statusRefreshTimer.Start();
+            _statusRefreshHandler = new Handler(Looper.MainLooper);
+            _statusRefreshRunnable = new Java.Lang.Runnable(() =>
+            {
+                UpdateStatusText();
+                _statusRefreshHandler?.PostDelayed(_statusRefreshRunnable, 1000);
+            });
+            _statusRefreshHandler.PostDelayed(_statusRefreshRunnable, 1000);
             HandleIncomingJsonIntent();
             if (_shouldAutoDownloadBirdStats)
             {
@@ -187,11 +192,11 @@ namespace PenguinMonitor
         protected override void OnResume()
         {
             base.OnResume();
-            _statusRefreshTimer?.Start();
+            _statusRefreshHandler?.PostDelayed(_statusRefreshRunnable, 1000);
             var token = _appSettings?.AuthToken;
             if (!string.IsNullOrEmpty(token) && _colonyState?.LastSyncedUtc > DateTime.MinValue)
             {
-                _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); });
+                _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
                 _ = Task.Run(async () =>
                 {
                     try
@@ -213,7 +218,7 @@ namespace PenguinMonitor
         protected override void OnPause()
         {
             base.OnPause();
-            _statusRefreshTimer?.Stop();
+            _statusRefreshHandler?.RemoveCallbacks(_statusRefreshRunnable);
             _dataStorageService.StopBackgroundPolling();
         }
 
@@ -228,13 +233,18 @@ namespace PenguinMonitor
                 _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
                 _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
                 if (result.BoxTags != null) _boxTags = result.BoxTags;
+                _lastSyncCheckUtc = DateTime.UtcNow;
                 new Handler(Looper.MainLooper).Post(() =>
                 {
                     DrawPageLayouts();
                     UpdateStatusText();
                 });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                new Handler(Looper.MainLooper).Post(() =>
+                    Toast.MakeText(this, $"Background sync error: {ex.Message}", ToastLength.Short)?.Show());
+            }
         }
 
         private void RequestPermissions()
@@ -467,8 +477,8 @@ namespace PenguinMonitor
 
             // Sync status — use most recent of full sync or successful poll check
             string sync;
-            if (_colonyState != null && _colonyState.DirtyCount > 0)
-                sync = $"uploading:{_colonyState.DirtyCount}";
+            if (_colonyState != null && _colonyState.PendingUploadCount > 0)
+                sync = $"Uploading:{_colonyState.PendingUploadCount}";
             else
             {
                 var lastFull = _colonyState?.LastSyncedUtc ?? DateTime.MinValue;
@@ -705,7 +715,7 @@ namespace PenguinMonitor
                 }
 
                 var incomingSummary = SummariseMonitor($"Incoming: {filename}", incomingBoxes);
-                var currentSummary = $"Current: {_colonyState.TodayBoxes.Count} today, {_colonyState.DirtyCount} pending, {_colonyState.PreviousBoxes.Count} from server\n";
+                var currentSummary = $"Current: {_colonyState.TodayBoxes.Count} today, {_colonyState.PendingUploadCount} pending, {_colonyState.PreviousBoxes.Count} from server\n";
 
                 var comparison = new System.Text.StringBuilder();
                 comparison.AppendLine($"📊 Incoming: {incomingBoxes.Count} boxes");
@@ -801,7 +811,7 @@ namespace PenguinMonitor
                         BreedingStatus = dataNode["BreedingChance"]?.Value<string>(),
                         Notes = dataNode["Notes"]?.Value<string>() ?? "",
                         WhenDataCollectedUtc = dataNode["whenDataCollectedUtc"]?.Value<DateTime>().ToUniversalTime() ?? DateTime.MinValue.ToUniversalTime(),
-                        IsDirty = false,
+                        IsPendingUpload = false,
                         BoxName = boxName,
                     };
                     var scannedIdsNode = dataNode["ScannedIds"];
@@ -868,7 +878,7 @@ namespace PenguinMonitor
             var gateUpCount = todayBoxes.Values.Count(box => box.GateStatus == "Gate up");
             var regateCount = todayBoxes.Values.Count(box => box.GateStatus == "Regate");
 
-            var dirty = _colonyState.DirtyCount;
+            var dirty = _colonyState.PendingUploadCount;
 
             string summary = $"📦 {todayBoxes.Count} boxes today\n" +
                          (dirty > 0 ? $"⏳ {dirty} boxes pending upload\n" : "") +
@@ -934,7 +944,7 @@ namespace PenguinMonitor
                     {
                         var token = _appSettings?.AuthToken;
                         if (!string.IsNullOrEmpty(token))
-                            _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); });
+                            _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
                     }
 
                     ShowSyncResultsDialog(result);
@@ -987,7 +997,7 @@ namespace PenguinMonitor
                 }
             }
 
-            var pending = _colonyState.DirtyCount;
+            var pending = _colonyState.PendingUploadCount;
             if (pending > 0)
                 lines.Add($"⏳ {pending} boxes pending upload");
 
@@ -1002,6 +1012,88 @@ namespace PenguinMonitor
             dialog.Show();
         }
 
+        /// <summary>
+        /// Build a styled comparison dialog with server (orange) and local (black) cards.
+        /// Uses app design language: card backgrounds, styled buttons.
+        /// </summary>
+        private void ShowComparisonDialog(string title, BoxObservation serverObs, BoxObservation localObs, Action onReplace, Action onDiscard)
+        {
+            var outerCard = _uiFactory.CreateCard(padding: 16);
+            outerCard.SetGravity(GravityFlags.Top);
+
+            // Title
+            var titleView = new TextView(this) { Text = title, TextSize = 20 };
+            titleView.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            titleView.SetTextColor(UIFactory.TEXT_PRIMARY);
+            titleView.SetPadding(0, 0, 0, 12);
+            outerCard.AddView(titleView);
+
+            // Server version (orange card)
+            var serverLabel = new TextView(this) { Text = "Current (server)", TextSize = 12 };
+            serverLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
+            outerCard.AddView(serverLabel);
+
+            var serverCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            serverCard.SetPadding(12, 8, 12, 8);
+            serverCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW);
+            var serverParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            serverParams.SetMargins(0, 4, 0, 8);
+            serverCard.LayoutParameters = serverParams;
+            serverCard.AddView(BuildObsDetailView(serverObs, showBoxLink: false));
+            outerCard.AddView(serverCard);
+
+            // Arrow
+            var arrow = new TextView(this) { Text = "▼", TextSize = 18, Gravity = GravityFlags.Center };
+            arrow.SetTextColor(UIFactory.TEXT_SECONDARY);
+            arrow.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            outerCard.AddView(arrow);
+
+            // Local version (black card)
+            var localLabel = new TextView(this) { Text = "Your edit", TextSize = 12 };
+            localLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
+            localLabel.SetPadding(0, 4, 0, 0);
+            outerCard.AddView(localLabel);
+
+            var localCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            localCard.SetPadding(12, 8, 12, 8);
+            localCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
+            var localParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            localParams.SetMargins(0, 4, 0, 16);
+            localCard.LayoutParameters = localParams;
+            localCard.AddView(BuildObsDetailView(localObs, showBoxLink: false));
+            outerCard.AddView(localCard);
+
+            // Button row
+            var buttonRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            buttonRow.SetGravity(GravityFlags.Center);
+            var buttonRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            buttonRow.LayoutParameters = buttonRowParams;
+
+            var discardButton = _uiFactory.CreateStyledButton("Discard", UIFactory.DANGER_RED);
+            discardButton.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            ((LinearLayout.LayoutParams)discardButton.LayoutParameters).SetMargins(0, 0, 8, 0);
+
+            var replaceButton = _uiFactory.CreateStyledButton("Replace", UIFactory.PRIMARY_BLUE);
+            replaceButton.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            ((LinearLayout.LayoutParams)replaceButton.LayoutParameters).SetMargins(8, 0, 0, 0);
+
+            buttonRow.AddView(discardButton);
+            buttonRow.AddView(replaceButton);
+            outerCard.AddView(buttonRow);
+
+            var scrollView = new ScrollView(this);
+            scrollView.AddView(outerCard);
+
+            var dialog = new AlertDialog.Builder(this)
+                .SetView(scrollView)
+                .SetCancelable(false)
+                .Create();
+
+            discardButton.Click += (s, e) => { dialog?.Dismiss(); onDiscard(); };
+            replaceButton.Click += (s, e) => { dialog?.Dismiss(); onReplace(); };
+            dialog?.Show();
+        }
+
         private void ShowConflictDialog(List<DataStorageService.SyncConflict> conflicts)
         {
             // Filter out conflicts where server data hasn't changed since local confirmation
@@ -1012,36 +1104,25 @@ namespace PenguinMonitor
                     && c.server != null && c.server.observation_id == confirmedId)
                 {
                     _confirmedAgainstServerObsId.Remove(boxName);
-                    return false; // Already confirmed against this exact server version
+                    return false;
                 }
                 return true;
             }).ToList();
 
             if (conflicts.Count == 0) return;
 
-            var scrollView = new ScrollView(this);
-            var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            container.SetPadding(16, 16, 16, 16);
-            container.SetBackgroundColor(Color.White);
-            scrollView.AddView(container);
-
-            var confirmedBoxes = new List<string>();
-
-            foreach (var conflict in conflicts)
+            // Show one dialog per conflict (sequential)
+            void ShowNext(int idx)
             {
+                if (idx >= conflicts.Count) return;
+                var conflict = conflicts[idx];
                 var boxName = conflict.box_name ?? "?";
                 var server = conflict.server;
 
-                var boxTitle = new TextView(this) { Text = $"Box {boxName}", TextSize = 16 };
-                boxTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-                boxTitle.SetTextColor(Color.Black);
-                boxTitle.SetPadding(0, 12, 0, 4);
-                container.AddView(boxTitle);
-
-                // Server version (orange border)
+                BoxObservation serverObs = null;
                 if (server != null)
                 {
-                    var serverObs = BoxObservation.FromServerData(
+                    serverObs = BoxObservation.FromServerData(
                         server.observation_id, 0, server.observation_time_utc ?? "",
                         server.adults, server.eggs, server.chicks,
                         server.breeding_status, server.gate_status, server.notes ?? "", server.monitor_filename,
@@ -1050,92 +1131,50 @@ namespace PenguinMonitor
                     if (server.scans != null)
                         foreach (var scan in server.scans)
                             serverObs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
-
-                    var serverCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-                    serverCard.SetPadding(12, 8, 12, 8);
-                    serverCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW);
-                    var serverParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                    serverParams.SetMargins(0, 4, 0, 4);
-                    serverCard.LayoutParameters = serverParams;
-                    var serverHeader = new TextView(this) { Text = BuildObsHeaderText(serverObs, "Server", false), TextSize = 11 };
-                    serverHeader.SetTextColor(Color.DarkGray);
-                    serverCard.AddView(serverHeader);
-                    serverCard.AddView(BuildObsDetailView(serverObs, showBoxLink: false));
-                    container.AddView(serverCard);
                 }
 
-                // Arrow
-                var arrow = new TextView(this) { Text = "↓ Replace with ↓", TextSize = 12, Gravity = GravityFlags.Center };
-                arrow.SetTextColor(Color.DarkGray);
-                container.AddView(arrow);
+                var local = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                if (serverObs == null || local == null) { ShowNext(idx + 1); return; }
 
-                // Local version (black border) — from pending observations
-                var local = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
-                if (local != null)
-                {
-                    var localCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-                    localCard.SetPadding(12, 8, 12, 8);
-                    localCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
-                    var localParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                    localParams.SetMargins(0, 4, 0, 8);
-                    localCard.LayoutParameters = localParams;
-                    var localHeader = new TextView(this) { Text = BuildObsHeaderText(local, "Your edit", false), TextSize = 11 };
-                    localHeader.SetTextColor(Color.Black);
-                    localCard.AddView(localHeader);
-                    localCard.AddView(BuildObsDetailView(local, showBoxLink: false));
-                    container.AddView(localCard);
-                }
-
-                confirmedBoxes.Add(boxName);
-            }
-
-            new AlertDialog.Builder(this)
-                .SetTitle(conflicts.Count > 1 ? $"Confirm {conflicts.Count} edits" : $"Confirm edit: Box {conflicts[0].box_name}")
-                .SetView(scrollView)
-                .SetPositiveButton("Replace", (s, e) =>
-                {
-                    _ = Task.Run(async () =>
+                ShowComparisonDialog($"Confirm edit: Box {boxName}", serverObs, local,
+                    onReplace: () =>
                     {
-                        var uploaded = await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings, confirmedBoxes);
-                        new Handler(Looper.MainLooper).Post(() =>
+                        _ = Task.Run(async () =>
                         {
-                            DataStorageService.SaveColonyState(this, _colonyState);
-                            UpdateSyncButtonLabel();
-                            DrawPageLayouts();
+                            await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings, new List<string> { boxName });
+                            new Handler(Looper.MainLooper).Post(() =>
+                            {
+                                DataStorageService.SaveColonyState(this, _colonyState);
+                                UpdateSyncButtonLabel();
+                                DrawPageLayouts();
+                                ShowNext(idx + 1);
+                            });
                         });
-                    });
-                })
-                .SetNegativeButton("Discard", (s, e) =>
-                {
-                    // Drop the unconfirmed edits and restore server versions
-                    foreach (var conflict in conflicts)
+                    },
+                    onDiscard: () =>
                     {
-                        var boxName = conflict.box_name ?? "";
-                        _colonyState.PendingObservations.RemoveAll(p => p.BoxName == boxName && p.IsDirty);
-
-                        // Restore server version into TodayBoxes
-                        if (conflict.server != null)
+                        _colonyState.PendingObservations.RemoveAll(p => p.BoxName == boxName && p.IsPendingUpload);
+                        if (server != null)
                         {
-                            var serverObs = BoxObservation.FromServerData(
-                                conflict.server.observation_id, 0, conflict.server.observation_time_utc ?? "",
-                                conflict.server.adults, conflict.server.eggs, conflict.server.chicks,
-                                conflict.server.breeding_status, conflict.server.gate_status,
-                                conflict.server.notes ?? "", conflict.server.monitor_filename,
-                                conflict.server.observer_name);
-                            serverObs.BoxName = boxName;
-                            if (conflict.server.scans != null)
-                                foreach (var scan in conflict.server.scans)
-                                    serverObs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
-                            serverObs.IsDirty = false;
-                            _colonyState.TodayBoxes[boxName] = serverObs;
+                            var restored = BoxObservation.FromServerData(
+                                server.observation_id, 0, server.observation_time_utc ?? "",
+                                server.adults, server.eggs, server.chicks,
+                                server.breeding_status, server.gate_status,
+                                server.notes ?? "", server.monitor_filename, server.observer_name);
+                            restored.BoxName = boxName;
+                            if (server.scans != null)
+                                foreach (var scan in server.scans)
+                                    restored.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                            restored.IsPendingUpload = false;
+                            _colonyState.TodayBoxes[boxName] = restored;
                         }
-                    }
-                    DataStorageService.SaveColonyState(this, _colonyState);
-                    UpdateSyncButtonLabel();
-                    DrawPageLayouts();
-                })
-                .SetCancelable(false)
-                .Show();
+                        DataStorageService.SaveColonyState(this, _colonyState);
+                        UpdateSyncButtonLabel();
+                        DrawPageLayouts();
+                        ShowNext(idx + 1);
+                    });
+            }
+            ShowNext(0);
         }
 
         private void ShowLoginPrompt()
@@ -1515,7 +1554,7 @@ namespace PenguinMonitor
             {
                 TextSize = 12,
             };
-            var pending = _colonyState.DirtyCount;
+            var pending = _colonyState.PendingUploadCount;
             timeTV.Text = !string.IsNullOrEmpty(_colonyState.DailyLabel) ? _colonyState.DailyLabel : "";
             var lastFullSync = _colonyState.LastSyncedUtc;
             var mostRecentCheck = _lastSyncCheckUtc > lastFullSync ? _lastSyncCheckUtc : lastFullSync;
@@ -1912,7 +1951,7 @@ namespace PenguinMonitor
 
             // Border: today=solid black, old data=orange border, loss=red, changed=blue, default=grey
             bool differenceFound = false;
-            if (currentExists && thisBoxData?.IsDirty == true)
+            if (currentExists && thisBoxData?.IsPendingUpload == true)
             {
                 // Unsynced today's edit — orange border
                 boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.WARNING_YELLOW, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
@@ -2031,28 +2070,22 @@ namespace PenguinMonitor
             container.AddView(headerRow);
 
             // Filter checkboxes row
-            var filtersRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var filtersRow = new PenguinMonitor.UI.FlowLayout(this);
             filtersRow.SetPadding(0, 8, 0, 8);
+            filtersRow.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
 
-            CheckBox hatchingCheckbox = new CheckBox(this) { Text = "Hatch", Checked = _appSettings.ShowHatchingDatesInTimeline };
-            hatchingCheckbox.SetTextColor(Color.Black);
-            hatchingCheckbox.Click += (s, e) => { _appSettings.ShowHatchingDatesInTimeline = hatchingCheckbox.Checked; DrawPageLayouts(); };
-            filtersRow.AddView(hatchingCheckbox);
-
-            CheckBox pgCheckbox = new CheckBox(this) { Text = "PG", Checked = _appSettings.ShowPGDatesInTimeline };
-            pgCheckbox.SetTextColor(Color.Black);
-            pgCheckbox.Click += (s, e) => { _appSettings.ShowPGDatesInTimeline = pgCheckbox.Checked; DrawPageLayouts(); };
-            filtersRow.AddView(pgCheckbox);
-
-            CheckBox chippingCheckbox = new CheckBox(this) { Text = "Chip", Checked = _appSettings.ShowChippingDatesInTimeline };
-            chippingCheckbox.SetTextColor(Color.Black);
-            chippingCheckbox.Click += (s, e) => { _appSettings.ShowChippingDatesInTimeline = chippingCheckbox.Checked; DrawPageLayouts(); };
-            filtersRow.AddView(chippingCheckbox);
-
-            CheckBox fledgingCheckbox = new CheckBox(this) { Text = "Fledge", Checked = _appSettings.ShowFledgingDatesInTimeline };
-            fledgingCheckbox.SetTextColor(Color.Black);
-            fledgingCheckbox.Click += (s, e) => { _appSettings.ShowFledgingDatesInTimeline = fledgingCheckbox.Checked; DrawPageLayouts(); };
-            filtersRow.AddView(fledgingCheckbox);
+            foreach (var (text, getter, setter) in new (string, Func<bool>, Action<bool>)[] {
+                ("Hatch", () => _appSettings.ShowHatchingDatesInTimeline, v => _appSettings.ShowHatchingDatesInTimeline = v),
+                ("PG", () => _appSettings.ShowPGDatesInTimeline, v => _appSettings.ShowPGDatesInTimeline = v),
+                ("Chip", () => _appSettings.ShowChippingDatesInTimeline, v => _appSettings.ShowChippingDatesInTimeline = v),
+                ("Fledge", () => _appSettings.ShowFledgingDatesInTimeline, v => _appSettings.ShowFledgingDatesInTimeline = v),
+            })
+            {
+                var cb = new CheckBox(this) { Text = text, Checked = getter() };
+                cb.SetTextColor(Color.Black);
+                cb.Click += (s, e) => { setter(cb.Checked); DrawPageLayouts(); };
+                filtersRow.AddView(cb);
+            }
 
             container.AddView(filtersRow);
 
@@ -2311,8 +2344,8 @@ namespace PenguinMonitor
                         .SetMessage($"{totalMismatched} of your observations today have a different label.\n\nUpdate them all to \"{newLabel}\"?")
                         .SetPositiveButton("Update all", (s2, e2) =>
                         {
-                            foreach (var obs in mismatchedObs) { obs.MonitorFilename = newLabel; obs.IsDirty = true; obs.DirtyTimestampUtc ??= DateTime.UtcNow; }
-                            foreach (var obs in mismatchedPending) { obs.MonitorFilename = newLabel; obs.IsDirty = true; obs.DirtyTimestampUtc ??= DateTime.UtcNow; }
+                            foreach (var obs in mismatchedObs) { obs.MonitorFilename = newLabel; obs.IsPendingUpload = true; obs.PendingUploadSinceUtc ??= DateTime.UtcNow; }
+                            foreach (var obs in mismatchedPending) { obs.MonitorFilename = newLabel; obs.IsPendingUpload = true; obs.PendingUploadSinceUtc ??= DateTime.UtcNow; }
                             applyLabel();
                             DrawPageLayouts();
                         })
@@ -2366,6 +2399,14 @@ namespace PenguinMonitor
             colonySpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(colonySpinner);
 
+
+            // Show saved colony immediately (before server fetch)
+            if (!string.IsNullOrEmpty(_appSettings.SelectedColonyName))
+            {
+                var savedColony = new[] { _appSettings.SelectedColonyName };
+                colonySpinner.Adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, savedColony);
+                ((ArrayAdapter<string>)colonySpinner.Adapter).SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+            }
 
             // Fetch colonies from server and populate dropdowns
             new Thread(async () =>
@@ -2749,7 +2790,10 @@ namespace PenguinMonitor
                     ///Single Box Card
                     // Hide expand/collapse button in tag mode, but keep lock icon and click area
                     if (_expandButton != null)
-                        _expandButton.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
+                    {
+                        bool hideExpand = tagMode || (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null);
+                        _expandButton.Visibility = hideExpand ? ViewStates.Gone : ViewStates.Visible;
+                    }
 
                     if (_dataCardLockIconView != null)
                     {
@@ -2803,9 +2847,9 @@ namespace PenguinMonitor
                     {
                         var nzTime = ToNzTime(currentObs.WhenDataCollectedUtc);
                         var who = !string.IsNullOrEmpty(currentObs.ObserverName) ? currentObs.ObserverName : "";
-                        var syncLine = currentObs.IsDirty ? "⏳ Unsynced" : "Synced";
+                        var syncLine = currentObs.IsPendingUpload ? "⏳ Unsynced" : "Synced";
                         _boxSavedTimeTextView.Text = $"{syncLine}\n{nzTime:HH:mm}" + (!string.IsNullOrEmpty(who) ? $"\n{who}" : "");
-                        _boxSavedTimeTextView.SetTextColor(currentObs.IsDirty ? UIFactory.DANGER_RED : Color.Black);
+                        _boxSavedTimeTextView.SetTextColor(currentObs.IsPendingUpload ? UIFactory.DANGER_RED : Color.Black);
                     }
                     else
                     {
@@ -3090,9 +3134,9 @@ namespace PenguinMonitor
                 return;
             }
 
-            // Compact header: date + icons, show breeding status if no eggs/chicks
+            // Compact header: date: icons, show breeding status if no eggs/chicks
             var nzDate = ToNzTime(prev.WhenDataCollectedUtc);
-            string compact = $"{nzDate:d MMM} " +
+            string compact = $"{nzDate:d MMM}: " +
                 string.Concat(Enumerable.Repeat("🐧", prev.Adults)) +
                 string.Concat(Enumerable.Repeat("🥚", prev.Eggs)) +
                 string.Concat(Enumerable.Repeat("🐣", prev.Chicks));
@@ -3119,7 +3163,31 @@ namespace PenguinMonitor
                 _prevObsDetailLayout.AddView(dateLabel);
             }
 
+            // Update today miniview
+            UpdateTodayMiniView();
+
             UpdateUnsyncedCards();
+        }
+
+        private void UpdateTodayMiniView()
+        {
+            if (_todayMiniView == null) return;
+            var today = _colonyState.GetTodayForBox(_currentBoxName);
+            if (today == null)
+            {
+                _todayMiniView.Visibility = ViewStates.Gone;
+                return;
+            }
+            string text = string.Concat(Enumerable.Repeat("🐧", today.Adults)) +
+                string.Concat(Enumerable.Repeat("🥚", today.Eggs)) +
+                string.Concat(Enumerable.Repeat("🐣", today.Chicks));
+            if (!string.IsNullOrEmpty(today.BreedingStatus) && today.BreedingStatus != "BR")
+                text += $" {today.BreedingStatus}";
+            if (!string.IsNullOrEmpty(today.GateStatus))
+                text += $" {today.GateStatus}";
+            if (string.IsNullOrWhiteSpace(text)) text = "Empty";
+            _todayMiniView.Text = text;
+            _todayMiniView.Visibility = ViewStates.Visible;
         }
 
         private LinearLayout? _unsyncedCardsContainer;
@@ -3189,6 +3257,9 @@ namespace PenguinMonitor
             expandSingleBoxImageButton.SetBackgroundColor(Color.Transparent);
             expandSingleBoxImageButton.Click += (s, e) =>
             {
+                // Don't expand when locked with no data — must unlock first
+                if (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null) return;
+
                 if (_singleBoxDataContentLayout.Visibility == ViewStates.Gone)
                 {
                     _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
@@ -3225,15 +3296,15 @@ namespace PenguinMonitor
                         return;
                     }
 
-                    // No changes — lock silently
-                    if (!_dataChangedSinceUnlock)
+                    // No changes and box already has today data — lock silently
+                    if (!_dataChangedSinceUnlock && _colonyState.GetTodayForBox(_currentBoxName) != null)
                     {
                         _dataChangedSinceUnlock = false;
                         DrawPageLayouts();
                         return;
                     }
 
-                    // Data changed but all zeros and no prior today data — confirm empty
+                    // All zeros and no prior today data — confirm empty
                     if (_colonyState.GetTodayForBox(_currentBoxName) == null && dataCardHasZeroData())
                     {
                         ShowEmptyBoxDialog(() =>
@@ -3253,19 +3324,24 @@ namespace PenguinMonitor
                         // If box has existing server data, show confirm edit dialog
                         var serverVersion = _colonyState.TodayBoxes.ContainsKey(_currentBoxName)
                             ? _colonyState.TodayBoxes[_currentBoxName] : null;
-                        if (serverVersion != null && !serverVersion.IsDirty)
+                        if (serverVersion != null && !serverVersion.IsPendingUpload)
                         {
                             ShowLocalConfirmEditDialog(_currentBoxName, serverVersion, () =>
                             {
                                 if (serverVersion.ObservationId.HasValue)
                                     _confirmedAgainstServerObsId[_currentBoxName] = serverVersion.ObservationId.Value;
                                 SaveCurrentBoxData();
+                                // Stamp the confirmed obs ID onto the pending observation
+                                var pending = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
+                                if (pending != null && serverVersion.ObservationId.HasValue)
+                                    pending.ConfirmedAgainstObsId = serverVersion.ObservationId.Value;
                                 _dataChangedSinceUnlock = false;
                                 DrawPageLayouts();
                                 TryBackgroundUpload();
                             }, () =>
                             {
-                                _isBoxLocked = false;
+                                // Restore server version — remove any pending edit for this box
+                                _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
                                 _dataChangedSinceUnlock = false;
                                 DrawPageLayouts();
                             });
@@ -3369,6 +3445,19 @@ namespace PenguinMonitor
             _stickyNoteBar.AddView(bulb2);
             _stickyNoteBar.Click += (s, e) => { if (!_isBoxLocked) ShowBoxNotesDialog(); };
             prevAndStickyRow.AddView(_stickyNoteBar);
+
+            // Today miniview (right-aligned, black border)
+            _todayMiniView = new TextView(this) { TextSize = 11 };
+            _todayMiniView.SetTextColor(Color.Black);
+            _todayMiniView.SetPadding(8, 4, 8, 4);
+            var todayMiniViewBg = new Android.Graphics.Drawables.GradientDrawable();
+            todayMiniViewBg.SetColor(Color.White);
+            todayMiniViewBg.SetCornerRadius(6 * (Resources?.DisplayMetrics?.Density ?? 2));
+            todayMiniViewBg.SetStroke((int)(2 * (Resources?.DisplayMetrics?.Density ?? 2)), Color.Black);
+            _todayMiniView.Background = todayMiniViewBg;
+            _todayMiniView.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            _todayMiniView.Visibility = ViewStates.Gone;
+            prevAndStickyRow.AddView(_todayMiniView);
 
             _singleBoxDataOuterLayout.AddView(prevAndStickyRow);
 
@@ -3598,56 +3687,10 @@ namespace PenguinMonitor
             return obs;
         }
 
-        /// <summary>
-        /// Show confirm edit dialog using local data — server version (orange) vs your edit (black).
-        /// </summary>
         private void ShowLocalConfirmEditDialog(string boxName, BoxObservation serverVersion, Action onConfirm, Action onDiscard)
         {
-            var scrollView = new ScrollView(this);
-            var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            container.SetPadding(16, 16, 16, 16);
-            container.SetBackgroundColor(Color.White);
-            scrollView.AddView(container);
-
-            // Server version (orange)
-            var serverCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            serverCard.SetPadding(12, 8, 12, 8);
-            serverCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW);
-            var serverParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            serverParams.SetMargins(0, 4, 0, 4);
-            serverCard.LayoutParameters = serverParams;
-            var serverHeader = new TextView(this) { Text = BuildObsHeaderText(serverVersion, "Server", false), TextSize = 11 };
-            serverHeader.SetTextColor(Color.DarkGray);
-            serverCard.AddView(serverHeader);
-            serverCard.AddView(BuildObsDetailView(serverVersion, showBoxLink: false));
-            container.AddView(serverCard);
-
-            // Arrow
-            var arrow = new TextView(this) { Text = "↓ Replace with ↓", TextSize = 12, Gravity = GravityFlags.Center };
-            arrow.SetTextColor(Color.DarkGray);
-            container.AddView(arrow);
-
-            // Local edit (black border)
             var localObs = BuildObsFromCurrentUI();
-            var localCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            localCard.SetPadding(12, 8, 12, 8);
-            localCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
-            var localParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            localParams.SetMargins(0, 4, 0, 8);
-            localCard.LayoutParameters = localParams;
-            var localHeader = new TextView(this) { Text = BuildObsHeaderText(localObs, "Your edit", false), TextSize = 11 };
-            localHeader.SetTextColor(Color.Black);
-            localCard.AddView(localHeader);
-            localCard.AddView(BuildObsDetailView(localObs, showBoxLink: false));
-            container.AddView(localCard);
-
-            new AlertDialog.Builder(this)
-                .SetTitle($"Confirm edit: Box {boxName}")
-                .SetView(scrollView)
-                .SetPositiveButton("Replace", (s, e) => onConfirm())
-                .SetNegativeButton("Discard", (s, e) => onDiscard())
-                .SetCancelable(false)
-                .Show();
+            ShowComparisonDialog($"Confirm edit: Box {boxName}", serverVersion, localObs, onConfirm, onDiscard);
         }
 
         private void OnPrevBoxClick(object? sender, EventArgs e)
@@ -3864,8 +3907,8 @@ namespace PenguinMonitor
             if (changed)
             {
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
-                boxData.IsDirty = true;
-                boxData.DirtyTimestampUtc ??= DateTime.UtcNow;
+                boxData.IsPendingUpload = true;
+                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
                 _colonyState.SaveBoxObservation(_currentBoxName, boxData);
                 SaveToAppDataDir();
@@ -3993,10 +4036,10 @@ namespace PenguinMonitor
                     resultParams.SetMargins(0, 2, 0, 2);
                     resultView.LayoutParameters = resultParams;
 
-                    var scannedId = pd.ScannedId;
+                    var fullPitId = !string.IsNullOrEmpty(pd.FullPitId) ? pd.FullPitId : pd.ScannedId;
                     resultView.Click += (s2, e2) =>
                     {
-                        AddScannedId(scannedId, 0, isManualEntry: true);
+                        AddScannedId(fullPitId, 0, isManualEntry: true);
                         _manualScanEditText.Text = "";
                         _searchResultsLayout.RemoveAllViews();
                         // Hide keyboard
@@ -4718,8 +4761,8 @@ namespace PenguinMonitor
                                     targetBoxData.Chicks++;
                                 }
                             }
-                            targetBoxData.IsDirty = true;
-                            targetBoxData.DirtyTimestampUtc ??= DateTime.UtcNow;
+                            targetBoxData.IsPendingUpload = true;
+                            targetBoxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                             _colonyState.SaveBoxObservation(targetBoxName, targetBoxData);
                             SaveCurrentBoxData();
                             buildScannedIdsLayout(currentBoxData.ScannedIds);
@@ -4845,7 +4888,7 @@ namespace PenguinMonitor
 
         private void TryBackgroundUpload()
         {
-            if (!_appSettings.IsAuthenticated || _colonyState.DirtyCount == 0) return;
+            if (!_appSettings.IsAuthenticated || _colonyState.PendingUploadCount == 0) return;
 
             // Use Thread directly to avoid Android SynchronizationContext deadlock
             new Thread(async () =>
@@ -4857,6 +4900,12 @@ namespace PenguinMonitor
                         DataStorageService.SaveColonyState(this, _colonyState);
                     RunOnUiThread(() =>
                     {
+                        if (result.Uploaded > 0)
+                        {
+                            _lastSyncCheckUtc = DateTime.UtcNow;
+                            UpdateStatusText();
+                            DrawPageLayouts();
+                        }
                         UpdateSyncButtonLabel();
                         if (result.Conflicts != null && result.Conflicts.Count > 0)
                             ShowConflictDialog(result.Conflicts);
@@ -5058,23 +5107,21 @@ namespace PenguinMonitor
                 return;
             }
 
-            var shortId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
-
             var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
 
-            if (!boxData.ScannedIds.Any(s => s.BirdId == shortId))
+            if (!boxData.ScannedIds.Any(s => s.BirdId == cleanEid))
             {
                 var scanRecord = new ScanRecord
                 {
-                    BirdId = shortId,
+                    BirdId = cleanEid, // Store full ID, never truncate
                     Timestamp = (isManualEntry && _appSettings.ActiveSessionTimeStampActive) ? TimeZoneInfo.ConvertTimeToUtc(_appSettings.ActiveSessionLocalTimeStamp, NzTimeZone) : DateTime.UtcNow,
                     Latitude = _currentLocation?.Latitude ?? 0,
                     Longitude = _currentLocation?.Longitude ?? 0,
                     Accuracy = _currentLocation?.Accuracy ?? -1
                 };
                 boxData.ScannedIds.Add(scanRecord);
-                boxData.IsDirty = true;
-                boxData.DirtyTimestampUtc ??= DateTime.UtcNow;
+                boxData.IsPendingUpload = true;
+                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
                 _colonyState.SaveBoxObservation(_currentBoxName, boxData);
                 SaveCurrentBoxData();
@@ -5082,7 +5129,8 @@ namespace PenguinMonitor
                 {
                     // Enhanced toast message with life stage info
                     bool isReturning = false;
-                    if (_remotePenguinData != null && _remotePenguinData.TryGetValue(shortId, out var penguinCheck))
+                    var displayId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
+                    if (_remotePenguinData != null && _remotePenguinData.TryGetValue(cleanEid.ToUpper(), out var penguinCheck))
                     {
                         // Check if ChipAs contains "chick" (case insensitive)
                         isReturning = penguinCheck.LastKnownLifeStage == LifeStage.Returnee ||
@@ -5090,8 +5138,8 @@ namespace PenguinMonitor
                                        penguinCheck.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
                     }
                     string birdIcon = isReturning ? "🔄🐧" : "🐧";
-                    string toastMessage = $"{birdIcon} Bird {shortId} added to Box {_currentBoxIndex}";
-                    if (_remotePenguinData != null && _remotePenguinData.TryGetValue(shortId, out var penguin))
+                    string toastMessage = $"{birdIcon} Bird {displayId} added to Box {_currentBoxIndex}";
+                    if (_remotePenguinData != null && _remotePenguinData.TryGetValue(cleanEid.ToUpper(), out var penguin))
                     {
                         if (penguin.LastKnownLifeStage == LifeStage.Adult ||
                             penguin.LastKnownLifeStage == LifeStage.Returnee)
@@ -5142,7 +5190,7 @@ namespace PenguinMonitor
                     {
                         toastMessage += ", Unknown scan ID!";
                         triggerAlertAsync();
-                        ShowNewBirdDialog(shortId, cleanEid);
+                        ShowNewBirdDialog(displayId, cleanEid);
                     }
                     DrawPageLayouts();
                     Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();

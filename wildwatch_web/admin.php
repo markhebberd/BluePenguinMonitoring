@@ -30,6 +30,123 @@ if (($observer['role'] ?? '') !== 'admin') { http_response_code(403); echo json_
 
 $action = $_GET['action'] ?? '';
 
+if ($action === 'duplicate_scans') {
+    // Duplicates by pit_id
+    $byPit = $pdo->query("
+        SELECT ps.observation_id, ps.pit_id, COUNT(*) as cnt, MIN(ps.scan_id) as keep_id,
+            ol.location_name as box_name, pc.peng_num,
+            DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as obs_date,
+            'pit_id' as dup_type
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+        WHERE (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        GROUP BY ps.observation_id, ps.pit_id
+        HAVING cnt > 1
+    ")->fetchAll();
+
+    // Duplicates by peng_num (different pit_ids mapping to same penguin — exclude exact dups already found)
+    $byPeng = $pdo->query("
+        SELECT ps.observation_id, pc.peng_num, COUNT(*) as cnt, MIN(ps.scan_id) as keep_id,
+            ol.location_name as box_name,
+            DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as obs_date,
+            GROUP_CONCAT(DISTINCT ps.pit_id) as pit_ids,
+            'peng_num' as dup_type
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+        WHERE (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        GROUP BY ps.observation_id, pc.peng_num
+        HAVING cnt > 1 AND COUNT(DISTINCT ps.pit_id) > 1
+    ")->fetchAll();
+
+    echo json_encode(array_merge($byPit, $byPeng));
+    exit;
+}
+
+if ($action === 'cleanup_duplicate_scans') {
+    $deleted = 0;
+
+    // Remove duplicate pit_ids per observation
+    $byPit = $pdo->query("
+        SELECT observation_id, pit_id, MIN(scan_id) as keep_id
+        FROM penguin_scans WHERE is_deleted = FALSE OR is_deleted IS NULL
+        GROUP BY observation_id, pit_id HAVING COUNT(*) > 1
+    ")->fetchAll();
+    foreach ($byPit as $dup) {
+        $del = $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ? AND pit_id = ? AND scan_id != ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+        $del->execute([$observer['observer_id'], $dup['observation_id'], $dup['pit_id'], $dup['keep_id']]);
+        $deleted += $del->rowCount();
+    }
+
+    // Remove duplicate peng_nums per observation (different pit_ids, same penguin)
+    $byPeng = $pdo->query("
+        SELECT ps.observation_id, pc.peng_num, MIN(ps.scan_id) as keep_id
+        FROM penguin_scans ps
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+        WHERE (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        GROUP BY ps.observation_id, pc.peng_num HAVING COUNT(*) > 1
+    ")->fetchAll();
+    foreach ($byPeng as $dup) {
+        $del = $pdo->prepare("UPDATE penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1 SET ps.is_deleted = TRUE, ps.deleted_at = NOW(), ps.deleted_by = ? WHERE ps.observation_id = ? AND pc.peng_num = ? AND ps.scan_id != ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
+        $del->execute([$observer['observer_id'], $dup['observation_id'], $dup['peng_num'], $dup['keep_id']]);
+        $deleted += $del->rowCount();
+    }
+
+    echo json_encode(['duplicate_groups' => count($byPit) + count($byPeng), 'scans_deleted' => $deleted]);
+    exit;
+}
+
+if ($action === 'duplicate_observations') {
+    $stmt = $pdo->query("
+        SELECT ol.location_name as box_name,
+            DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as obs_date,
+            COUNT(*) as cnt,
+            GROUP_CONCAT(o.observation_id ORDER BY o.observation_time_utc DESC) as obs_ids,
+            GROUP_CONCAT(COALESCE(ob.observer_name,'?') ORDER BY o.observation_time_utc DESC) as observers
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+        WHERE o.is_deleted = FALSE
+        GROUP BY ol.location_name, DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
+        HAVING cnt > 1
+        ORDER BY obs_date DESC, ol.location_name + 0
+    ");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
+if ($action === 'cleanup_duplicate_observations') {
+    // Keep the most recent observation per box per day, soft-delete the rest
+    $stmt = $pdo->query("
+        SELECT ol.location_name as box_name, o.location_id,
+            DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as obs_date,
+            MAX(o.observation_id) as keep_id
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE o.is_deleted = FALSE
+        GROUP BY o.location_id, DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
+        HAVING COUNT(*) > 1
+    ");
+    $groups = $stmt->fetchAll();
+    $deleted = 0;
+    foreach ($groups as $g) {
+        $del = $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE location_id = ? AND is_deleted = FALSE AND DATE(CONVERT_TZ(observation_time_utc, '+00:00', '+12:00')) = ? AND observation_id != ?");
+        $del->execute([$observer['observer_id'], $g['location_id'], $g['obs_date'], $g['keep_id']]);
+        $count = $del->rowCount();
+        // Also soft-delete scans/biometrics for those observations
+        if ($count > 0) {
+            $pdo->prepare("UPDATE penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id SET ps.is_deleted = TRUE, ps.deleted_at = NOW(), ps.deleted_by = ? WHERE o.location_id = ? AND o.is_deleted = TRUE AND o.deleted_by = ? AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)")
+                ->execute([$observer['observer_id'], $g['location_id'], $observer['observer_id'], $g['obs_date']]);
+        }
+        $deleted += $count;
+    }
+    echo json_encode(['duplicate_groups' => count($groups), 'observations_deleted' => $deleted]);
+    exit;
+}
+
 if ($action === 'recent_changes') {
     $days = min(30, max(1, (int)($_GET['days'] ?? 7)));
     $stmt = $pdo->prepare("SELECT a.*,

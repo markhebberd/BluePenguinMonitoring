@@ -9,6 +9,7 @@ namespace PenguinMonitor.Models
     }
     public class PenguinData
     {
+        public string FullPitId { get; set; } = "";
         public string ScannedId { get; set; } = "";
         public string PengNum { get; set; } = "";
         public LifeStage LastKnownLifeStage { get; set; }

@@ -69,7 +69,7 @@ namespace PenguinMonitor.Services
         /// onChecked is called on every successful poll (changed or not).
         /// onChanged is called only when server has new data.
         /// </summary>
-        internal void StartBackgroundPolling(string token, Func<Task> onChanged, Action? onChecked = null)
+        internal void StartBackgroundPolling(string token, Func<Task> onChanged, Action? onChecked = null, Func<Task>? onPendingUpload = null)
         {
             StopBackgroundPolling();
             _pollTimer = new System.Timers.Timer(60 * 1000); // 1 minute
@@ -79,12 +79,19 @@ namespace PenguinMonitor.Services
                 try
                 {
                     var result = await CheckForChangesAsync(token);
-                    if (result != PollResult.Failed) onChecked?.Invoke();
-                    if (result == PollResult.Changed)
+                    if (result != PollResult.Failed)
                     {
-                        _pollingSyncing = true;
-                        await onChanged();
-                        _pollingSyncing = false;
+                        onChecked?.Invoke();
+                        if (result == PollResult.Changed)
+                        {
+                            _pollingSyncing = true;
+                            await onChanged();
+                            _pollingSyncing = false;
+                        }
+                        else if (onPendingUpload != null)
+                        {
+                            await onPendingUpload();
+                        }
                     }
                 }
                 catch { _pollingSyncing = false; }
@@ -175,7 +182,7 @@ namespace PenguinMonitor.Services
                 var dirtyBoxes = new List<object>();
                 foreach (var pending in colonyState.PendingObservations)
                 {
-                    if (!pending.IsDirty || string.IsNullOrEmpty(pending.BoxName)) continue;
+                    if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
                     var scans = new List<object>();
                     foreach (var scan in pending.ScannedIds)
                     {
@@ -233,7 +240,7 @@ namespace PenguinMonitor.Services
                             if (boxName != null)
                             {
                                 // Remove the matching pending observation
-                                var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                                var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
                                 if (match != null)
                                     colonyState.PendingObservations.Remove(match);
                             }
@@ -286,7 +293,6 @@ namespace PenguinMonitor.Services
 
                 var serverState = JsonConvert.DeserializeObject<SyncResponse>(stateJson);
 
-                // Update from server — additive, never remove local data
                 // PreviousBoxes can be fully replaced (read-only server data)
                 colonyState.PreviousBoxes.Clear();
                 var nzToday = MainActivity.NzToday;
@@ -320,11 +326,11 @@ namespace PenguinMonitor.Services
                         {
                             // Don't overwrite if there's a local pending edit for this box today
                             bool hasPendingEdit = colonyState.PendingObservations.Any(p =>
-                                p.BoxName == kvp.Key && p.IsDirty &&
+                                p.BoxName == kvp.Key && p.IsPendingUpload &&
                                 MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzToday);
                             if (!hasPendingEdit)
                             {
-                                obs.IsDirty = false;
+                                obs.IsPendingUpload = false;
                                 colonyState.TodayBoxes[kvp.Key] = obs;
                             }
                         }
@@ -334,6 +340,19 @@ namespace PenguinMonitor.Services
                         }
                     }
                     result.BoxCount = serverState.boxes.Count;
+
+                    // Remove TodayBoxes entries deleted on server (not in server response, no pending local edit)
+                    var serverTodayBoxNames = new HashSet<string>(
+                        serverState.boxes.Where(kvp => {
+                            var d = DateTime.TryParse(kvp.Value.observation_time_utc, out var dt) ? dt : DateTime.MinValue;
+                            return MainActivity.ToNzTime(d).Date == nzToday;
+                        }).Select(kvp => kvp.Key));
+                    var staleKeys = colonyState.TodayBoxes.Keys
+                        .Where(k => !serverTodayBoxNames.Contains(k)
+                            && !colonyState.PendingObservations.Any(p => p.BoxName == k && p.IsPendingUpload))
+                        .ToList();
+                    foreach (var key in staleKeys)
+                        colonyState.TodayBoxes.Remove(key);
                 }
 
                 // Process previous observations (for boxes where latest is today)
@@ -367,6 +386,23 @@ namespace PenguinMonitor.Services
 
                 colonyState.LastSyncedUtc = DateTime.UtcNow;
 
+                // Process locations → box notes
+                if (serverState?.locations != null)
+                {
+                    var boxNotes = new Dictionary<string, BoxNoteData>();
+                    foreach (var loc in serverState.locations)
+                    {
+                        boxNotes[loc.location_name ?? ""] = new BoxNoteData
+                        {
+                            LocationId = loc.location_id,
+                            BoxName = loc.location_name ?? "",
+                            PersistentNotes = loc.persistent_notes ?? "",
+                        };
+                    }
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME),
+                        JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
+                }
+
                 // Step 2b: Process penguin data
                 var birdsResponse = await birdsTask;
                 birdsResponse.EnsureSuccessStatusCode();
@@ -390,6 +426,7 @@ namespace PenguinMonitor.Services
                     var fullId = cleanId.ToUpper();
                     var pengData = new PenguinData
                     {
+                        FullPitId = record.pit_id ?? "",
                         ScannedId = eightDigitId,
                         PengNum = record.peng_num ?? "",
                         LastKnownLifeStage = lifeStage,
@@ -436,7 +473,7 @@ namespace PenguinMonitor.Services
             var uploads = new List<object>();
             foreach (var boxName in confirmedBoxNames)
             {
-                var pending = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                var pending = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
                 if (pending == null) continue;
 
                 var scans = new List<object>();
@@ -478,11 +515,11 @@ namespace PenguinMonitor.Services
                     var boxName = c["box_name"]?.ToString();
                     if (boxName != null)
                     {
-                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
                         if (match != null)
                         {
                             colonyState.PendingObservations.Remove(match);
-                            match.IsDirty = false;
+                            match.IsPendingUpload = false;
                             var nzDate = MainActivity.ToNzTime(match.WhenDataCollectedUtc).Date;
                             if (nzDate == MainActivity.NzToday)
                                 colonyState.TodayBoxes[boxName] = match;
@@ -502,24 +539,28 @@ namespace PenguinMonitor.Services
             var result = new SyncResult();
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
-            if (colonyState.PendingObservations.Count(p => p.IsDirty) == 0) return result;
+            if (colonyState.PendingObservations.Count(p => p.IsPendingUpload) == 0) return result;
 
             var dirtyBoxes = new List<object>();
             foreach (var pending in colonyState.PendingObservations)
             {
-                if (!pending.IsDirty || string.IsNullOrEmpty(pending.BoxName)) continue;
+                if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
                 var scans = pending.ScannedIds.Select(scan => (object)new {
                     pit_id = scan.BirdId,
                     scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                     latitude = scan.Latitude, longitude = scan.Longitude, accuracy = scan.Accuracy,
                 }).ToList();
-                dirtyBoxes.Add(new {
-                    box_name = pending.BoxName,
-                    observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                    adults = pending.Adults, eggs = pending.Eggs, chicks = pending.Chicks,
-                    breeding_status = pending.BreedingStatus, gate_status = pending.GateStatus,
-                    notes = pending.Notes, scans = scans,
-                });
+                var obsPayload = new Dictionary<string, object?>
+                {
+                    ["box_name"] = pending.BoxName,
+                    ["observation_time_utc"] = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    ["adults"] = pending.Adults, ["eggs"] = pending.Eggs, ["chicks"] = pending.Chicks,
+                    ["breeding_status"] = pending.BreedingStatus, ["gate_status"] = pending.GateStatus,
+                    ["notes"] = pending.Notes, ["scans"] = scans,
+                };
+                if (pending.ConfirmedAgainstObsId.HasValue)
+                    obsPayload["expected_observation_id"] = pending.ConfirmedAgainstObsId.Value;
+                dirtyBoxes.Add(obsPayload);
             }
 
             var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = dirtyBoxes });
@@ -544,12 +585,12 @@ namespace PenguinMonitor.Services
                     var boxName = c["box_name"]?.ToString();
                     if (boxName != null)
                     {
-                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsDirty);
+                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
                         if (match != null)
                         {
                             colonyState.PendingObservations.Remove(match);
                             // Move to TodayBoxes so it stays visible locally
-                            match.IsDirty = false;
+                            match.IsPendingUpload = false;
                             var nzDate = MainActivity.ToNzTime(match.WhenDataCollectedUtc).Date;
                             if (nzDate == MainActivity.NzToday)
                                 colonyState.TodayBoxes[boxName] = match;
@@ -680,8 +721,8 @@ namespace PenguinMonitor.Services
                                 Notes = kvp.Value.Notes,
                                 WhenDataCollectedUtc = kvp.Value.whenDataCollectedUtc,
                                 BreedingStatus = kvp.Value.BreedingChance,
-                                IsDirty = true,
-                                DirtyTimestampUtc = DateTime.UtcNow,
+                                IsPendingUpload = true,
+                                PendingUploadSinceUtc = DateTime.UtcNow,
                             };
                             state.PendingObservations.Add(obs);
                         }

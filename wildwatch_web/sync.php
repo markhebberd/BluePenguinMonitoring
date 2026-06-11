@@ -247,25 +247,32 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $existing = $existingStmt->fetch();
 
                 if ($existing) {
-                    // Conflict: server already has today's data for this box
-                    $conflicts[] = [
-                        'box_name' => $boxName,
-                        'server' => [
-                            'observation_id' => (int)$existing['observation_id'],
-                            'observation_time_utc' => $existing['observation_time_utc'],
-                            'observer_name' => $existing['observer_name'],
-                            'adults' => (int)$existing['adults'],
-                            'eggs' => (int)$existing['eggs'],
-                            'chicks' => (int)$existing['chicks'],
-                            'breeding_status' => $existing['breeding_status'],
-                            'gate_status' => $existing['gate_status'],
-                            'notes' => $existing['notes'],
-                            'monitor_filename' => $existing['monitor_filename'],
-                            'scans' => $fetchScansForObs($existing['observation_id']),
-                        ],
-                        'incoming' => $obs,
-                    ];
-                    continue; // Skip — don't write
+                    // Optimistic concurrency: if client confirmed against this exact observation, auto-replace
+                    $expectedObsId = $obs['expected_observation_id'] ?? null;
+                    if ($expectedObsId !== null && (int)$expectedObsId === (int)$existing['observation_id']) {
+                        $forceReplace = true;
+                        // Fall through to the force-replace logic below
+                    } else {
+                        // Conflict: server data differs from what client expected
+                        $conflicts[] = [
+                            'box_name' => $boxName,
+                            'server' => [
+                                'observation_id' => (int)$existing['observation_id'],
+                                'observation_time_utc' => $existing['observation_time_utc'],
+                                'observer_name' => $existing['observer_name'],
+                                'adults' => (int)$existing['adults'],
+                                'eggs' => (int)$existing['eggs'],
+                                'chicks' => (int)$existing['chicks'],
+                                'breeding_status' => $existing['breeding_status'],
+                                'gate_status' => $existing['gate_status'],
+                                'notes' => $existing['notes'],
+                                'monitor_filename' => $existing['monitor_filename'],
+                                'scans' => $fetchScansForObs($existing['observation_id']),
+                            ],
+                            'incoming' => $obs,
+                        ];
+                        continue; // Skip — don't write
+                    }
                 }
             }
 
@@ -326,6 +333,11 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $lat = isset($scan['latitude']) && $scan['latitude'] != 0 ? $scan['latitude'] : null;
                 $lon = isset($scan['longitude']) && $scan['longitude'] != 0 ? $scan['longitude'] : null;
                 $acc = isset($scan['accuracy']) && $scan['accuracy'] > 0 ? $scan['accuracy'] : null;
+
+                // Skip duplicate pit_id for same observation
+                $dupCheck = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+                $dupCheck->execute([$observationId, $fullPitId]);
+                if ($dupCheck->fetch()) continue;
 
                 $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
                     ->execute([$observationId, $fullPitId, $scanTime, $lat, $lon, $acc]);

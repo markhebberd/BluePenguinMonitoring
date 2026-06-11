@@ -11,8 +11,28 @@ function authHeaders(): Record<string, string> {
 
 const DB_NAME = 'wildwatch';
 const DB_VERSION = 1;
+const CACHE_VERSION = 2; // Bump to force all clients to full re-sync
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 type StoreNames = typeof STORES[number];
+
+// ============ Store subscriptions ============
+
+let storeVersion = 0;
+const subscribers = new Set<() => void>();
+
+function notifySubscribers() {
+  storeVersion++;
+  for (const cb of subscribers) cb();
+}
+
+export function subscribe(cb: () => void): () => void {
+  subscribers.add(cb);
+  return () => subscribers.delete(cb);
+}
+
+export function getStoreVersion(): number {
+  return storeVersion;
+}
 
 // ============ In-memory cache ============
 
@@ -254,6 +274,7 @@ async function loadMemFromIDB(): Promise<void> {
     getAll(db, 'chips'), getAll(db, 'locations'), getAll(db, 'biometrics'),
   ]);
   mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics });
+  notifySubscribers();
 }
 
 /** Store snapshot data into both IndexedDB and memory */
@@ -282,11 +303,20 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       chips: data.chips, locations: data.locations, biometrics: data.biometrics,
     });
     console.timeEnd('buildIndexes');
+    notifySubscribers();
   } else {
-    // Incremental: merge into IDB
+    // Incremental: merge into IDB, removing soft-deleted scans
+    const activeScans = (data.scans || []).filter((s: any) => !s.scan_deleted);
+    const deletedScanIds = (data.scans || []).filter((s: any) => s.scan_deleted).map((s: any) => s.scan_id);
+    if (deletedScanIds.length > 0) {
+      const tx = db.transaction('scans', 'readwrite');
+      const store = tx.objectStore('scans');
+      for (const id of deletedScanIds) store.delete(id);
+      await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    }
     await Promise.all([
       putAll(db, 'observations', observations),
-      putAll(db, 'scans', data.scans),
+      putAll(db, 'scans', activeScans),
       putAll(db, 'penguins', data.penguins),
       putAll(db, 'chips', data.chips),
       putAll(db, 'locations', data.locations),
@@ -350,6 +380,14 @@ async function fetchWithProgress(url: string, onProgress?: (pct: number, label: 
 
 export async function syncDatabase(onProgress?: (msg: string, pct?: number) => void): Promise<void> {
   const db = await openDB();
+  const cachedVersion = await getMeta(db, 'cache_version');
+  if (cachedVersion !== CACHE_VERSION) {
+    onProgress?.('Updating data format...');
+    await resetDatabase();
+    const freshDb = await openDB();
+    await setMeta(freshDb, 'cache_version', CACHE_VERSION);
+    // Fall through to full download below (lastSync will be null)
+  }
   const lastSync = await getMeta(db, 'snapshot_time');
 
   if (lastSync) {
@@ -458,12 +496,18 @@ function enrichScan(s: any, c: MemCache) {
   };
 }
 
+export function queryBoxDetailSync(boxName: string, includeDeleted?: boolean): any {
+  return queryBoxDetailInner(boxName, includeDeleted);
+}
 export function queryBoxDetail(boxName: string, includeDeleted?: boolean): Promise<any> {
-  if (!mem) return Promise.resolve({ location: null, observations: [], all_penguins: [], deleted_count: 0, deleted: [] });
+  return Promise.resolve(queryBoxDetailInner(boxName, includeDeleted));
+}
+function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
+  if (!mem) return { location: null, observations: [], all_penguins: [], deleted_count: 0, deleted: [] };
   const c = mem;
 
   const location = c.locByName.get(boxName) || null;
-  if (!location) return Promise.resolve({ location: null, observations: [], all_penguins: [], deleted_count: 0, deleted: [] });
+  if (!location) return { location: null, observations: [], all_penguins: [], deleted_count: 0, deleted: [] };
 
   const boxObs = (c.obsByLocation.get(location.location_id) || [])
     .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
@@ -511,20 +555,26 @@ export function queryBoxDetail(boxName: string, includeDeleted?: boolean): Promi
     }
   }
 
-  return Promise.resolve({
+  return {
     location, observations,
     all_penguins: Array.from(seenPenguins.values()),
     deleted_count: deleted.length,
     deleted: includeDeleted ? deleted : [],
-  });
+  };
 }
 
+export function queryBirdDetailSync(pengNum: string): any {
+  return queryBirdDetailInner(pengNum);
+}
 export function queryBirdDetail(pengNum: string): Promise<any> {
-  if (!mem) return Promise.resolve({ error: 'not loaded' });
+  return Promise.resolve(queryBirdDetailInner(pengNum));
+}
+function queryBirdDetailInner(pengNum: string): any {
+  if (!mem) return { error: 'not loaded' };
   const c = mem;
 
   const penguin = c.pengByNum.get(pengNum);
-  if (!penguin) return Promise.resolve({ error: 'penguin not found' });
+  if (!penguin) return { error: 'penguin not found' };
 
   const chips = (c.chipsByPeng.get(pengNum) || []).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
   const result = { ...penguin, chips };
@@ -618,7 +668,7 @@ export function queryBirdDetail(pengNum: string): Promise<any> {
   }
   const breedingStats = Array.from(bsMap.values()).sort((a, b) => b.season.localeCompare(a.season));
 
-  return Promise.resolve({ penguin: result, sightings, biometrics, partners, breeding_stats: breedingStats });
+  return { penguin: result, sightings, biometrics, partners, breeding_stats: breedingStats };
 }
 
 /** Get all penguins with active chip info (for search/PenguinMini) */

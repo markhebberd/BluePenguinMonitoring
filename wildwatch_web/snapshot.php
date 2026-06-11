@@ -32,7 +32,7 @@ function getTotalCounts($pdo, $colonyId) {
     };
     return [
         'observations' => $c("SELECT COUNT(*) FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId]),
-        'scans' => $c("SELECT COUNT(*) FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId]),
+        'scans' => $c("SELECT COUNT(*) FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)", [$colonyId]),
         'penguins' => $c("SELECT COUNT(*) FROM penguins"),
         'chips' => $c("SELECT COUNT(*) FROM penguin_chips"),
         'locations' => $c("SELECT COUNT(*) FROM observation_locations WHERE colony_id = ?", [$colonyId]),
@@ -50,12 +50,12 @@ if ($since) {
     $obs->execute([$colonyId, $ts]);
 
     // Scans belonging to changed observations
-    $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id
+    $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted
         FROM penguin_scans ps
         JOIN observations o ON ps.observation_id = o.observation_id
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        WHERE ol.colony_id = ? AND o.updated_at >= ?");
-    $scans->execute([$colonyId, $ts]);
+        WHERE ol.colony_id = ? AND (o.updated_at >= ? OR ps.deleted_at >= ?)");
+    $scans->execute([$colonyId, $ts, $ts]);
 
     $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins WHERE updated_at >= ?");
     $penguins->execute([$ts]);
@@ -83,10 +83,19 @@ if ($since) {
         foreach ($ec->fetchAll() as $row) $editCounts[(int)$row['record_id']] = (int)$row['c'];
     }
 
+    // Use the current max watermark as snapshot_time (not server clock)
+    // This ensures we never skip data due to timing gaps
+    $wmStmt = $pdo->query("SELECT GREATEST(
+        COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01')
+    ) as wm");
+    $snapshotTime = $wmStmt->fetch()['wm'];
+
     echo json_encode([
         'incremental' => true,
         'since' => $ts,
-        'snapshot_time' => date('c'),
+        'snapshot_time' => $snapshotTime,
         'observations' => $obsRows,
         'scans' => $scans->fetchAll(),
         'penguins' => $penguins->fetchAll(),
@@ -113,11 +122,11 @@ $ec = $pdo->query("SELECT record_id, COUNT(*) as c FROM audit_log WHERE table_na
 $editCounts = [];
 foreach ($ec->fetchAll() as $row) $editCounts[(int)$row['record_id']] = (int)$row['c'];
 
-$scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id
+$scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted
     FROM penguin_scans ps
     JOIN observations o ON ps.observation_id = o.observation_id
     JOIN observation_locations ol ON o.location_id = ol.location_id
-    WHERE ol.colony_id = ?");
+    WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
 $scans->execute([$colonyId]);
 
 $penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins");
@@ -131,9 +140,15 @@ $bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_d
 
 $elapsed = round((microtime(true) - $t0) * 1000);
 
+$fullWm = $pdo->query("SELECT GREATEST(
+    COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
+    COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
+    COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01')
+) as wm")->fetch()['wm'];
+
 $json = json_encode([
     'incremental' => false,
-    'snapshot_time' => date('c'),
+    'snapshot_time' => $fullWm,
     'query_ms' => $elapsed,
     'observations' => $observations,
     'scans' => $scans->fetchAll(),
