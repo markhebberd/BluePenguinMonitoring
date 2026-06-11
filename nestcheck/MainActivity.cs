@@ -16,7 +16,6 @@ using PenguinMonitor.Services;
 using PenguinMonitor.UI.Factories;
 using PenguinMonitor.UI.Gestures;
 using PenguinMonitor.UI.Utils;
-using SmtpAuthenticator;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -87,6 +86,7 @@ namespace PenguinMonitor
         // Single box data 
         private bool _isBoxLocked;
         private bool _dataChangedSinceUnlock;
+        private bool _suppressDataChanged;
         // Track server observation IDs that user already confirmed locally (fallback for non-optimistic paths)
         private Dictionary<string, int> _confirmedAgainstServerObsId = new();
         private bool _highOffspringCountConfirmed;
@@ -96,6 +96,7 @@ namespace PenguinMonitor
         private LinearLayout _boxNavigationButtonsLayout;
         private TextView? _dataCardTitleText;
         private ImageView? _dataCardLockIconView;
+        private TextView? _discardButton;
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
@@ -185,7 +186,7 @@ namespace PenguinMonitor
             {
                 new Handler(Looper.MainLooper).PostDelayed(() =>
                 {
-                    try { OnBirdStatsClick(null, EventArgs.Empty); } catch { }
+                    try { StartSync(silent: true); } catch { }
                 }, 1500);
             }
         }
@@ -622,7 +623,6 @@ namespace PenguinMonitor
                 System.Diagnostics.Debug.WriteLine($"LoadJsonDataFromFile error: {ex}");
             }
         }
-        // TCP server loading removed — sync via wildwatch.co.nz
         private void ShowFileSelectionDialog(string[] files)
         {
             var fileNames = files.Select(f => 
@@ -653,86 +653,7 @@ namespace PenguinMonitor
         private void LoadJsonFileData(string filePath)
         {
             var json = File.ReadAllText(filePath);
-            ShowMonitorComparisonDialog(json, System.IO.Path.GetFileName(filePath));
-        }
-        private string SummariseMonitor(string label, Dictionary<string, BoxData> boxData)
-        {
-            if (boxData == null || boxData.Count == 0) return $"{label}: Empty\n";
-            int boxes = boxData.Count;
-            int emptyBoxes = boxData.Values.Count(b => b.Adults == 0 && b.Eggs == 0 && b.Chicks == 0 && b.ScannedIds.Count == 0 && string.IsNullOrEmpty(b.Notes) && string.IsNullOrEmpty(b.GateStatus));
-            int occupiedBoxes = boxes - emptyBoxes;
-            int totalScans = boxData.Values.Sum(b => b.ScannedIds.Count);
-            int totalAdults = boxData.Values.Sum(b => b.Adults);
-            int totalEggs = boxData.Values.Sum(b => b.Eggs);
-            int totalChicks = boxData.Values.Sum(b => b.Chicks);
-            int gateUps = boxData.Values.Count(b => !string.IsNullOrEmpty(b.GateStatus) && b.GateStatus.Contains("up", StringComparison.OrdinalIgnoreCase));
-            int regates = boxData.Values.Count(b => !string.IsNullOrEmpty(b.GateStatus) && b.GateStatus.Contains("egate", StringComparison.OrdinalIgnoreCase));
-            var dates = boxData.Values
-                .Where(b => b.whenDataCollectedUtc > DateTime.MinValue)
-                .Select(b => ToNzTime(b.whenDataCollectedUtc).ToString("d MMM yyyy"))
-                .Distinct().OrderBy(d => d).ToList();
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"📋 {label}");
-            sb.AppendLine($"  {boxes} boxes: {occupiedBoxes} occupied, {emptyBoxes} empty");
-            sb.AppendLine($"  🐧 {totalAdults} adults · 🥚 {totalEggs} eggs · 🐣 {totalChicks} chicks");
-            sb.AppendLine($"  📡 {totalScans} scans");
-            if (gateUps > 0 || regates > 0)
-                sb.AppendLine($"  🚪 {gateUps} gate ups · {regates} regates");
-            if (dates.Count > 0)
-                sb.AppendLine($"  📅 {string.Join(", ", dates.Take(5))}{(dates.Count > 5 ? $" +{dates.Count - 5} more" : "")}");
-            return sb.ToString();
-        }
-
-        private void ShowMonitorComparisonDialog(string json, string filename)
-        {
-            try
-            {
-                var loadedData = JToken.Parse(json);
-                if (loadedData == null || loadedData["BoxData"] == null)
-                {
-                    Toast.MakeText(this, "Invalid monitor file", ToastLength.Long)?.Show();
-                    return;
-                }
-
-                // Parse incoming monitor boxes for summary
-                var incomingBoxes = new Dictionary<string, BoxData>();
-                var boxDatas = loadedData["BoxData"] as JObject;
-                foreach (var boxItem in boxDatas)
-                {
-                    var dataNode = boxItem.Value;
-                    var bd = new BoxData
-                    {
-                        Adults = dataNode["Adults"]?.Value<int>() ?? 0,
-                        Eggs = dataNode["Eggs"]?.Value<int>() ?? 0,
-                        Chicks = dataNode["Chicks"]?.Value<int>() ?? 0,
-                        Notes = dataNode["Notes"]?.Value<string>() ?? "",
-                        whenDataCollectedUtc = dataNode["whenDataCollectedUtc"]?.Value<DateTime>() ?? DateTime.MinValue,
-                    };
-                    var scannedIds = dataNode["ScannedIds"];
-                    if (scannedIds != null)
-                        foreach (var s in scannedIds) bd.ScannedIds.Add(new ScanRecord { BirdId = s["BirdId"]?.Value<string>() ?? "" });
-                    incomingBoxes[boxItem.Key] = bd;
-                }
-
-                var incomingSummary = SummariseMonitor($"Incoming: {filename}", incomingBoxes);
-                var currentSummary = $"Current: {_colonyState.TodayBoxes.Count} today, {_colonyState.PendingUploadCount} pending, {_colonyState.PreviousBoxes.Count} from server\n";
-
-                var comparison = new System.Text.StringBuilder();
-                comparison.AppendLine($"📊 Incoming: {incomingBoxes.Count} boxes");
-
-                var message = $"{incomingSummary}\n{comparison}\nView this data in read-only historical mode.";
-
-                new AlertDialog.Builder(this)
-                    .SetTitle("View Historical Data?")
-                    .SetMessage(message)
-                    .SetPositiveButton("View", (s, e) => LoadJsonData(json, filename))
-                    .SetNegativeButton("Cancel", (s, e) => { })
-                    .Show();
-            }
-            catch (Exception ex)
-            {
-                Toast.MakeText(this, $"Failed to parse: {ex.Message}", ToastLength.Long)?.Show();
-            }
+            LoadJsonData(json, System.IO.Path.GetFileName(filePath));
         }
 
         private void ExitHistoricalView()
@@ -878,10 +799,10 @@ namespace PenguinMonitor
             var gateUpCount = todayBoxes.Values.Count(box => box.GateStatus == "Gate up");
             var regateCount = todayBoxes.Values.Count(box => box.GateStatus == "Regate");
 
-            var dirty = _colonyState.PendingUploadCount;
+            var pending = _colonyState.PendingUploadCount;
 
             string summary = $"📦 {todayBoxes.Count} boxes today\n" +
-                         (dirty > 0 ? $"⏳ {dirty} boxes pending upload\n" : "") +
+                         (pending > 0 ? $"⏳ {pending} boxes pending upload\n" : "") +
                          $"🐧 {totalScannedBirds} bird scans\n" +
                          $"👥 {totalAdults} adults\n" +
                          $"🥚 {totalEggs} eggs\n" +
@@ -890,7 +811,9 @@ namespace PenguinMonitor
             return summary;
         }
         private bool _isDownloadingCsvData = false;
-        private void OnBirdStatsClick(object? sender, EventArgs e)
+        private void OnSyncClick(object? sender, EventArgs e) => StartSync(silent: false);
+
+        private void StartSync(bool silent = false)
         {
             if (_isDownloadingCsvData)
                 return;
@@ -899,9 +822,25 @@ namespace PenguinMonitor
             UpdateStatusText("Syncing...");
             if (_syncButton != null)
             {
-                _syncButton.Text = "Syncing...";
+                _syncButton.Text = "Sync";
                 _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
                 _syncButton.Enabled = false;
+            }
+
+            // Show sync dialog — transitions from progress to results
+            var progressMessages = new[] { "📦 Boxes...", "🐧 Penguins...", "📍 Tags..." };
+            var cancelled = false;
+            AlertDialog? syncDialog = null;
+
+            if (!silent)
+            {
+                syncDialog = new AlertDialog.Builder(this)
+                    .SetTitle("Syncing")
+                    .SetMessage(string.Join("\n", progressMessages))
+                    .SetNegativeButton("Cancel", (s, e) => { cancelled = true; })
+                    .SetCancelable(false)
+                    .Create();
+                syncDialog?.Show();
             }
 
             _ = Task.Run(async () =>
@@ -909,13 +848,22 @@ namespace PenguinMonitor
                 DataStorageService.SyncResult result;
                 try
                 {
-                    result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
+                    result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys,
+                        onLineProgress: (lineIndex, status) =>
+                        {
+                            if (lineIndex >= 0 && lineIndex < progressMessages.Length)
+                            {
+                                var icon = lineIndex == 0 ? "📦" : lineIndex == 1 ? "🐧" : "📍";
+                                progressMessages[lineIndex] = $"{icon} {status}";
+                            }
+                            RunOnUiThread(() => syncDialog?.SetMessage(string.Join("\n", progressMessages)));
+                        },
+                        isCancelled: () => cancelled);
 
                     _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
                     _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
+                    if (result.BoxTags != null) _boxTags = result.BoxTags;
 
-                    if (result.BoxTags != null)
-                        _boxTags = result.BoxTags;
                 }
                 catch (Exception ex)
                 {
@@ -933,11 +881,8 @@ namespace PenguinMonitor
                     }
                     DrawPageLayouts();
 
-                    if ((_colonyState.GetTodayForBox(_currentBoxName) != null))
-                    {
-                        var boxData = _colonyState.GetTodayForBox(_currentBoxName);
-                        buildScannedIdsLayout(boxData.ScannedIds);
-                    }
+                    if (_colonyState.GetTodayForBox(_currentBoxName) != null)
+                        buildScannedIdsLayout(_colonyState.GetTodayForBox(_currentBoxName).ScannedIds);
 
                     // Start background polling after successful sync
                     if (result.Error == null && !result.AuthFailed)
@@ -947,70 +892,36 @@ namespace PenguinMonitor
                             _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
                     }
 
-                    ShowSyncResultsDialog(result);
+                    if (syncDialog != null)
+                    {
+                        if (cancelled)
+                        {
+                            syncDialog.Dismiss();
+                        }
+                        else
+                        {
+                            bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null || result.UploadErrors > 0;
+                            syncDialog.SetTitle(hasErrors ? "Sync — Partial" : "Synced");
+                            var okBtn = syncDialog.GetButton((int)Android.Content.DialogButtonType.Negative);
+                            if (okBtn != null) okBtn.Text = "OK";
+                        }
+                    }
 
                     if (result.Conflicts != null && result.Conflicts.Count > 0)
+                    {
+                        syncDialog?.Dismiss();
                         ShowConflictDialog(result.Conflicts);
+                    }
 
                     if (result.AuthFailed)
+                    {
+                        syncDialog?.Dismiss();
                         ShowLoginPrompt();
+                    }
                 });
             });
         }
 
-        private void ShowSyncResultsDialog(DataStorageService.SyncResult result)
-        {
-            if (!string.IsNullOrEmpty(result.Error))
-            {
-                var errDialog = new AlertDialog.Builder(this)
-                    .SetTitle("Sync Failed")
-                    .SetMessage($"❌ {result.Error}")
-                    .SetPositiveButton("OK", (s, e) => { })
-                    .SetNeutralButton("Retry", (s, e) => OnBirdStatsClick(null, EventArgs.Empty));
-                if (result.Error.Contains("<!") || result.Error.Contains("doctype") || result.Error.Contains("Human"))
-                    errDialog.SetNegativeButton("Open Website", (s, e) => {
-                        StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView, Android.Net.Uri.Parse("https://wildwatch.co.nz")));
-                    });
-                errDialog.Show();
-                return;
-            }
-
-            var lines = new List<string>();
-            lines.Add($"🐧 {result.BirdCount} penguin records");
-            lines.Add($"📦 {result.BoxCount} boxes from server");
-            if (result.Uploaded > 0)
-                lines.Add($"⬆️ {result.Uploaded} observations uploaded");
-            if (result.UploadErrors > 0)
-                lines.Add($"⚠️ {result.UploadErrors} upload errors");
-
-            if (result.TagSyncResult != null)
-            {
-                if (result.TagSyncResult.Error != null)
-                    lines.Add($"⚠️ Box tags: sync failed");
-                else
-                {
-                    var ts = result.TagSyncResult;
-                    if (ts.Downloaded > 0)
-                        lines.Add($"📍 Box tags: {ts.Downloaded} downloaded");
-                    else
-                        lines.Add($"📍 {ts.Tags.Count} box tags synced");
-                }
-            }
-
-            var pending = _colonyState.PendingUploadCount;
-            if (pending > 0)
-                lines.Add($"⏳ {pending} boxes pending upload");
-
-            bool hasErrors = result.TagSyncResult?.Error != null || result.UploadErrors > 0;
-
-            var dialog = new AlertDialog.Builder(this)
-                .SetTitle(hasErrors ? "Sync - Partial" : "Synced")
-                .SetMessage(string.Join("\n", lines))
-                .SetPositiveButton("OK", (s, e) => { });
-            if (hasErrors)
-                dialog.SetNeutralButton("Retry", (s, e) => OnBirdStatsClick(null, EventArgs.Empty));
-            dialog.Show();
-        }
 
         /// <summary>
         /// Build a styled comparison dialog with server (orange) and local (black) cards.
@@ -1916,18 +1827,6 @@ namespace PenguinMonitor
             var breedingDatesContent = createBreedingDatesTimelineSection();
             _breedingDatesCard.AddView(breedingDatesContent);
         }
-        private DateTime getLocalDateTime(MonitorDetails monitorDetails)
-        {
-            foreach (var boxData in monitorDetails.BoxData.Values)
-            {
-                if (boxData.whenDataCollectedUtc.Year > 2010)
-                    return ToNzTime(boxData.whenDataCollectedUtc);
-                foreach (var scan in boxData.ScannedIds)
-                    if (scan.Timestamp.Year > 2010)
-                        return ToNzTime(scan.Timestamp);
-            }
-            return DateTime.MinValue;
-        }
         private View? CreateBoxSummaryCard(string boxName, BoxObservation? thisBoxData, bool selected, BoxObservation? previousBoxData)
         {
             bool currentExists = thisBoxData != null;
@@ -2373,13 +2272,13 @@ namespace PenguinMonitor
             // Edit Box Tags mode toggle button
             Button editBoxTagsButton = _uiFactory.CreateStyledButton(
                 _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags",
-                _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.PRIMARY_BLUE);
+                _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.SUCCESS_GREEN);
             editBoxTagsButton.Click += (s, e) =>
             {
                 _appSettings.EditBoxTagsMode = !_appSettings.EditBoxTagsMode;
                 editBoxTagsButton.Text = _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags";
                 editBoxTagsButton.Background = _uiFactory.CreateRoundedBackground(
-                    _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.PRIMARY_BLUE, 8);
+                    _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.SUCCESS_GREEN, 8);
                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
                 DrawPageLayouts();
             };
@@ -2487,11 +2386,6 @@ namespace PenguinMonitor
 
             // Daily label warning
 
-            // TCP checkbox
-            var tcpCheckBox = new CheckBox(this) { Text = "Legacy incremental backups", Checked = _appSettings.TcpIncrementalEnabled };
-            tcpCheckBox.SetTextColor(Color.Black);
-            tcpCheckBox.CheckedChange += (s, e) => { _appSettings.TcpIncrementalEnabled = tcpCheckBox.Checked; };
-
             // Logout/Login button
             View authButton;
             if (_appSettings?.IsAuthenticated == true)
@@ -2532,32 +2426,36 @@ namespace PenguinMonitor
             // === Add all elements in order ===
             // 1. Region/Colony (top)
             _settingsCard.AddView(regionColonyLayout);
-            // 2. Daily label (warning is outside settings card so it shows when collapsed)
+            // 2. Daily label
             _settingsCard.AddView(dailyLabelLayout);
             // 3. Bluetooth
             _settingsCard.AddView(_isBluetoothEnabledCheckBox);
-            // 4. Legacy incremental backups
-            _settingsCard.AddView(tcpCheckBox);
-            // 5. Sync button
+            // 4. Box Tags + Sync + Logout/Login (horizontal row)
             _syncButton = _uiFactory.CreateStyledButton("Sync", UIFactory.PRIMARY_BLUE);
-            _syncButton.Click += OnBirdStatsClick;
-            var syncButton = _syncButton;
-            var syncParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            syncParams.SetMargins(8, 4, 8, 4);
-            syncButton.LayoutParameters = syncParams;
-            _settingsCard.AddView(syncButton);
-            // 6. Edit box tags + Logout/Login (horizontal)
-            var tagAndAuthLayout = new LinearLayout(this);
-            var tagAndAuthParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            tagAndAuthParams.SetMargins(0, 4, 0, 4);
-            tagAndAuthLayout.LayoutParameters = tagAndAuthParams;
-            var halfParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-            halfParams.SetMargins(4, 0, 4, 0);
-            editBoxTagsButton.LayoutParameters = halfParams;
-            authButton.LayoutParameters = halfParams;
-            tagAndAuthLayout.AddView(editBoxTagsButton);
-            tagAndAuthLayout.AddView(authButton);
-            _settingsCard.AddView(tagAndAuthLayout);
+            _syncButton.Click += OnSyncClick;
+
+            var actionRow = new PenguinMonitor.UI.FlowLayout(this);
+            var actionDensity = Resources?.DisplayMetrics?.Density ?? 2;
+            actionRow.HorizontalSpacing = (int)(6 * actionDensity);
+            actionRow.VerticalSpacing = (int)(6 * actionDensity);
+            var actionRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            actionRowParams.SetMargins(0, 4, 0, 4);
+            actionRow.LayoutParameters = actionRowParams;
+
+            var density = Resources?.DisplayMetrics?.Density ?? 2;
+            var gap = (int)(3 * density);
+            foreach (var btn in new[] { editBoxTagsButton, _syncButton, authButton as Button })
+            {
+                if (btn == null) continue;
+                btn.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
+                var p = new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                btn.LayoutParameters = p;
+            }
+            _syncButton.SetMinimumWidth((int)(100 * density));
+            actionRow.AddView(editBoxTagsButton);
+            actionRow.AddView(_syncButton);
+            actionRow.AddView(authButton);
+            _settingsCard.AddView(actionRow);
         }
 
         private void UpdateBoxSetsSelector()
@@ -2618,18 +2516,22 @@ namespace PenguinMonitor
         {
             var layout = new LinearLayout(this);
             layout.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            var density = Resources?.DisplayMetrics?.Density ?? 2;
             _prevBoxButton = _uiFactory.CreateStyledButton("← Prev", UIFactory.PRIMARY_BLUE);
             _prevBoxButton.Click += OnPrevBoxClick;
+            _prevBoxButton.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
             var buttonParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-            buttonParams.SetMargins(8, 16, 8, 16);
+            buttonParams.SetMargins(8, 8, 8, 8);
             _prevBoxButton.LayoutParameters = buttonParams;
 
             _selectBoxButton = _uiFactory.CreateStyledButton("Select", UIFactory.PRIMARY_BLUE);
             _selectBoxButton.Click += (s,e) => ShowBoxJumpDialog();
+            _selectBoxButton.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
             _selectBoxButton.LayoutParameters = buttonParams;
 
             _nextBoxButton = _uiFactory.CreateStyledButton("Next →", UIFactory.PRIMARY_BLUE);
             _nextBoxButton.Click += OnNextBoxClick;
+            _nextBoxButton.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
             _nextBoxButton.LayoutParameters = buttonParams;
 
             layout.AddView(_prevBoxButton);
@@ -2793,6 +2695,8 @@ namespace PenguinMonitor
                     {
                         bool hideExpand = tagMode || (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null);
                         _expandButton.Visibility = hideExpand ? ViewStates.Gone : ViewStates.Visible;
+                        if (_discardButton != null)
+                            _discardButton.Visibility = !_isBoxLocked && !tagMode ? ViewStates.Visible : ViewStates.Gone;
                     }
 
                     if (_dataCardLockIconView != null)
@@ -2853,7 +2757,7 @@ namespace PenguinMonitor
                     }
                     else
                     {
-                        _boxSavedTimeTextView.Text = tagStr;
+                        _boxSavedTimeTextView.Text = _isBoxLocked ? tagStr : "";
                         _boxSavedTimeTextView.SetTextColor(Color.Black);
                     }
                     _boxSavedTimeTextView.Gravity = GravityFlags.Right;
@@ -2871,6 +2775,7 @@ namespace PenguinMonitor
                         _stickyNoteBar.Clickable = !_isBoxLocked;
 
                     var editTexts = new[] { _adultsEditText, _eggsEditText, _chicksEditText, _notesEditText };
+                    _suppressDataChanged = true;
 
                     foreach (var editText in editTexts)
                     {
@@ -2909,6 +2814,8 @@ namespace PenguinMonitor
 
                     foreach (var editText in editTexts)
                         if (editText != null) editText[0].TextChanged += OnDataChanged;
+                    // Clear suppress after spinner events fire (they're queued after this Post)
+                    new Handler(Looper.MainLooper).Post(() => _suppressDataChanged = false);
 
                     // Update previous observation summary
                     UpdatePreviousObsSummary();
@@ -3394,6 +3301,43 @@ namespace PenguinMonitor
             _boxSavedTimeTextView = new TextView(this);
             _singleBoxDataTitleLayout.AddView(_boxSavedTimeTextView);
 
+            // Discard button — visible only when unlocked
+            _discardButton = new TextView(this) { Text = "✕", TextSize = 14, Gravity = GravityFlags.Center };
+            _discardButton.SetTextColor(Color.White);
+            _discardButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            _discardButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.DANGER_RED, 6);
+            var discardParams = new LinearLayout.LayoutParams(
+                (int)(28 * (Resources?.DisplayMetrics?.Density ?? 2)),
+                (int)(28 * (Resources?.DisplayMetrics?.Density ?? 2)));
+            discardParams.SetMargins(12, 0, 4, 0);
+            _discardButton.LayoutParameters = discardParams;
+            _discardButton.Visibility = ViewStates.Gone;
+            _discardButton.Clickable = true;
+            _discardButton.Click += (s, e) =>
+            {
+                if (_dataChangedSinceUnlock)
+                {
+                    bool hasServerData = _colonyState.TodayBoxes.ContainsKey(_currentBoxName);
+                    new AlertDialog.Builder(this)
+                        .SetMessage(hasServerData ? "Discard changes?" : "Discard data?")
+                        .SetPositiveButton(hasServerData ? "Discard changes" : "Discard data", (s2, e2) =>
+                        {
+                            _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
+                            _isBoxLocked = true;
+                            _dataChangedSinceUnlock = false;
+                            DrawPageLayouts();
+                        })
+                        .SetNegativeButton("Cancel", (s2, e2) => { })
+                        .Show();
+                }
+                else
+                {
+                    _isBoxLocked = true;
+                    _dataChangedSinceUnlock = false;
+                    DrawPageLayouts();
+                }
+            };
+            _singleBoxDataTitleLayout.AddView(_discardButton);
 
             // Navigation buttons above the box header
             _boxNavigationButtonsLayout = CreateNavigationLayout();
@@ -3560,7 +3504,7 @@ namespace PenguinMonitor
             _breedingChanceSpinner[0].SetSelection(breedingPercentageIndex, false);
             _breedingChanceSpinner[0].ItemSelected += (s, e) =>
             {
-                _dataChangedSinceUnlock = true;
+                if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
                 string selectedItem = items[e.Position];
                 string status = _breedingChanceSpinner[0].SelectedItem.ToString();
             };
@@ -3568,7 +3512,7 @@ namespace PenguinMonitor
             _gateStatusSpinner.Add(_uiFactory.CreateSpinner(new string[] { "", "Gate up", "Regate" }));
             _gateStatusSpinner[0].ItemSelected += (s, e) =>
             {
-                _dataChangedSinceUnlock = true;
+                if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
                 // Only save if viewing current data (not historical)
                 if (false /* no historical view */) return;
 
@@ -3716,10 +3660,10 @@ namespace PenguinMonitor
         private void ShowEmptyBoxDialog(Action onConfirm, Action onCancel)
         {
             ShowConfirmationDialog(
-                "Empty Box Confirmation",
-                "Please confirm this box has been inspected and is empty",
-                ("Confirm empty", onConfirm),
-                ("Discard", onCancel)
+                "Empty Box",
+                "This box has been inspected and is empty",
+                ("Save as empty", onConfirm),
+                ("Skip", onCancel)
             );
         }
         private void OnSaveDataClick(object? sender, EventArgs e)
@@ -3836,7 +3780,7 @@ namespace PenguinMonitor
         }
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
-            _dataChangedSinceUnlock = true;
+            if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
             CheckForHighOffspringCount();
             if ((int.TryParse(_eggsEditText?[0].Text ?? "0", out int eggs) && eggs > 0) || (int.TryParse(_chicksEditText?[0].Text ?? "0", out int chicks) && chicks > 0))
             {
@@ -3987,7 +3931,7 @@ namespace PenguinMonitor
             {
                 _searchResultsLayout.RemoveAllViews();
                 var query = _manualScanEditText.Text?.Trim().ToUpper() ?? "";
-                if (query.Length < 2 || _remotePenguinData == null) return;
+                if (query.Length < 1 || _remotePenguinData == null) return;
 
                 // Search: exact peng# match first, then pit_id substring, then peng# prefix
                 var exactPengNum = new List<PenguinData>();
@@ -4793,7 +4737,7 @@ namespace PenguinMonitor
                 Intent.SetData(null);
                 Intent.SetAction(null);
 
-                ShowMonitorComparisonDialog(json, filename);
+                LoadJsonData(json, filename);
             }
             catch (Exception ex)
             {
@@ -4854,23 +4798,6 @@ namespace PenguinMonitor
         {
             DataStorageService.SaveColonyState(this, _colonyState);
             UpdateSyncButtonLabel();
-
-            // TCP incremental upload (legacy — can be disabled in settings)
-            if (_appSettings.TcpIncrementalEnabled)
-            {
-                try
-                {
-                    var todayMonitor = _colonyState.BuildTodayMonitor(_colonyState.DailyLabel ?? "NestCheck");
-                    if (todayMonitor.BoxData.Count > 0)
-                    {
-                        var json = JsonConvert.SerializeObject(todayMonitor, Formatting.Indented);
-                        var bw = new System.ComponentModel.BackgroundWorker();
-                        bw.DoWork += (s, e) => { try { Backend.RequestServerResponse("PenguinReport:" + json); } catch { } };
-                        bw.RunWorkerAsync();
-                    }
-                }
-                catch { }
-            }
 
         }
 
@@ -5288,7 +5215,7 @@ namespace PenguinMonitor
                         "File Exists",
                         $"A file named '{fileName}' already exists. Do you want to overwrite it?",
                         ("Overwrite", () => {
-                            SaveMonitorDetailsToPath(filePath, jsonContents);
+                            SaveJsonToPath(filePath, jsonContents);
                         }
                     ),
                         ("Cancel", () => ShowSaveFilenameDialog()) // Go back to filename dialog
@@ -5296,7 +5223,7 @@ namespace PenguinMonitor
                 }
                 else
                 {
-                    SaveMonitorDetailsToPath(filePath, jsonContents);
+                    SaveJsonToPath(filePath, jsonContents);
                 }
             }
             catch (Exception ex)
@@ -5304,7 +5231,7 @@ namespace PenguinMonitor
                 Toast.MakeText(this, $"❌ Export failed: {ex.Message}", ToastLength.Short)?.Show();
             }
         }
-        private void SaveMonitorDetailsToPath(string filePath, string json )
+        private void SaveJsonToPath(string filePath, string json )
         {
             try
             {
@@ -5520,7 +5447,6 @@ namespace PenguinMonitor
                 "📊 Monitor statistics",
                 "💾 Save monitor",
                 "📂 Open monitor file",
-                "📂 Open monitor from server",
             };
             var builder = new AlertDialog.Builder(this);
             builder.SetTitle("Load & Save Options");            
@@ -5536,9 +5462,6 @@ namespace PenguinMonitor
                         break;
                     case 2: // Load data
                         LoadJsonDataFromFile();
-                        break;
-                    case 3: // Load data
-                        Toast.MakeText(this, "TCP server loading removed — use Sync button", ToastLength.Short)?.Show();
                         break;
                 }
             });

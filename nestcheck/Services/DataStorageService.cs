@@ -15,13 +15,37 @@ namespace PenguinMonitor.Services
     {
         private const string APP_SETTINGS_FILENAME = "app_settings.json";
         private const string COLONY_STATE_FILENAME = "colony_state.json";
-        private const string LEGACY_MONITOR_FILENAME = "penguin_data_autosave.json";
         internal const string REMOTE_BIRD_DATA_FILENAME = "remotePenguinData.json";
-        internal const string REMOTE_BOX_DATA_FILENAME = "remoteBoxData.json";
         internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        private const int RETRY_MAX_SECONDS = 30;
+        private const int RETRY_DELAY_MS = 5000;
+
+        private static async Task<T> WithRetry<T>(Func<Task<T>> action, string label, Action<string>? onStatus = null, Func<bool>? isCancelled = null)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(RETRY_MAX_SECONDS);
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    onStatus?.Invoke(attempt > 0 ? $"{label} (attempt {attempt + 1})..." : $"{label}...");
+                    var result = await action();
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    if (DateTime.UtcNow >= deadline || (isCancelled?.Invoke() == true))
+                    {
+                        onStatus?.Invoke($"{label} ✗");
+                        throw new Exception($"{label} failed after {attempt + 1} attempts: {ex.Message}");
+                    }
+                    onStatus?.Invoke($"{label} (attempt {attempt + 1} failed, retrying)...");
+                    await Task.Delay(Math.Min(RETRY_DELAY_MS, (int)(deadline - DateTime.UtcNow).TotalMilliseconds));
+                }
+            }
+        }
         internal const string WILDWATCH_BASE_URL = "https://wildwatch.co.nz/penguin-api";
         internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/api/penguins.php";
         internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
@@ -129,9 +153,9 @@ namespace PenguinMonitor.Services
             public List<SyncConflict>? Conflicts { get; set; }
         }
 
-        // ===== Main Sync: Upload dirty, download fresh state =====
+        // ===== Main Sync: Upload pending, download fresh state =====
 
-        internal async Task<SyncResult> SyncWithServer(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null)
+        internal async Task<SyncResult> SyncWithServer(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null, Action<int, string>? onLineProgress = null, Func<bool>? isCancelled = null)
         {
             var result = new SyncResult();
             try
@@ -179,7 +203,7 @@ namespace PenguinMonitor.Services
                 }
 
                 // Step 1: Upload ALL pending observations — server detects conflicts
-                var dirtyBoxes = new List<object>();
+                var pendingBoxes = new List<object>();
                 foreach (var pending in colonyState.PendingObservations)
                 {
                     if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
@@ -194,7 +218,7 @@ namespace PenguinMonitor.Services
                             accuracy = scan.Accuracy,
                         });
                     }
-                    dirtyBoxes.Add(new {
+                    pendingBoxes.Add(new {
                         box_name = pending.BoxName,
                         observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                         adults = pending.Adults,
@@ -207,11 +231,11 @@ namespace PenguinMonitor.Services
                     });
                 }
 
-                if (dirtyBoxes.Count > 0)
+                if (pendingBoxes.Count > 0)
                 {
                     var uploadBody = JsonConvert.SerializeObject(new {
                         daily_label = colonyState.DailyLabel,
-                        observations = dirtyBoxes,
+                        observations = pendingBoxes,
                     });
                     var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload");
                     uploadRequest.Headers.Add("Authorization", $"Bearer {token}");
@@ -258,202 +282,143 @@ namespace PenguinMonitor.Services
                     }
                 }
 
-                // Step 2: Download fresh state from server (parallel with penguin data + box tags)
-                var downloadRequest = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_SYNC_URL);
-                downloadRequest.Headers.Add("Authorization", $"Bearer {token}");
-                Task<HttpResponseMessage> stateTask = _httpClient.SendAsync(downloadRequest);
+                // Step 2: Fetch + process in parallel — each task reports its own progress
+                var nzToday = MainActivity.NzToday;
+                bool authFailed = false;
 
-                var birdsRequest = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL);
-                birdsRequest.Headers.Add("Authorization", $"Bearer {token}");
-                Task<HttpResponseMessage> birdsTask = _httpClient.SendAsync(birdsRequest);
+                // Boxes: fetch, parse, update colony state
+                Task boxesTask = WithRetry(async () =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_SYNC_URL);
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
+                    resp.EnsureSuccessStatusCode();
+                    var json = await resp.Content.ReadAsStringAsync();
+                    var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
 
+                    colonyState.PreviousBoxes.Clear();
+                    if (serverState?.boxes != null)
+                    {
+                        foreach (var kvp in serverState.boxes)
+                        {
+                            var b = kvp.Value;
+                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
+                                b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                            obs.BoxName = kvp.Key;
+                            if (b.scans != null) foreach (var scan in b.scans)
+                                obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
+
+                            var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
+                            if (obsNzDate == nzToday)
+                            {
+                                bool hasPending = colonyState.PendingObservations.Any(p => p.BoxName == kvp.Key && p.IsPendingUpload && MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzToday);
+                                if (!hasPending) { obs.IsPendingUpload = false; colonyState.TodayBoxes[kvp.Key] = obs; }
+                            }
+                            else colonyState.PreviousBoxes[kvp.Key] = obs;
+                        }
+                        result.BoxCount = serverState.boxes.Count;
+
+                        var serverTodayBoxNames = new HashSet<string>(serverState.boxes.Where(kvp => { var d = DateTime.TryParse(kvp.Value.observation_time_utc, out var dt) ? dt : DateTime.MinValue; return MainActivity.ToNzTime(d).Date == nzToday; }).Select(kvp => kvp.Key));
+                        foreach (var key in colonyState.TodayBoxes.Keys.Where(k => !serverTodayBoxNames.Contains(k) && !colonyState.PendingObservations.Any(p => p.BoxName == k && p.IsPendingUpload)).ToList())
+                            colonyState.TodayBoxes.Remove(key);
+                    }
+                    if (serverState?.previous != null)
+                        foreach (var kvp in serverState.previous)
+                        {
+                            var b = kvp.Value;
+                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                            obs.BoxName = kvp.Key;
+                            if (b.scans != null) foreach (var scan in b.scans) obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
+                            colonyState.PreviousBoxes[kvp.Key] = obs;
+                        }
+                    colonyState.LastSyncedUtc = DateTime.UtcNow;
+                    if (serverState?.locations != null)
+                    {
+                        var boxNotes = new Dictionary<string, BoxNoteData>();
+                        foreach (var loc in serverState.locations) boxNotes[loc.location_name ?? ""] = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "" };
+                        File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
+                    }
+                    onLineProgress?.Invoke(0, $"{result.BoxCount} boxes ✓");
+                    return result.BoxCount;
+                }, "Boxes", s => onLineProgress?.Invoke(0, s), isCancelled);
+
+                // Penguins: fetch, parse, save
+                Task birdsTask = WithRetry(async () =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL);
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
+                    resp.EnsureSuccessStatusCode();
+                    var birdsJson = await resp.Content.ReadAsStringAsync();
+                    if (string.IsNullOrEmpty(birdsJson) || !birdsJson.TrimStart().StartsWith("["))
+                        throw new Exception($"Penguins API: expected JSON array");
+                    var penguinRecords = JsonConvert.DeserializeObject<List<WildWatchPenguin>>(birdsJson);
+                    var remotePenguinData = new Dictionary<string, PenguinData>();
+                    foreach (var record in penguinRecords)
+                    {
+                        if (string.IsNullOrEmpty(record.pit_id) || record.pit_id.Length < 8) continue;
+                        var cleanId = new string(record.pit_id.Where(char.IsLetterOrDigit).ToArray());
+                        var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
+                        if (eightDigitId.Length != 8) continue;
+                        var lifeStage = LifeStage.Adult;
+                        if (!string.IsNullOrEmpty(record.life_stage)) Enum.TryParse<LifeStage>(record.life_stage, true, out lifeStage);
+                        remotePenguinData[cleanId.ToUpper()] = new PenguinData
+                        {
+                            FullPitId = record.pit_id ?? "", ScannedId = eightDigitId, PengNum = record.peng_num ?? "",
+                            LastKnownLifeStage = lifeStage, Sex = record.sex ?? "", VidForScanner = record.vid_for_scanner ?? "",
+                            ChipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue,
+                            ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? ""
+                        };
+                    }
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
+                        JsonConvert.SerializeObject(remotePenguinData, Formatting.Indented));
+                    result.BirdCount = remotePenguinData.Count;
+                    onLineProgress?.Invoke(1, $"{result.BirdCount} penguin records ✓");
+                    return result.BirdCount;
+                }, "Penguins", s => onLineProgress?.Invoke(1, s), isCancelled);
+
+                // Tags: fetch + sync
                 Task<BoxTagService.SyncResult?> tagSyncTask;
                 if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)
-                    tagSyncTask = BoxTagService.SyncWithApiAsync(boxTags, context.FilesDir.AbsolutePath, validBoxIds)
-                        .ContinueWith(t => (BoxTagService.SyncResult?)t.Result);
+                    tagSyncTask = WithRetry(async () =>
+                    {
+                        var tagResult = await BoxTagService.SyncWithApiAsync(boxTags, context.FilesDir.AbsolutePath, validBoxIds);
+                        if (tagResult.Error != null) throw new Exception(tagResult.Error);
+                        return (BoxTagService.SyncResult?)tagResult;
+                    }, "Tags", s => onLineProgress?.Invoke(2, s), isCancelled);
                 else
                     tagSyncTask = Task.FromResult<BoxTagService.SyncResult?>(null);
 
-                await Task.WhenAll(stateTask, birdsTask, tagSyncTask);
-                sw.Stop();
-                System.Diagnostics.Debug.WriteLine($"SyncWithServer total: {sw.ElapsedMilliseconds}ms");
+                // Wait for all — don't throw if individual tasks fail
+                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask); } catch { }
 
-                // Step 2a: Process state download
-                var stateResponse = await stateTask;
-                if (stateResponse.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    result.Error = "Session expired. Please log in again.";
-                    result.AuthFailed = true;
-                    return result;
-                }
-                stateResponse.EnsureSuccessStatusCode();
-                var stateJson = await stateResponse.Content.ReadAsStringAsync();
-                if (string.IsNullOrEmpty(stateJson) || !stateJson.TrimStart().StartsWith("{"))
-                    throw new Exception($"Sync API: expected JSON object, got: {stateJson?.Substring(0, Math.Min(stateJson?.Length ?? 0, 100))}");
-
-                var serverState = JsonConvert.DeserializeObject<SyncResponse>(stateJson);
-
-                // PreviousBoxes can be fully replaced (read-only server data)
-                colonyState.PreviousBoxes.Clear();
-                var nzToday = MainActivity.NzToday;
-                if (serverState?.boxes != null)
-                {
-                    foreach (var kvp in serverState.boxes)
-                    {
-                        var b = kvp.Value;
-                        var obs = BoxObservation.FromServerData(
-                            b.observation_id, b.location_id, b.observation_time_utc,
-                            b.adults, b.eggs, b.chicks,
-                            b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
-                            b.observer_name);
-                        obs.BoxName = kvp.Key;
-
-                        // Add scans from server
-                        if (b.scans != null)
-                        {
-                            foreach (var scan in b.scans)
-                            {
-                                obs.ScannedIds.Add(new ScanRecord
-                                {
-                                    BirdId = scan.pit_id ?? "",
-                                    Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow,
-                                });
-                            }
-                        }
-
-                        var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
-                        if (obsNzDate == nzToday)
-                        {
-                            // Don't overwrite if there's a local pending edit for this box today
-                            bool hasPendingEdit = colonyState.PendingObservations.Any(p =>
-                                p.BoxName == kvp.Key && p.IsPendingUpload &&
-                                MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzToday);
-                            if (!hasPendingEdit)
-                            {
-                                obs.IsPendingUpload = false;
-                                colonyState.TodayBoxes[kvp.Key] = obs;
-                            }
-                        }
-                        else
-                        {
-                            colonyState.PreviousBoxes[kvp.Key] = obs;
-                        }
-                    }
-                    result.BoxCount = serverState.boxes.Count;
-
-                    // Remove TodayBoxes entries deleted on server (not in server response, no pending local edit)
-                    var serverTodayBoxNames = new HashSet<string>(
-                        serverState.boxes.Where(kvp => {
-                            var d = DateTime.TryParse(kvp.Value.observation_time_utc, out var dt) ? dt : DateTime.MinValue;
-                            return MainActivity.ToNzTime(d).Date == nzToday;
-                        }).Select(kvp => kvp.Key));
-                    var staleKeys = colonyState.TodayBoxes.Keys
-                        .Where(k => !serverTodayBoxNames.Contains(k)
-                            && !colonyState.PendingObservations.Any(p => p.BoxName == k && p.IsPendingUpload))
-                        .ToList();
-                    foreach (var key in staleKeys)
-                        colonyState.TodayBoxes.Remove(key);
-                }
-
-                // Process previous observations (for boxes where latest is today)
-                if (serverState?.previous != null)
-                {
-                    foreach (var kvp in serverState.previous)
-                    {
-                        var b = kvp.Value;
-                        var obs = BoxObservation.FromServerData(
-                            b.observation_id, b.location_id, b.observation_time_utc,
-                            b.adults, b.eggs, b.chicks,
-                            b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
-                            b.observer_name);
-                        obs.BoxName = kvp.Key;
-
-                        if (b.scans != null)
-                        {
-                            foreach (var scan in b.scans)
-                            {
-                                obs.ScannedIds.Add(new ScanRecord
-                                {
-                                    BirdId = scan.pit_id ?? "",
-                                    Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow,
-                                });
-                            }
-                        }
-
-                        colonyState.PreviousBoxes[kvp.Key] = obs;
-                    }
-                }
-
-                colonyState.LastSyncedUtc = DateTime.UtcNow;
-
-                // Process locations → box notes
-                if (serverState?.locations != null)
-                {
-                    var boxNotes = new Dictionary<string, BoxNoteData>();
-                    foreach (var loc in serverState.locations)
-                    {
-                        boxNotes[loc.location_name ?? ""] = new BoxNoteData
-                        {
-                            LocationId = loc.location_id,
-                            BoxName = loc.location_name ?? "",
-                            PersistentNotes = loc.persistent_notes ?? "",
-                        };
-                    }
-                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME),
-                        JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
-                }
-
-                // Step 2b: Process penguin data
-                var birdsResponse = await birdsTask;
-                birdsResponse.EnsureSuccessStatusCode();
-                var birdsJson = await birdsResponse.Content.ReadAsStringAsync();
-                if (string.IsNullOrEmpty(birdsJson) || !birdsJson.TrimStart().StartsWith("["))
-                    throw new Exception($"Penguins API: expected JSON array, got: {birdsJson?.Substring(0, Math.Min(birdsJson?.Length ?? 0, 100))}");
-                var penguinRecords = JsonConvert.DeserializeObject<List<WildWatchPenguin>>(birdsJson);
-
-                var remotePenguinData = new Dictionary<string, PenguinData>();
-                foreach (var record in penguinRecords)
-                {
-                    if (string.IsNullOrEmpty(record.pit_id) || record.pit_id.Length < 8) continue;
-                    var cleanId = new string(record.pit_id.Where(char.IsLetterOrDigit).ToArray());
-                    var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
-                    if (eightDigitId.Length != 8) continue;
-
-                    var lifeStage = LifeStage.Adult;
-                    if (!string.IsNullOrEmpty(record.life_stage))
-                        Enum.TryParse<LifeStage>(record.life_stage, true, out lifeStage);
-
-                    var fullId = cleanId.ToUpper();
-                    var pengData = new PenguinData
-                    {
-                        FullPitId = record.pit_id ?? "",
-                        ScannedId = eightDigitId,
-                        PengNum = record.peng_num ?? "",
-                        LastKnownLifeStage = lifeStage,
-                        Sex = record.sex ?? "",
-                        VidForScanner = record.vid_for_scanner ?? "",
-                        ChipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue,
-                        ChipAs = record.chipped_as_adult == 1 ? "Adult" : "",
-                        ChickSizeCode = record.chick_size_code ?? ""
-                    };
-                    remotePenguinData[fullId] = pengData;
-                }
-
-                File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
-                    JsonConvert.SerializeObject(remotePenguinData, Formatting.Indented));
-                result.BirdCount = remotePenguinData.Count;
-
-                // Step 2c: Box tag sync results
-                var tagSyncResult = await tagSyncTask;
-                result.TagSyncResult = tagSyncResult;
-                if (tagSyncResult != null)
-                {
-                    result.BoxTags = tagSyncResult.Tags;
-                    result.BoxTagError = tagSyncResult.Error;
-                }
-
-                // Save colony state to disk
+                // Save colony state after all tasks complete (boxes task already mutated it)
                 SaveColonyState(context, colonyState);
+
+                if (authFailed) { result.Error = "Session expired. Please log in again."; result.AuthFailed = true; return result; }
+                if (boxesTask.IsFaulted) { result.Error = $"Boxes: {boxesTask.Exception?.InnerException?.Message ?? "Failed"}"; return result; }
+                if (birdsTask.IsFaulted)
+                    result.Error = $"Penguin data: {birdsTask.Exception?.InnerException?.Message ?? "Failed"}";
+
+                // Process tag results
+                if (tagSyncTask.IsFaulted)
+                {
+                    result.TagSyncResult = new BoxTagService.SyncResult { Error = tagSyncTask.Exception?.InnerException?.Message ?? "Failed" };
+                    onLineProgress?.Invoke(2, "Tags ✗");
+                }
+                else
+                {
+                    var tagSyncResult = await tagSyncTask;
+                    result.TagSyncResult = tagSyncResult;
+                    if (tagSyncResult != null)
+                    {
+                        result.BoxTags = tagSyncResult.Tags;
+                        result.BoxTagError = tagSyncResult.Error;
+                        onLineProgress?.Invoke(2, $"{tagSyncResult.Tags.Count} box tags ✓");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -541,7 +506,7 @@ namespace PenguinMonitor.Services
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
             if (colonyState.PendingObservations.Count(p => p.IsPendingUpload) == 0) return result;
 
-            var dirtyBoxes = new List<object>();
+            var pendingBoxes = new List<object>();
             foreach (var pending in colonyState.PendingObservations)
             {
                 if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
@@ -560,10 +525,10 @@ namespace PenguinMonitor.Services
                 };
                 if (pending.ConfirmedAgainstObsId.HasValue)
                     obsPayload["expected_observation_id"] = pending.ConfirmedAgainstObsId.Value;
-                dirtyBoxes.Add(obsPayload);
+                pendingBoxes.Add(obsPayload);
             }
 
-            var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = dirtyBoxes });
+            var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = pendingBoxes });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
@@ -699,38 +664,6 @@ namespace PenguinMonitor.Services
                     if (state != null) return state;
                 }
 
-                // Try loading legacy monitor data and migrating
-                var legacyPath = Path.Combine(context.FilesDir?.AbsolutePath, LEGACY_MONITOR_FILENAME);
-                if (File.Exists(legacyPath))
-                {
-                    var json = File.ReadAllText(legacyPath);
-                    var legacy = JsonConvert.DeserializeObject<Dictionary<int, MonitorDetails>>(json);
-                    if (legacy != null && legacy.ContainsKey(0))
-                    {
-                        var state = new ColonyState();
-                        foreach (var kvp in legacy[0].BoxData)
-                        {
-                            var obs = new BoxObservation
-                            {
-                                BoxName = kvp.Key,
-                                ScannedIds = kvp.Value.ScannedIds,
-                                Adults = kvp.Value.Adults,
-                                Eggs = kvp.Value.Eggs,
-                                Chicks = kvp.Value.Chicks,
-                                GateStatus = kvp.Value.GateStatus,
-                                Notes = kvp.Value.Notes,
-                                WhenDataCollectedUtc = kvp.Value.whenDataCollectedUtc,
-                                BreedingStatus = kvp.Value.BreedingChance,
-                                IsPendingUpload = true,
-                                PendingUploadSinceUtc = DateTime.UtcNow,
-                            };
-                            state.PendingObservations.Add(obs);
-                        }
-                        System.Diagnostics.Debug.WriteLine($"Migrated {state.PendingObservations.Count} boxes from legacy format");
-                        SaveColonyState(context, state);
-                        return state;
-                    }
-                }
             }
             catch (Exception ex)
             {
@@ -790,20 +723,6 @@ namespace PenguinMonitor.Services
             }
         }
 
-        public async Task<Dictionary<int, BoxRemoteData>?> loadRemoteBoxInfoFromAppDataDir(Android.Content.Context? context)
-        {
-            try
-            {
-                string remoteBoxDataPath = Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BOX_DATA_FILENAME);
-                var remoteBoxDataJson = File.ReadAllText(remoteBoxDataPath);
-                return JsonConvert.DeserializeObject<Dictionary<int, BoxRemoteData>>(remoteBoxDataJson);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to load remote box data: {ex.Message}");
-                return null;
-            }
-        }
 
         public async Task<Dictionary<string, BoxPredictedDates>?> loadBreedingDatesFromAppDataDir(Android.Content.Context? context)
         {
@@ -861,7 +780,7 @@ namespace PenguinMonitor.Services
             try
             {
                 if (string.IsNullOrEmpty(filesDir)) return;
-                foreach (var f in new[] { COLONY_STATE_FILENAME, LEGACY_MONITOR_FILENAME })
+                foreach (var f in new[] { COLONY_STATE_FILENAME })
                 {
                     var path = Path.Combine(filesDir, f);
                     if (File.Exists(path)) File.Delete(path);

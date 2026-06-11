@@ -664,6 +664,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     return result;
   };
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
   const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
   useEffect(() => { setLocalScans(obs.scans); }, [obs.observation_id]);
@@ -697,7 +698,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   };
 
   return (
-    <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`}>
+    <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`} style={deleting ? {opacity: 0.4, pointerEvents: 'none'} : undefined}>
       <div className="obs-top">
         {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b> <span className="muted small">{obs.monitor_filename}</span></span>}
         <span className="obs-top-right">
@@ -709,6 +710,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={async () => {
               const reason = prompt(`Delete observation from ${formatDate(obs.observation_time_utc)}?\n\nReason for deletion (optional):`);
               if (reason === null) return;
+              setEditing(false);
+              setDeleting(true);
               await deleteRecord(token || '', 'observations', obsId!, reason || undefined);
               onDataChange?.();
             }}>Delete</button>
@@ -2714,7 +2717,7 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   return (
     <div>
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
-      {expanded && observations.map((o: any, i: number) => <ObsCard key={`${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
+      {expanded && observations.map((o: any, i: number) => <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
 }
@@ -3604,7 +3607,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
                   ) : (
-                    <ObsCard key={`t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
+                    <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
                   {sortedPrev.map(([label, obs]) => (
                     <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={goToDay} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />

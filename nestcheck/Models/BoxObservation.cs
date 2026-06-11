@@ -24,11 +24,11 @@ namespace PenguinMonitor.Models
         public string? ObserverName { get; set; }
 
         /// <summary>True if this observation has been modified locally and not yet uploaded.</summary>
-        [JsonProperty("IsDirty")]
+        [JsonProperty("IsDirty")] // Legacy JSON key — kept for backwards compatibility with saved data on devices
         public bool IsPendingUpload { get; set; }
 
         /// <summary>UTC timestamp of when this observation was first modified locally.</summary>
-        [JsonProperty("DirtyTimestampUtc")]
+        [JsonProperty("DirtyTimestampUtc")] // Legacy JSON key
         public DateTime? PendingUploadSinceUtc { get; set; }
 
         /// <summary>Server observation_id this edit was confirmed against (for optimistic concurrency).</summary>

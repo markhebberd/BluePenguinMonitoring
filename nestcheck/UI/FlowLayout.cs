@@ -8,6 +8,9 @@ namespace PenguinMonitor.UI
     /// </summary>
     public class FlowLayout : ViewGroup
     {
+        public int HorizontalSpacing { get; set; }
+        public int VerticalSpacing { get; set; }
+
         public FlowLayout(Context context) : base(context) { }
 
         protected override void OnMeasure(int widthMeasureSpec, int heightMeasureSpec)
@@ -20,13 +23,15 @@ namespace PenguinMonitor.UI
                 var child = GetChildAt(i)!;
                 child.Measure(MeasureSpec.MakeMeasureSpec(maxWidth, MeasureSpecMode.AtMost),
                     MeasureSpec.MakeMeasureSpec(0, MeasureSpecMode.Unspecified));
-                if (x + child.MeasuredWidth > maxWidth && x > 0)
+                int childWidth = child.MeasuredWidth + (x > 0 ? HorizontalSpacing : 0);
+                if (x + childWidth > maxWidth && x > 0)
                 {
                     x = 0;
-                    y += rowHeight;
+                    y += rowHeight + VerticalSpacing;
                     rowHeight = 0;
+                    childWidth = child.MeasuredWidth;
                 }
-                x += child.MeasuredWidth;
+                x += childWidth;
                 rowHeight = System.Math.Max(rowHeight, child.MeasuredHeight);
             }
 
@@ -41,14 +46,16 @@ namespace PenguinMonitor.UI
             for (int i = 0; i < ChildCount; i++)
             {
                 var child = GetChildAt(i)!;
-                if (x + child.MeasuredWidth > maxWidth && x > 0)
+                int spacing = x > 0 ? HorizontalSpacing : 0;
+                if (x + spacing + child.MeasuredWidth > maxWidth && x > 0)
                 {
                     x = 0;
-                    y += rowHeight;
+                    y += rowHeight + VerticalSpacing;
                     rowHeight = 0;
+                    spacing = 0;
                 }
-                child.Layout(x, y, x + child.MeasuredWidth, y + child.MeasuredHeight);
-                x += child.MeasuredWidth;
+                child.Layout(x + spacing, y, x + spacing + child.MeasuredWidth, y + child.MeasuredHeight);
+                x += spacing + child.MeasuredWidth;
                 rowHeight = System.Math.Max(rowHeight, child.MeasuredHeight);
             }
         }

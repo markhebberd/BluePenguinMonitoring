@@ -105,52 +105,5 @@ namespace PenguinMonitor.Models
             }
         }
 
-        /// <summary>
-        /// Build a MonitorDetails from today's observations for TCP incremental upload.
-        /// Includes both pending and synced (TodayBoxes) observations.
-        /// </summary>
-        public MonitorDetails BuildTodayMonitor(string filename)
-        {
-            var monitor = new MonitorDetails
-            {
-                filename = filename,
-                LastSaved = DateTime.UtcNow,
-                BoxData = new Dictionary<string, BoxData>()
-            };
-
-            var nzToday = MainActivity.NzToday;
-
-            // Add today's synced observations
-            foreach (var kvp in TodayBoxes)
-            {
-                monitor.BoxData[kvp.Key] = ToBoxData(kvp.Value);
-            }
-
-            // Overlay pending observations from today (these take priority)
-            foreach (var obs in PendingObservations)
-            {
-                if (MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date == nzToday && !string.IsNullOrEmpty(obs.BoxName))
-                {
-                    monitor.BoxData[obs.BoxName] = ToBoxData(obs);
-                }
-            }
-
-            return monitor;
-        }
-
-        private static BoxData ToBoxData(BoxObservation obs)
-        {
-            return new BoxData
-            {
-                Adults = obs.Adults,
-                Eggs = obs.Eggs,
-                Chicks = obs.Chicks,
-                GateStatus = obs.GateStatus,
-                BreedingChance = obs.BreedingStatus,
-                Notes = obs.Notes,
-                whenDataCollectedUtc = obs.WhenDataCollectedUtc,
-                ScannedIds = obs.ScannedIds,
-            };
-        }
     }
 }

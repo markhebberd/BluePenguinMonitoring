@@ -645,20 +645,6 @@ namespace PenguinMonitor.Models
             }
         }
 
-        private bool tcpIncrementalEnabled = true;
-        public bool TcpIncrementalEnabled
-        {
-            get => tcpIncrementalEnabled;
-            set
-            {
-                if (tcpIncrementalEnabled != value)
-                {
-                    tcpIncrementalEnabled = value;
-                    OnAnyPropertyChanged();
-                }
-            }
-        }
-
         // Transient property - not saved to JSON
         [JsonIgnore]
         public bool ShowDifferencesWithPreviousMonitor { get; set; } = false;
