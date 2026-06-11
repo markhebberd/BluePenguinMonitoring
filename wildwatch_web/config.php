@@ -5,8 +5,7 @@
  * INSTRUCTIONS:
  * 1. Copy this file to your cPanel server at: public_html/penguin-api/config.php
  * 2. Update the database credentials below
- * 3. Generate a secure API key (32+ characters) and set it below
- * 4. Ensure this file is NOT accessible directly from web (or move outside public_html)
+ * 3. Ensure this file is NOT accessible directly from web (or move outside public_html)
  */
 
 // Database credentials - UPDATE THESE
@@ -15,8 +14,7 @@ define('DB_NAME', 'wildwatch_nestcheck');
 define('DB_USER', 'wildwatch_nestcheck_api');       // Update this
 define('DB_PASS', '9_?KPS7U~h7Pt_=K');              // Update this
 
-// API Key for authentication - GENERATE A SECURE KEY
-// Use: https://randomkeygen.com/ or similar to generate a 32+ character key
+// API Key — read-only access for legacy app (v37). Write access requires Bearer token.
 define('API_KEY', 'tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf');
 
 // CORS settings (adjust for production)
@@ -68,17 +66,54 @@ function getDbConnection($attemptsRemaining = 4) {
 }
 
 /**
- * Validate API key from request header
+ * Require auth for read-only endpoints. Accepts Bearer token, API key, or
+ * observer api_key (GET only). Returns observer row or true.
+ * Used by penguins.php and boxtags.php for legacy app (v37) compatibility.
  */
-function validateApiKey() {
-    $headers = getallheaders();
-    $apiKey = $headers['X-API-Key'] ?? $headers['x-api-key'] ?? '';
-
-    if ($apiKey !== API_KEY) {
-        http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Invalid API key']);
-        exit;
+function requireReadAuth($pdo = null) {
+    if (!$pdo) $pdo = getDbConnection();
+    // Bearer token — full access
+    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
+        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt->execute([$m[1]]);
+        $result = $stmt->fetch();
+        if ($result) return $result;
     }
+    // API key — read-only (GET requests only)
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $headers = getallheaders();
+        $apiKey = $headers['X-API-Key'] ?? $headers['x-api-key'] ?? '';
+        if (!empty($apiKey)) {
+            // Check global API key
+            if ($apiKey === API_KEY) return true;
+            // Check per-observer api_key (legacy app uses this for boxtags)
+            $stmt = $pdo->prepare("SELECT * FROM observers WHERE api_key = ?");
+            $stmt->execute([$apiKey]);
+            $result = $stmt->fetch();
+            if ($result) return $result;
+        }
+    }
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => 'Authentication required']);
+    exit;
+}
+
+/**
+ * Require session-based auth (Bearer token). Returns observer row or exits 401.
+ */
+function requireAuth($pdo = null) {
+    if (!$pdo) $pdo = getDbConnection();
+    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
+        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt->execute([$m[1]]);
+        $result = $stmt->fetch();
+        if ($result) return $result;
+    }
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => 'Authentication required']);
+    exit;
 }
 
 /**
@@ -88,7 +123,7 @@ function setHeaders() {
     header('Content-Type: application/json');
     header('Access-Control-Allow-Origin: ' . ALLOWED_ORIGIN);
     header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
 
     // Handle preflight requests
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

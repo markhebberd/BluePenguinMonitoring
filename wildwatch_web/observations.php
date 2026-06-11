@@ -13,7 +13,7 @@
  */
 require_once 'config.php';
 setHeaders();
-validateApiKey();
+requireAuth();
 
 $pdo = getDbConnection();
 $colonyId = $_GET['colony_id'] ?? 1;

@@ -6,7 +6,7 @@
  */
 require_once 'config.php';
 setHeaders();
-validateApiKey();
+requireAuth();
 $pdo = getDbConnection();
 
 echo "=== CLEANUP MIGRATION ===\n\n";

@@ -8,7 +8,7 @@
  */
 require_once 'config.php';
 setHeaders();
-validateApiKey();
+requireAuth();
 $pdo = getDbConnection();
 
 $drops = ['chip_as', 'chip_box', 'chip_by', 'chip_ok', 'chick_size'];

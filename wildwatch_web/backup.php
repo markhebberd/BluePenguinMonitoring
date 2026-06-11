@@ -16,7 +16,7 @@ set_exception_handler(function($e) {
 });
 
 require_once 'config.php';
-validateApiKey();
+requireAuth();
 
 ini_set('memory_limit', '256M');
 set_time_limit(120);

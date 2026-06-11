@@ -4,6 +4,11 @@
  * Data lives in memory for instant queries; IndexedDB for persistence across reloads.
  */
 
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('ww_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 const DB_NAME = 'wildwatch';
 const DB_VERSION = 1;
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
@@ -308,7 +313,7 @@ function fmtSize(bytes: number): string {
 }
 
 async function fetchWithProgress(url: string, onProgress?: (pct: number, label: string) => void): Promise<any> {
-  const resp = await fetch(url);
+  const resp = await fetch(url, { headers: authHeaders() });
   if (!resp.body) return resp.json();
   const total = parseInt(resp.headers.get('Content-Length') || '0', 10);
   const isGzip = resp.headers.get('Content-Type')?.includes('gzip');
@@ -352,7 +357,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     if (!mem) await loadMemFromIDB();
 
     // Then check for changes in background
-    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&_=${Date.now()}`);
+    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&_=${Date.now()}`, { headers: authHeaders() });
     const data = await resp.json();
     const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0;
     if (hasChanges) {
@@ -422,7 +427,7 @@ export function startPolling(onChanged: () => void, intervalMs = 30000): void {
   stopPolling();
   pollTimer = setInterval(async () => {
     try {
-      const resp = await fetch(`/api/events.php?wm=${encodeURIComponent(lastWatermark)}&_=${Date.now()}`);
+      const resp = await fetch(`/api/events.php?wm=${encodeURIComponent(lastWatermark)}&_=${Date.now()}`, { headers: authHeaders() });
       const data = await resp.json();
       if (data.wm) lastWatermark = data.wm;
       if (data.changed) {
@@ -432,7 +437,7 @@ export function startPolling(onChanged: () => void, intervalMs = 30000): void {
     } catch {}
   }, intervalMs);
   // Also fetch initial watermark
-  fetch(`/api/events.php?_=${Date.now()}`).then(r => r.json()).then(d => { if (d.wm) lastWatermark = d.wm; }).catch(() => {});
+  fetch(`/api/events.php?_=${Date.now()}`, { headers: authHeaders() }).then(r => r.json()).then(d => { if (d.wm) lastWatermark = d.wm; }).catch(() => {});
 }
 
 export function stopPolling(): void {

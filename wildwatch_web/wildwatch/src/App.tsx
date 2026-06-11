@@ -1505,7 +1505,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   // Load date mappings for season
   useEffect(() => {
     if (season < 2020) return;
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season}`)
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setDateMappings(d))
       .catch(() => setDateMappings([]));
@@ -1616,7 +1616,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
     try {
       // Find location_id for this box
-      const dashRes = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`);
+      const dashRes = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
       const dashData = await dashRes.json();
       const locationId = dashData.location?.location_id;
 
@@ -1676,7 +1676,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
   useEffect(() => {
     if (!box) { setAllBoxObs([]); return; }
-    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}`)
+    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setAllBoxObs(d.observations || []))
       .catch(() => setAllBoxObs([]));
@@ -2799,7 +2799,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     fetch('/api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
-    fetch(`/api/server_stats.php?_=${Date.now()}`)
+    fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
   }, [token]);
 
@@ -3525,7 +3525,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
                       if (!showDeleted && deletedObs.length === 0) {
-                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`);
+                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
                         const d = await r.json();
                         setDeletedObs(d.deleted || []);
                       }

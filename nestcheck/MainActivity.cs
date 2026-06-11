@@ -57,6 +57,10 @@ namespace PenguinMonitor
         private Location? _currentLocation;
         private float _gpsAccuracy = -1;
 
+        // Status refresh timer (updates "sync:Xm ago" display)
+        private System.Timers.Timer? _statusRefreshTimer;
+        private DateTime _lastSyncCheckUtc = DateTime.MinValue;
+
         // UI Components
         private ScrollView? _rootScrollView;
         private TextView? _statusText; // scanner and GPS status
@@ -81,6 +85,9 @@ namespace PenguinMonitor
 
         // Single box data 
         private bool _isBoxLocked;
+        private bool _dataChangedSinceUnlock;
+        // Track server observation IDs that user already confirmed locally (to avoid duplicate conflict dialogs)
+        private Dictionary<string, int> _confirmedAgainstServerObsId = new();
         private bool _highOffspringCountConfirmed;
         private LinearLayout? _singleBoxDataOuterLayout;
         private LinearLayout? _singleBoxDataTitleLayout;
@@ -164,6 +171,10 @@ namespace PenguinMonitor
             HandleAuthDeepLink(Intent);
             CreateUI();
             UpdateStatusText();
+            _statusRefreshTimer = new System.Timers.Timer(60000); // 1 minute
+            _statusRefreshTimer.Elapsed += (s, e) => UpdateStatusText();
+            _statusRefreshTimer.AutoReset = true;
+            _statusRefreshTimer.Start();
             HandleIncomingJsonIntent();
             if (_shouldAutoDownloadBirdStats)
             {
@@ -173,6 +184,59 @@ namespace PenguinMonitor
                 }, 1500);
             }
         }
+        protected override void OnResume()
+        {
+            base.OnResume();
+            _statusRefreshTimer?.Start();
+            var token = _appSettings?.AuthToken;
+            if (!string.IsNullOrEmpty(token) && _colonyState?.LastSyncedUtc > DateTime.MinValue)
+            {
+                _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); });
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var result = await _dataStorageService.CheckForChangesAsync(token);
+                        if (result != DataStorageService.PollResult.Failed)
+                        {
+                            _lastSyncCheckUtc = DateTime.UtcNow;
+                            RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); });
+                        }
+                        if (result == DataStorageService.PollResult.Changed) await DoSilentSync(token);
+                    }
+                    catch { }
+                });
+            }
+            UpdateStatusText();
+        }
+
+        protected override void OnPause()
+        {
+            base.OnPause();
+            _statusRefreshTimer?.Stop();
+            _dataStorageService.StopBackgroundPolling();
+        }
+
+        /// <summary>
+        /// Silent background sync — download only, no UI dialogs, no upload.
+        /// </summary>
+        private async Task DoSilentSync(string token)
+        {
+            try
+            {
+                var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
+                _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+                _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
+                if (result.BoxTags != null) _boxTags = result.BoxTags;
+                new Handler(Looper.MainLooper).Post(() =>
+                {
+                    DrawPageLayouts();
+                    UpdateStatusText();
+                });
+            }
+            catch { }
+        }
+
         private void RequestPermissions()
         {
             InitializeVibrationAndSound();
@@ -280,9 +344,14 @@ namespace PenguinMonitor
         }
         public void OnLocationChanged(Location location) // required by ILocationListener
         {
-            _currentLocation = location;
-            _gpsAccuracy = location.Accuracy;
-            UpdateStatusText();
+            // Only accept if more accurate than current fix (avoids Network provider overwriting GPS)
+            if (_currentLocation == null || location.Accuracy <= _currentLocation.Accuracy
+                || (DateTime.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(_currentLocation.Time).UtcDateTime).TotalSeconds > 10)
+            {
+                _currentLocation = location;
+                _gpsAccuracy = location.Accuracy;
+                UpdateStatusText();
+            }
         }
         public void OnStatusChanged(string? provider, Availability status, Bundle? extras) { } // required by ILocationListener
         public void OnProviderDisabled(string provider) { } // required by ILocationListener
@@ -351,6 +420,7 @@ namespace PenguinMonitor
             bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
 
             AddScannedId(eidData, 0);
+            _dataChangedSinceUnlock = true;
 
             if (!isBoxTag)
             {
@@ -358,28 +428,63 @@ namespace PenguinMonitor
             }
             DrawPageLayouts();
         }
+        private static string FormatAccuracy(float accuracy)
+        {
+            if (accuracy >= 100) return $"{(int)accuracy}m";
+            if (accuracy >= 10) return $"{accuracy:F0}m";
+            return $"{accuracy:F1}m";
+        }
+
+        private static string FormatSyncAgo(DateTime lastSyncUtc)
+        {
+            if (lastSyncUtc <= DateTime.MinValue) return "never";
+            var ago = DateTime.UtcNow - lastSyncUtc;
+            if (ago.TotalSeconds < 60) return $"{(int)ago.TotalSeconds}s ago";
+            if (ago.TotalMinutes < 60) return $"{(int)ago.TotalMinutes}m ago";
+            if (ago.TotalHours < 24) return $"{(int)ago.TotalHours}h ago";
+            return $"{(int)ago.TotalDays}d ago";
+        }
+
         private void UpdateStatusText(string? bluetoothStatus = null)
         {
-            var btStatus = "Bluetooth Disabled";
-            if (_bluetoothManager != null)
+            // BT status
+            string bt;
+            if (_bluetoothManager == null)
+                bt = "BT:off";
+            else if (_bluetoothManager.IsConnected)
+                bt = "BT🔗";
+            else if (_bluetoothManager.IsConnecting)
+                bt = "BT🔄";
+            else
+                bt = bluetoothStatus != null && bluetoothStatus.Contains("Retry") ? "BT🔄" : "BT:off";
+
+            // GPS status
+            string gps;
+            if (_gpsAccuracy > 0)
+                gps = $"📍{FormatAccuracy(_gpsAccuracy)}";
+            else
+                gps = "GPS:off";
+
+            // Sync status — use most recent of full sync or successful poll check
+            string sync;
+            if (_colonyState != null && _colonyState.DirtyCount > 0)
+                sync = $"uploading:{_colonyState.DirtyCount}";
+            else
             {
-                btStatus = bluetoothStatus ?? (_bluetoothManager?.IsConnected == true ? "HR5 Connected" : "Connecting to HR5...");
+                var lastFull = _colonyState?.LastSyncedUtc ?? DateTime.MinValue;
+                var mostRecent = _lastSyncCheckUtc > lastFull ? _lastSyncCheckUtc : lastFull;
+                sync = $"sync:{FormatSyncAgo(mostRecent)}";
             }
-            var gpsStatus = _gpsAccuracy > 0 ? $" | GPS: ±{_gpsAccuracy:F1}m" : " | GPS: No signal";
-            var syncStatus = _colonyState != null && _colonyState.DirtyCount > 0
-                ? $" | ⏳ {_colonyState.DirtyCount} pending"
-                : " | Synced";
 
             RunOnUiThread(() =>
             {
                 if (_statusText != null)
                 {
-                    _statusText.Text = btStatus + gpsStatus + syncStatus;
+                    _statusText.Text = $"{bt}  {gps}  {sync}";
 
-                    // Update status color based on connection state
-                    if (btStatus.Contains("Connected") && _gpsAccuracy > 0)
+                    if (_bluetoothManager?.IsConnected == true && _gpsAccuracy > 0)
                         _statusText.SetTextColor(UIFactory.SUCCESS_GREEN);
-                    else if (btStatus.Contains("Connected"))
+                    else if (_bluetoothManager?.IsConnected == true)
                         _statusText.SetTextColor(UIFactory.WARNING_YELLOW);
                     else
                         _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
@@ -824,6 +929,14 @@ namespace PenguinMonitor
                         buildScannedIdsLayout(boxData.ScannedIds);
                     }
 
+                    // Start background polling after successful sync
+                    if (result.Error == null && !result.AuthFailed)
+                    {
+                        var token = _appSettings?.AuthToken;
+                        if (!string.IsNullOrEmpty(token))
+                            _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); });
+                    }
+
                     ShowSyncResultsDialog(result);
 
                     if (result.Conflicts != null && result.Conflicts.Count > 0)
@@ -891,6 +1004,21 @@ namespace PenguinMonitor
 
         private void ShowConflictDialog(List<DataStorageService.SyncConflict> conflicts)
         {
+            // Filter out conflicts where server data hasn't changed since local confirmation
+            conflicts = conflicts.Where(c =>
+            {
+                var boxName = c.box_name ?? "";
+                if (_confirmedAgainstServerObsId.TryGetValue(boxName, out int confirmedId)
+                    && c.server != null && c.server.observation_id == confirmedId)
+                {
+                    _confirmedAgainstServerObsId.Remove(boxName);
+                    return false; // Already confirmed against this exact server version
+                }
+                return true;
+            }).ToList();
+
+            if (conflicts.Count == 0) return;
+
             var scrollView = new ScrollView(this);
             var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             container.SetPadding(16, 16, 16, 16);
@@ -932,7 +1060,7 @@ namespace PenguinMonitor
                     var serverHeader = new TextView(this) { Text = BuildObsHeaderText(serverObs, "Server", false), TextSize = 11 };
                     serverHeader.SetTextColor(Color.DarkGray);
                     serverCard.AddView(serverHeader);
-                    serverCard.AddView(BuildObsDetailView(serverObs));
+                    serverCard.AddView(BuildObsDetailView(serverObs, showBoxLink: false));
                     container.AddView(serverCard);
                 }
 
@@ -954,7 +1082,7 @@ namespace PenguinMonitor
                     var localHeader = new TextView(this) { Text = BuildObsHeaderText(local, "Your edit", false), TextSize = 11 };
                     localHeader.SetTextColor(Color.Black);
                     localCard.AddView(localHeader);
-                    localCard.AddView(BuildObsDetailView(local));
+                    localCard.AddView(BuildObsDetailView(local, showBoxLink: false));
                     container.AddView(localCard);
                 }
 
@@ -1374,6 +1502,7 @@ namespace PenguinMonitor
             };
             multiBoxTitle.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             multiBoxTitle.SetTextColor(Color.Black);
+            multiBoxTitle.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Normal);
             multiBoxTitle.SetPadding(0, 0, 0, 0);
             headerTitle.AddView(multiBoxTitle);
 
@@ -1388,8 +1517,14 @@ namespace PenguinMonitor
             };
             var pending = _colonyState.DirtyCount;
             timeTV.Text = !string.IsNullOrEmpty(_colonyState.DailyLabel) ? _colonyState.DailyLabel : "";
-            if (_colonyState.LastSyncedUtc > DateTime.MinValue)
-                timeTV.Text += $"\nSynced {ToNzTime(_colonyState.LastSyncedUtc):d MMM HH:mm}";
+            var lastFullSync = _colonyState.LastSyncedUtc;
+            var mostRecentCheck = _lastSyncCheckUtc > lastFullSync ? _lastSyncCheckUtc : lastFullSync;
+            if (mostRecentCheck > DateTime.MinValue)
+            {
+                var syncNz = ToNzTime(mostRecentCheck);
+                var syncLabel = syncNz.Date == NzToday ? $"{syncNz:HH:mm}" : $"{syncNz:d MMM HH:mm}";
+                timeTV.Text += $"\nSynced {syncLabel}";
+            }
             if (pending > 0)
                 timeTV.Text += $"\n⏳ {pending} pending upload";
 
@@ -1887,7 +2022,7 @@ namespace PenguinMonitor
             var title = new TextView(this)
             {
                 Text = "Next breeding dates",
-                TextSize = 24,
+                TextSize = 30,
                 Gravity = GravityFlags.Left
             };
             title.SetTextColor(Color.Black);
@@ -1899,7 +2034,7 @@ namespace PenguinMonitor
             var filtersRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
             filtersRow.SetPadding(0, 8, 0, 8);
 
-            CheckBox hatchingCheckbox = new CheckBox(this) { Text = "Hatching", Checked = _appSettings.ShowHatchingDatesInTimeline };
+            CheckBox hatchingCheckbox = new CheckBox(this) { Text = "Hatch", Checked = _appSettings.ShowHatchingDatesInTimeline };
             hatchingCheckbox.SetTextColor(Color.Black);
             hatchingCheckbox.Click += (s, e) => { _appSettings.ShowHatchingDatesInTimeline = hatchingCheckbox.Checked; DrawPageLayouts(); };
             filtersRow.AddView(hatchingCheckbox);
@@ -1909,12 +2044,12 @@ namespace PenguinMonitor
             pgCheckbox.Click += (s, e) => { _appSettings.ShowPGDatesInTimeline = pgCheckbox.Checked; DrawPageLayouts(); };
             filtersRow.AddView(pgCheckbox);
 
-            CheckBox chippingCheckbox = new CheckBox(this) { Text = "Chipping", Checked = _appSettings.ShowChippingDatesInTimeline };
+            CheckBox chippingCheckbox = new CheckBox(this) { Text = "Chip", Checked = _appSettings.ShowChippingDatesInTimeline };
             chippingCheckbox.SetTextColor(Color.Black);
             chippingCheckbox.Click += (s, e) => { _appSettings.ShowChippingDatesInTimeline = chippingCheckbox.Checked; DrawPageLayouts(); };
             filtersRow.AddView(chippingCheckbox);
 
-            CheckBox fledgingCheckbox = new CheckBox(this) { Text = "Fledging", Checked = _appSettings.ShowFledgingDatesInTimeline };
+            CheckBox fledgingCheckbox = new CheckBox(this) { Text = "Fledge", Checked = _appSettings.ShowFledgingDatesInTimeline };
             fledgingCheckbox.SetTextColor(Color.Black);
             fledgingCheckbox.Click += (s, e) => { _appSettings.ShowFledgingDatesInTimeline = fledgingCheckbox.Checked; DrawPageLayouts(); };
             filtersRow.AddView(fledgingCheckbox);
@@ -2734,6 +2869,12 @@ namespace PenguinMonitor
                     // Update previous observation summary
                     UpdatePreviousObsSummary();
 
+                    // Collapse content when locked with no today data
+                    if (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null && !tagMode)
+                    {
+                        _singleBoxDataContentLayout.Visibility = ViewStates.Gone;
+                    }
+
                     // Nav buttons are item 0, title layout is item 1 — don't disable either
                     for (int i = 2; i < _singleBoxDataOuterLayout.ChildCount; i++)
                     {
@@ -2797,7 +2938,7 @@ namespace PenguinMonitor
         /// <summary>
         /// Build the observation detail as a View (not just text) so scans can be styled badges.
         /// </summary>
-        private View BuildObsDetailView(BoxObservation obs)
+        private View BuildObsDetailView(BoxObservation obs, bool showBoxLink = true)
         {
             var layout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
 
@@ -2846,8 +2987,8 @@ namespace PenguinMonitor
             var flowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             flowParams.SetMargins(0, 2, 4, 2);
 
-            // Box link badge — always first
-            if (!string.IsNullOrEmpty(obs.BoxName))
+            // Box link badge — always first (unless suppressed)
+            if (showBoxLink && !string.IsNullOrEmpty(obs.BoxName))
             {
                 var boxName = obs.BoxName;
                 var boxBadge = new TextView(this) { Text = $"Box {boxName} →", TextSize = 10 };
@@ -2969,6 +3110,13 @@ namespace PenguinMonitor
                 _prevObsSummaryLayout.Visibility = ViewStates.Visible;
                 _prevObsDetailLayout.RemoveAllViews();
                 _prevObsDetailLayout.AddView(BuildObsDetailView(prev));
+
+                // Date label bottom-right
+                var dateLabel = new TextView(this) { Text = nzDate.ToString("d MMM"), TextSize = 11 };
+                dateLabel.SetTextColor(Color.Gray);
+                dateLabel.Gravity = GravityFlags.Right;
+                dateLabel.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                _prevObsDetailLayout.AddView(dateLabel);
             }
 
             UpdateUnsyncedCards();
@@ -3060,37 +3208,75 @@ namespace PenguinMonitor
                 _isBoxLocked = !_isBoxLocked;
                 if (!_isBoxLocked)
                 {
-                    DrawPageLayouts();
+                    // Unlock — enter edit mode
+                    _dataChangedSinceUnlock = false;
+                    _highOffspringCountConfirmed = false;
                     if (!_appSettings.EditBoxTagsMode)
                         _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
-                    _highOffspringCountConfirmed = false;
+                    DrawPageLayouts();
                 }
                 else
                 {
                     // In tag mode or historical view, just lock without saving
                     if (_appSettings.EditBoxTagsMode || _isHistoricalView)
                     {
+                        _dataChangedSinceUnlock = false;
                         DrawPageLayouts();
                         return;
                     }
 
-                    if (!(_colonyState.GetTodayForBox(_currentBoxName) != null) && dataCardHasZeroData())
+                    // No changes — lock silently
+                    if (!_dataChangedSinceUnlock)
+                    {
+                        _dataChangedSinceUnlock = false;
+                        DrawPageLayouts();
+                        return;
+                    }
+
+                    // Data changed but all zeros and no prior today data — confirm empty
+                    if (_colonyState.GetTodayForBox(_currentBoxName) == null && dataCardHasZeroData())
                     {
                         ShowEmptyBoxDialog(() =>
                         {
                             SaveCurrentBoxData();
+                            _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                             TryBackgroundUpload();
                         }, () =>
                         {
+                            _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                         });
                     }
                     else
                     {
-                        SaveCurrentBoxData();
-                        DrawPageLayouts();
-                        TryBackgroundUpload();
+                        // If box has existing server data, show confirm edit dialog
+                        var serverVersion = _colonyState.TodayBoxes.ContainsKey(_currentBoxName)
+                            ? _colonyState.TodayBoxes[_currentBoxName] : null;
+                        if (serverVersion != null && !serverVersion.IsDirty)
+                        {
+                            ShowLocalConfirmEditDialog(_currentBoxName, serverVersion, () =>
+                            {
+                                if (serverVersion.ObservationId.HasValue)
+                                    _confirmedAgainstServerObsId[_currentBoxName] = serverVersion.ObservationId.Value;
+                                SaveCurrentBoxData();
+                                _dataChangedSinceUnlock = false;
+                                DrawPageLayouts();
+                                TryBackgroundUpload();
+                            }, () =>
+                            {
+                                _isBoxLocked = false;
+                                _dataChangedSinceUnlock = false;
+                                DrawPageLayouts();
+                            });
+                        }
+                        else
+                        {
+                            SaveCurrentBoxData();
+                            _dataChangedSinceUnlock = false;
+                            DrawPageLayouts();
+                            TryBackgroundUpload();
+                        }
                     }
                 }
             };
@@ -3196,6 +3382,7 @@ namespace PenguinMonitor
             _prevObsSummaryLayout.Visibility = ViewStates.Gone;
 
             _prevObsDetailLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _prevObsDetailLayout.Visibility = ViewStates.Gone;
             _prevObsSummaryLayout.AddView(_prevObsDetailLayout);
 
             _prevObsSummaryLayout.Click += (s, e) =>
@@ -3284,6 +3471,7 @@ namespace PenguinMonitor
             _breedingChanceSpinner[0].SetSelection(breedingPercentageIndex, false);
             _breedingChanceSpinner[0].ItemSelected += (s, e) =>
             {
+                _dataChangedSinceUnlock = true;
                 string selectedItem = items[e.Position];
                 string status = _breedingChanceSpinner[0].SelectedItem.ToString();
             };
@@ -3291,6 +3479,7 @@ namespace PenguinMonitor
             _gateStatusSpinner.Add(_uiFactory.CreateSpinner(new string[] { "", "Gate up", "Regate" }));
             _gateStatusSpinner[0].ItemSelected += (s, e) =>
             {
+                _dataChangedSinceUnlock = true;
                 // Only save if viewing current data (not historical)
                 if (false /* no historical view */) return;
 
@@ -3385,6 +3574,82 @@ namespace PenguinMonitor
                 editText.Post(() => editText.SelectAll());
             }
         }
+        /// <summary>
+        /// Build a BoxObservation from the current UI fields without saving.
+        /// </summary>
+        private BoxObservation BuildObsFromCurrentUI()
+        {
+            int.TryParse(_adultsEditText?[0].Text ?? "0", out int adults);
+            int.TryParse(_eggsEditText?[0].Text ?? "0", out int eggs);
+            int.TryParse(_chicksEditText?[0].Text ?? "0", out int chicks);
+            var obs = new BoxObservation
+            {
+                BoxName = _currentBoxName,
+                Adults = adults, Eggs = eggs, Chicks = chicks,
+                GateStatus = GetSelectedStatus(_gateStatusSpinner[0]),
+                BreedingStatus = GetSelectedStatus(_breedingChanceSpinner[0]),
+                Notes = _notesEditText?[0].Text ?? "",
+                WhenDataCollectedUtc = DateTime.UtcNow,
+                ObserverName = _appSettings.ObserverName,
+            };
+            // Copy scans from current box data
+            var existing = _colonyState.GetTodayForBox(_currentBoxName);
+            if (existing != null) obs.ScannedIds = existing.ScannedIds;
+            return obs;
+        }
+
+        /// <summary>
+        /// Show confirm edit dialog using local data — server version (orange) vs your edit (black).
+        /// </summary>
+        private void ShowLocalConfirmEditDialog(string boxName, BoxObservation serverVersion, Action onConfirm, Action onDiscard)
+        {
+            var scrollView = new ScrollView(this);
+            var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            container.SetPadding(16, 16, 16, 16);
+            container.SetBackgroundColor(Color.White);
+            scrollView.AddView(container);
+
+            // Server version (orange)
+            var serverCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            serverCard.SetPadding(12, 8, 12, 8);
+            serverCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW);
+            var serverParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            serverParams.SetMargins(0, 4, 0, 4);
+            serverCard.LayoutParameters = serverParams;
+            var serverHeader = new TextView(this) { Text = BuildObsHeaderText(serverVersion, "Server", false), TextSize = 11 };
+            serverHeader.SetTextColor(Color.DarkGray);
+            serverCard.AddView(serverHeader);
+            serverCard.AddView(BuildObsDetailView(serverVersion, showBoxLink: false));
+            container.AddView(serverCard);
+
+            // Arrow
+            var arrow = new TextView(this) { Text = "↓ Replace with ↓", TextSize = 12, Gravity = GravityFlags.Center };
+            arrow.SetTextColor(Color.DarkGray);
+            container.AddView(arrow);
+
+            // Local edit (black border)
+            var localObs = BuildObsFromCurrentUI();
+            var localCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            localCard.SetPadding(12, 8, 12, 8);
+            localCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
+            var localParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            localParams.SetMargins(0, 4, 0, 8);
+            localCard.LayoutParameters = localParams;
+            var localHeader = new TextView(this) { Text = BuildObsHeaderText(localObs, "Your edit", false), TextSize = 11 };
+            localHeader.SetTextColor(Color.Black);
+            localCard.AddView(localHeader);
+            localCard.AddView(BuildObsDetailView(localObs, showBoxLink: false));
+            container.AddView(localCard);
+
+            new AlertDialog.Builder(this)
+                .SetTitle($"Confirm edit: Box {boxName}")
+                .SetView(scrollView)
+                .SetPositiveButton("Replace", (s, e) => onConfirm())
+                .SetNegativeButton("Discard", (s, e) => onDiscard())
+                .SetCancelable(false)
+                .Show();
+        }
+
         private void OnPrevBoxClick(object? sender, EventArgs e)
         {
             NavigateToBox(_currentBoxIndex - 1, () => _currentBoxIndex > 1);
@@ -3411,7 +3676,7 @@ namespace PenguinMonitor
                 "Empty Box Confirmation",
                 "Please confirm this box has been inspected and is empty",
                 ("Confirm empty", onConfirm),
-                ("Lock without saving", onCancel)
+                ("Discard", onCancel)
             );
         }
         private void OnSaveDataClick(object? sender, EventArgs e)
@@ -3528,6 +3793,7 @@ namespace PenguinMonitor
         }
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
+            _dataChangedSinceUnlock = true;
             CheckForHighOffspringCount();
             if ((int.TryParse(_eggsEditText?[0].Text ?? "0", out int eggs) && eggs > 0) || (int.TryParse(_chicksEditText?[0].Text ?? "0", out int chicks) && chicks > 0))
             {

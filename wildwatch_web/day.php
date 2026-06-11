@@ -1,7 +1,7 @@
 <?php
 require_once 'config.php';
 setHeaders();
-validateApiKey();
+requireAuth();
 
 $pdo = getDbConnection();
 $date = $_GET['date'] ?? '';

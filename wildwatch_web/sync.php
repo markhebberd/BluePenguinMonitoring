@@ -41,14 +41,6 @@ function authenticate($pdo) {
         if ($result) return $result;
     }
 
-    // Try X-API-Key (for API users)
-    $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? getallheaders()['X-API-Key'] ?? getallheaders()['x-api-key'] ?? '';
-    if (!empty($apiKey)) {
-        $stmt = $pdo->prepare("SELECT * FROM observers WHERE api_key = ?");
-        $stmt->execute([$apiKey]);
-        return $stmt->fetch() ?: null;
-    }
-
     return null;
 }
 

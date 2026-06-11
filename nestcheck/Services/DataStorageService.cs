@@ -27,6 +27,81 @@ namespace PenguinMonitor.Services
         internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
         internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/api/sync.php";
         internal const string WILDWATCH_API_KEY = "b30181424b2d70102fb90a32af6c013e63e7b0d49ae466ebf90aa0f969ddbe02";
+        internal const string WILDWATCH_EVENTS_URL = "https://wildwatch.co.nz/api/events.php";
+
+        // ===== Background Polling =====
+
+        private static string _lastWatermark = "";
+        private static System.Timers.Timer? _pollTimer;
+        private static bool _pollingSyncing = false;
+
+        internal enum PollResult { Failed, NoChanges, Changed }
+
+        /// <summary>
+        /// Check events.php for changes since last watermark.
+        /// </summary>
+        internal async Task<PollResult> CheckForChangesAsync(string token)
+        {
+            try
+            {
+                var url = string.IsNullOrEmpty(_lastWatermark)
+                    ? WILDWATCH_EVENTS_URL
+                    : $"{WILDWATCH_EVENTS_URL}?wm={Uri.EscapeDataString(_lastWatermark)}";
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Add("Authorization", $"Bearer {token}");
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return PollResult.Failed;
+                var json = await response.Content.ReadAsStringAsync();
+                var data = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+                if (data == null) return PollResult.Failed;
+                if (data.ContainsKey("wm")) _lastWatermark = data["wm"]?.ToString() ?? "";
+                bool changed = data.ContainsKey("changed") && data["changed"]?.ToString() == "True";
+                return changed ? PollResult.Changed : PollResult.NoChanges;
+            }
+            catch { return PollResult.Failed; }
+        }
+
+        /// <summary>
+        /// Start background polling every 5 minutes. Calls onChanged on the main thread when new data detected.
+        /// </summary>
+        /// <summary>
+        /// Start background polling every 5 minutes.
+        /// onChecked is called on every successful poll (changed or not).
+        /// onChanged is called only when server has new data.
+        /// </summary>
+        internal void StartBackgroundPolling(string token, Func<Task> onChanged, Action? onChecked = null)
+        {
+            StopBackgroundPolling();
+            _pollTimer = new System.Timers.Timer(60 * 1000); // 1 minute
+            _pollTimer.Elapsed += async (s, e) =>
+            {
+                if (_pollingSyncing || string.IsNullOrEmpty(token)) return;
+                try
+                {
+                    var result = await CheckForChangesAsync(token);
+                    if (result != PollResult.Failed) onChecked?.Invoke();
+                    if (result == PollResult.Changed)
+                    {
+                        _pollingSyncing = true;
+                        await onChanged();
+                        _pollingSyncing = false;
+                    }
+                }
+                catch { _pollingSyncing = false; }
+            };
+            _pollTimer.AutoReset = true;
+            _pollTimer.Start();
+
+            // Fetch initial watermark silently
+            _ = CheckForChangesAsync(token);
+        }
+
+        internal void StopBackgroundPolling()
+        {
+            _pollTimer?.Stop();
+            _pollTimer?.Dispose();
+            _pollTimer = null;
+        }
 
         // ===== Sync Result =====
 
@@ -181,7 +256,9 @@ namespace PenguinMonitor.Services
                 downloadRequest.Headers.Add("Authorization", $"Bearer {token}");
                 Task<HttpResponseMessage> stateTask = _httpClient.SendAsync(downloadRequest);
 
-                Task<HttpResponseMessage> birdsTask = _httpClient.GetAsync(WILDWATCH_PENGUINS_URL);
+                var birdsRequest = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL);
+                birdsRequest.Headers.Add("Authorization", $"Bearer {token}");
+                Task<HttpResponseMessage> birdsTask = _httpClient.SendAsync(birdsRequest);
 
                 Task<BoxTagService.SyncResult?> tagSyncTask;
                 if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)

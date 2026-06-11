@@ -7,7 +7,7 @@
  */
 require_once 'config.php';
 setHeaders();
-validateApiKey();
+requireAuth();
 $pdo = getDbConnection();
 
 echo "=== MIGRATE penguin_id -> peng_num ===\n\n";

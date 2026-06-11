@@ -37,7 +37,10 @@ $action = $_GET['action'] ?? '';
 if ($action === 'login') { handleLogin($pdo); exit; }
 if ($action === 'register') { handleRegister($pdo); exit; }
 
-// Season field-monitoring dates — public read, auth write
+$observer = authenticate($pdo);
+if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
+
+// Season field-monitoring dates — read (GET) and write (POST)
 if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $seasonInput = $_GET['season'] ?? '';
     $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
@@ -47,9 +50,6 @@ if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     echo json_encode($stmt->fetchAll());
     exit;
 }
-
-$observer = authenticate($pdo);
-if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
 
 if ($action === 'change_password') { handleChangePassword($pdo, $observer); exit; }
 
@@ -194,14 +194,6 @@ function authenticate($pdo) {
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
         if ($result) return $result;
-    }
-
-    // Try X-API-Key (for API users)
-    $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? getallheaders()['X-API-Key'] ?? getallheaders()['x-api-key'] ?? '';
-    if (!empty($apiKey)) {
-        $stmt = $pdo->prepare("SELECT * FROM observers WHERE api_key = ?");
-        $stmt->execute([$apiKey]);
-        return $stmt->fetch() ?: null;
     }
 
     return null;

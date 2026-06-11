@@ -1,40 +1,43 @@
 import type { BoxTag } from '../types';
 import { triggerSync } from './localdb';
 
-const API_KEY = 'tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf';
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('ww_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
 
 export async function fetchBoxTags(): Promise<Record<string, BoxTag>> {
-  const r = await fetch('/api/boxtags.php', { headers: { 'X-API-Key': API_KEY } });
+  const r = await fetch('/api/boxtags.php', { headers: authHeaders() });
   const d = await r.json();
   return d.data;
 }
 
 export async function fetchOverview() {
-  return (await fetch(`/api/dashboard.php?view=overview&_=${Date.now()}`)).json();
+  return (await fetch(`/api/dashboard.php?view=overview&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchServerStats() {
-  return (await fetch(`/api/server_stats.php?_=${Date.now()}`)).json();
+  return (await fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchTimeline() {
-  return (await fetch('/api/dashboard.php?view=timeline')).json();
+  return (await fetch('/api/dashboard.php?view=timeline', { headers: authHeaders() })).json();
 }
 
 export async function fetchBoxDetail(name: string) {
-  return (await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(name)}&_=${Date.now()}`)).json();
+  return (await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(name)}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchAllPenguins() {
-  return (await fetch(`/api/penguins.php?_=${Date.now()}`)).json();
+  return (await fetch(`/api/penguins.php?_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBirdQuick(pengNum: string) {
-  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&quick=1&_=${Date.now()}`)).json();
+  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&quick=1&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBirdDetail(pengNum: string) {
-  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`)).json();
+  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function updateRecord(token: string, table: string, id: number | string, fields: Record<string, any>, reason?: string) {
@@ -44,7 +47,7 @@ export async function updateRecord(token: string, table: string, id: number | st
     body: JSON.stringify({ ...fields, ...(reason ? { _reason: reason } : {}) })
   });
   const result = await r.json();
-  triggerSync(); // sync local DB with server changes
+  triggerSync();
   return result;
 }
 
@@ -78,9 +81,9 @@ export async function fetchHistory(token: string, table: string, id: number) {
 }
 
 export async function fetchDay(date: string) {
-  return (await fetch(`/api/day.php?date=${date}&_=${Date.now()}`, { headers: { 'X-API-Key': API_KEY } })).json();
+  return (await fetch(`/api/day.php?date=${date}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchReport(report: string) {
-  return (await fetch(`/api/reports.php?report=${report}&_=${Date.now()}`, { headers: { 'X-API-Key': API_KEY } })).json();
+  return (await fetch(`/api/reports.php?report=${report}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }

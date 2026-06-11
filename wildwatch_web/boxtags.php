@@ -9,17 +9,24 @@
  *   POST   /penguin-api/boxtags.php           - Create or update box tag
  *   DELETE /penguin-api/boxtags.php?box_id=X  - Clear box tag
  *
- * All requests require X-API-Key header
+ * GET: Bearer token or API key (read-only for legacy app)
+ * POST/DELETE: Bearer token required
  */
 
 require_once 'config.php';
 
 setHeaders();
-validateApiKey();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $pdo = getDbConnection();
 $colonyId = 1;
+
+// GETs accept API key (legacy app), writes require Bearer
+if ($method === 'GET') {
+    requireReadAuth($pdo);
+} else {
+    requireAuth($pdo);
+}
 
 switch ($method) {
     case 'GET': handleGet($pdo, $colonyId); break;
