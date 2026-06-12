@@ -2036,15 +2036,30 @@ function EggArrivalChart() {
 }
 
 function ChickSexChart() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const allPenguins = useAllPenguins();
 
-  useEffect(() => {
-    fetchReport('chick_sex').then(d => { setData(d); setLoading(false); });
-  }, []);
+  const data = useMemo(() => {
+    if (!allPenguins || allPenguins.length === 0) return null;
+    const groups: Record<string, { M: number; F: number; U: number; total: number; returned: number }> = {
+      LC: { M: 0, F: 0, U: 0, total: 0, returned: 0 },
+      BC: { M: 0, F: 0, U: 0, total: 0, returned: 0 },
+      SC: { M: 0, F: 0, U: 0, total: 0, returned: 0 },
+    };
+    for (const p of allPenguins) {
+      if (p.chipped_as_adult) continue;
+      const size = p.chick_size_code as string;
+      if (!size || !(size in groups)) continue;
+      const g = groups[size as keyof typeof groups];
+      const sex = (p.sex || '').toUpperCase();
+      const s = (sex === 'M' || sex === 'F' ? sex : 'U') as 'M' | 'F' | 'U';
+      g[s]++;
+      g.total++;
+      if (p.hasReturned) g.returned++;
+    }
+    return groups;
+  }, [allPenguins]);
 
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
-  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+  if (!data) return <div className="report-card"><p className="muted">No data available</p></div>;
 
   const sizes = ['BC', 'LC', 'SC'] as const;
   const sizeLabels: Record<string, string> = { LC: 'Little Chick', BC: 'Big Chick', SC: 'Single Chick' };
@@ -2147,23 +2162,60 @@ function ChickSexChart() {
 }
 
 function ChickSexBothReturnedChart() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const allPenguins = useAllPenguins();
 
-  useEffect(() => {
-    fetchReport('chick_sex_both_returned').then(d => { setData(d); setLoading(false); });
-  }, []);
+  const result = useMemo(() => {
+    if (!allPenguins || allPenguins.length === 0) return null;
+    // Get all chicks with BC/LC size codes
+    const chicks = allPenguins.filter((p: any) => !p.chipped_as_adult && (p.chick_size_code === 'BC' || p.chick_size_code === 'LC') && p.chip_box && p.chip_date);
 
-  if (loading) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">Loading...</p></div>;
-  if (!data || data.error) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">No data available</p></div>;
+    // Group by nest (chip_box + chip_season)
+    const nests = new Map<string, any[]>();
+    for (const c of chicks) {
+      const d = new Date(c.chip_date);
+      const seasonYear = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+      const key = `${c.chip_box}|${seasonYear}`;
+      if (!nests.has(key)) nests.set(key, []);
+      nests.get(key)!.push(c);
+    }
 
-  const { groups, pairs, both_returned_total } = data;
+    const groups = { LC: { M: 0, F: 0, U: 0, total: 0 }, BC: { M: 0, F: 0, U: 0, total: 0 } };
+    let pairs = 0;
+    let bothReturnedTotal = 0;
+
+    for (const nest of nests.values()) {
+      const bc = nest.find((c: any) => c.chick_size_code === 'BC');
+      const lc = nest.find((c: any) => c.chick_size_code === 'LC');
+      if (!bc || !lc) continue;
+      if (!bc.hasReturned || !lc.hasReturned) continue;
+
+      bothReturnedTotal++;
+
+      const bcSex = (bc.sex || '').toUpperCase();
+      const lcSex = (lc.sex || '').toUpperCase();
+      if (!((bcSex === 'M' && lcSex === 'F') || (bcSex === 'F' && lcSex === 'M'))) continue;
+
+      pairs++;
+      for (const c of [bc, lc]) {
+        const size = c.chick_size_code as 'BC' | 'LC';
+        const sex = (c.sex || '').toUpperCase();
+        groups[size][sex as 'M' | 'F']++;
+        groups[size].total++;
+      }
+    }
+
+    return { groups, pairs, bothReturnedTotal };
+  }, [allPenguins]);
+
+  if (!result) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">No data available</p></div>;
+
+  const { groups, pairs, bothReturnedTotal } = result;
 
   if (!pairs || pairs === 0) return (
     <div className="report-card">
       <h3>Chick Size vs Sex — One Male, One Female Returned</h3>
       <p className="muted">Waiting for the first pair of male/female chicks to both return to the colony. No nests yet where both the BC and LC returned and one was confirmed male, one female.</p>
-      {both_returned_total > 0 && <p className="muted">{both_returned_total} nest{both_returned_total !== 1 ? 's' : ''} where both chicks returned (any sex combination).</p>}
+      {bothReturnedTotal > 0 && <p className="muted">{bothReturnedTotal} nest{bothReturnedTotal !== 1 ? 's' : ''} where both chicks returned (any sex combination).</p>}
     </div>
   );
   const sizes = ['BC', 'LC'] as const;
@@ -2256,7 +2308,7 @@ function ChickSexBothReturnedChart() {
         </tbody>
       </table>
       <p className="muted" style={{marginTop:'0.5em'}}>Which sibling was male — the bigger or smaller chick?</p>
-      {both_returned_total > 0 && <p className="muted" style={{marginTop:'0.5em'}}>{both_returned_total} nest{both_returned_total !== 1 ? 's' : ''} total where both chicks returned from a single nest.</p>}
+      {bothReturnedTotal > 0 && <p className="muted" style={{marginTop:'0.5em'}}>{bothReturnedTotal} nest{bothReturnedTotal !== 1 ? 's' : ''} total where both chicks returned from a single nest.</p>}
     </div>
   );
 }

@@ -681,6 +681,7 @@ export function queryAllPenguins(): any[] {
       chipped_as_adult: p.chipped_as_adult, vid_for_scanner: p.vid_for_scanner,
       chick_size_code: p.chick_size_code, hasReturned: p.hasReturned || false,
       pit_id: active?.pit_id || null, chip_date: active?.chip_date || null,
+      chip_box: active?.chip_box || null,
     });
   }
   return result;
