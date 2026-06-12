@@ -2172,6 +2172,119 @@ function ChickSexChart() {
   );
 }
 
+function ChickSexBothReturnedChart() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('chick_sex_both_returned').then(d => { setData(d); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+
+  const { groups, pairs } = data;
+
+  if (!pairs || pairs === 0) return (
+    <div className="report-card">
+      <h3>Sex of Chicks Where Both Siblings Returned</h3>
+      <p className="muted">No nests found where both BC and LC returned and were confirmed as one male, one female.</p>
+    </div>
+  );
+  const sizes = ['BC', 'LC'] as const;
+  const sizeLabels: Record<string, string> = { LC: 'Little Chick', BC: 'Big Chick' };
+  const sexColors = { M: '#2196F3', F: '#E91E63' };
+  const sexLabels: Record<string, string> = { M: 'Male', F: 'Female' };
+
+  const W = 500, H = 320, PAD = { top: 30, right: 20, bottom: 60, left: 50 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const barGroupW = plotW / sizes.length;
+  const barW = barGroupW * 0.3;
+
+  const maxVal = Math.max(...sizes.map(s => { const g = groups[s]; return g ? Math.max(g.M, g.F) : 0; }));
+  const yScale = (v: number) => PAD.top + plotH - (maxVal > 0 ? (v / maxVal) * plotH : 0);
+
+  return (
+    <div className="report-card">
+      <h3>Sex of Chicks Where Both Siblings Returned</h3>
+      <p className="muted">From nests where both BC and LC returned and one was male, one female ({pairs} pairs)</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(maxVal * frac)} y2={yScale(maxVal * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+          <text key={frac} x={PAD.left - 8} y={yScale(maxVal * frac) + 4} textAnchor="end" fontSize="11" fill="#888">{Math.round(maxVal * frac)}</text>
+        ))}
+        {sizes.map((size, gi) => {
+          const g = groups[size];
+          if (!g) return null;
+          const cx = PAD.left + barGroupW * gi + barGroupW / 2;
+          const sexKeys = ['M', 'F'] as const;
+          return (
+            <Fragment key={size}>
+              {sexKeys.map((sex, si) => {
+                const count = g[sex] || 0;
+                if (count === 0) return null;
+                const x = cx - barW + si * barW;
+                const barH = maxVal > 0 ? (count / maxVal) * plotH : 0;
+                return (
+                  <Fragment key={sex}>
+                    <rect x={x} y={yScale(count)} width={barW - 2} height={barH} fill={sexColors[sex]} opacity="0.85" rx="2" />
+                    <text x={x + (barW - 2) / 2} y={yScale(count) - 4} textAnchor="middle" fontSize="10" fill={sexColors[sex]} fontWeight="600">{count}</text>
+                  </Fragment>
+                );
+              })}
+              <text x={cx} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="12" fill="#666" fontWeight="600">{sizeLabels[size]}</text>
+              <text x={cx} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="10" fill="#888">n={g.total}</text>
+            </Fragment>
+          );
+        })}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      </svg>
+      <div style={{display:'flex', gap:'1.5em', justifyContent:'center', marginTop:'0.5em'}}>
+        {(['M','F'] as const).map(sex => (
+          <span key={sex} style={{display:'flex', alignItems:'center', gap:'0.3em', fontSize:'0.85em'}}>
+            <span style={{width:12,height:12,borderRadius:2,background:sexColors[sex],display:'inline-block'}} />
+            {sexLabels[sex]}
+          </span>
+        ))}
+      </div>
+      <table style={{margin:'1em auto', borderCollapse:'collapse', fontSize:'0.85em'}}>
+        <thead>
+          <tr style={{borderBottom:'1px solid #ddd'}}>
+            <th style={{padding:'0.3em 1em', textAlign:'left'}}>Size</th>
+            <th style={{padding:'0.3em 1em'}}>Total</th>
+            <th style={{padding:'0.3em 1em'}}>Male</th>
+            <th style={{padding:'0.3em 1em'}}>Female</th>
+            <th style={{padding:'0.3em 1em'}}>% Male</th>
+            <th style={{padding:'0.3em 1em'}}>% Female</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sizes.map(size => {
+            const g = groups[size];
+            if (!g) return null;
+            const known = g.M + g.F;
+            return (
+              <tr key={size} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'0.3em 1em', fontWeight:600}}>{sizeLabels[size]}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center', color:sexColors.M}}>{g.M}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center', color:sexColors.F}}>{g.F}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known > 0 ? (g.M / known * 100).toFixed(1) + '%' : '—'}</td>
+                <td style={{padding:'0.3em 1em', textAlign:'center'}}>{known > 0 ? (g.F / known * 100).toFixed(1) + '%' : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="muted" style={{marginTop:'0.5em'}}>Which sibling was male — the bigger or smaller chick?</p>
+    </div>
+  );
+}
+
 function ChickReturnChart() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -3437,6 +3550,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <EggArrivalChart />
           <ChickReturnChart />
           <ChickSexChart />
+          <ChickSexBothReturnedChart />
         </div>
         {passwordDialog}
       </div>

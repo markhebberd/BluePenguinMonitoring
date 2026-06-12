@@ -12,6 +12,7 @@ switch ($report) {
     case 'chick_sex': chickSex($pdo); break;
     case 'chick_return': chickReturn($pdo); break;
     case 'distinct_adults': distinctAdults($pdo, $colonyId); break;
+    case 'chick_sex_both_returned': chickSexBothReturned($pdo); break;
     default: echo json_encode(['error' => 'Unknown report']); break;
 }
 
@@ -235,4 +236,66 @@ function distinctAdults($pdo, $colonyId) {
     }
 
     echo json_encode($result);
+}
+
+function chickSexBothReturned($pdo) {
+    // Find nests where both BC and LC were chipped and both returned in a later season
+    // Pair chicks by chip_box + chip_season, require one LC and one BC, both with a return scan
+    $stmt = $pdo->query("
+        SELECT p.peng_num, p.sex, p.chick_size_code, pc.chip_box,
+            CASE WHEN MONTH(pc.chip_date) >= 4 THEN YEAR(pc.chip_date) ELSE YEAR(pc.chip_date) - 1 END as chip_season_year,
+            (SELECT MIN(DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')))
+             FROM penguin_scans ps2
+             JOIN penguin_chips pc2 ON ps2.pit_id = pc2.pit_id
+             JOIN observations o ON ps2.observation_id = o.observation_id
+             WHERE pc2.peng_num = p.peng_num AND o.is_deleted = FALSE AND (ps2.is_deleted = FALSE OR ps2.is_deleted IS NULL)
+             AND (CASE WHEN MONTH(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) >= 4
+                       THEN YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
+                       ELSE YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) - 1 END)
+                 > (CASE WHEN MONTH(pc.chip_date) >= 4 THEN YEAR(pc.chip_date) ELSE YEAR(pc.chip_date) - 1 END)
+            ) as first_return_date
+        FROM penguins p
+        JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1
+        WHERE p.chipped_as_adult = 0
+        AND p.chick_size_code IN ('LC', 'BC')
+    ");
+    $rows = $stmt->fetchAll();
+
+    // Group by nest (chip_box + chip_season)
+    $nests = [];
+    foreach ($rows as $row) {
+        $key = $row['chip_box'] . '|' . $row['chip_season_year'];
+        if (!isset($nests[$key])) $nests[$key] = [];
+        $nests[$key][] = $row;
+    }
+
+    // Filter to nests with both BC and LC, both returned
+    $groups = ['LC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0],
+               'BC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0]];
+    $pairs = 0;
+
+    foreach ($nests as $key => $chicks) {
+        $bc = null; $lc = null;
+        foreach ($chicks as $c) {
+            if ($c['chick_size_code'] === 'BC') $bc = $c;
+            if ($c['chick_size_code'] === 'LC') $lc = $c;
+        }
+        if (!$bc || !$lc) continue;
+        if (empty($bc['first_return_date']) || empty($lc['first_return_date'])) continue;
+
+        // Require one male and one female (mixed-sex pair)
+        $bcSex = strtoupper($bc['sex'] ?? '');
+        $lcSex = strtoupper($lc['sex'] ?? '');
+        if (!(($bcSex === 'M' && $lcSex === 'F') || ($bcSex === 'F' && $lcSex === 'M'))) continue;
+
+        $pairs++;
+        foreach ([$bc, $lc] as $c) {
+            $size = $c['chick_size_code'];
+            $sex = strtoupper($c['sex'] ?? '');
+            $groups[$size][$sex]++;
+            $groups[$size]['total']++;
+        }
+    }
+
+    echo json_encode(['groups' => $groups, 'pairs' => $pairs]);
 }
