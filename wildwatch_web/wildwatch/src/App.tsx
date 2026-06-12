@@ -2154,15 +2154,16 @@ function ChickSexBothReturnedChart() {
     fetchReport('chick_sex_both_returned').then(d => { setData(d); setLoading(false); });
   }, []);
 
-  if (loading) return <div className="report-card"><h3>Sex of Chicks Where Both Siblings Returned</h3><p className="muted">Loading...</p></div>;
-  if (!data || data.error) return <div className="report-card"><h3>Sex of Chicks Where Both Siblings Returned</h3><p className="muted">No data available</p></div>;
+  if (loading) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">No data available</p></div>;
 
-  const { groups, pairs } = data;
+  const { groups, pairs, both_returned_total } = data;
 
   if (!pairs || pairs === 0) return (
     <div className="report-card">
-      <h3>Sex of Chicks Where Both Siblings Returned</h3>
+      <h3>Chick Size vs Sex — One Male, One Female Returned</h3>
       <p className="muted">Waiting for the first pair of male/female chicks to both return to the colony. No nests yet where both the BC and LC returned and one was confirmed male, one female.</p>
+      {both_returned_total > 0 && <p className="muted">{both_returned_total} nest{both_returned_total !== 1 ? 's' : ''} where both chicks returned (any sex combination).</p>}
     </div>
   );
   const sizes = ['BC', 'LC'] as const;
@@ -2181,7 +2182,7 @@ function ChickSexBothReturnedChart() {
 
   return (
     <div className="report-card">
-      <h3>Sex of Chicks Where Both Siblings Returned</h3>
+      <h3>Chick Size vs Sex — One Male, One Female Returned</h3>
       <p className="muted">From nests where both BC and LC returned and one was male, one female ({pairs} pairs)</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[0.25, 0.5, 0.75, 1].map(frac => (
@@ -2255,6 +2256,7 @@ function ChickSexBothReturnedChart() {
         </tbody>
       </table>
       <p className="muted" style={{marginTop:'0.5em'}}>Which sibling was male — the bigger or smaller chick?</p>
+      {both_returned_total > 0 && <p className="muted" style={{marginTop:'0.5em'}}>{both_returned_total} nest{both_returned_total !== 1 ? 's' : ''} total where both chicks returned from a single nest.</p>}
     </div>
   );
 }

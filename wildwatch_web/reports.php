@@ -273,6 +273,7 @@ function chickSexBothReturned($pdo) {
     $groups = ['LC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0],
                'BC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0]];
     $pairs = 0;
+    $bothReturnedTotal = 0;
 
     foreach ($nests as $key => $chicks) {
         $bc = null; $lc = null;
@@ -283,7 +284,9 @@ function chickSexBothReturned($pdo) {
         if (!$bc || !$lc) continue;
         if (empty($bc['first_return_date']) || empty($lc['first_return_date'])) continue;
 
-        // Require one male and one female (mixed-sex pair)
+        $bothReturnedTotal++;
+
+        // Only include in chart if one male and one female
         $bcSex = strtoupper($bc['sex'] ?? '');
         $lcSex = strtoupper($lc['sex'] ?? '');
         if (!(($bcSex === 'M' && $lcSex === 'F') || ($bcSex === 'F' && $lcSex === 'M'))) continue;
@@ -297,5 +300,5 @@ function chickSexBothReturned($pdo) {
         }
     }
 
-    echo json_encode(['groups' => $groups, 'pairs' => $pairs]);
+    echo json_encode(['groups' => $groups, 'pairs' => $pairs, 'both_returned_total' => $bothReturnedTotal]);
 }
