@@ -1,7 +1,7 @@
 import React, { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchDay, fetchReport } from './api/boxtags';
-import { syncDatabase, queryBoxDetail, queryBirdDetail, queryAllPenguins, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, getObservationDates, triggerSync, startPolling, stopPolling } from './api/localdb';
-import { useDbVersion, useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchReport } from './api/boxtags';
+import { syncDatabase, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, startPolling, stopPolling } from './api/localdb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -11,12 +11,6 @@ import './App.css';
 
 interface Scan { scan_id?:number; peng_num?:string|null; pit_id:string; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
 
-function isChickAtDate(bird: any, dateStr: string): boolean {
-  if (!bird || !bird.chip_date || bird.chipped_as_adult) return false;
-  const chipTime = new Date(bird.chip_date).getTime();
-  const obsTime = new Date(dateStr).getTime();
-  return (obsTime - chipTime) < 90 * 86400000; // chick if chipped as chick and <3 months since chip
-}
 interface Observation {
   observation_id?:number;
   observation_time_utc:string; monitor_filename:string;
@@ -26,13 +20,6 @@ interface Observation {
   edit_count?:string|number;
 }
 interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; chick_size_code?:string|null; }
-interface BoxDetailData {
-  location: { location_id:number; location_name:string; persistent_notes:string|null; pit_id:string|null; } | null;
-  observations: Observation[];
-  all_penguins?: any[];
-  chipped_here?: ChippedHere[]; // deprecated, use all_penguins
-}
-
 const DAY = 86400000;
 const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
 
@@ -365,7 +352,7 @@ function navClick(e: React.MouseEvent, action: () => void) {
 
 function useDateTooltip() {
   const [tip, setTip] = useState<{ date: string; x: number; y: number } | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const show = useCallback((date: string, e: React.MouseEvent) => {
     clearTimeout(timerRef.current);
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1301,7 +1288,7 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
         if (parsed) return d.startsWith(parsed);
         const [p0, p1, p2] = parts.map(p => p.toLowerCase());
         const n0 = parseInt(p0), n1 = parseInt(p1), n2 = parseInt(p2);
-        const m0 = matchMonths(p0), m1 = matchMonths(p1), m2 = matchMonths(p2);
+        const m1 = matchMonths(p1);
 
         // day month year: "20 f 2024", "20 feb 24"
         if (!isNaN(n0) && m1.length > 0) {
@@ -1518,19 +1505,6 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     }
     setParsedDate(parseSeasonDate(trimmed, season));
   }, [dateInput, season, dateMappings]);
-
-  const filteredBirds = birdSearch.length > 0
-    ? allPenguins.filter((p: any) => p.pit_id && (p.pit_id.includes(birdSearch) || (p.peng_num && p.peng_num === birdSearch)) && !p.pit_id.startsWith('LA900025') && !p.pit_id.startsWith('9130')).slice(0, 10)
-    : [];
-  const [searchIdx, setSearchIdx] = useState(-1);
-  useEffect(() => { setSearchIdx(-1); }, [birdSearch]);
-
-  const handleSearchKey = (e: React.KeyboardEvent) => {
-    if (filteredBirds.length === 0) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, filteredBirds.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
-    else if (e.key === 'Enter' && searchIdx >= 0) { e.preventDefault(); addBird(filteredBirds[searchIdx].pit_id); }
-  };
 
   const addBird = (tag: string) => {
     const short = tag.slice(-8);
@@ -2180,15 +2154,15 @@ function ChickSexBothReturnedChart() {
     fetchReport('chick_sex_both_returned').then(d => { setData(d); setLoading(false); });
   }, []);
 
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
-  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+  if (loading) return <div className="report-card"><h3>Sex of Chicks Where Both Siblings Returned</h3><p className="muted">Loading...</p></div>;
+  if (!data || data.error) return <div className="report-card"><h3>Sex of Chicks Where Both Siblings Returned</h3><p className="muted">No data available</p></div>;
 
   const { groups, pairs } = data;
 
   if (!pairs || pairs === 0) return (
     <div className="report-card">
       <h3>Sex of Chicks Where Both Siblings Returned</h3>
-      <p className="muted">No nests found where both BC and LC returned and were confirmed as one male, one female.</p>
+      <p className="muted">Waiting for the first pair of male/female chicks to both return to the colony. No nests yet where both the BC and LC returned and one was confirmed male, one female.</p>
     </div>
   );
   const sizes = ['BC', 'LC'] as const;
@@ -2426,9 +2400,6 @@ function ChickReturnChart() {
         const xScale2 = (m: number) => SP.left + (m - 1) * barW;
         const yScale2 = (v: number) => SP.top + spH - (v / maxCount) * spH;
 
-        // Year markers for x axis
-        const yearMarkers = Array.from({ length: Math.floor(maxMonth / 12) + 1 }, (_, i) => (i + 1) * 12).filter(m => m <= maxMonth);
-
         return (
           <div className="report-card" style={{marginTop: '0.5em'}}>
             <h3>Age at First Return</h3>
@@ -2560,7 +2531,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
+function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
@@ -2578,11 +2549,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick, onDayClick, externalBir
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
 
-  // Find prev/next dates with data
   const sorted = [...dates].sort();
-  const idx = sorted.indexOf(date);
-  const prevStr = idx > 0 ? sorted[idx - 1] : (idx === -1 ? sorted.filter(d => d < date).pop() : null);
-  const nextStr = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : (idx === -1 ? sorted.find(d => d > date) : null);
 
   // Group observations and chippings by box
   const byBox: Record<string, { obs: any[]; chips: any[] }> = {};
@@ -2872,7 +2839,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [users, setUsers] = useState<any[]>([]);
   const [syncResult, setSyncResult] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
-  const [showDeletedMonitors, setShowDeletedMonitors] = useState(false);
   const [loading, setLoading] = useState(true);
   const [diskTest, setDiskTest] = useState<any>(null);
   const [diskTesting, setDiskTesting] = useState(false);
@@ -2913,18 +2879,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
   };
 
-  const doSync = async (action: string) => {
-    setSyncing(true); setSyncResult(null);
-    try {
-      const r = await fetch(`/api/admin.php?action=${action}`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await r.json();
-      result.dry_run = (action === 'trial_sync');
-      setSyncResult(result);
-    } catch (e: any) { setSyncResult({ error: e.message }); }
-    setSyncing(false);
-  };
 
 
   return (
@@ -3673,8 +3627,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
                 const thisLabel = getSeasonLabel();
-                const thisSeason = boxDetail.observations.filter(o => o.observation_time_utc >= thisSeasonStart);
-                const prevObs = boxDetail.observations.filter(o => o.observation_time_utc < thisSeasonStart);
+                const thisSeason = boxDetail.observations.filter((o: any) => o.observation_time_utc >= thisSeasonStart);
+                const prevObs = boxDetail.observations.filter((o: any) => o.observation_time_utc < thisSeasonStart);
 
                 // Group previous observations by season
                 const prevSeasons = new Map<string, Observation[]>();
@@ -3689,7 +3643,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
                 // Merge deleted into date-sorted list when showing
                 const mergedObs = showDeleted && deletedObs.length > 0
-                  ? [...thisSeason.map(o => ({...o, _deleted: false})), ...deletedObs.map(o => ({...o, _deleted: true}))]
+                  ? [...thisSeason.map((o: any) => ({...o, _deleted: false})), ...deletedObs.map((o: any) => ({...o, _deleted: true}))]
                     .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
                   : thisSeason;
 
@@ -3758,9 +3712,6 @@ function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
 function fmtDateTime(d:string) { return formatDate(d); }
-function fmtDateNZ(d:string) {
-  return parseDate(d).toLocaleDateString('en-NZ',{day:'2-digit',month:'2-digit',year:'2-digit',timeZone:'Pacific/Auckland'});
-}
 /** Returns YYYY-MM-DD in NZ timezone for a datetime string */
 function toNzDateStr(d: string): string {
   const nz = parseDate(d).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); // en-CA gives YYYY-MM-DD

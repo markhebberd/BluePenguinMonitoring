@@ -588,8 +588,6 @@ function queryBirdDetailInner(pengNum: string): any {
     const scans = c.scansByPit.get(pit);
     if (scans) myScans.push(...scans);
   }
-  const myObsIds = new Set(myScans.map(s => s.observation_id));
-
   // Build sightings
   const sightingMap = new Map<string, any>();
   for (const scan of myScans) {
