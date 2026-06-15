@@ -9,7 +9,7 @@ function authHeaders(): Record<string, string> {
 export async function fetchBoxTags(): Promise<Record<string, BoxTag>> {
   const r = await fetch('/api/boxtags.php', { headers: authHeaders() });
   const d = await r.json();
-  return d.data;
+  return d.data ?? {};
 }
 
 export async function fetchOverview() {

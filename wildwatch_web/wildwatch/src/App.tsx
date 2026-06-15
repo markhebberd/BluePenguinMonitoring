@@ -3416,7 +3416,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // All box IDs from observations (not just RFID-tagged ones)
   const sortedBoxIds = useMemo(() => {
-    const ids = new Set([...Object.keys(boxTags), ...Object.keys(stats?.box_info || {})]);
+    const ids = new Set([...Object.keys(boxTags || {}), ...Object.keys(stats?.box_info || {})]);
     return Array.from(ids).sort((a, b) => {
       const na = parseInt(a), nb = parseInt(b);
       return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
