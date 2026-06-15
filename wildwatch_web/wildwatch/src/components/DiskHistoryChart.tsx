@@ -5,14 +5,11 @@ import {
 
 type Range = 'day' | 'week' | 'month' | 'year';
 
-type DayPoint = { t: number; free_mb: number };
-type DailyPoint = { d: string; min_mb: number; max_mb: number; avg_mb: number };
-
 const RANGES: { key: Range; label: string }[] = [
-  { key: 'day', label: '1 day' },
-  { key: 'week', label: '7 days' },
-  { key: 'month', label: '1 month' },
   { key: 'year', label: '1 year' },
+  { key: 'month', label: '1 month' },
+  { key: 'week', label: '7 days' },
+  { key: 'day', label: '1 day' },
 ];
 
 const toGb = (mb: number) => mb / 1024;
@@ -31,9 +28,21 @@ function fmtDay(d: string) {
   return `${parseInt(day, 10)} ${months[parseInt(m, 10) - 1]}`;
 }
 
+function fmtDateShort(t: number) {
+  return new Date(t).toLocaleDateString('en-NZ', {
+    timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short',
+  });
+}
+
+function fmtDateTime(t: number) {
+  return new Date(t).toLocaleString('en-NZ', {
+    timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export function DiskHistoryChart({ token }: { token: string }) {
   const [range, setRange] = useState<Range>('day');
-  const [data, setData] = useState<{ daily: boolean; points: any[] } | null>(null);
+  const [data, setData] = useState<{ range: Range; daily: boolean; points: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +55,7 @@ export function DiskHistoryChart({ token }: { token: string }) {
       .then(d => {
         if (cancelled) return;
         if (d.error) { setError(d.error); setData(null); }
-        else setData({ daily: !!d.daily, points: d.points || [] });
+        else setData({ range: d.range || range, daily: !!d.daily, points: d.points || [] });
       })
       .catch(e => { if (!cancelled) setError(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -55,10 +64,23 @@ export function DiskHistoryChart({ token }: { token: string }) {
 
   const points = data?.points ?? [];
   const isDaily = data?.daily ?? false;
-  // The value we plot: raw free space for "day", the daily LOW for longer ranges.
+  // dRange tracks the dataset actually loaded (avoids a flicker if range changed mid-fetch).
+  const dRange: Range = data?.range ?? range;
+  // The value we plot: raw free space for day/week, the daily LOW for month/year.
   const valueOf = (p: any) => (isDaily ? p.min_mb : p.free_mb);
   const lowest = points.length ? Math.min(...points.map(valueOf)) : null;
   const lowestPoint = lowest != null ? points.find(p => valueOf(p) === lowest) : null;
+
+  // Axis ticks: daily ranges key off the 'YYYY-MM-DD' string; raw ranges off a
+  // timestamp — show clock time for a single day, dates across a week.
+  const xTick = isDaily
+    ? (v: any) => fmtDay(String(v))
+    : dRange === 'day' ? (v: any) => fmtTime(Number(v)) : (v: any) => fmtDateShort(Number(v));
+  const tipLabel = isDaily
+    ? (v: any) => fmtDay(String(v))
+    : dRange === 'day' ? (v: any) => fmtTime(Number(v)) : (v: any) => fmtDateTime(Number(v));
+  const lowestPrefix = isDaily ? 'Lowest daily free space' : dRange === 'day' ? 'Lowest in last 24h' : 'Lowest in last 7 days';
+  const lowestWhen = (p: any) => isDaily ? ` on ${fmtDay(p.d)}` : dRange === 'day' ? ` at ${fmtTime(p.t)}` : ` at ${fmtDateTime(p.t)}`;
 
   return (
     <div className="admin-section">
@@ -84,8 +106,8 @@ export function DiskHistoryChart({ token }: { token: string }) {
         <>
           {lowest != null && (
             <p className="muted" style={{ marginTop: 0 }}>
-              {isDaily ? 'Lowest daily free space' : 'Lowest in last 24h'}: <strong>{fmtGb(lowest)}</strong>
-              {lowestPoint && (isDaily ? ` on ${fmtDay(lowestPoint.d)}` : ` at ${fmtTime(lowestPoint.t)}`)}
+              {lowestPrefix}: <strong>{fmtGb(lowest)}</strong>
+              {lowestPoint && lowestWhen(lowestPoint)}
             </p>
           )}
           <ResponsiveContainer width="100%" height={260}>
@@ -93,7 +115,7 @@ export function DiskHistoryChart({ token }: { token: string }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#e8ecef" />
               <XAxis
                 dataKey={isDaily ? 'd' : 't'}
-                tickFormatter={isDaily ? fmtDay : fmtTime}
+                tickFormatter={xTick}
                 type={isDaily ? 'category' : 'number'}
                 domain={isDaily ? undefined : ['dataMin', 'dataMax']}
                 scale={isDaily ? 'auto' : 'time'}
@@ -108,8 +130,8 @@ export function DiskHistoryChart({ token }: { token: string }) {
                 label={{ value: 'GB free', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#888' } }}
               />
               <Tooltip
-                labelFormatter={(v: any) => (isDaily ? fmtDay(String(v)) : fmtTime(Number(v)))}
-                formatter={(value: any, name: string) => [fmtGb(Number(value)), name]}
+                labelFormatter={tipLabel}
+                formatter={(value: any, name: any) => [fmtGb(Number(value)), name]}
                 contentStyle={{ fontSize: 12 }}
               />
               {lowest != null && (

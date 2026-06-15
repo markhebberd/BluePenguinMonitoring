@@ -57,20 +57,24 @@ $range = $_GET['range'] ?? 'day';
 // NZ local time for daily grouping (matches existing reports; ignores DST like the rest of the app).
 $tz = '+12:00';
 
-if ($range === 'day') {
+// Raw 15-min samples for the shorter ranges (day, week).
+$rawDays = ['day' => 1, 'week' => 7];
+if (isset($rawDays[$range])) {
+    $d = (int)$rawDays[$range];
     $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(recorded_at) * 1000 AS t, disk_free_mb
         FROM disk_history
-        WHERE recorded_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY
+        WHERE recorded_at >= UTC_TIMESTAMP() - INTERVAL $d DAY
         ORDER BY recorded_at");
     $points = [];
     foreach ($stmt as $r) {
         $points[] = ['t' => (int)$r['t'], 'free_mb' => (int)$r['disk_free_mb']];
     }
-    echo json_encode(['range' => 'day', 'daily' => false, 'points' => $points]);
+    echo json_encode(['range' => $range, 'daily' => false, 'points' => $points]);
     exit;
 }
 
-$days = ['week' => 7, 'month' => 31, 'year' => 366][$range] ?? null;
+// Per-day min/max/avg (the daily low) for the longer ranges.
+$days = ['month' => 31, 'year' => 366][$range] ?? null;
 if ($days === null) {
     http_response_code(400);
     echo json_encode(['error' => 'Invalid range']);
