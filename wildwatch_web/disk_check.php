@@ -15,6 +15,12 @@ if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
         @unlink($testFile);
         @mail($alertEmail, "DISK FULL - wildwatch.co.nz", "FAILED: " . $e->getMessage() . " at " . date('Y-m-d H:i:s T'), "From: noreply@wildwatch.co.nz");
     }
+    // Record a free-space sample for the admin history graph (after cleanup,
+    // so it reflects true free space rather than the test file).
+    try {
+        require_once __DIR__ . '/config.php';
+        recordDiskSample(getDbConnection());
+    } catch (Exception $e) { /* history sampling is best-effort */ }
     exit;
 }
 

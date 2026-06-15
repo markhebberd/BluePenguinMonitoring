@@ -117,6 +117,29 @@ function requireAuth($pdo = null) {
 }
 
 /**
+ * Record a server free-space sample into disk_history (auto-creates the table,
+ * prunes samples older than 400 days). Returns free MB, or null on failure.
+ * $dir selects the filesystem to measure (defaults to this api directory,
+ * matching server_stats.php / disk_check.php).
+ */
+function recordDiskSample($pdo, $dir = null) {
+    if ($dir === null) $dir = __DIR__;
+    $pdo->exec("CREATE TABLE IF NOT EXISTS disk_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        recorded_at DATETIME NOT NULL,
+        disk_free_mb INT NOT NULL,
+        INDEX idx_recorded_at (recorded_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $free = @disk_free_space($dir);
+    if ($free === false) return null;
+    $freeMb = (int)round($free / 1048576);
+    $stmt = $pdo->prepare("INSERT INTO disk_history (recorded_at, disk_free_mb) VALUES (UTC_TIMESTAMP(), ?)");
+    $stmt->execute([$freeMb]);
+    $pdo->exec("DELETE FROM disk_history WHERE recorded_at < UTC_TIMESTAMP() - INTERVAL 400 DAY");
+    return $freeMb;
+}
+
+/**
  * Set CORS and JSON headers
  */
 function setHeaders() {

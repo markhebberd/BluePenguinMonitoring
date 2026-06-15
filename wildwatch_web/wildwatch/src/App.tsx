@@ -1,4 +1,4 @@
-import React, { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchReport } from './api/boxtags';
 import { syncDatabase, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, startPolling, stopPolling } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
@@ -6,6 +6,7 @@ import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
+const DiskHistoryChart = lazy(() => import('./components/DiskHistoryChart'));
 import type { BoxTag } from './types';
 import './App.css';
 
@@ -3104,6 +3105,10 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <DuplicateObservations token={token} />
       <DuplicateScans token={token} />
+
+      <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
+        <DiskHistoryChart token={token} />
+      </Suspense>
 
       <div className="admin-section">
         <h3>Disk Write Test</h3>
