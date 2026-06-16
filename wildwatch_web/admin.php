@@ -66,38 +66,8 @@ if ($action === 'duplicate_scans') {
     exit;
 }
 
-if ($action === 'cleanup_duplicate_scans') {
-    $deleted = 0;
-
-    // Remove duplicate pit_ids per observation
-    $byPit = $pdo->query("
-        SELECT observation_id, pit_id, MIN(scan_id) as keep_id
-        FROM penguin_scans WHERE is_deleted = FALSE OR is_deleted IS NULL
-        GROUP BY observation_id, pit_id HAVING COUNT(*) > 1
-    ")->fetchAll();
-    foreach ($byPit as $dup) {
-        $del = $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ? AND pit_id = ? AND scan_id != ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
-        $del->execute([$observer['observer_id'], $dup['observation_id'], $dup['pit_id'], $dup['keep_id']]);
-        $deleted += $del->rowCount();
-    }
-
-    // Remove duplicate peng_nums per observation (different pit_ids, same penguin)
-    $byPeng = $pdo->query("
-        SELECT ps.observation_id, pc.peng_num, MIN(ps.scan_id) as keep_id
-        FROM penguin_scans ps
-        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
-        WHERE (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
-        GROUP BY ps.observation_id, pc.peng_num HAVING COUNT(*) > 1
-    ")->fetchAll();
-    foreach ($byPeng as $dup) {
-        $del = $pdo->prepare("UPDATE penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1 SET ps.is_deleted = TRUE, ps.deleted_at = NOW(), ps.deleted_by = ? WHERE ps.observation_id = ? AND pc.peng_num = ? AND ps.scan_id != ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
-        $del->execute([$observer['observer_id'], $dup['observation_id'], $dup['peng_num'], $dup['keep_id']]);
-        $deleted += $del->rowCount();
-    }
-
-    echo json_encode(['duplicate_groups' => count($byPit) + count($byPeng), 'scans_deleted' => $deleted]);
-    exit;
-}
+// NOTE: cleanup_duplicate_scans was intentionally removed. Duplicate scans are
+// preserved as evidence of data-entry errors and must not be bulk-deleted.
 
 if ($action === 'duplicate_observations') {
     $stmt = $pdo->query("

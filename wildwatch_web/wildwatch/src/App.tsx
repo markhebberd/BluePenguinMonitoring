@@ -2683,8 +2683,13 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               return (
               <div key={box}>
                 {obs.map((o: any, oi: number) => {
-                  const oScans = (o.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
+                  // Keep duplicate scans visible — the same penguin scanned >1x in one observation is a
+                  // data-entry error worth surfacing, not noise to hide.
+                  const oScans = (o.scans || []).filter((s: any) => s.peng_num)
                     .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+                  const scanCounts: Record<string, number> = {};
+                  for (const s of oScans) scanCounts[s.peng_num] = (scanCounts[s.peng_num] || 0) + 1;
+                  const hasDupScan = Object.values(scanCounts).some((n: number) => n > 1);
                   const oDs = displayStatus(o.breeding_status || '', o.eggs || 0, o.chicks || 0);
                   const isDup = obs.length > 1;
                   return (
@@ -2696,10 +2701,17 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
                       {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
                       {oDs && oDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(oDs)?'bordered':''}`} style={{background:STATUS_COLORS[oDs]||'#ccc',color:DARK_TEXT_STATUSES.has(oDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{oDs}</span>}
-                      {oScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />)}
+                      {oScans.map((s: any, si: number) => (
+                        <span key={s.scan_id || `${s.peng_num}-${si}`}
+                          style={scanCounts[s.peng_num] > 1 ? {outline:'2px solid #F44336', borderRadius:3} : undefined}
+                          title={scanCounts[s.peng_num] > 1 ? `Duplicate scan: #${s.peng_num} recorded ${scanCounts[s.peng_num]}× in this observation` : undefined}>
+                          <PenguinMini scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />
+                        </span>
+                      ))}
                       {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
+                      {hasDupScan && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup scan</span>}
                       {o.notes && <span className="day-note">{o.notes}</span>}
                     </div>
                     {expandedBox === `${box}-${oi}` && (
@@ -3223,23 +3235,12 @@ function DuplicateObservations({ token }: { token: string }) {
 function DuplicateScans({ token }: { token: string }) {
   const [duplicates, setDuplicates] = useState<any[]|null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
 
   const check = async () => {
-    setLoading(true); setResult(null);
+    setLoading(true);
     const r = await fetch('/api/admin.php?action=duplicate_scans', { headers: { 'Authorization': `Bearer ${token}` } });
     const d = await r.json();
     setDuplicates(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
-
-  const cleanup = async () => {
-    if (!confirm(`Remove ${duplicates?.length} duplicate scan groups?`)) return;
-    setLoading(true);
-    const r = await fetch('/api/admin.php?action=cleanup_duplicate_scans', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-    const d = await r.json();
-    setResult(d);
-    setDuplicates(null);
     setLoading(false);
   };
 
@@ -3262,11 +3263,8 @@ function DuplicateScans({ token }: { token: string }) {
             </tr>
           ))}</tbody>
         </table>
-        <button onClick={cleanup} disabled={loading} style={{marginTop:8, background:'#F44336', color:'#fff', border:'none', padding:'6px 16px', borderRadius:4, cursor:'pointer'}}>
-          Remove duplicates (keep earliest)
-        </button>
+        <p className="muted" style={{marginTop:8}}>Duplicate scans are kept on purpose — they flag data-entry errors. Review each from the box card for that date; they are also marked “⚠ dup scan” in the day view.</p>
       </>)}
-      {result && <p style={{color:'#4CAF50', marginTop:8}}>Cleaned up {result.scans_deleted} duplicate scans from {result.duplicate_groups} groups</p>}
     </div>
   );
 }
