@@ -16,7 +16,9 @@ set_exception_handler(function($e) {
 });
 
 require_once 'config.php';
-requireAuth();
+// Backups authenticate via X-API-Key (GET), handled by requireReadAuth — not the
+// session-only requireAuth, which would reject the API key with 401.
+requireReadAuth();
 
 ini_set('memory_limit', '256M');
 set_time_limit(120);
