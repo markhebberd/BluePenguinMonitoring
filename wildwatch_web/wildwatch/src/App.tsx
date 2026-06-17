@@ -2344,6 +2344,7 @@ function ChickReturnChart() {
   const yTicks = Array.from({ length: Math.floor(yMax / 10) + 1 }, (_, i) => i * 10).filter(v => v <= yMax);
 
   return (
+    <>
     <div className="report-card">
       <h3>Chick Return Rate by Size</h3>
       <p className="muted">Percentage of chicks that returned to the colony in a later season, by size at chipping</p>
@@ -2435,6 +2436,7 @@ function ChickReturnChart() {
           </tbody>
         </table>
       )}
+    </div>
 
       {/* Histogram: age at first return */}
       {data.points && data.points.length > 0 && (() => {
@@ -2495,7 +2497,7 @@ function ChickReturnChart() {
           </div>
         );
       })()}
-    </div>
+    </>
   );
 }
 
