@@ -65,6 +65,12 @@ function getDbConnection($attemptsRemaining = 4) {
     }
 }
 
+/** Sliding session: extend a valid token to 30 days from now, at most once per day. */
+function touchSession($pdo, $token) {
+    $pdo->prepare("UPDATE sessions SET expires_at = NOW() + INTERVAL 30 DAY WHERE token = ? AND expires_at < NOW() + INTERVAL 29 DAY")
+        ->execute([$token]);
+}
+
 /**
  * Require auth for read-only endpoints. Accepts Bearer token, API key, or
  * observer api_key (GET only). Returns observer row or true.
@@ -78,7 +84,7 @@ function requireReadAuth($pdo = null) {
         $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
-        if ($result) return $result;
+        if ($result) { touchSession($pdo, $m[1]); return $result; }
     }
     // API key — read-only (GET requests only)
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -109,7 +115,7 @@ function requireAuth($pdo = null) {
         $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
-        if ($result) return $result;
+        if ($result) { touchSession($pdo, $m[1]); return $result; }
     }
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Authentication required']);
