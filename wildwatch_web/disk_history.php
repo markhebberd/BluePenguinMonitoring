@@ -15,6 +15,28 @@
  */
 require_once __DIR__ . '/config.php';
 
+/**
+ * Low-space warning, throttled to once per 12h via a shared state file.
+ * Defined here (as well as in disk_check.php) so the alert fires regardless of
+ * which script the cron invokes. The HTTP path runs under the web SAPI, whose
+ * mail() is known to deliver (the CLI cron's mail did not).
+ */
+function ww_maybe_alert_low_disk($freeMb) {
+    $thresholdMb = 50 * 1024; // 50 GB
+    if ($freeMb === null || $freeMb >= $thresholdMb) return false;
+    $stateFile = __DIR__ . '/disk_alert_last.txt';
+    $last = @file_get_contents($stateFile);
+    if ($last !== false && (time() - (int)$last) < 12 * 3600) return false; // throttle 12h
+    $to = 'mark@wildwatch.co.nz'; $from = 'mark@wildwatch.co.nz';
+    $freeGb = round($freeMb / 1024, 1); $thresholdGb = (int)round($thresholdMb / 1024);
+    $headers = "From: $from\r\nReply-To: $from\r\nContent-Type: text/plain; charset=UTF-8";
+    $ok = @mail($to, "DISK LOW ({$freeGb} GB free) - wildwatch.co.nz",
+        "Server free space is {$freeMb} MB (~{$freeGb} GB), below the {$thresholdGb} GB warning threshold, at " . date('Y-m-d H:i:s T') . ".",
+        $headers, "-f$from");
+    if ($ok) @file_put_contents($stateFile, (string)time());
+    return $ok;
+}
+
 // --- RECORD MODE: CLI cron, or HTTP with ?cron=<API_KEY> ---
 // (The live 15-min sample is normally taken by disk_check.php's cron; this
 //  path is a standalone fallback / manual trigger.)
@@ -28,7 +50,8 @@ if ($isCli || ($cronKey !== '' && hash_equals(API_KEY, $cronKey))) {
         echo json_encode(['ok' => false, 'error' => 'disk_free_space failed']);
         exit;
     }
-    echo json_encode(['ok' => true, 'disk_free_mb' => $freeMb]);
+    ww_maybe_alert_low_disk($freeMb); // low-space warning fires from whichever cron records the sample
+    echo json_encode(['ok' => true, 'disk_free_mb' => $freeMb, 'low_disk_threshold_mb' => 50 * 1024]);
     exit;
 }
 
