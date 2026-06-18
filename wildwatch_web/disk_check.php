@@ -1,6 +1,23 @@
 <?php
 $alertEmail = 'mark@wildwatch.co.nz';
+$alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
 $testFile = __DIR__ . '/disk_test.tmp';
+
+/** Send a disk alert from a real local mailbox, with a valid envelope sender (-f) so the MTA accepts it. */
+function sendDiskAlert($to, $from, $subject, $body) {
+    $headers = "From: $from\r\nReply-To: $from\r\nContent-Type: text/plain; charset=UTF-8";
+    return @mail($to, $subject, $body, $headers, "-f$from");
+}
+
+// Self-test: GET ?selftest=<API_KEY> — sends a test alert and reports whether mail() accepted it.
+if (isset($_GET['selftest'])) {
+    require_once __DIR__ . '/config.php';
+    header('Content-Type: application/json');
+    if (!hash_equals(API_KEY, (string)$_GET['selftest'])) { http_response_code(401); echo json_encode(['ok' => false, 'error' => 'bad key']); exit; }
+    $ok = sendDiskAlert($alertEmail, $alertFrom, "wildwatch disk alert self-test", "Disk-alert self-test at " . date('Y-m-d H:i:s T') . ". If you received this, mail() works.");
+    echo json_encode(['ok' => $ok, 'to' => $alertEmail, 'from' => $alertFrom]);
+    exit;
+}
 
 // Cron mode (no params) — silent 100MB test with email
 if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
@@ -13,7 +30,7 @@ if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
         fclose($fh); @unlink($testFile);
     } catch (Exception $e) {
         @unlink($testFile);
-        @mail($alertEmail, "DISK FULL - wildwatch.co.nz", "FAILED: " . $e->getMessage() . " at " . date('Y-m-d H:i:s T'), "From: noreply@wildwatch.co.nz");
+        sendDiskAlert($alertEmail, $alertFrom, "DISK FULL - wildwatch.co.nz", "FAILED: " . $e->getMessage() . " at " . date('Y-m-d H:i:s T'));
     }
     // Record a free-space sample for the admin history graph (after cleanup,
     // so it reflects true free space rather than the test file).
