@@ -6,18 +6,25 @@ function authHeaders(): Record<string, string> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// A 401 means the session token is invalid/expired. Signal the app to send the
+// user back to login (automating the manual "log out and back in" workaround).
+function checkAuth(r: Response): Response {
+  if (r.status === 401) window.dispatchEvent(new Event('ww-auth-expired'));
+  return r;
+}
+
 export async function fetchBoxTags(): Promise<Record<string, BoxTag>> {
-  const r = await fetch('/api/boxtags.php', { headers: authHeaders() });
+  const r = checkAuth(await fetch('/api/boxtags.php', { headers: authHeaders() }));
   const d = await r.json();
   return d.data ?? {};
 }
 
 export async function fetchOverview() {
-  return (await fetch(`/api/dashboard.php?view=overview&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return checkAuth(await fetch(`/api/dashboard.php?view=overview&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchServerStats() {
-  return (await fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: authHeaders() })).json();
+  return checkAuth(await fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchTimeline() {

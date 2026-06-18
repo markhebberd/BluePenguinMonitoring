@@ -3351,27 +3351,52 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     setTimeout(() => { setMenuOpen(false); setMenuClosing(false); }, 300);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Load local DB — incremental sync loads from IDB first (instant), then checks for changes
-      await syncDatabase((msg, pct) => { if (!cancelled) { setLoadProgress(msg); setLoadPct(pct ?? null); } });
-
-      if (cancelled) return;
-
-      // Phase 2: Load overview/tags/stats from API (fast, small payloads)
+  const lastLoadRef = useRef(0);
+  const loadColony = useCallback(async () => {
+    // A sync failure (e.g. flaky mobile network on resume) must NOT block the
+    // box-grid fetches below, or the grid renders empty ("Nest Boxes (0)").
+    try {
+      await syncDatabase((msg, pct) => { setLoadProgress(msg); setLoadPct(pct ?? null); });
+    } catch (e) {
+      console.warn('syncDatabase failed; continuing with cached/API data', e);
+    }
+    try {
       const [tags, ov, ss] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchServerStats()]);
-      if (cancelled) return;
       setBoxTags(tags); setStats(ov); setServerStats(ss);
+    } catch (e) {
+      console.warn('overview/tags fetch failed', e);
+    } finally {
       setLoading(false);
-
-      // Start polling for changes
-      startPolling(() => {
-        fetchOverview().then(ov => setStats(ov));
-      });
-    })().catch(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; stopPolling(); };
+      lastLoadRef.current = Date.now();
+    }
   }, []);
+
+  useEffect(() => {
+    loadColony();
+    startPolling(() => { fetchOverview().then(ov => setStats(ov)).catch(() => {}); });
+
+    // Re-sync when the app is reopened/refocused (mobile PWA resume) or network
+    // returns — Britta's "doesn't refresh on opening" was the lack of this.
+    const resume = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastLoadRef.current > 15000) loadColony();
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+    };
+  }, [loadColony]);
+
+  // Expired/invalid session → bounce to login (automates the log-out/in fix).
+  useEffect(() => {
+    const onExpired = () => onLogout();
+    window.addEventListener('ww-auth-expired', onExpired);
+    return () => window.removeEventListener('ww-auth-expired', onExpired);
+  }, [onLogout]);
 
   const boxDetail = useBoxDetail(loading ? null : selectedBox);
 
