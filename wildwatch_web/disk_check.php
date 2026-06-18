@@ -2,6 +2,9 @@
 $alertEmail = 'mark@wildwatch.co.nz';
 $alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
 $testFile = __DIR__ . '/disk_test.tmp';
+$alertStateFile  = __DIR__ . '/disk_alert_last.txt'; // throttle state for the low-space warning
+$lowDiskWarnMb   = 50 * 1024;                         // warn when free space drops below 50 GB
+$lowDiskThrottle = 12 * 3600;                         // at most one low-space warning per 12h
 
 /** Send a disk alert from a real local mailbox, with a valid envelope sender (-f) so the MTA accepts it. */
 function sendDiskAlert($to, $from, $subject, $body) {
@@ -29,14 +32,26 @@ if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
         }
         fclose($fh); @unlink($testFile);
     } catch (Exception $e) {
+        // Email on EVERY write failure (critical — not throttled).
         @unlink($testFile);
-        sendDiskAlert($alertEmail, $alertFrom, "DISK FULL - wildwatch.co.nz", "FAILED: " . $e->getMessage() . " at " . date('Y-m-d H:i:s T'));
+        sendDiskAlert($alertEmail, $alertFrom, "DISK WRITE FAILED - wildwatch.co.nz", "Disk write test FAILED: " . $e->getMessage() . " at " . date('Y-m-d H:i:s T'));
     }
     // Record a free-space sample for the admin history graph (after cleanup,
-    // so it reflects true free space rather than the test file).
+    // so it reflects true free space rather than the test file), then warn if
+    // free space is low — throttled to once per 12h.
     try {
         require_once __DIR__ . '/config.php';
-        recordDiskSample(getDbConnection());
+        $freeMb = recordDiskSample(getDbConnection());
+        if ($freeMb !== null && $freeMb < $lowDiskWarnMb) {
+            $last = @file_get_contents($alertStateFile);
+            if ($last === false || (time() - (int)$last) >= $lowDiskThrottle) {
+                $freeGb = round($freeMb / 1024, 1);
+                $thresholdGb = (int)round($lowDiskWarnMb / 1024);
+                if (sendDiskAlert($alertEmail, $alertFrom, "DISK LOW ({$freeGb} GB free) - wildwatch.co.nz", "Server free space is {$freeMb} MB (~{$freeGb} GB), below the {$thresholdGb} GB warning threshold, at " . date('Y-m-d H:i:s T') . ".")) {
+                    @file_put_contents($alertStateFile, (string)time());
+                }
+            }
+        }
     } catch (Exception $e) { /* history sampling is best-effort */ }
     exit;
 }
