@@ -1,5 +1,5 @@
 <?php
-$alertEmail = 'mark@wildwatch.co.nz';
+$alertEmail = 'mark@wildwatch.co.nz, britta@wildwatch.co.nz';
 $alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
 $testFile = __DIR__ . '/disk_test.tmp';
 $alertStateFile  = __DIR__ . '/disk_alert_last.txt'; // throttle state for the low-space warning
