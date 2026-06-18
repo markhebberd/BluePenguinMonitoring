@@ -1,5 +1,11 @@
 import type { BoxTag } from '../types';
 
+/** Render a UTC timestamp string in NZ time (viewer-independent). */
+function fmtNzDateTime(s: string) {
+  const d = new Date(s && (s.includes('T') || s.includes('Z')) ? s : String(s).replace(' ', 'T') + 'Z');
+  return d.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' });
+}
+
 interface Stats {
   total_boxes: number;
   season_observations: number;
@@ -67,7 +73,7 @@ export function StatsPanel({ boxTags, selectedBox, stats }: StatsPanelProps) {
           <table>
             <tbody>
               <tr><td>Tag</td><td>{selected.TagNumber}</td></tr>
-              <tr><td>Scanned</td><td>{new Date(selected.ScanTimeUTC).toLocaleString('en-NZ')}</td></tr>
+              <tr><td>Scanned</td><td>{fmtNzDateTime(selected.ScanTimeUTC)}</td></tr>
               <tr><td>Latitude</td><td>{selected.Latitude.toFixed(6)}</td></tr>
               <tr><td>Longitude</td><td>{selected.Longitude.toFixed(6)}</td></tr>
               <tr><td>Accuracy</td><td>{selected.Accuracy > 0 ? `${selected.Accuracy.toFixed(1)}m` : 'N/A'}</td></tr>

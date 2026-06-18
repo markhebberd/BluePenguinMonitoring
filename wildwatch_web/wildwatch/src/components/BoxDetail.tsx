@@ -55,8 +55,9 @@ export function BoxDetail({ boxName, onClose }: BoxDetailProps) {
   if (loading) return <div className="box-detail loading-small">Loading box {boxName}...</div>;
 
   const formatDate = (d: string) => {
-    const date = new Date(d);
-    return date.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    // Parse the MySQL UTC string as UTC, then render in NZ time (viewer-independent).
+    const date = new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z');
+    return date.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   };
 
   const getSexColor = (sex: string | null) => {
