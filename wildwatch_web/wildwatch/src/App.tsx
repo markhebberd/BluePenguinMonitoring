@@ -721,12 +721,12 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
       ) : (
         <>
         <div className="obs-edit-row">
-          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} />
-          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} />
-          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} />
-          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} />
-          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} />
-          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} />
+          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline />
+          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} inline />
+          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline />
+          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
+          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
+          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline />
         </div>
         <div className="obs-edit-birds">
           {[...localScans].sort(scanSortMFC).map(s => (
@@ -762,9 +762,9 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   );
 }
 
-function EditableField({ value, type, options, onSave, placeholder, canEdit }: {
+function EditableField({ value, type, options, onSave, placeholder, canEdit, inline }: {
   value: any; type?: 'text'|'number'|'select'|'date'; options?: string[];
-  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean;
+  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean; inline?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ''));
@@ -776,8 +776,46 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit }: {
   useEffect(() => { setDraft(String(value ?? '')); }, [value]);
 
   const display = value !== null && value !== undefined && value !== '' ? String(value) : null;
+  const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+  // Selects always render as a live dropdown, so a blank value is obviously
+  // settable (shows the placeholder, e.g. "Location status") rather than a "-".
+  if (type === 'select') {
+    if (!canEdit) return <span className="ef-value">{display ?? <span className="muted">{placeholder || '-'}</span>}</span>;
+    const opts = options || [];
+    const allOpts = draft && !opts.includes(draft) ? [draft, ...opts] : opts; // keep current value (e.g. BR) visible
+    return (
+      <select className={`ef-input${draft === '' ? ' ef-placeholder' : ''}`} value={draft} disabled={saving}
+        onChange={async e => { const v = e.target.value; setDraft(v); setSaving(true); await onSave(v || null); setSaving(false); flash(); }}>
+        {allOpts.map(o => <option key={o} value={o}>{o || (placeholder || '(none)')}</option>)}
+      </select>
+    );
+  }
 
   if (!canEdit) return <span className="ef-value">{display ?? <span className="muted">{placeholder || '-'}</span>}</span>;
+
+  const save = async () => {
+    setSaving(true);
+    const val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
+    await onSave(val);
+    setSaving(false);
+    setEditing(false);
+    flash();
+  };
+
+  const cancel = () => { setDraft(String(value ?? '')); setEditing(false); };
+
+  // Inline: a plain input shown directly (no click-to-reveal span / pencil icon),
+  // used in the observation edit row where the card is already in edit mode.
+  if (inline) {
+    return (
+      <input ref={ref as any} className="ef-input" type={type || 'text'} value={draft} disabled={saving}
+        placeholder={placeholder}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+        onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); if (e.key === 'Escape') cancel(); }} />
+    );
+  }
 
   if (!editing) {
     return (
@@ -786,28 +824,6 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit }: {
         {saved && <span className="ef-saved">&#10003;</span>}
         <span className="ef-pencil">&#9998;</span>
       </span>
-    );
-  }
-
-  const save = async () => {
-    setSaving(true);
-    const val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
-    await onSave(val);
-    setSaving(false);
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const cancel = () => { setDraft(String(value ?? '')); setEditing(false); };
-
-  if (type === 'select') {
-    return (
-      <select ref={ref as any} className="ef-input" value={draft} disabled={saving}
-        onChange={async e => { const v = e.target.value; setDraft(v); setSaving(true); const val = v || null; await onSave(val); setSaving(false); setEditing(false); setSaved(true); setTimeout(() => setSaved(false), 2000); }}
-        onKeyDown={e => { if (e.key === 'Escape') cancel(); }}>
-        {(options || []).map(o => <option key={o} value={o}>{o || '(none)'}</option>)}
-      </select>
     );
   }
 

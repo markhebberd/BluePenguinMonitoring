@@ -432,6 +432,7 @@ h3.collapsible:hover { color:#1a5276; }
 .ef-saved { color:#4CAF50; font-size:12px; margin-left:4px; }
 .ef-input { font-size:13px; padding:2px 6px; border:1px solid #2196F3; border-radius:4px; outline:none; max-width:120px; }
 select.ef-input { max-width:140px; }
+select.ef-input.ef-placeholder { color:#888; }
 
 /* History */
 .history-btn { background:none; border:1px solid #ddd; color:#999; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer; margin-top:4px; }
