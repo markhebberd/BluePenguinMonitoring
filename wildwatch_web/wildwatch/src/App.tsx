@@ -664,6 +664,19 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
       ).slice(0, 8)
     : [];
 
+  // Adding/removing a scan bumps the matching count: a bird that is a chick at the
+  // observation date (chipped as a chick < 3 months prior) adjusts #chicks; an adult
+  // (chipped as adult, or chipped > 3 months ago) adjusts #adults. Never goes below 0.
+  const adjustCountForScan = async (scan: any, delta: number) => {
+    if (!obsId || !token) return;
+    const field = isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, obs.observation_time_utc) ? 'chicks' : 'adults';
+    const current = Number((localObs as any)[field] || 0);
+    const next = Math.max(0, current + delta);
+    if (next === current) return;
+    await updateRecord(token, 'observations', obsId, { [field]: next },
+      `${delta > 0 ? '+1' : '-1'} ${field} (penguin #${scan.peng_num || scan.pit_id} ${delta > 0 ? 'added' : 'removed'})`);
+  };
+
   const addScan = async (p: any) => {
     if (!obsId || !token) return;
     if (localScans.some(s => s.pit_id === p.pit_id)) return;
@@ -673,6 +686,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     if (result?.id) {
       const newScan: Scan = { scan_id: result.id, peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
       setLocalScans([...localScans, newScan]);
+      await adjustCountForScan(p, 1);
     }
     setBirdSearch('');
     onDataChange?.();
@@ -682,6 +696,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     if (!scan.scan_id || !token) return;
     await deleteRecord(token, 'penguin_scans', scan.scan_id);
     setLocalScans(localScans.filter(s => s.scan_id !== scan.scan_id));
+    await adjustCountForScan(scan, -1);
     onDataChange?.();
   };
 
@@ -720,14 +735,6 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         </>
       ) : (
         <>
-        <div className="obs-edit-row">
-          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline />
-          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} inline />
-          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline />
-          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
-          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
-          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline />
-        </div>
         <div className="obs-edit-birds">
           {[...localScans].sort(scanSortMFC).map(s => (
             <span key={s.scan_id || s.pit_id} className="scan-removable">
@@ -748,6 +755,14 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             )}
           </div>
         </div>
+        <div className="obs-edit-row">
+          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline narrow min={0} />
+          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} inline narrow min={0} />
+          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline narrow min={0} />
+          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
+          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
+          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline />
+        </div>
         </>
       )}
       {!editing && obs.scans.length>0 && (
@@ -762,9 +777,9 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   );
 }
 
-function EditableField({ value, type, options, onSave, placeholder, canEdit, inline }: {
+function EditableField({ value, type, options, onSave, placeholder, canEdit, inline, narrow, min }: {
   value: any; type?: 'text'|'number'|'select'|'date'; options?: string[];
-  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean; inline?: boolean;
+  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean; inline?: boolean; narrow?: boolean; min?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ''));
@@ -796,7 +811,8 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
 
   const save = async () => {
     setSaving(true);
-    const val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
+    let val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
+    if (type === 'number' && val !== null && min !== undefined && (val as number) < min) val = min;
     await onSave(val);
     setSaving(false);
     setEditing(false);
@@ -809,8 +825,8 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   // used in the observation edit row where the card is already in edit mode.
   if (inline) {
     return (
-      <input ref={ref as any} className="ef-input" type={type || 'text'} value={draft} disabled={saving}
-        placeholder={placeholder}
+      <input ref={ref as any} className={`ef-input${narrow ? ' ef-narrow' : ''}`} type={type || 'text'} value={draft} disabled={saving}
+        placeholder={placeholder} min={min}
         onChange={e => setDraft(e.target.value)}
         onBlur={() => { if (String(value ?? '') !== draft) save(); }}
         onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); if (e.key === 'Escape') cancel(); }} />
