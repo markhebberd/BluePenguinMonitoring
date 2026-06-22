@@ -761,7 +761,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline narrow min={0} />
           <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
           <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
-          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline />
+          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline multiline />
         </div>
         </>
       )}
@@ -777,9 +777,9 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   );
 }
 
-function EditableField({ value, type, options, onSave, placeholder, canEdit, inline, narrow, min }: {
+function EditableField({ value, type, options, onSave, placeholder, canEdit, inline, narrow, min, multiline }: {
   value: any; type?: 'text'|'number'|'select'|'date'; options?: string[];
-  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean; inline?: boolean; narrow?: boolean; min?: number;
+  onSave: (val: any) => Promise<any>; placeholder?: string; canEdit?: boolean; inline?: boolean; narrow?: boolean; min?: number; multiline?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ''));
@@ -824,6 +824,15 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   // Inline: a plain input shown directly (no click-to-reveal span / pencil icon),
   // used in the observation edit row where the card is already in edit mode.
   if (inline) {
+    if (multiline) {
+      return (
+        <textarea ref={ref as any} className="ef-input ef-notes" value={draft} disabled={saving} rows={1}
+          placeholder={placeholder}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+          onKeyDown={e => { if (e.key === 'Escape') cancel(); }} />
+      );
+    }
     return (
       <input ref={ref as any} className={`ef-input${narrow ? ' ef-narrow' : ''}`} type={type || 'text'} value={draft} disabled={saving}
         placeholder={placeholder} min={min}
