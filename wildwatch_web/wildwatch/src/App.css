@@ -434,7 +434,7 @@ h3.collapsible:hover { color:#1a5276; }
 select.ef-input { max-width:140px; }
 select.ef-input.ef-placeholder { color:#888; }
 .ef-input.ef-narrow { width:3.8em; max-width:3.8em; padding:2px 4px; }
-.ef-input.ef-notes { flex:1 1 10em; min-width:7em; min-height:1.9em; resize:vertical; font-family:inherit; line-height:1.4; box-sizing:border-box; }
+.ef-input.ef-notes { flex:1 1 10em; min-width:7em; max-width:none; min-height:1.9em; resize:vertical; font-family:inherit; line-height:1.4; box-sizing:border-box; }
 .ef-input.ef-notes:focus { flex-basis:100%; min-height:4.5em; }
 
 /* History */
