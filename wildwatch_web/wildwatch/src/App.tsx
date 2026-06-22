@@ -814,6 +814,7 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
     let val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
     if (type === 'number' && val !== null && min !== undefined && (val as number) < min) val = min;
     await onSave(val);
+    setDraft(String(val ?? '')); // resync display to the (possibly clamped) saved value
     setSaving(false);
     setEditing(false);
     flash();
