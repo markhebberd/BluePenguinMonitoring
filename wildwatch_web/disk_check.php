@@ -1,5 +1,5 @@
 <?php
-$alertEmail = 'mark@wildwatch.co.nz, britta@wildwatch.co.nz';
+$alertEmail = 'markhebberd@gmail.com, bdot@snotch.com';
 $alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
 $testFile = __DIR__ . '/disk_test.tmp';
 $alertStateFile  = __DIR__ . '/disk_alert_last.txt'; // throttle state for the low-space warning
@@ -41,7 +41,8 @@ if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
     // free space is low — throttled to once per 12h.
     try {
         require_once __DIR__ . '/config.php';
-        $freeMb = recordDiskSample(getDbConnection());
+        $pdo = getDbConnection();
+        $freeMb = recordDiskSample($pdo);
         if ($freeMb !== null && $freeMb < $lowDiskWarnMb) {
             $last = @file_get_contents($alertStateFile);
             if ($last === false || (time() - (int)$last) >= $lowDiskThrottle) {
@@ -52,6 +53,8 @@ if (!isset($_GET['mb']) && php_sapi_name() === 'cli') {
                 }
             }
         }
+        // Check for linear descent — alert if disk hits zero within 24h
+        checkDiskDescentAlert($pdo);
     } catch (Exception $e) { /* history sampling is best-effort */ }
     exit;
 }

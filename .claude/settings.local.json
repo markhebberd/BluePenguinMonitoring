@@ -70,7 +70,9 @@
       "Bash(sort -t'\\(' -k2 -n)",
       "Bash(rclone delete:*)",
       "Bash(php:*)",
-      "Bash(zcat /home/mark/src/PenguinMonitor/backups/2026/06/2026-06-08.sql.gz)"
+      "Bash(zcat /home/mark/src/PenguinMonitor/backups/2026/06/2026-06-08.sql.gz)",
+      "WebFetch(domain:www.microsoft.com)",
+      "Bash(ssh:*)"
     ]
   }
 }
