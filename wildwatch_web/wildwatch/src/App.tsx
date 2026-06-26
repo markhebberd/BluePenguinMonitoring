@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchReport } from './api/boxtags';
-import { syncDatabase, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getDateStats, startPolling, stopPolling } from './api/localdb';
+import { syncDatabase, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -64,6 +64,30 @@ function displayStatus(status: string|null, eggs: number, chicks: number): strin
 }
 
 const DARK_TEXT_STATUSES = new Set(['NO','UNL','POT','CON','I','']);
+
+// "Only changed" day-view filter fields (compare a day's observation to the box's previous one)
+const CHANGED_FIELDS: { key: string; label: string }[] = [
+  { key: 'status', label: 'Breeding status' },
+  { key: 'adults', label: 'Adults' },
+  { key: 'eggs', label: 'Eggs' },
+  { key: 'chicks', label: 'Chicks' },
+  { key: 'sum', label: 'Eggs+chicks' },
+];
+/** True if a day's observation differs from the box's previous observation in any selected field.
+ *  Breeding status carries forward: a blank current status inherits the previous, so only a
+ *  newly-recorded differing status counts. A missing previous is an empty baseline (0 / no status). */
+function obsDiffersFromPrev(o: any, prev: any, fields: Set<string>): boolean {
+  if (fields.has('status')) {
+    const cur = (o.breeding_status || '').trim();
+    const prevStatus = (prev?.breeding_status || '').trim();
+    if (cur && cur !== prevStatus) return true;
+  }
+  if (fields.has('adults') && (o.adults || 0) !== (prev?.adults || 0)) return true;
+  if (fields.has('eggs') && (o.eggs || 0) !== (prev?.eggs || 0)) return true;
+  if (fields.has('chicks') && (o.chicks || 0) !== (prev?.chicks || 0)) return true;
+  if (fields.has('sum') && ((o.eggs || 0) + (o.chicks || 0)) !== ((prev?.eggs || 0) + (prev?.chicks || 0))) return true;
+  return false;
+}
 
 // Color progression: NO → UNL → POT → CON → BR → Guard → PG → Molting. Red = alert only.
 const STATUS_COLORS: Record<string,string> = {
@@ -2644,6 +2668,14 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
   const handleBirdClick = (num: string) => setSideBird(num);
   const [showCarryForward, setShowCarryForward] = useState(false);
   const [hideDcm, setHideDcm] = useState(false);
+  // "Only changed" filter: show boxes whose observation differs from the previous one (before this day)
+  const [changedExpanded, setChangedExpanded] = useState(false);
+  const [changedFields, setChangedFields] = useState<Set<string>>(new Set());
+  const toggleChangedField = (f: string) => setChangedFields(prev => {
+    const next = new Set(prev);
+    if (next.has(f)) next.delete(f); else next.add(f);
+    return next;
+  });
 
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
@@ -2678,6 +2710,19 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
         <div className="day-section">
           <h3 className="day-header-row">
             <span><DateStatsLine stats={getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, chipped:0, label:null, isFullMonitor:false, totalLocations:0 }} showDate date={date} /></span>
+            <span className="day-changed-group">
+              <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
+                Changed {changedExpanded ? '▴' : '▾'}
+              </button>
+              {changedExpanded && CHANGED_FIELDS.map(f => (
+                <label key={f.key} className="day-cf-toggle">
+                  <input type="checkbox" checked={changedFields.has(f.key)} onChange={() => toggleChangedField(f.key)} /> {f.label}
+                </label>
+              ))}
+              {changedExpanded && changedFields.size > 0 && (
+                <button type="button" className="day-changed-clear" onClick={() => setChangedFields(new Set())}>clear</button>
+              )}
+            </span>
             <span className="day-cf-toggles">
               <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
               <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => setShowCarryForward(e.target.checked)} /> Show all</label>
@@ -2694,7 +2739,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
             for (const cf of cfData) cfByBox[cf.box_name] = cf;
 
             // Merge all boxes: observed + carry-forward, filter out DCM if enabled
-            const allBoxNames = (showCarryForward
+            let allBoxNames = (showCarryForward
               ? [...new Set([...sortedBoxes, ...cfData.map((c: any) => c.box_name)])]
               : [...sortedBoxes]
             ).filter(b => !dcmBoxes.has(b)).sort((a, b) => {
@@ -2702,7 +2747,22 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
             });
 
-            return allBoxNames.map(box => {
+            // "Only changed" filter: keep boxes observed today whose observation differs from the
+            // box's previous observation (before today) in a selected field. Carry-forward-only
+            // boxes have no new observation, so they're excluded while this filter is active.
+            let hiddenByChange = 0;
+            if (changedFields.size > 0) {
+              const observedBefore = allBoxNames.filter(b => observedBoxes.has(b)).length;
+              const prevByBox = queryPreviousObservations(date, [...observedBoxes]);
+              allBoxNames = allBoxNames.filter(box => {
+                if (!observedBoxes.has(box)) return false;
+                const prev = prevByBox[box];
+                return (byBox[box]?.obs || []).some((o: any) => obsDiffersFromPrev(o, prev, changedFields));
+              });
+              hiddenByChange = observedBefore - allBoxNames.length;
+            }
+
+            const rows = allBoxNames.map(box => {
               const cf = cfByBox[box];
               if (cf && !observedBoxes.has(box)) {
                 // Carry-forward row (orange)
@@ -2767,6 +2827,13 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               </div>
               );
             });
+
+            return (<>
+              {rows}
+              {hiddenByChange > 0 && (
+                <div className="day-hidden-note">{hiddenByChange} box{hiddenByChange === 1 ? '' : 'es'} hidden by change filter</div>
+              )}
+            </>);
           })()}
           </div>
         </div>

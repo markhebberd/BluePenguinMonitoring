@@ -733,6 +733,37 @@ export function queryCarryForward(nzDate: string, observedBoxes: Set<string>): a
   return results;
 }
 
+/** For each given box, its most recent non-deleted observation strictly before the NZ date.
+ *  Numeric fields (adults/eggs/chicks) come from that latest prior observation. breeding_status
+ *  is carried forward from the most recent observation that actually recorded one, which may be
+ *  older than the numeric snapshot. Returns box_name -> prev summary (boxes with no prior omitted). */
+export function queryPreviousObservations(nzDate: string, boxNames: string[]): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (!mem) return out;
+  const c = mem;
+  // NZ date D starts at UTC (D-1)T11:00:00 — same window math as queryDay
+  const d = new Date(nzDate + 'T00:00:00Z');
+  const utcStart = new Date(d.getTime() - 86400000 + 11 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+  for (const box of boxNames) {
+    const loc = c.locByName.get(box);
+    if (!loc) continue;
+    const locObs = (c.obsByLocation.get(loc.location_id) || [])
+      .filter((o: any) => !o.is_deleted && o.observation_time_utc < utcStart)
+      .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
+    if (locObs.length === 0) continue;
+    const latest = locObs[0];
+    const lastStatus = locObs.find((o: any) => o.breeding_status)?.breeding_status ?? null;
+    out[box] = {
+      adults: latest.adults || 0,
+      eggs: latest.eggs || 0,
+      chicks: latest.chicks || 0,
+      breeding_status: lastStatus,
+      observation_time_utc: latest.observation_time_utc,
+    };
+  }
+  return out;
+}
+
 /** Get boxes whose most recent breeding_status before a date is DCM */
 export function getDcmBoxes(beforeNzDate: string): Set<string> {
   const dcm = new Set<string>();

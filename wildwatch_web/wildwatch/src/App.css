@@ -270,9 +270,14 @@ h3.collapsible:hover { color:#1a5276; }
 .day-row-cf { color:#e65100; opacity:0.8; }
 .day-row-cf .day-box-link { color:#e65100; }
 .day-cf-date { font-size:10px; font-style:italic; }
-.day-header-row { display:flex; align-items:center; justify-content:space-between; }
+.day-header-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; row-gap:6px; }
 .day-cf-toggles { display:flex; gap:12px; }
 .day-cf-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:4px; }
+.day-changed-group { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.day-changed-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; background:none; border:1px solid #cfd8dc; border-radius:4px; padding:2px 8px; color:#1a5276; }
+.day-changed-toggle.active { background:#e3f2fd; border-color:#90caf9; font-weight:600; }
+.day-changed-clear { font-size:11px; cursor:pointer; background:none; border:none; color:#1a5276; text-decoration:underline; padding:0; }
+.day-hidden-note { color:#F44336; font-size:12px; font-weight:600; padding:6px 0 2px; break-inside:avoid; }
 .day-chips { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:4px 0; font-size:12px; }
 .day-chip-entry { display:flex; align-items:center; gap:4px; }
 .header-nav .penguin-search { flex:1; }
