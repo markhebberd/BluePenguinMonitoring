@@ -98,7 +98,7 @@ $range = $_GET['range'] ?? 'day';
 $tz = '+12:00';
 
 // Raw 15-min samples for the shorter ranges (day, week).
-$rawDays = ['day' => 1, 'week' => 7];
+$rawDays = ['day' => 1, 'week' => 7, 'month' => 31];
 if (isset($rawDays[$range])) {
     $d = (int)$rawDays[$range];
     $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(recorded_at) * 1000 AS t, disk_free_mb

@@ -3159,8 +3159,12 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
-      <DuplicateObservations token={token} />
-      <DuplicateScans token={token} />
+      <div className="admin-section">
+        <h3>Data Security</h3>
+        <DuplicateObservations token={token} />
+        <DuplicateScans token={token} />
+        <SameGenderConflicts token={token} />
+      </div>
 
       <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
         <DiskHistoryChart token={token} />
@@ -3308,6 +3312,46 @@ function DuplicateScans({ token }: { token: string }) {
           ))}</tbody>
         </table>
         <p className="muted" style={{marginTop:8}}>Duplicate scans are kept on purpose — they flag data-entry errors. Review each from the box card for that date; they are also marked “⚠ dup scan” in the day view.</p>
+      </>)}
+    </div>
+  );
+}
+
+function SameGenderConflicts({ token }: { token: string }) {
+  const [conflicts, setConflicts] = useState<any[]|null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const check = async () => {
+    setLoading(true);
+    const r = await fetch('/api/admin.php?action=same_gender_conflicts', { headers: { 'Authorization': `Bearer ${token}` } });
+    const d = await r.json();
+    setConflicts(Array.isArray(d) ? d : []);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
+      <h3 style={{margin:'0 0 8px'}}>Same-Gender Conflicts</h3>
+      <p className="muted" style={{margin:'0 0 8px'}}>Multiple penguins of the same sex scanned at the same box on the same day</p>
+      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check'}</button>
+      {conflicts && conflicts.length === 0 && <span style={{color:'#4CAF50'}}>No conflicts found</span>}
+      {conflicts && conflicts.length > 0 && (<>
+        <p style={{color:'#F44336', fontWeight:600}}>{conflicts.length} same-gender conflicts found:</p>
+        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Sex</th><th>Count</th><th>Penguins</th></tr></thead>
+          <tbody>{conflicts.map((d: any, i: number) => (
+            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
+              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
+              <td>{d.sex === 'M' ? 'Male' : d.sex === 'F' ? 'Female' : d.sex}</td>
+              <td style={{color:'#F44336'}}>{d.cnt}x</td>
+              <td>{d.peng_nums?.split(',').map((n: string) => (
+                <a key={n} className="clickable" href={`/penguin/${n.trim()}`} style={{marginRight:6}}>#{n.trim()}</a>
+              ))}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+        <p className="muted" style={{marginTop:8}}>May indicate a sex assignment error or a genuine multi-bird visit.</p>
       </>)}
     </div>
   );

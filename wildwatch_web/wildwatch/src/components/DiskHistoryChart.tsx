@@ -217,7 +217,8 @@ export function DiskHistoryChart({ token }: { token: string }) {
   const tipLabel = isDaily
     ? (v: any) => fmtDay(String(v))
     : dRange === 'day' ? (v: any) => fmtTime(Number(v)) : (v: any) => fmtDateTime(Number(v));
-  const lowestPrefix = isDaily ? 'Lowest daily free space' : dRange === 'day' ? 'Lowest in last 24h' : 'Lowest in last 7 days';
+  const rangeLabel = { day: '24h', week: '7 days', month: '31 days', year: '1 year' }[dRange] ?? dRange;
+  const lowestPrefix = isDaily ? 'Lowest daily free space' : `Lowest in last ${rangeLabel}`;
   const lowestWhen = (p: any) => isDaily ? ` on ${fmtDay(p.d)}` : dRange === 'day' ? ` at ${fmtTime(p.t)}` : ` at ${fmtDateTime(p.t)}`;
 
   return (
