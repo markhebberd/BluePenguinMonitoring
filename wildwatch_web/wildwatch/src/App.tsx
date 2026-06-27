@@ -2740,8 +2740,14 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               <button type="button" className="day-changed-clear" onClick={() => setChangedFields(new Set())}>clear</button>
             )}
             <span className="day-cf-toggles">
-              <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
-              <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => setShowCarryForward(e.target.checked)} /> Show all</label>
+              <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => {
+                const v = e.target.checked;
+                setShowCarryForward(v);
+                if (v) setChangedFields(new Set()); else setHideDcm(false);
+              }} /> Show all</label>
+              {showCarryForward && (
+                <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
+              )}
             </span>
           </h3>
           <div className="day-grid">
