@@ -3382,6 +3382,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [showAdmin, setShowAdmin] = useState(initial.admin || false);
   const [showReports, setShowReports] = useState(initial.reports || false);
+  const [showSettings, setShowSettings] = useState(false);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [datePickerCenter, setDatePickerCenter] = useState('');
   const [selectedDay, setSelectedDay] = useState<string|null>(initial.day || null);
@@ -3625,23 +3626,77 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <div className="mobile-search-group">
             <label className="mobile-label">Date</label>
             <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+            {(() => {
+              const dates = (stats?.observation_dates || []).slice(0, 20).reverse();
+              if (!dates.length) return null;
+              const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              return (
+                <div ref={el => { if (el) el.scrollLeft = el.scrollWidth; }} style={{display:'flex', gap:4, overflowX:'auto', marginTop:6, paddingBottom:2}}>
+                  {dates.map((d: string) => {
+                    const ds = dateStatsCache.get(d);
+                    const fm = ds?.isFullMonitor;
+                    const [,m,day] = d.split('-');
+                    const label = `${parseInt(day)} ${months[parseInt(m) - 1]}`;
+                    return (
+                      <span key={d} className="scan clickable" onClick={() => { goToDay(d); closeMenu(); }}
+                        style={{fontSize:10, whiteSpace:'nowrap', background: fm ? '#c8e6c9' : '#e3f2fd', color: fm ? '#2e7d32' : '#1a5276', borderColor: fm ? '#81c784' : '#90caf9', display:'inline-flex', flexDirection:'column', alignItems:'center', gap:1, padding:'2px 5px', lineHeight:1.3}}>
+                        <span style={{fontWeight:600}}>{label}</span>
+                        {ds && <span style={{fontSize:8, opacity:0.8}}>
+                          {'\uD83D\uDCE6'}{ds.boxes}{ds.penguins ? ` \uD83D\uDC27${ds.penguins}` : ''}{ds.eggs ? ` \uD83E\uDD5A${ds.eggs}` : ''}{ds.chicks ? ` \uD83D\uDC23${ds.chicks}` : ''}
+                        </span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
           <nav className="mobile-nav">
             <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => { goTo('reports'); closeMenu(); })}>Reports</a>
             {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin</a>}
             {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
           </nav>
-          <nav className="mobile-nav mobile-nav-user">
-            <span className="mobile-username">{userName}</span>
-            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); const next = menuSide === 'right' ? 'left' : 'right'; setMenuSide(next); localStorage.setItem('ww_menu_side', next); }}>Menu on {menuSide === 'right' ? 'left' : 'right'}</a>
-            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); setShowChangePassword(true); closeMenu(); }}>Change password</a>
-            <a className="mobile-nav-link" href="#" onClick={e => { e.preventDefault(); onLogout(); }}>Logout</a>
-          </nav>
-          {serverStats && <div className="mobile-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</div>}
+          <div style={{marginTop:'auto'}}>
+            {serverStats && <div className="mobile-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</div>}
+            <div className="mobile-nav-user" style={{display:'flex', alignItems:'center', gap:12, padding:'8px 12px'}}>
+              <span className="mobile-username" style={{padding:0, flex:1}}>{userName}</span>
+              <button onClick={() => { setShowSettings(true); closeMenu(); }} style={{background:'none', border:'none', fontSize:20, cursor:'pointer', padding:4, color:'#666'}} title="Settings">{'\u2699'}</button>
+              <button onClick={() => { onLogout(); }} style={{background:'none', border:'none', fontSize:18, cursor:'pointer', padding:4, color:'#999'}} title="Logout">{'\uD83D\uDEAA'}</button>
+            </div>
+          </div>
         </div>
       </>}
     </header>
   );
+
+  // Settings page
+  if (showSettings) {
+    return wrap(
+      <div className="app">
+        {siteHeader}
+        <div style={{maxWidth:400, margin:'0 auto', padding:'24px 20px'}}>
+          <h2 style={{color:'#1a5276', margin:'0 0 20px'}}>Settings</h2>
+          <div style={{marginBottom:20}}>
+            <h3 style={{color:'#1a5276', margin:'0 0 8px'}}>Menu position</h3>
+            <div style={{display:'flex', gap:8}}>
+              {(['left', 'right'] as const).map(side => (
+                <button key={side} className="edit-btn" style={menuSide === side ? {background:'#2196F3', color:'#fff', borderColor:'#2196F3'} : undefined}
+                  onClick={() => { setMenuSide(side); localStorage.setItem('ww_menu_side', side); }}>
+                  {side === 'left' ? 'Left' : 'Right'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{marginBottom:20}}>
+            <h3 style={{color:'#1a5276', margin:'0 0 8px'}}>Password</h3>
+            <button className="edit-btn" onClick={() => setShowChangePassword(true)}>Change password</button>
+          </div>
+          <button className="edit-btn" onClick={() => setShowSettings(false)} style={{marginTop:12}}>Back</button>
+        </div>
+        {passwordDialog}
+      </div>
+    );
+  }
 
   // Admin page
   if (showAdmin && userRole === 'admin') {
