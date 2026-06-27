@@ -2728,22 +2728,24 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
         <div className="day-section">
           <h3 className="day-header-row">
             <span><DateStatsLine stats={getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, chipped:0, label:null, isFullMonitor:false, totalLocations:0 }} showDate date={date} /></span>
-            <span className="day-changed-group">
-              <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
-                Changed {changedExpanded ? '▴' : '▾'}
-              </button>
-              {changedExpanded && CHANGED_FIELDS.map(f => (
-                <label key={f.key} className="day-cf-toggle">
-                  <input type="checkbox" checked={changedFields.has(f.key)} onChange={() => toggleChangedField(f.key)} /> {f.label}
-                </label>
-              ))}
-              {changedExpanded && changedFields.size > 0 && (
-                <button type="button" className="day-changed-clear" onClick={() => setChangedFields(new Set())}>clear</button>
-              )}
-            </span>
-            <span className="day-cf-toggles">
-              <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
-              <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => setShowCarryForward(e.target.checked)} /> Show all</label>
+            <span className="day-controls">
+              <span className="day-changed-group">
+                <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
+                  Changed {changedExpanded ? '▴' : '▾'}
+                </button>
+                {changedExpanded && CHANGED_FIELDS.map(f => (
+                  <label key={f.key} className="day-cf-toggle">
+                    <input type="checkbox" checked={changedFields.has(f.key)} onChange={() => toggleChangedField(f.key)} /> {f.label}
+                  </label>
+                ))}
+                {changedExpanded && changedFields.size > 0 && (
+                  <button type="button" className="day-changed-clear" onClick={() => setChangedFields(new Set())}>clear</button>
+                )}
+              </span>
+              <span className="day-cf-toggles">
+                <label className="day-cf-toggle"><input type="checkbox" checked={hideDcm} onChange={e => setHideDcm(e.target.checked)} /> Hide DCM</label>
+                <label className="day-cf-toggle"><input type="checkbox" checked={showCarryForward} onChange={e => setShowCarryForward(e.target.checked)} /> Show all</label>
+              </span>
             </span>
           </h3>
           <div className="day-grid">
