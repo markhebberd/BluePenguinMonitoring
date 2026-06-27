@@ -275,11 +275,10 @@ h3.collapsible:hover { color:#1a5276; }
 .day-row-cf { color:#e65100; opacity:0.8; }
 .day-row-cf .day-box-link { color:#e65100; }
 .day-cf-date { font-size:10px; font-style:italic; }
-.day-header-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 16px; }
-.day-controls { display:flex; align-items:center; flex-wrap:wrap; gap:6px 16px; }
+.day-header-row { display:flex; align-items:center; flex-wrap:wrap; gap:6px 14px; }
+.day-stats { margin-right:auto; }
 .day-cf-toggles { display:flex; gap:12px; }
 .day-cf-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:4px; }
-.day-changed-group { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; }
 .day-changed-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; background:none; border:1px solid #cfd8dc; border-radius:4px; padding:2px 8px; color:#1a5276; }
 .day-changed-toggle.active { background:#e3f2fd; border-color:#90caf9; font-weight:600; }
 .day-changed-clear { font-size:11px; cursor:pointer; background:none; border:none; color:#1a5276; text-decoration:underline; padding:0; }
