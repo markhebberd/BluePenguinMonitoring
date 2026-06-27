@@ -2574,7 +2574,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   useEffect(() => {
     if (calRef.current) {
       const active = calRef.current.querySelector('.cal-day.active');
-      if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      if (active) active.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
     }
   }, [date]);
 
@@ -2670,10 +2670,28 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
   const totalObs = data.observations.length;
   const totalChips = data.chippings.length;
 
-  return (
-    <div className="day-page">
-      <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
+  const dayPageRef = useRef<HTMLDivElement>(null);
+  const [calHidden, setCalHidden] = useState(false);
 
+  return (
+    <div className="day-page" ref={dayPageRef}>
+      {!calHidden && (
+        <div style={{position:'relative'}}>
+          <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
+          <button onClick={() => setCalHidden(true)} className="cal-toggle" style={{position:'absolute', bottom:-10, right:16}} title="Hide calendar">
+            <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1,5 5,1 9,5" />
+            </svg>
+          </button>
+        </div>
+      )}
+      {calHidden && (
+        <button onClick={() => setCalHidden(false)} className="cal-toggle cal-toggle-collapsed" title="Show calendar">
+          <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1,1 5,5 9,1" />
+          </svg>
+        </button>
+      )}
       {(totalObs > 0 || totalChips > 0) && (
         <div className="day-section">
           <h3 className="day-header-row">

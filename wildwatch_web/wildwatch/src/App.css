@@ -250,6 +250,11 @@ h3.collapsible:hover { color:#1a5276; }
 .cal-day.active { background:#1a5276; color:#fff; font-weight:700; }
 .cal-day.active.full-monitor { background:#2e7d32; }
 
+.cal-toggle { width:20px; height:20px; border-radius:50%; border:1px solid #ccc; background:#fff; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; flex-shrink:0; z-index:501; }
+.cal-toggle:hover { background:#e3f2fd; color:#1a5276; border-color:#90caf9; }
+.cal-toggle svg { width:10px; height:10px; }
+.cal-toggle-collapsed { position:fixed; top:44px; right:16px; border-color:rgba(255,255,255,.4); background:rgba(255,255,255,.9); }
+
 /* Daily view */
 .day-page { margin:0 auto; padding:0; display:flex; flex-direction:column; overflow:hidden; height:calc(100dvh - 88px); }
 .day-section { max-width:100%; margin:0; padding:16px 20px; flex:1; min-height:0; display:flex; flex-direction:column; }
