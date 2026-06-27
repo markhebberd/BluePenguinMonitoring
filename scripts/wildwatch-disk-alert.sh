@@ -16,7 +16,7 @@ set -u
 
 API_KEY="tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf"
 THRESHOLD_GB="${WW_DISK_THRESHOLD_GB:-20}"     # normal free space is ~300-440 GB; 20 GB = real emergency
-ALERT_TO="markhebberd@gmail.com"
+ALERT_TO="markhebberd@gmail.com,bdot@snotch.com"
 THROTTLE_SECS=21600                            # at most one alert per 6h while a condition persists
 STATE="/tmp/wildwatch-disk-alert.last"
 HIMALAYA="$(command -v himalaya || echo "$HOME/.local/bin/himalaya")"
@@ -25,16 +25,23 @@ URL="https://wildwatch.co.nz/api/disk_history.php?cron=${API_KEY}"
 now="$(date +%s)"
 ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
-send_alert() {  # $1 subject, $2 body — throttled unless WW_DISK_FORCE=1
+send_alert() {  # $1 subject, $2 body, $3 state_file (optional) — throttled unless WW_DISK_FORCE=1
+  local state_file="${3:-$STATE}"
   local last=0
-  [ -f "$STATE" ] && last="$(cat "$STATE" 2>/dev/null || echo 0)"
+  [ -f "$state_file" ] && last="$(cat "$state_file" 2>/dev/null || echo 0)"
   if [ "${WW_DISK_FORCE:-0}" != "1" ] && [ $((now - last)) -lt "$THROTTLE_SECS" ]; then
     echo "$ts  [throttled] $1"; return
   fi
-  if printf 'To: %s\nSubject: %s\n\n%s\n' "$ALERT_TO" "$1" "$2" | "$HIMALAYA" message send -a gmail >/dev/null 2>&1; then
-    echo "$now" > "$STATE"; echo "$ts  [alert sent] $1"
-  else
-    echo "$ts  [alert SEND FAILED] $1"
+  local ok=0
+  for addr in $(echo "$ALERT_TO" | tr ',' ' '); do
+    if printf 'To: %s\nSubject: %s\n\n%s\n' "$addr" "$1" "$2" | "$HIMALAYA" message send -a gmail >/dev/null 2>&1; then
+      ok=1
+    else
+      echo "$ts  [alert SEND FAILED to $addr] $1"
+    fi
+  done
+  if [ "$ok" = "1" ]; then
+    echo "$now" > "$state_file"; echo "$ts  [alert sent] $1"
   fi
 }
 

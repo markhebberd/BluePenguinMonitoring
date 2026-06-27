@@ -69,6 +69,30 @@ if ($action === 'duplicate_scans') {
 // NOTE: cleanup_duplicate_scans was intentionally removed. Duplicate scans are
 // preserved as evidence of data-entry errors and must not be bulk-deleted.
 
+if ($action === 'same_gender_conflicts') {
+    // Find observations where 2+ penguins of the same sex were scanned at the same box on the same day
+    $stmt = $pdo->query("
+        SELECT ol.location_name AS box_name,
+            DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) AS obs_date,
+            p.sex,
+            COUNT(DISTINCT pc.peng_num) AS cnt,
+            GROUP_CONCAT(DISTINCT pc.peng_num ORDER BY pc.peng_num) AS peng_nums
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
+        JOIN penguins p ON pc.peng_num = p.peng_num
+        WHERE o.is_deleted = FALSE
+          AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+          AND p.sex IS NOT NULL AND p.sex != ''
+        GROUP BY ol.location_name, DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')), p.sex
+        HAVING cnt > 1
+        ORDER BY obs_date DESC, ol.location_name + 0
+    ");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
 if ($action === 'duplicate_observations') {
     $stmt = $pdo->query("
         SELECT ol.location_name as box_name,

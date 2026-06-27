@@ -27,7 +27,7 @@ function ww_maybe_alert_low_disk($freeMb) {
     $stateFile = __DIR__ . '/disk_alert_last.txt';
     $last = @file_get_contents($stateFile);
     if ($last !== false && (time() - (int)$last) < 12 * 3600) return false; // throttle 12h
-    $to = 'mark@wildwatch.co.nz, britta@wildwatch.co.nz'; $from = 'mark@wildwatch.co.nz';
+    $to = 'markhebberd@gmail.com, bdot@snotch.com'; $from = 'mark@wildwatch.co.nz';
     $freeGb = round($freeMb / 1024, 1); $thresholdGb = (int)round($thresholdMb / 1024);
     $headers = "From: $from\r\nReply-To: $from\r\nContent-Type: text/plain; charset=UTF-8";
     $ok = @mail($to, "DISK LOW ({$freeGb} GB free) - wildwatch.co.nz",
@@ -76,12 +76,29 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS disk_history (
     INDEX idx_recorded_at (recorded_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+// Descent detection endpoint (used by external monitor script)
+// Accepts admin Bearer token or cron API key
+if (($_GET['range'] ?? '') === 'check') {
+    $cronKey = $_GET['cron'] ?? '';
+    if (!($cronKey !== '' && hash_equals(API_KEY, $cronKey))) {
+        $observer = requireAuth($pdo);
+        if (($observer['role'] ?? '') !== 'admin') {
+            http_response_code(403);
+            echo json_encode(['error' => 'Admin required']);
+            exit;
+        }
+    }
+    $result = checkDiskDescentAlert($pdo, null, []); // no email — caller handles alerting
+    echo json_encode($result ?: ['detected' => false]);
+    exit;
+}
+
 $range = $_GET['range'] ?? 'day';
 // NZ local time for daily grouping (matches existing reports; ignores DST like the rest of the app).
 $tz = '+12:00';
 
 // Raw 15-min samples for the shorter ranges (day, week).
-$rawDays = ['day' => 1, 'week' => 7];
+$rawDays = ['day' => 1, 'week' => 7, 'month' => 31];
 if (isset($rawDays[$range])) {
     $d = (int)$rawDays[$range];
     $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(recorded_at) * 1000 AS t, disk_free_mb

@@ -146,6 +146,244 @@ function recordDiskSample($pdo, $dir = null) {
 }
 
 /**
+ * Check recent disk_history for a linear descent that would hit zero within 24 hours.
+ * If detected and the descent spans >= 45 minutes, email an alert with an SVG graph.
+ *
+ * $asOfUtc: if set, pretend "now" is this UTC datetime (for testing).
+ * $recipients: array of email addresses to notify.
+ * Returns the detection result array or null.
+ */
+function checkDiskDescentAlert($pdo, $asOfUtc = null, $recipients = ['markhebberd@gmail.com', 'bdot@snotch.com']) {
+    $nowUtc = $asOfUtc ?? gmdate('Y-m-d H:i:s');
+
+    // Fetch last 24h of samples relative to $nowUtc
+    $stmt = $pdo->prepare("SELECT UNIX_TIMESTAMP(recorded_at) AS t, disk_free_mb
+        FROM disk_history
+        WHERE recorded_at >= ? - INTERVAL 1 DAY AND recorded_at <= ?
+        ORDER BY recorded_at");
+    $stmt->execute([$nowUtc, $nowUtc]);
+    $points = $stmt->fetchAll();
+    if (count($points) < 4) return null;
+
+    // Convert to arrays
+    $ts = array_map(fn($p) => (int)$p['t'], $points);
+    $mb = array_map(fn($p) => (int)$p['disk_free_mb'], $points);
+
+    // --- Same algorithm as JS: walk backwards requiring each step to descend ---
+    $end = count($points) - 1;
+    $minPts = 4;
+
+    // Compute tail rate from last minPts points
+    $tailDrop = $mb[$end - $minPts + 1] - $mb[$end];
+    $tailSpan = $ts[$end] - $ts[$end - $minPts + 1];
+    if ($tailSpan <= 0 || $tailDrop <= 0) return null;
+    $steepestRate = $tailDrop / $tailSpan; // MB per second
+    $minRate = $steepestRate * 0.25;
+
+    $descentStart = $end;
+    for ($i = $end; $i > 0; $i--) {
+        $drop = $mb[$i - 1] - $mb[$i];
+        $dt = $ts[$i] - $ts[$i - 1];
+        if ($dt <= 0) break;
+        $rate = $drop / $dt;
+        if ($rate < $minRate) break;
+        $descentStart = $i - 1;
+    }
+    $n = $end - $descentStart + 1;
+    if ($n < $minPts) return null;
+
+    // Linear regression on the descent segment
+    $xs = array_slice($ts, $descentStart, $n);
+    $ys = array_slice($mb, $descentStart, $n);
+    $sx = $sy = $sxx = $sxy = $syy = 0;
+    for ($i = 0; $i < $n; $i++) {
+        $sx += $xs[$i]; $sy += $ys[$i];
+        $sxx += $xs[$i] * $xs[$i]; $sxy += $xs[$i] * $ys[$i]; $syy += $ys[$i] * $ys[$i];
+    }
+    $denom = $n * $sxx - $sx * $sx;
+    if ($denom == 0) return null;
+    $slope = ($n * $sxy - $sx * $sy) / $denom;
+    $intercept = ($sy - $slope * $sx) / $n;
+    $ssTot = $syy - $sy * $sy / $n;
+    $ssRes = 0;
+    for ($i = 0; $i < $n; $i++) $ssRes += ($ys[$i] - ($slope * $xs[$i] + $intercept)) ** 2;
+    $r2 = $ssTot == 0 ? 1 : 1 - $ssRes / $ssTot;
+
+    if ($slope >= 0 || $r2 < 0.95) return null;
+
+    $zeroTime = -$intercept / $slope; // unix timestamp when it hits 0
+    $durationMin = ($ts[$end] - $ts[$descentStart]) / 60;
+    $slopeMbPerMin = $slope * 60;
+    $hoursToZero = ($zeroTime - $ts[$end]) / 3600;
+
+    // Only alert if > 40 min descent and hits zero within 24 hours
+    if ($durationMin <= 40 || $hoursToZero > 24 || $hoursToZero < 0) return null;
+
+    $result = [
+        'slope_mb_per_min' => round($slopeMbPerMin, 1),
+        'gb_per_hr' => round($slopeMbPerMin * 60 / 1024, 2),
+        'duration_min' => round($durationMin),
+        'r2' => round($r2, 3),
+        'zero_time_utc' => gmdate('Y-m-d H:i:s', (int)$zeroTime),
+        'zero_time_nz' => (new DateTime('@' . (int)$zeroTime))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('H:i D j M T'),
+        'hours_to_zero' => round($hoursToZero, 1),
+        'current_free_mb' => $mb[$end],
+    ];
+
+    // Build PNG graph
+    $pngData = buildDescentPng($ts, $mb, $descentStart, $end, $slope, $intercept, (int)$zeroTime);
+
+    // Build multipart MIME email with inline PNG
+    $nowNz = (new DateTime($nowUtc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('H:i D j M Y T');
+    $freeGb = round($result['current_free_mb'] / 1024, 1);
+    $subject = "DISK ALERT - wildwatch.co.nz hits zero in {$result['hours_to_zero']}h";
+    $boundary = '----=_DiskAlert_' . md5(uniqid());
+    $cid = 'disk-graph@wildwatch.co.nz';
+
+    $html = "<html><body style='font-family:sans-serif;max-width:700px'>"
+        . "<h2 style='color:#D32F2F;margin:0 0 12px 0'>Disk space running out</h2>"
+        . "<table style='border-collapse:collapse;font-size:14px'>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>Drop rate</td><td><strong>" . abs($result['slope_mb_per_min']) . " MB/min</strong> (" . abs($result['gb_per_hr']) . " GB/hr)</td></tr>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>Duration</td><td>{$result['duration_min']} min</td></tr>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>R&sup2;</td><td>{$result['r2']}</td></tr>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>Current free</td><td>{$freeGb} GB</td></tr>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>Hits zero at</td><td style='color:#D32F2F;font-weight:bold'>{$result['zero_time_nz']}</td></tr>"
+        . "<tr><td style='padding:4px 12px 4px 0;color:#666'>Alert sent</td><td>{$nowNz}</td></tr>"
+        . "</table>"
+        . "<div style='margin:16px 0'><img src='cid:{$cid}' width='600' height='260' style='border:1px solid #ddd;border-radius:4px' alt='Disk space graph'/></div>"
+        . "<p style='font-size:12px;color:#999'><a href='https://wildwatch.co.nz/#admin'>View live graph</a></p>"
+        . "</body></html>";
+
+    $body = "--{$boundary}\r\n"
+        . "Content-Type: text/html; charset=UTF-8\r\n"
+        . "Content-Transfer-Encoding: 7bit\r\n\r\n"
+        . $html . "\r\n"
+        . "--{$boundary}\r\n"
+        . "Content-Type: image/png; name=\"disk-graph.png\"\r\n"
+        . "Content-Transfer-Encoding: base64\r\n"
+        . "Content-ID: <{$cid}>\r\n"
+        . "Content-Disposition: inline; filename=\"disk-graph.png\"\r\n\r\n"
+        . chunk_split(base64_encode($pngData)) . "\r\n"
+        . "--{$boundary}--";
+
+    $from = 'mark@wildwatch.co.nz';
+    $headers = "From: $from\r\n"
+        . "Reply-To: $from\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: multipart/related; boundary=\"{$boundary}\"";
+
+    $to = implode(', ', $recipients);
+    $ok = @mail($to, $subject, $body, $headers, "-f$from");
+
+    $result['emailed'] = $recipients;
+    $result['mail_result'] = $ok;
+    return $result;
+}
+
+/**
+ * Generate a PNG chart of disk history with descent highlighted using GD.
+ */
+function buildDescentPng($ts, $mb, $descentStart, $end, $slope, $intercept, $zeroTime) {
+    $w = 600; $h = 260;
+    $pad = ['t' => 20, 'r' => 20, 'b' => 40, 'l' => 55];
+    $pw = $w - $pad['l'] - $pad['r'];
+    $ph = $h - $pad['t'] - $pad['b'];
+
+    $tMin = $ts[0];
+    $tMax = max($ts[$end], $zeroTime);
+    $mbMax = max($mb);
+    $mbMin = 0;
+    $tRange = $tMax - $tMin ?: 1;
+    $mbRange = $mbMax - $mbMin ?: 1;
+
+    $xOf = fn($t) => (int)($pad['l'] + ($t - $tMin) / $tRange * $pw);
+    $yOf = fn($v) => (int)($pad['t'] + (1 - ($v - $mbMin) / $mbRange) * $ph);
+
+    $img = imagecreatetruecolor($w, $h);
+    $white = imagecolorallocate($img, 255, 255, 255);
+    $blue = imagecolorallocate($img, 33, 150, 243);
+    $orange = imagecolorallocate($img, 255, 87, 34);
+    $red = imagecolorallocate($img, 211, 47, 47);
+    $gray = imagecolorallocate($img, 150, 150, 150);
+    $gridCol = imagecolorallocate($img, 232, 236, 239);
+    $black = imagecolorallocate($img, 0, 0, 0);
+
+    imagefill($img, 0, 0, $white);
+    imagesetthickness($img, 1);
+
+    // Grid lines + Y labels
+    for ($i = 0; $i <= 4; $i++) {
+        $v = $mbMin + $mbRange * $i / 4;
+        $py = $yOf($v);
+        imagedashedline($img, $pad['l'], $py, $w - $pad['r'], $py, $gridCol);
+        $label = round($v / 1024) . ' GB';
+        imagestring($img, 2, $pad['l'] - 45, $py - 7, $label, $gray);
+    }
+
+    // X labels (NZ 24h time)
+    $tz = new DateTimeZone('Pacific/Auckland');
+    for ($i = 0; $i <= 6; $i++) {
+        $t = $tMin + ($tRange * $i / 6);
+        $px = $xOf($t);
+        $label = (new DateTime('@' . (int)$t))->setTimezone($tz)->format('H:i');
+        imagestring($img, 2, $px - 12, $h - 30, $label, $gray);
+    }
+
+    // Blue line (all points)
+    imagesetthickness($img, 2);
+    for ($i = 1; $i <= $end; $i++) {
+        imageline($img, $xOf($ts[$i-1]), $yOf($mb[$i-1]), $xOf($ts[$i]), $yOf($mb[$i]), $blue);
+    }
+
+    // Orange descent segment (thicker)
+    imagesetthickness($img, 3);
+    for ($i = $descentStart + 1; $i <= $end; $i++) {
+        imageline($img, $xOf($ts[$i-1]), $yOf($mb[$i-1]), $xOf($ts[$i]), $yOf($mb[$i]), $orange);
+    }
+    // Orange dots
+    for ($i = $descentStart; $i <= $end; $i++) {
+        imagefilledellipse($img, $xOf($ts[$i]), $yOf($mb[$i]), 6, 6, $orange);
+    }
+
+    // Red dashed extrapolation line
+    imagesetthickness($img, 2);
+    $extX1 = $xOf($ts[$end]); $extY1 = $yOf($mb[$end]);
+    $extX2 = $xOf($zeroTime); $extY2 = $yOf(0);
+    // Draw dashed line manually
+    $dashLen = 8; $gapLen = 5;
+    $dx = $extX2 - $extX1; $dy = $extY2 - $extY1;
+    $lineLen = sqrt($dx * $dx + $dy * $dy);
+    if ($lineLen > 0) {
+        $ux = $dx / $lineLen; $uy = $dy / $lineLen;
+        $drawn = 0; $drawing = true;
+        while ($drawn < $lineLen) {
+            $segLen = $drawing ? $dashLen : $gapLen;
+            $segEnd = min($drawn + $segLen, $lineLen);
+            if ($drawing) {
+                imageline($img,
+                    (int)($extX1 + $ux * $drawn), (int)($extY1 + $uy * $drawn),
+                    (int)($extX1 + $ux * $segEnd), (int)($extY1 + $uy * $segEnd), $red);
+            }
+            $drawn = $segEnd;
+            $drawing = !$drawing;
+        }
+    }
+
+    // Zero reference line (dashed red)
+    $zeroY = $yOf(0);
+    imagesetthickness($img, 1);
+    for ($px = $pad['l']; $px < $w - $pad['r']; $px += 10) {
+        imageline($img, $px, $zeroY, min($px + 5, $w - $pad['r']), $zeroY, $red);
+    }
+
+    ob_start();
+    imagepng($img);
+    $data = ob_get_clean();
+    imagedestroy($img);
+    return $data;
+}
+
+/**
  * Set CORS and JSON headers
  */
 function setHeaders() {
