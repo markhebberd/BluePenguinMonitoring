@@ -460,6 +460,11 @@ namespace PenguinMonitor
             if (_isBoxLocked)
             {
                 // Penguin chip scanned while locked — hold it, don't add to any box
+                if (_heldScans.Any(s => s.BirdId == cleanEid))
+                {
+                    Toast.MakeText(this, $"Already held — {cleanEid}", ToastLength.Short)?.Show();
+                    return;
+                }
                 var scanRecord = new ScanRecord
                 {
                     BirdId = cleanEid,
