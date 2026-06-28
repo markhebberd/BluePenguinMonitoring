@@ -241,7 +241,7 @@ function handleCreate($pdo, $table, $pk, $observer) {
 
         // Prevent duplicate chips
         if ($table === 'penguin_chips' && isset($input['pit_id'])) {
-            $dup = $pdo->prepare("SELECT chip_id, peng_num FROM penguin_chips WHERE pit_id = ?");
+            $dup = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE pit_id = ?");
             $dup->execute([$input['pit_id']]);
             $existing = $dup->fetch();
             if ($existing) {

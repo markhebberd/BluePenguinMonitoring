@@ -255,7 +255,7 @@ namespace PenguinMonitor
 
         private async Task DoSilentSync(string token)
         {
-            if (_dialogActive) return;
+            if (_dialogActive || !_isBoxLocked) return;
             try
             {
                 var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
@@ -509,8 +509,11 @@ namespace PenguinMonitor
             if (_heldScans.Count == 0) return;
 
             _isBoxLocked = false;
-            if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
-                selectedPage = UIFactory.selectedPage.BoxDataSingle;
+            selectedPage = UIFactory.selectedPage.BoxDataSingle;
+            if (_singleBoxDataContentLayout != null)
+                _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+            if (_boxNavigationButtonsLayout != null)
+                _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
 
             var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
             int added = 0;
@@ -582,7 +585,7 @@ namespace PenguinMonitor
             waitLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             headerFlow.AddView(waitLabel);
             foreach (var scan in _heldScans)
-                headerFlow.AddView(CreateScanBadge(scan.BirdId));
+                headerFlow.AddView(CreateScanBadge(scan.BirdId, textSize: 18));
             layout.AddView(headerFlow);
 
             var info = new TextView(this)
@@ -3071,7 +3074,7 @@ namespace PenguinMonitor
         /// <summary>
         /// Build the observation detail lines for an orange or red card.
         /// </summary>
-        private TextView CreateScanBadge(string birdId, Action? onClick = null)
+        private TextView CreateScanBadge(string birdId, Action? onClick = null, float textSize = 10)
         {
             var cleanId = new string(birdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
             var shortId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8) : cleanId;
@@ -3097,8 +3100,10 @@ namespace PenguinMonitor
                 label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
             }
 
-            var badge = new TextView(this) { Text = label, TextSize = 10 };
-            badge.SetPadding(8, 3, 8, 3);
+            var badge = new TextView(this) { Text = label, TextSize = textSize };
+            var padH = (int)(8 * textSize / 10);
+            var padV = (int)(3 * textSize / 10);
+            badge.SetPadding(padH, padV, padH, padV);
 
             Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
             badge.Background = _uiFactory.CreateRoundedBackground(bg, 4);
@@ -3118,6 +3123,7 @@ namespace PenguinMonitor
         private static readonly Color SCAN_FEMALE_BG = Color.ParseColor("#FFE4E1");
         private static readonly Color SCAN_UNKNOWN_BG = Color.ParseColor("#F0F0F0");
         private static readonly Color SCAN_CHICK_BG = Color.ParseColor("#FFF9C4");
+        private static readonly Color SCAN_CHIPPED_TODAY_BG = Color.ParseColor("#C8E6C9");
         private static readonly Color SCAN_MALE_TEXT = Color.ParseColor("#1565C0");
         private static readonly Color SCAN_FEMALE_TEXT = Color.ParseColor("#C62828");
 
@@ -4200,7 +4206,7 @@ namespace PenguinMonitor
                         : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
                     var label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
 
-                    Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
+                Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
 
                     var resultView = new TextView(this)
                     {
@@ -4244,10 +4250,21 @@ namespace PenguinMonitor
             Color backgroundColor;
             string additionalInfo = "";
             
-            if (null != _remotePenguinData && _remotePenguinData.TryGetValue(scan.BirdId, out var penguinData))
+            var lookupId = new string(scan.BirdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
+            var shortLookupId = lookupId.Length >= 8 ? lookupId.Substring(lookupId.Length - 8) : lookupId;
+            PenguinData? penguinData = null;
+            if (_remotePenguinData != null)
             {
-                // Penguin found in remote data - check for returning birds
-                // Check if ChipAs contains "chick" (case insensitive)
+                if (!_remotePenguinData.TryGetValue(lookupId, out penguinData))
+                    _remotePenguinData.TryGetValue(shortLookupId, out penguinData);
+            }
+
+            if (penguinData != null)
+            {
+                // Check if chipped on this observation date
+                bool chippedToday = penguinData.ChipDate > DateTime.MinValue && ToNzTime(penguinData.ChipDate).Date == NzToday;
+
+                // Check for returning birds
                 bool isReturning = penguinData.LastKnownLifeStage == LifeStage.Returnee ||
                                    (!string.IsNullOrEmpty(penguinData.ChipAs) &&
                                     penguinData.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -4257,13 +4274,16 @@ namespace PenguinMonitor
                                      !(penguinData.ChipDate > NzToday.AddYears(-20) &&
                                        NzToday > penguinData.ChipDate.AddMonths(3));
 
-                if (isRecentChick)
+                if (chippedToday)
                 {
-                    // Still a chick
+                    backgroundColor = SCAN_CHIPPED_TODAY_BG;
+                    additionalInfo = " 🆕";
+                }
+                else if (isRecentChick)
+                {
                     backgroundColor = UIFactory.CHICK_BACKGROUND;
                     additionalInfo = isReturning ? " 🐣🔄" : " 🐣";
                 }
-                // Adult - check sex
                 else if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
                 {
                     backgroundColor = UIFactory.FEMALE_BACKGROUND;
@@ -4276,7 +4296,6 @@ namespace PenguinMonitor
                 }
                 else
                 {
-                    // Unknown sex - gray background
                     backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
                     additionalInfo = isReturning ? " 🐧🔄" : " 🐧";
                 }
@@ -4568,7 +4587,7 @@ namespace PenguinMonitor
                         foreach (var (field, cb) in conditionChecks)
                             if (cb.Checked) fields[field] = true;
                         if (!string.IsNullOrEmpty(notesInput.Text)) fields["notes"] = notesInput.Text;
-                        fields["observation_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                        fields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
                         fields["peng_num"] = pengNum;
 
                         var json = JsonConvert.SerializeObject(fields);
@@ -4804,7 +4823,7 @@ namespace PenguinMonitor
                         {
                             ["peng_num"] = pengNum,
                             ["pit_id"] = fullPitId,
-                            ["chip_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                            ["chip_date"] = NzNow.ToString("yyyy-MM-dd"),
                             ["is_active"] = 1,
                             ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
                             ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
@@ -4815,6 +4834,20 @@ namespace PenguinMonitor
                         chipReq.Content = new StringContent(
                             JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
                         var chipResp = await client.SendAsync(chipReq);
+                        var chipJson = await chipResp.Content.ReadAsStringAsync();
+                        var chipResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(chipJson);
+                        if (chipResult == null || chipResult.ContainsKey("error"))
+                        {
+                            RunOnUiThread(() =>
+                            {
+                                new AlertDialog.Builder(this)
+                                    .SetTitle("Failed to create chip")
+                                    .SetMessage(chipJson)
+                                    .SetPositiveButton("OK", (s3, e3) => { })
+                                    .Show();
+                            });
+                            return;
+                        }
 
                         // 3. Create biometric record if any data entered
                         var bioFields = new Dictionary<string, object>();
@@ -4826,7 +4859,7 @@ namespace PenguinMonitor
                         if (bioFields.Count > 0)
                         {
                             bioFields["peng_num"] = pengNum;
-                            bioFields["observation_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                            bioFields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
                             var bioReq = new HttpRequestMessage(HttpMethod.Post,
                                 $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
                             bioReq.Headers.Add("Authorization", $"Bearer {token}");
@@ -4842,7 +4875,7 @@ namespace PenguinMonitor
                             {
                                 ScannedId = shortId,
                                 PengNum = pengNum,
-                                Sex = sex,
+                                Sex = "", // sex is unconfirmed until set on penguins table
                                 LastKnownLifeStage = isChick ? LifeStage.Chick : LifeStage.Adult,
                                 ChipDate = DateTime.UtcNow,
                                 ChipAs = isChick ? "Chick" : "Adult",
@@ -4854,7 +4887,18 @@ namespace PenguinMonitor
 
                         RunOnUiThread(() =>
                         {
-                            Toast.MakeText(this, $"#{pengNum} added to database", ToastLength.Short)?.Show();
+                            // Increment adult or chick count
+                            if (isChick)
+                            {
+                                _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
+                                Toast.MakeText(this, $"#{pengNum} added (+1 Chick)", ToastLength.Short)?.Show();
+                            }
+                            else
+                            {
+                                _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                                Toast.MakeText(this, $"#{pengNum} added (+1 Adult)", ToastLength.Short)?.Show();
+                            }
+                            SaveCurrentBoxData();
                             dialog.Dismiss();
                             SetDialogActive(false);
                             DrawPageLayouts();
@@ -5108,7 +5152,7 @@ namespace PenguinMonitor
 
         private void TryBackgroundUpload()
         {
-            if (!_appSettings.IsAuthenticated || _colonyState.PendingUploadCount == 0 || _dialogActive) return;
+            if (!_appSettings.IsAuthenticated || _colonyState.PendingUploadCount == 0 || _dialogActive || !_isBoxLocked) return;
 
             // Use Thread directly to avoid Android SynchronizationContext deadlock
             new Thread(async () =>

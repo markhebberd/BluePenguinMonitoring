@@ -466,7 +466,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     $sightings = []; // deduped by peng+date+box
     foreach ($scans as $s) {
         $pnum = $s['peng_num'];
-        $date = substr($s['observation_time_utc'], 0, 10);
+        $date = (new DateTime($s['observation_time_utc'], new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('Y-m-d');
         $key = $pnum . '|' . $date . '|' . $s['box_name'];
 
         if (!isset($penguins[$pnum])) {
@@ -516,14 +516,21 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
             }
 
             if ($c['chip_box'] && $c['chip_date']) {
-                $key = $pnum . '|' . $c['chip_date'] . '|' . $c['chip_box'];
-                if (!isset($sightings[$key])) {
-                    $sightings[$key] = [
-                        'peng_num' => $pnum, 'date' => $c['chip_date'], 'box' => $c['chip_box'],
-                        'source' => 'chip', 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
-                        'breeding_status' => null, 'notes' => 'Chipped by ' . ($c['chip_by'] ?? ''),
-                        'seen_with' => [],
-                    ];
+                // Skip chip sighting if penguin was already scanned that day (any box)
+                $alreadyScanned = false;
+                foreach ($sightings as $sk => $sv) {
+                    if (str_starts_with($sk, $pnum . '|' . $c['chip_date'] . '|')) { $alreadyScanned = true; break; }
+                }
+                if (!$alreadyScanned) {
+                    $key = $pnum . '|' . $c['chip_date'] . '|' . $c['chip_box'];
+                    if (!isset($sightings[$key])) {
+                        $sightings[$key] = [
+                            'peng_num' => $pnum, 'date' => $c['chip_date'], 'box' => $c['chip_box'],
+                            'source' => 'chip', 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
+                            'breeding_status' => null, 'notes' => 'Chipped by ' . ($c['chip_by'] ?? ''),
+                            'seen_with' => [],
+                        ];
+                    }
                 }
             }
         }

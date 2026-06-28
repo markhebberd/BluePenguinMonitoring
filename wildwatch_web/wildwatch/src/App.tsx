@@ -459,12 +459,14 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly }: { sca
   const unprovenAdult = wasChippedAsChick && !isChickNow && !sex && !observationDate;
   const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
   const grayCls = unprovenAdult ? 'unproven' : '';
+  const obsNzDate = observationDate ? new Date(observationDate).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '';
+  const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
   const sc = scan.chick_size_code || '';
   const sizeLabel = sc ? (sex ? sc + sex.charAt(0) : (scan.hasReturned ? sc + 'U' : sc)) : '';
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
       {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{sizeLabel ? ` ${sizeLabel} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );

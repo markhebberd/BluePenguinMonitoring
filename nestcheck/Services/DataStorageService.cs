@@ -96,7 +96,7 @@ namespace PenguinMonitor.Services
         internal void StartBackgroundPolling(string token, Func<Task> onChanged, Action? onChecked = null, Func<Task>? onPendingUpload = null)
         {
             StopBackgroundPolling();
-            _pollTimer = new System.Timers.Timer(60 * 1000); // 1 minute
+            _pollTimer = new System.Timers.Timer(15 * 1000); // 15 seconds (testing)
             _pollTimer.Elapsed += async (s, e) =>
             {
                 if (_pollingSyncing || string.IsNullOrEmpty(token)) return;
