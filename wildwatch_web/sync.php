@@ -221,7 +221,7 @@ function handleUpload($pdo, $colonyId, $observer) {
     try {
         foreach ($input['observations'] as $obs) {
             $boxName = $obs['box_name'] ?? null;
-            if (!$boxName) { $errors[] = ['error' => 'Missing box_name', 'obs' => $obs]; continue; }
+            if ($boxName === null || $boxName === '') { $errors[] = ['error' => 'Missing box_name', 'obs' => $obs]; continue; }
 
             // Look up location_id
             $locStmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
@@ -366,6 +366,7 @@ function handleUpload($pdo, $colonyId, $observer) {
         $pdo->commit();
         $response = ['success' => true, 'created' => $created, 'errors' => $errors];
         if (!empty($conflicts)) $response['conflicts'] = $conflicts;
+        @file_put_contents(__DIR__ . '/sync_debug.log', date('Y-m-d H:i:s') . ' ' . json_encode($response) . "\n", FILE_APPEND);
         echo json_encode($response);
     } catch (Exception $e) {
         $pdo->rollBack();

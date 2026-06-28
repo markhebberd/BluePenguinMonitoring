@@ -231,7 +231,6 @@ namespace PenguinMonitor.Services
                     });
                 }
 
-                result.Error = $"DEBUG pending:{pendingBoxes.Count} obs:{colonyState.PendingObservations.Count(p=>p.IsPendingUpload)}";
                 if (pendingBoxes.Count > 0)
                 {
                     var uploadBody = JsonConvert.SerializeObject(new {
@@ -251,7 +250,6 @@ namespace PenguinMonitor.Services
                     }
 
                     var uploadJson = await uploadResponse.Content.ReadAsStringAsync();
-                    result.Error = $"DEBUG: {uploadJson?.Substring(0, Math.Min(uploadJson?.Length ?? 0, 400))}";
                     var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(uploadJson);
 
                     if (uploadResult != null && uploadResult.ContainsKey("created"))
@@ -542,7 +540,6 @@ namespace PenguinMonitor.Services
             if (!response.IsSuccessStatusCode || string.IsNullOrEmpty(json) || !json.TrimStart().StartsWith("{"))
             { result.Error = $"Upload failed ({(int)response.StatusCode}): {json?.Substring(0, Math.Min(json?.Length ?? 0, 200))}"; return result; }
 
-            result.Error = $"DEBUG upload response: {json?.Substring(0, Math.Min(json?.Length ?? 0, 300))}";
             var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
             if (uploadResult != null && uploadResult.ContainsKey("created"))
             {

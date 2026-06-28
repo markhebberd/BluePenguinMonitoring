@@ -56,6 +56,10 @@ namespace PenguinMonitor
         private Location? _currentLocation;
         private float _gpsAccuracy = -1;
 
+        // Held scans — penguin chips scanned while no box is unlocked
+        private readonly List<ScanRecord> _heldScans = new();
+        private AlertDialog? _heldScansDialog;
+
         // Status refresh (updates "sync:Xs ago" display)
         private Handler? _statusRefreshHandler;
         private Java.Lang.Runnable? _statusRefreshRunnable;
@@ -442,18 +446,183 @@ namespace PenguinMonitor
                 return;
             }
 
-            // Normal scanning mode
+            bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
+
+            if (isBoxTag)
+            {
+                // Box tag scanned — navigate to box and flush any held scans
+                HandleBoxTagScan(cleanEid);
+                if (_heldScans.Count > 0)
+                    FlushHeldScansToCurrentBox();
+                return;
+            }
+
+            if (_isBoxLocked)
+            {
+                // Penguin chip scanned while locked — hold it, don't add to any box
+                var scanRecord = new ScanRecord
+                {
+                    BirdId = cleanEid,
+                    Timestamp = DateTime.UtcNow,
+                    Latitude = _currentLocation?.Latitude ?? 0,
+                    Longitude = _currentLocation?.Longitude ?? 0,
+                    Accuracy = _currentLocation?.Accuracy ?? -1
+                };
+                _heldScans.Add(scanRecord);
+                TriggerAlert();
+                ShowHeldScansDialog();
+                return;
+            }
+
+            // Box is unlocked — normal scan flow
             if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
 
-            bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
             AddScannedId(eidData, 0);
             _dataChangedSinceUnlock = true;
-
-            if (!isBoxTag)
-                _isBoxLocked = false;
-
             DrawPageLayouts();
+        }
+
+        private void FlushHeldScansToCurrentBox()
+        {
+            if (_heldScans.Count == 0) return;
+
+            _isBoxLocked = false;
+            if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
+                selectedPage = UIFactory.selectedPage.BoxDataSingle;
+
+            var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
+            int added = 0;
+            foreach (var scan in _heldScans)
+            {
+                if (!boxData.ScannedIds.Any(s => s.BirdId == scan.BirdId))
+                {
+                    boxData.ScannedIds.Add(scan);
+                    added++;
+                }
+            }
+            if (added > 0)
+            {
+                boxData.IsPendingUpload = true;
+                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
+                boxData.WhenDataCollectedUtc = DateTime.UtcNow;
+                boxData.ObserverName = _appSettings.ObserverName;
+                _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+                SaveToAppDataDir();
+            }
+
+            // Collect unknown scans for new bird dialog
+            var unknownScans = new List<(string displayId, string fullId)>();
+            foreach (var scan in _heldScans)
+            {
+                var key = scan.BirdId.ToUpper();
+                var shortKey = scan.BirdId.Length >= 8 ? scan.BirdId.Substring(scan.BirdId.Length - 8).ToUpper() : key;
+                bool known = _remotePenguinData != null &&
+                    (_remotePenguinData.ContainsKey(key) || _remotePenguinData.ContainsKey(shortKey));
+                if (!known)
+                    unknownScans.Add((shortKey, scan.BirdId));
+            }
+
+            Toast.MakeText(this, $"📥 {added} scan{(added != 1 ? "s" : "")} added to Box {_currentBoxName}", ToastLength.Short)?.Show();
+            _heldScans.Clear();
+            _heldScansDialog?.Dismiss();
+            _heldScansDialog = null;
+            _dataChangedSinceUnlock = true;
+            DrawPageLayouts();
+
+            // Show new bird dialog for unknown scans (deferred to avoid dialog collision)
+            if (unknownScans.Count > 0)
+            {
+                new Handler(Looper.MainLooper).PostDelayed(() =>
+                {
+                    ShowNewBirdDialog(unknownScans[0].displayId, unknownScans[0].fullId);
+                }, 500);
+            }
+        }
+
+        private void ShowHeldScansDialog()
+        {
+            try { _heldScansDialog?.Dismiss(); } catch { }
+            _heldScansDialog = null;
+
+            var layout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            layout.SetPadding(24, 16, 24, 16);
+
+            var info = new TextView(this)
+            {
+                Text = "Scanned while no box was unlocked.\nScan a box tag or select a box below.",
+                TextSize = 13
+            };
+            info.SetTextColor(Color.DarkGray);
+            info.SetPadding(0, 0, 0, 12);
+            layout.AddView(info);
+
+            var badgeFlow = new PenguinMonitor.UI.FlowLayout(this);
+            var density = Resources?.DisplayMetrics?.Density ?? 2;
+            badgeFlow.HorizontalSpacing = (int)(4 * density);
+            badgeFlow.VerticalSpacing = (int)(4 * density);
+            foreach (var scan in _heldScans)
+            {
+                var badge = CreateScanBadge(scan.BirdId);
+                badgeFlow.AddView(badge);
+            }
+            layout.AddView(badgeFlow);
+
+            var boxLabel = new TextView(this) { Text = "Assign to box:", TextSize = 13 };
+            boxLabel.SetTextColor(Color.DarkGray);
+            boxLabel.SetPadding(0, 16, 0, 8);
+            layout.AddView(boxLabel);
+
+            var boxRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+
+            var currentBtn = _uiFactory.CreateStyledButton($"Box {_currentBoxName}", UIFactory.PRIMARY_BLUE);
+            currentBtn.Click += (s, e) =>
+            {
+                _isBoxLocked = false;
+                FlushHeldScansToCurrentBox();
+            };
+            boxRow.AddView(currentBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+
+            var otherBtn = _uiFactory.CreateStyledButton("Other...", UIFactory.LIGHTER_GRAY);
+            otherBtn.Click += (s, e) =>
+            {
+                var input = new EditText(this) { Hint = "Box number", InputType = Android.Text.InputTypes.ClassText };
+                new AlertDialog.Builder(this)
+                    .SetTitle("Assign to box")
+                    .SetView(input)
+                    .SetPositiveButton("OK", (s2, e2) =>
+                    {
+                        var boxName = input.Text?.Trim() ?? "";
+                        if (!string.IsNullOrEmpty(boxName) && _boxNamesAndIndexes.ContainsKey(boxName))
+                        {
+                            _currentBoxIndex = _boxNamesAndIndexes[boxName];
+                            _currentBoxName = boxName;
+                            _isBoxLocked = false;
+                            FlushHeldScansToCurrentBox();
+                        }
+                        else
+                        {
+                            Toast.MakeText(this, $"Box {boxName} not found", ToastLength.Short)?.Show();
+                        }
+                    })
+                    .SetNegativeButton("Cancel", (s2, e2) => { })
+                    .Show();
+            };
+            boxRow.AddView(otherBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+            layout.AddView(boxRow);
+
+            _heldScansDialog = new AlertDialog.Builder(this)
+                .SetTitle($"{_heldScans.Count} scan{(_heldScans.Count != 1 ? "s" : "")} waiting")
+                .SetView(layout)
+                .SetNegativeButton("Discard all", (s, e) =>
+                {
+                    _heldScans.Clear();
+                    _heldScansDialog = null;
+                })
+                .SetCancelable(false)
+                .Create();
+
+            _heldScansDialog.Show();
         }
         private static string FormatAccuracy(float accuracy)
         {
@@ -2872,6 +3041,49 @@ namespace PenguinMonitor
         /// <summary>
         /// Build the observation detail lines for an orange or red card.
         /// </summary>
+        private TextView CreateScanBadge(string birdId, Action? onClick = null)
+        {
+            var cleanId = new string(birdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
+            var shortId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8) : cleanId;
+            string label = shortId;
+            string sex = "";
+            bool isChick = false;
+
+            PenguinData? pd = null;
+            if (_remotePenguinData != null)
+            {
+                if (!_remotePenguinData.TryGetValue(cleanId, out pd))
+                    _remotePenguinData.TryGetValue(shortId, out pd);
+            }
+
+            if (pd != null)
+            {
+                sex = pd.Sex?.ToUpper() ?? "";
+                isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
+                var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
+                var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
+                    ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
+                    : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
+                label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
+            }
+
+            var badge = new TextView(this) { Text = label, TextSize = 10 };
+            badge.SetPadding(8, 3, 8, 3);
+
+            Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
+            badge.Background = _uiFactory.CreateRoundedBackground(bg, 4);
+            badge.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
+            badge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
+
+            if (onClick != null)
+            {
+                badge.Clickable = true;
+                badge.Click += (s, e) => onClick();
+            }
+
+            return badge;
+        }
+
         private static readonly Color SCAN_MALE_BG = Color.ParseColor("#E6F3FF");
         private static readonly Color SCAN_FEMALE_BG = Color.ParseColor("#FFE4E1");
         private static readonly Color SCAN_UNKNOWN_BG = Color.ParseColor("#F0F0F0");
@@ -5040,8 +5252,8 @@ namespace PenguinMonitor
                         {
                             // Same box - just unlock
                             _isBoxLocked = false;
-                            DrawPageLayouts();
-                            Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show();
+                            if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
+                            else { DrawPageLayouts(); Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show(); }
                         }
                         else
                         {
@@ -5051,8 +5263,8 @@ namespace PenguinMonitor
                                 _currentBoxIndex = _boxNamesAndIndexes[assignedBoxId];
                                 _currentBoxName = assignedBoxId;
                                 _isBoxLocked = false;
-                                DrawPageLayouts();
-                                Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show();
+                                if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
+                                else { DrawPageLayouts(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
                             }
                             else
                             {
