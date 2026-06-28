@@ -5252,6 +5252,7 @@ namespace PenguinMonitor
                         {
                             // Same box - just unlock
                             _isBoxLocked = false;
+                            selectedPage = UIFactory.selectedPage.BoxDataSingle;
                             if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
                             else { DrawPageLayouts(); Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show(); }
                         }
@@ -5263,6 +5264,7 @@ namespace PenguinMonitor
                                 _currentBoxIndex = _boxNamesAndIndexes[assignedBoxId];
                                 _currentBoxName = assignedBoxId;
                                 _isBoxLocked = false;
+                                selectedPage = UIFactory.selectedPage.BoxDataSingle;
                                 if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
                                 else { DrawPageLayouts(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
                             }

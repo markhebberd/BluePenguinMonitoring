@@ -547,9 +547,10 @@ if ($action === 'delete_penguin') {
         $scansDeleted = 0;
         if (!empty($pitIds)) {
             $ph = implode(',', array_fill(0, count($pitIds), '?'));
-            $del = $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE pit_id IN ($ph) AND (is_deleted = FALSE OR is_deleted IS NULL)");
-            $del->execute(array_merge([$oid], $pitIds));
-            $scansDeleted = $del->rowCount();
+            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM penguin_scans WHERE pit_id IN ($ph)");
+            $countStmt->execute($pitIds);
+            $scansDeleted = (int)$countStmt->fetchColumn();
+            $pdo->prepare("DELETE FROM penguin_scans WHERE pit_id IN ($ph)")->execute($pitIds);
         }
 
         // Delete biometrics
