@@ -91,7 +91,9 @@ namespace PenguinMonitor.UI.Factories
                 TextSize = 14
             };
 
-            button.SetTextColor(Color.White);
+            // Dark text on light backgrounds, white text on dark backgrounds
+            bool isLight = (backgroundColor.R * 0.299 + backgroundColor.G * 0.587 + backgroundColor.B * 0.114) > 186;
+            button.SetTextColor(isLight ? Color.Black : Color.White);
             button.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             button.SetPadding(16, 20, 16, 20);
             button.Background = CreateRoundedBackground(backgroundColor, 8);

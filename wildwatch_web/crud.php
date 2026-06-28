@@ -239,6 +239,18 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
+        // Prevent duplicate chips
+        if ($table === 'penguin_chips' && isset($input['pit_id'])) {
+            $dup = $pdo->prepare("SELECT chip_id, peng_num FROM penguin_chips WHERE pit_id = ?");
+            $dup->execute([$input['pit_id']]);
+            $existing = $dup->fetch();
+            if ($existing) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'error' => "pit_id already assigned to penguin #{$existing['peng_num']}", 'peng_num' => $existing['peng_num']]);
+                return;
+            }
+        }
+
         // Auto-generate peng_num for new penguins
         if ($table === 'penguins' && !isset($input['peng_num'])) {
             $maxNum = (int)$pdo->query("SELECT MAX(CAST(peng_num AS UNSIGNED)) FROM penguins")->fetchColumn();

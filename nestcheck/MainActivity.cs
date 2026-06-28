@@ -60,6 +60,21 @@ namespace PenguinMonitor
         private readonly List<ScanRecord> _heldScans = new();
         private AlertDialog? _heldScansDialog;
 
+        // Suppress ALL sync while data-entry dialogs are open
+        private bool _dialogActive;
+        private void SetDialogActive(bool active)
+        {
+            _dialogActive = active;
+            if (active)
+                _dataStorageService.StopBackgroundPolling();
+            else
+            {
+                var token = _appSettings?.AuthToken;
+                if (!string.IsNullOrEmpty(token))
+                    _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); DrawPageLayouts(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
+            }
+        }
+
         // Status refresh (updates "sync:Xs ago" display)
         private Handler? _statusRefreshHandler;
         private Java.Lang.Runnable? _statusRefreshRunnable;
@@ -240,6 +255,7 @@ namespace PenguinMonitor
 
         private async Task DoSilentSync(string token)
         {
+            if (_dialogActive) return;
             try
             {
                 var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
@@ -532,6 +548,7 @@ namespace PenguinMonitor
             _heldScans.Clear();
             _heldScansDialog?.Dismiss();
             _heldScansDialog = null;
+            SetDialogActive(false);
             _dataChangedSinceUnlock = true;
             DrawPageLayouts();
 
@@ -549,36 +566,44 @@ namespace PenguinMonitor
         {
             try { _heldScansDialog?.Dismiss(); } catch { }
             _heldScansDialog = null;
+            SetDialogActive(true);
 
             var layout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             layout.SetPadding(24, 16, 24, 16);
+            layout.SetBackgroundColor(Color.White);
+
+            // Header: "Waiting:" followed by penguin mini badges
+            var headerFlow = new PenguinMonitor.UI.FlowLayout(this);
+            var density = Resources?.DisplayMetrics?.Density ?? 2;
+            headerFlow.HorizontalSpacing = (int)(4 * density);
+            headerFlow.VerticalSpacing = (int)(4 * density);
+            var waitLabel = new TextView(this) { Text = "Waiting:", TextSize = 30 };
+            waitLabel.SetTextColor(Color.Black);
+            waitLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            headerFlow.AddView(waitLabel);
+            foreach (var scan in _heldScans)
+                headerFlow.AddView(CreateScanBadge(scan.BirdId));
+            layout.AddView(headerFlow);
 
             var info = new TextView(this)
             {
-                Text = "Scanned while no box was unlocked.\nScan a box tag or select a box below.",
-                TextSize = 13
+                Text = "Scan a box tag or select a box below.",
+                TextSize = 12
             };
-            info.SetTextColor(Color.DarkGray);
-            info.SetPadding(0, 0, 0, 12);
+            info.SetTextColor(Color.Black);
+            info.SetPadding(0, 8, 0, 12);
             layout.AddView(info);
 
-            var badgeFlow = new PenguinMonitor.UI.FlowLayout(this);
-            var density = Resources?.DisplayMetrics?.Density ?? 2;
-            badgeFlow.HorizontalSpacing = (int)(4 * density);
-            badgeFlow.VerticalSpacing = (int)(4 * density);
-            foreach (var scan in _heldScans)
-            {
-                var badge = CreateScanBadge(scan.BirdId);
-                badgeFlow.AddView(badge);
-            }
-            layout.AddView(badgeFlow);
-
             var boxLabel = new TextView(this) { Text = "Assign to box:", TextSize = 13 };
-            boxLabel.SetTextColor(Color.DarkGray);
+            boxLabel.SetTextColor(Color.Black);
             boxLabel.SetPadding(0, 16, 0, 8);
             layout.AddView(boxLabel);
 
             var boxRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            boxRow.SetPadding(0, 0, 0, 0);
+
+            var btnMargin = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            btnMargin.SetMargins((int)(4 * density), 0, (int)(4 * density), 0);
 
             var currentBtn = _uiFactory.CreateStyledButton($"Box {_currentBoxName}", UIFactory.PRIMARY_BLUE);
             currentBtn.Click += (s, e) =>
@@ -586,9 +611,9 @@ namespace PenguinMonitor
                 _isBoxLocked = false;
                 FlushHeldScansToCurrentBox();
             };
-            boxRow.AddView(currentBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+            boxRow.AddView(currentBtn, btnMargin);
 
-            var otherBtn = _uiFactory.CreateStyledButton("Other...", UIFactory.LIGHTER_GRAY);
+            var otherBtn = _uiFactory.CreateStyledButton("Select", UIFactory.PRIMARY_BLUE);
             otherBtn.Click += (s, e) =>
             {
                 var input = new EditText(this) { Hint = "Box number", InputType = Android.Text.InputTypes.ClassText };
@@ -613,16 +638,16 @@ namespace PenguinMonitor
                     .SetNegativeButton("Cancel", (s2, e2) => { })
                     .Show();
             };
-            boxRow.AddView(otherBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+            boxRow.AddView(otherBtn, btnMargin);
             layout.AddView(boxRow);
 
             _heldScansDialog = new AlertDialog.Builder(this)
-                .SetTitle($"{_heldScans.Count} scan{(_heldScans.Count != 1 ? "s" : "")} waiting")
                 .SetView(layout)
                 .SetNegativeButton("Discard all", (s, e) =>
                 {
                     _heldScans.Clear();
                     _heldScansDialog = null;
+                    SetDialogActive(false);
                 })
                 .SetCancelable(false)
                 .Create();
@@ -3023,7 +3048,7 @@ namespace PenguinMonitor
                             canGo = false;
                         }
                         button.Enabled = _isBoxLocked && canGo;
-                        button.Alpha = button.Enabled ? 2.0f : 0.5f; // Grey out when unlocked
+                        button.Alpha = button.Enabled ? 1.0f : 0.5f;
                     }
 
 
@@ -4466,7 +4491,7 @@ namespace PenguinMonitor
             card.AddView(weightInput);
 
             // Right flipper length
-            card.AddView(createLabel("Right flipper (mm)"));
+            card.AddView(createLabel("Flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             flipperInput.Text = existVal("right_flipper_length");
             card.AddView(flipperInput);
@@ -4579,6 +4604,7 @@ namespace PenguinMonitor
 
         private void ShowNewBirdDialog(string shortId, string fullPitId)
         {
+            SetDialogActive(true);
             var scrollView = new ScrollView(this);
             scrollView.SetClipChildren(false);
             scrollView.DescendantFocusability = Android.Views.DescendantFocusability.AfterDescendants;
@@ -4684,7 +4710,7 @@ namespace PenguinMonitor
             var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             card.AddView(weightInput);
 
-            card.AddView(createLabel("Right flipper (mm)"));
+            card.AddView(createLabel("Flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             card.AddView(flipperInput);
 
@@ -4715,13 +4741,15 @@ namespace PenguinMonitor
                 .SetTitle($"New bird: {shortId}")
                 .SetView(scrollView)
                 .SetPositiveButton("Add new penguin", (EventHandler<DialogClickEventArgs>)null!)
-                .SetNegativeButton("Skip", (s, e) => { })
+                .SetNegativeButton("Skip", (s, e) => { SetDialogActive(false); })
                 .Create();
 
             dialog.Show();
             var addButton = dialog.GetButton((int)DialogButtonType.Positive);
             addButton.Click += (s, e) =>
             {
+                addButton.Enabled = false;
+                addButton.Text = "Adding...";
                 var isChick = chippedAsChick.Checked;
                 var sex = sexSpinner.SelectedItem?.ToString() ?? "";
                 var chickSize = "";
@@ -4828,6 +4856,7 @@ namespace PenguinMonitor
                         {
                             Toast.MakeText(this, $"#{pengNum} added to database", ToastLength.Short)?.Show();
                             dialog.Dismiss();
+                            SetDialogActive(false);
                             DrawPageLayouts();
                         });
                     }
@@ -5079,7 +5108,7 @@ namespace PenguinMonitor
 
         private void TryBackgroundUpload()
         {
-            if (!_appSettings.IsAuthenticated || _colonyState.PendingUploadCount == 0) return;
+            if (!_appSettings.IsAuthenticated || _colonyState.PendingUploadCount == 0 || _dialogActive) return;
 
             // Use Thread directly to avoid Android SynchronizationContext deadlock
             new Thread(async () =>
