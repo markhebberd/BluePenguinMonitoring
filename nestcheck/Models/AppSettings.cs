@@ -64,6 +64,19 @@ namespace PenguinMonitor.Models
                 }
             }
         }
+        private string? selectedBluetoothDevice;
+        public string? SelectedBluetoothDevice
+        {
+            get => selectedBluetoothDevice;
+            set
+            {
+                if (selectedBluetoothDevice != value)
+                {
+                    selectedBluetoothDevice = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
         private bool showMultiboxFilterCard;
         public bool ShowMultiboxFilterCard
         {

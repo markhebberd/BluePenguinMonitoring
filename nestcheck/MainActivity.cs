@@ -226,17 +226,23 @@ namespace PenguinMonitor
         /// <summary>
         /// Silent background sync — download only, no UI dialogs, no upload.
         /// </summary>
+        private async Task ApplyPostSync(DataStorageService.SyncResult result)
+        {
+            _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+            _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
+            if (result.BoxTags != null) _boxTags = result.BoxTags;
+            _lastSyncCheckUtc = DateTime.UtcNow;
+        }
+
         private async Task DoSilentSync(string token)
         {
             try
             {
                 var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
-                _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
-                _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
-                if (result.BoxTags != null) _boxTags = result.BoxTags;
-                _lastSyncCheckUtc = DateTime.UtcNow;
+                await ApplyPostSync(result);
                 new Handler(Looper.MainLooper).Post(() =>
                 {
+                    CreateBoxSetsDictionary();
                     DrawPageLayouts();
                     UpdateStatusText();
                 });
@@ -369,11 +375,17 @@ namespace PenguinMonitor
         public void OnProviderEnabled(string provider) { } // required by ILocationListener
         private void InitializeBluetooth()
         {
+            var address = _appSettings.SelectedBluetoothDevice;
+            if (string.IsNullOrEmpty(address))
+            {
+                UpdateStatusText("No scanner selected — choose one in Settings");
+                return;
+            }
             _bluetoothManager = new BluetoothManager();
             _bluetoothManager.StatusChanged += OnBluetoothStatusChanged;
             _bluetoothManager.EidDataReceived += OnEidDataReceived;
             if (_isBluetoothEnabledCheckBox.Checked)
-                _ = _bluetoothManager.StartConnectionAsync();
+                _ = _bluetoothManager.ConnectAsync(address);
         }
         private void OnBluetoothStatusChanged(string status)
         {
@@ -416,27 +428,31 @@ namespace PenguinMonitor
         }
         private void OnEidDataReceived(string eidData)
         {
-            if (eidData.Length != 15)
-                ;// new Handler(Looper.MainLooper).Post(() => Toast.MakeText(this, "EID length " + eidData.Length + ", '" + eidData + "'", ToastLength.Long)?.Show());
+            RunOnUiThread(() => HandleEidData(eidData));
+        }
 
+        private void HandleEidData(string eidData)
+        {
             var cleanEid = new String(eidData.Where(char.IsLetterOrDigit).ToArray());
 
-            // Ensure we're on the current page for scanning
-            if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
+            // Box tag mode: route all scans to HandleBoxTagScan
+            if (_appSettings.EditBoxTagsMode)
             {
-                selectedPage = UIFactory.selectedPage.BoxDataSingle;
+                HandleBoxTagScan(cleanEid);
+                return;
             }
 
-            // Don't auto-unlock for box tag scans - let HandleBoxTagScan manage the lock state
-            bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
+            // Normal scanning mode
+            if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
+                selectedPage = UIFactory.selectedPage.BoxDataSingle;
 
+            bool isBoxTag = BoxTagService.IsBoxTag(cleanEid);
             AddScannedId(eidData, 0);
             _dataChangedSinceUnlock = true;
 
             if (!isBoxTag)
-            {
                 _isBoxLocked = false;
-            }
+
             DrawPageLayouts();
         }
         private static string FormatAccuracy(float accuracy)
@@ -479,7 +495,10 @@ namespace PenguinMonitor
             // Sync status — use most recent of full sync or successful poll check
             string sync;
             if (_colonyState != null && _colonyState.PendingUploadCount > 0)
-                sync = $"Uploading:{_colonyState.PendingUploadCount}";
+            {
+                var pendingNames = string.Join(",", _colonyState.PendingObservations.Where(p => p.IsPendingUpload).Select(p => p.BoxName));
+                sync = $"Uploading:{_colonyState.PendingUploadCount} [{pendingNames}]";
+            }
             else
             {
                 var lastFull = _colonyState?.LastSyncedUtc ?? DateTime.MinValue;
@@ -860,10 +879,7 @@ namespace PenguinMonitor
                         },
                         isCancelled: () => cancelled);
 
-                    _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
-                    _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
-                    if (result.BoxTags != null) _boxTags = result.BoxTags;
-
+                    await ApplyPostSync(result);
                 }
                 catch (Exception ex)
                 {
@@ -879,6 +895,7 @@ namespace PenguinMonitor
                         _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
                         _syncButton.Enabled = true;
                     }
+                    CreateBoxSetsDictionary();
                     DrawPageLayouts();
 
                     if (_colonyState.GetTodayForBox(_currentBoxName) != null)
@@ -1254,7 +1271,7 @@ namespace PenguinMonitor
             string setString;
             if (string.IsNullOrWhiteSpace(_appSettings.AllBoxSetsString))
             {
-                _appSettings.AllBoxSetsString = "{1-150,AA-AC}";
+                _appSettings.AllBoxSetsString = "{0-150,AA-AC}";
                 _appSettings.BoxSetString = "All";
             }
             setString = string.IsNullOrWhiteSpace(_appSettings.BoxSetString) || _appSettings.BoxSetString.ToLower() == "all"
@@ -2337,6 +2354,78 @@ namespace PenguinMonitor
             _settingsCard.AddView(dailyLabelLayout);
             // 3. Bluetooth
             _settingsCard.AddView(_isBluetoothEnabledCheckBox);
+
+            // Scanner device picker
+            // Scanner selection
+            var scannerSection = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            scannerSection.SetPadding(8, 0, 8, 8);
+
+            var currentScanner = _appSettings.SelectedBluetoothDevice;
+            var pairedName = BluetoothManager.GetPairedDevices().FirstOrDefault(d => d.Address == currentScanner).Name;
+            var scannerStatus = new TextView(this) { TextSize = 14 };
+            scannerStatus.SetTextColor(Color.Black);
+            scannerStatus.Text = currentScanner != null ? $"Scanner: {pairedName ?? currentScanner}" : "No scanner selected";
+
+            IDisposable? discoveryHandle = null;
+            var scanButton = _uiFactory.CreateStyledButton("Scan for scanners", UIFactory.PRIMARY_BLUE);
+            var deviceListLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+
+            scanButton.Click += (s, e) =>
+            {
+                scannerStatus.Visibility = Android.Views.ViewStates.Visible;
+                deviceListLayout.Visibility = Android.Views.ViewStates.Visible;
+                discoveryHandle?.Dispose();
+                deviceListLayout.RemoveAllViews();
+                scanButton.Text = "Scanning...";
+                scanButton.Enabled = false;
+                var foundAddresses = new HashSet<string>();
+
+                discoveryHandle = BluetoothManager.StartDiscovery(this, (address, name) =>
+                {
+                    RunOnUiThread(() =>
+                    {
+                        if (!foundAddresses.Add(address)) return;
+                        var btn = _uiFactory.CreateStyledButton($"{name}\n{address}", UIFactory.SUCCESS_GREEN);
+                        btn.SetAllCaps(false);
+                        btn.Click += (_, _) =>
+                        {
+                            discoveryHandle?.Dispose();
+                            _appSettings.SelectedBluetoothDevice = address;
+                            scannerStatus.Text = $"Scanner: {name}";
+                            deviceListLayout.RemoveAllViews();
+                            scanButton.Text = "Scan for scanners";
+                            scanButton.Enabled = true;
+                            if (_isBluetoothEnabledCheckBox.Checked)
+                            {
+                                _bluetoothManager?.Dispose();
+                                InitializeBluetooth();
+                            }
+                        };
+                        var btnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                        btnParams.SetMargins(0, 4, 0, 4);
+                        btn.LayoutParameters = btnParams;
+                        deviceListLayout.AddView(btn);
+                    });
+                }, () =>
+                {
+                    RunOnUiThread(() =>
+                    {
+                        scanButton.Text = "Scan for scanners";
+                        scanButton.Enabled = true;
+                    });
+                });
+            };
+
+            scannerStatus.Visibility = Android.Views.ViewStates.Gone;
+            deviceListLayout.Visibility = Android.Views.ViewStates.Gone;
+            scannerSection.AddView(scannerStatus);
+            var scanBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            scanBtnParams.SetMargins(0, 4, 0, 4);
+            scanButton.LayoutParameters = scanBtnParams;
+            scannerSection.AddView(scanButton);
+            scannerSection.AddView(deviceListLayout);
+            _settingsCard.AddView(scannerSection);
+
             // 4. Box Tags + Sync + Logout/Login (horizontal row)
             _syncButton = _uiFactory.CreateStyledButton("Sync", UIFactory.PRIMARY_BLUE);
             _syncButton.Click += OnSyncClick;
@@ -2576,21 +2665,19 @@ namespace PenguinMonitor
                                 _tagModeTodayCard.Visibility = ViewStates.Gone;
                             }
 
-                            var currentTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) ? tagInfo.TagNumber : "";
-                            var displayTag = currentTag;
+                            var hasTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) && !string.IsNullOrEmpty(tagInfo.TagNumber);
+                            var tagDetails = hasTag
+                                ? $"Current tag: {tagInfo!.TagNumber}" + (tagInfo.Accuracy > 0 ? $" ({FormatAccuracy(tagInfo.Accuracy)})" : "")
+                                : "No tag assigned.";
 
                             if (_isBoxLocked)
                             {
-                                _tagModeInstructionText.Text = !string.IsNullOrEmpty(displayTag)
-                                    ? $"Current tag: {displayTag}\nUnlock the box to edit the tag."
-                                    : "No tag assigned.\nUnlock the box to scan a new tag.";
+                                _tagModeInstructionText.Text = $"{tagDetails}\nUnlock the box to edit the tag.";
                                 _tagModeInstructionText.SetTextColor(Color.DarkGray);
                             }
                             else
                             {
-                                _tagModeInstructionText.Text = !string.IsNullOrEmpty(displayTag)
-                                    ? $"Current tag: {displayTag}\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag."
-                                    : "No tag assigned.\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag.";
+                                _tagModeInstructionText.Text = $"{tagDetails}\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag.";
                                 _tagModeInstructionText.SetTextColor(UIFactory.PRIMARY_BLUE);
                             }
                         }
@@ -3743,9 +3830,9 @@ namespace PenguinMonitor
             int.TryParse(_chicksEditText?[0].Text ?? "0", out chicks);
 
             bool changed = boxData.Adults != adults || boxData.Eggs != eggs || boxData.Chicks != chicks
-                || boxData.GateStatus != GetSelectedStatus(_gateStatusSpinner[0])
-                || boxData.BreedingStatus != GetSelectedStatus(_breedingChanceSpinner[0])
-                || boxData.Notes != (_notesEditText?[0].Text ?? "");
+                || (boxData.GateStatus ?? "") != (GetSelectedStatus(_gateStatusSpinner[0]) ?? "")
+                || (boxData.BreedingStatus ?? "") != (GetSelectedStatus(_breedingChanceSpinner[0]) ?? "")
+                || (boxData.Notes ?? "") != (_notesEditText?[0].Text ?? "");
 
             boxData.Adults = adults;
             boxData.Eggs = eggs;
@@ -4087,6 +4174,45 @@ namespace PenguinMonitor
             var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
             var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} Biometrics" : $"{shortId} Biometrics";
 
+            // Fetch existing biometric data for today in background, then show form
+            _ = Task.Run(async () =>
+            {
+                Dictionary<string, object>? existing = null;
+                int? existingId = null;
+                if (!string.IsNullOrEmpty(pengNum))
+                {
+                    try
+                    {
+                        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                        var req = new HttpRequestMessage(HttpMethod.Get,
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=list&table=penguin_biometric_data&peng_num={pengNum}&observation_date={today}");
+                        req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
+                        var resp = await client.SendAsync(req);
+                        if (resp.IsSuccessStatusCode)
+                        {
+                            var json = await resp.Content.ReadAsStringAsync();
+                            var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json);
+                            if (rows != null && rows.Count > 0)
+                            {
+                                existing = rows[0];
+                                if (existing.ContainsKey("biometric_id"))
+                                    existingId = Convert.ToInt32(existing["biometric_id"]);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                RunOnUiThread(() => ShowBiometricFormUI(birdId, pd, pengNum, existing, existingId));
+            });
+        }
+
+        private void ShowBiometricFormUI(string birdId, PenguinData? pd, string pengNum, Dictionary<string, object>? existing, int? existingId)
+        {
+            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
+            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} Biometrics" : $"{shortId} Biometrics";
+            if (existing != null) title += " (update)";
+
             var scrollView = new ScrollView(this);
             var card = _uiFactory.CreateCard();
             card.SetPadding(16, 16, 16, 16);
@@ -4114,19 +4240,27 @@ namespace PenguinMonitor
                 return lbl;
             }
 
+            string existVal(string key) => existing != null && existing.ContainsKey(key) && existing[key] != null ? existing[key].ToString() ?? "" : "";
+
             // Weight
             card.AddView(createLabel("Weight (g)"));
             var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            weightInput.Text = existVal("weight");
             card.AddView(weightInput);
 
             // Right flipper length
             card.AddView(createLabel("Right flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            flipperInput.Text = existVal("right_flipper_length");
             card.AddView(flipperInput);
 
             // Sex
             card.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(new List<string> { "", "M", "F" });
+            var sexOptions = new List<string> { "", "M", "F" };
+            var sexSpinner = _uiFactory.CreateSpinner(sexOptions);
+            var savedSex = existVal("observed_sex");
+            var sexIdx = sexOptions.IndexOf(savedSex);
+            if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
             var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             spinnerParams.SetMargins(0, 4, 0, 12);
             sexSpinner.LayoutParameters = spinnerParams;
@@ -4147,6 +4281,8 @@ namespace PenguinMonitor
             {
                 var cb = new CheckBox(this) { Text = label };
                 cb.SetTextColor(Color.Black);
+                var val = existVal(field);
+                cb.Checked = val == "1" || val.Equals("true", StringComparison.OrdinalIgnoreCase);
                 conditionChecks[field] = cb;
                 card.AddView(cb);
             }
@@ -4155,6 +4291,7 @@ namespace PenguinMonitor
             card.AddView(createLabel("Notes"));
             var notesInput = createInput("Observations about this bird",
                 Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
+            notesInput.Text = existVal("notes");
             card.AddView(notesInput);
 
             // Save button
@@ -4193,8 +4330,10 @@ namespace PenguinMonitor
                         fields["peng_num"] = pengNum;
 
                         var json = JsonConvert.SerializeObject(fields);
-                        var request = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
+                        var url = existingId != null
+                            ? $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguin_biometric_data&id={existingId}"
+                            : $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data";
+                        var request = new HttpRequestMessage(HttpMethod.Post, url);
                         request.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
                         request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
                         var response = await new HttpClient { Timeout = TimeSpan.FromSeconds(15) }.SendAsync(request);
@@ -4224,13 +4363,15 @@ namespace PenguinMonitor
         private void ShowNewBirdDialog(string shortId, string fullPitId)
         {
             var scrollView = new ScrollView(this);
+            scrollView.SetClipChildren(false);
+            scrollView.DescendantFocusability = Android.Views.DescendantFocusability.AfterDescendants;
             var card = _uiFactory.CreateCard();
             card.SetPadding(16, 16, 16, 16);
             scrollView.AddView(card);
 
             EditText createInput(string hint, Android.Text.InputTypes inputType = Android.Text.InputTypes.ClassText)
             {
-                var input = new EditText(this) { InputType = inputType, Hint = hint, TextSize = 14 };
+                var input = new EditText(this) { InputType = inputType, Hint = hint, TextSize = 14, Focusable = true, FocusableInTouchMode = true };
                 input.SetTextColor(UIFactory.TEXT_PRIMARY);
                 input.SetHintTextColor(UIFactory.TEXT_SECONDARY);
                 input.SetPadding(16, 12, 16, 12);
@@ -4353,20 +4494,16 @@ namespace PenguinMonitor
                 Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
             card.AddView(notesInput);
 
-            // Save button
-            var saveButton = _uiFactory.CreateStyledButton("Add to database", UIFactory.SUCCESS_GREEN);
-            var saveParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            saveParams.SetMargins(0, 16, 0, 0);
-            saveButton.LayoutParameters = saveParams;
-            card.AddView(saveButton);
-
             var dialog = new AlertDialog.Builder(this)
                 .SetTitle($"New bird: {shortId}")
                 .SetView(scrollView)
+                .SetPositiveButton("Add new penguin", (EventHandler<DialogClickEventArgs>)null!)
                 .SetNegativeButton("Skip", (s, e) => { })
                 .Create();
 
-            saveButton.Click += (s, e) =>
+            dialog.Show();
+            var addButton = dialog.GetButton((int)DialogButtonType.Positive);
+            addButton.Click += (s, e) =>
             {
                 var isChick = chippedAsChick.Checked;
                 var sex = sexSpinner.SelectedItem?.ToString() ?? "";
@@ -4390,7 +4527,6 @@ namespace PenguinMonitor
                         {
                             ["chipped_as_adult"] = isChick ? 0 : 1,
                             ["life_stage"] = isChick ? "Chick" : "Adult",
-                            ["chip_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
                         };
                         // sex goes to biometric data as observed_sex, not penguin table
                         if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
@@ -4407,7 +4543,14 @@ namespace PenguinMonitor
                         var pengNum = pengResult?.ContainsKey("peng_num") == true ? pengResult["peng_num"]?.ToString() : null;
                         if (string.IsNullOrEmpty(pengNum))
                         {
-                            RunOnUiThread(() => Toast.MakeText(this, $"Failed to create penguin: {pengJson}", ToastLength.Long)?.Show());
+                            RunOnUiThread(() =>
+                            {
+                                new AlertDialog.Builder(this)
+                                    .SetTitle("Failed to create penguin")
+                                    .SetMessage(pengJson)
+                                    .SetPositiveButton("OK", (s2, e2) => { })
+                                    .Show();
+                            });
                             return;
                         }
 
@@ -4478,8 +4621,6 @@ namespace PenguinMonitor
                     }
                 });
             };
-
-            dialog.Show();
         }
 
         private void OnDeleteScanClick(ScanRecord scanToDelete)

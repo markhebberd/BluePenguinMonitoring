@@ -486,4 +486,141 @@ if ($action === 'export_nestcheck_zip') {
     exit;
 }
 
+// --- Remove Penguin ---
+
+if ($action === 'preview_penguin_delete') {
+    $pengNum = $_GET['peng_num'] ?? '';
+    if (!$pengNum) { http_response_code(400); echo json_encode(['error' => 'peng_num required']); exit; }
+
+    $peng = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ?");
+    $peng->execute([$pengNum]);
+    $penguin = $peng->fetch();
+    if (!$penguin) { http_response_code(404); echo json_encode(['error' => 'Penguin not found']); exit; }
+
+    $chips = $pdo->prepare("SELECT * FROM penguin_chips WHERE peng_num = ?");
+    $chips->execute([$pengNum]);
+    $chipList = $chips->fetchAll();
+
+    $pitIds = array_column($chipList, 'pit_id');
+    $scans = [];
+    if (!empty($pitIds)) {
+        $ph = implode(',', array_fill(0, count($pitIds), '?'));
+        $scanStmt = $pdo->prepare("SELECT ps.*, o.observation_time_utc, ol.location_name AS box_name
+            FROM penguin_scans ps
+            JOIN observations o ON ps.observation_id = o.observation_id
+            JOIN observation_locations ol ON o.location_id = ol.location_id
+            WHERE ps.pit_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+            ORDER BY o.observation_time_utc DESC");
+        $scanStmt->execute($pitIds);
+        $scans = $scanStmt->fetchAll();
+    }
+
+    $bio = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+    $bio->execute([$pengNum]);
+    $bioData = $bio->fetchAll();
+
+    echo json_encode([
+        'penguin' => $penguin,
+        'chips' => $chipList,
+        'scans' => $scans,
+        'biometrics' => $bioData,
+        'scan_count' => count($scans),
+    ]);
+    exit;
+}
+
+if ($action === 'delete_penguin') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $pengNum = $input['peng_num'] ?? '';
+    if (!$pengNum) { http_response_code(400); echo json_encode(['error' => 'peng_num required']); exit; }
+
+    $pdo->beginTransaction();
+    try {
+        $oid = $observer['observer_id'];
+
+        // Get pit_ids for this penguin
+        $chips = $pdo->prepare("SELECT pit_id FROM penguin_chips WHERE peng_num = ?");
+        $chips->execute([$pengNum]);
+        $pitIds = array_column($chips->fetchAll(), 'pit_id');
+
+        // Soft-delete scans
+        $scansDeleted = 0;
+        if (!empty($pitIds)) {
+            $ph = implode(',', array_fill(0, count($pitIds), '?'));
+            $del = $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE pit_id IN ($ph) AND (is_deleted = FALSE OR is_deleted IS NULL)");
+            $del->execute(array_merge([$oid], $pitIds));
+            $scansDeleted = $del->rowCount();
+        }
+
+        // Delete biometrics
+        $pdo->prepare("DELETE FROM penguin_biometric_data WHERE peng_num = ?")->execute([$pengNum]);
+
+        // Delete chips
+        $pdo->prepare("DELETE FROM penguin_chips WHERE peng_num = ?")->execute([$pengNum]);
+
+        // Delete penguin
+        $pdo->prepare("DELETE FROM penguins WHERE peng_num = ?")->execute([$pengNum]);
+
+        // Audit
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES ('penguins', ?, 'DELETE', ?, ?, ?)")
+            ->execute([$pengNum, $oid, json_encode(['peng_num' => $pengNum, 'pit_ids' => $pitIds, 'scans_deleted' => $scansDeleted]), $input['reason'] ?? 'Admin delete']);
+
+        $pdo->commit();
+        echo json_encode(['success' => true, 'scans_deleted' => $scansDeleted, 'chips_deleted' => count($pitIds)]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// --- Regions & Colonies management ---
+
+if ($action === 'regions') {
+    $stmt = $pdo->query("SELECT r.*, (SELECT COUNT(*) FROM colonies c WHERE c.region_id = r.region_id) as colony_count FROM regions r ORDER BY r.region_name");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
+if ($action === 'save_region') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $name = trim($input['region_name'] ?? '');
+    if (!$name) { http_response_code(400); echo json_encode(['error' => 'region_name required']); exit; }
+    $id = $input['region_id'] ?? null;
+    if ($id) {
+        $pdo->prepare("UPDATE regions SET region_name = ? WHERE region_id = ?")->execute([$name, $id]);
+    } else {
+        $pdo->prepare("INSERT INTO regions (region_name) VALUES (?)")->execute([$name]);
+        $id = $pdo->lastInsertId();
+    }
+    echo json_encode(['success' => true, 'region_id' => (int)$id]);
+    exit;
+}
+
+if ($action === 'colonies') {
+    $stmt = $pdo->query("SELECT c.*, r.region_name FROM colonies c JOIN regions r ON c.region_id = r.region_id ORDER BY r.region_name, c.colony_name");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
+if ($action === 'save_colony') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $name = trim($input['colony_name'] ?? '');
+    $regionId = (int)($input['region_id'] ?? 0);
+    $locationSets = trim($input['location_sets_string'] ?? '');
+    if (!$name || !$regionId) { http_response_code(400); echo json_encode(['error' => 'colony_name and region_id required']); exit; }
+    $id = $input['colony_id'] ?? null;
+    if ($id) {
+        $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ? WHERE colony_id = ?")
+            ->execute([$name, $regionId, $locationSets, $id]);
+    } else {
+        $pdo->prepare("INSERT INTO colonies (colony_name, region_id, location_sets_string) VALUES (?, ?, ?)")
+            ->execute([$name, $regionId, $locationSets]);
+        $id = $pdo->lastInsertId();
+    }
+    echo json_encode(['success' => true, 'colony_id' => (int)$id]);
+    exit;
+}
+
 echo json_encode(['error'=>'Unknown action']);

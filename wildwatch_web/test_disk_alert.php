@@ -21,10 +21,7 @@ if (!$isCli) {
 
 $pdo = getDbConnection();
 
-// 14:00 NZST = 02:00 UTC (NZST = UTC+12)
-$asOfUtc = '2026-06-21 02:00:00';
-
-$result = checkDiskDescentAlert($pdo, $asOfUtc, ['markhebberd@gmail.com', 'bdot@snotch.com']);
+$result = checkDiskDescentAlert($pdo, null, ['markhebberd@gmail.com', 'bdot@snotch.com']);
 
 if ($isCli) {
     if ($result) {

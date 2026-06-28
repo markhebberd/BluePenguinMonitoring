@@ -3248,8 +3248,11 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
+      <RegionsAndColonies token={token} />
+
       <div className="admin-section">
         <h3>Data Security</h3>
+        <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
         <DuplicateScans token={token} />
         <SameGenderConflicts token={token} />
@@ -3314,6 +3317,203 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function RegionsAndColonies({ token }: { token: string }) {
+  const [regions, setRegions] = useState<any[]|null>(null);
+  const [colonies, setColonies] = useState<any[]|null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editRegion, setEditRegion] = useState<any|null>(null);
+  const [editColony, setEditColony] = useState<any|null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const [rr, cr] = await Promise.all([
+      fetch('/api/admin.php?action=regions', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+      fetch('/api/admin.php?action=colonies', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+    ]);
+    setRegions(Array.isArray(rr) ? rr : []);
+    setColonies(Array.isArray(cr) ? cr : []);
+    setLoading(false);
+  };
+
+  const saveRegion = async (data: any) => {
+    await fetch('/api/admin.php?action=save_region', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    setEditRegion(null);
+    load();
+  };
+
+  const saveColony = async (data: any) => {
+    await fetch('/api/admin.php?action=save_colony', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    setEditColony(null);
+    load();
+  };
+
+  return (
+    <div className="admin-section">
+      <h3>Regions & Colonies</h3>
+      {!regions && <button className="edit-btn" onClick={load} disabled={loading}>{loading ? 'Loading...' : 'Load'}</button>}
+
+      {regions && (<>
+        <h4 style={{color:'#1a5276', margin:'12px 0 6px'}}>Regions</h4>
+        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%', marginBottom:8}}>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Region</th><th>Colonies</th><th></th></tr></thead>
+          <tbody>
+            {regions.map((r: any) => (
+              <tr key={r.region_id} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'4px 8px'}}>{r.region_name}</td>
+                <td style={{padding:'4px 8px', textAlign:'center'}}>{r.colony_count}</td>
+                <td><button className="edit-btn" onClick={() => setEditRegion({region_id: r.region_id, region_name: r.region_name})}>Edit</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button className="edit-btn" onClick={() => setEditRegion({region_name: ''})}>+ Add region</button>
+
+        {editRegion && (
+          <div className="obs-card" style={{marginTop:8}}>
+            <input type="text" defaultValue={editRegion.region_name} placeholder="Region name"
+              style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6}}
+              onChange={e => editRegion.region_name = e.target.value} />
+            <div style={{display:'flex', gap:6}}>
+              <button className="edit-btn" onClick={() => saveRegion(editRegion)}>Save</button>
+              <button className="edit-btn" onClick={() => setEditRegion(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        <h4 style={{color:'#1a5276', margin:'16px 0 6px'}}>Colonies</h4>
+        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%', marginBottom:8}}>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Colony</th><th style={{textAlign:'left'}}>Region</th><th style={{textAlign:'left'}}>Box sets</th><th></th></tr></thead>
+          <tbody>
+            {colonies!.map((c: any) => (
+              <tr key={c.colony_id} style={{borderBottom:'1px solid #eee'}}>
+                <td style={{padding:'4px 8px'}}>{c.colony_name}</td>
+                <td style={{padding:'4px 8px'}} className="muted">{c.region_name}</td>
+                <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.location_sets_string}</td>
+                <td><button className="edit-btn" onClick={() => setEditColony({colony_id: c.colony_id, colony_name: c.colony_name, region_id: c.region_id, location_sets_string: c.location_sets_string || ''})}>Edit</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button className="edit-btn" onClick={() => setEditColony({colony_name: '', region_id: regions[0]?.region_id || 0, location_sets_string: ''})}>+ Add colony</button>
+
+        {editColony && (
+          <div className="obs-card" style={{marginTop:8}}>
+            <input type="text" defaultValue={editColony.colony_name} placeholder="Colony name"
+              style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6}}
+              onChange={e => editColony.colony_name = e.target.value} />
+            <select defaultValue={editColony.region_id} style={{padding:'4px 8px', fontSize:13, marginBottom:6, width:'100%'}}
+              onChange={e => editColony.region_id = parseInt(e.target.value)}>
+              {regions.map((r: any) => <option key={r.region_id} value={r.region_id}>{r.region_name}</option>)}
+            </select>
+            <input type="text" defaultValue={editColony.location_sets_string} placeholder="Box sets e.g. {1-150,AA-AC}"
+              style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6, fontFamily:'monospace'}}
+              onChange={e => editColony.location_sets_string = e.target.value} />
+            <div style={{display:'flex', gap:6}}>
+              <button className="edit-btn" onClick={() => saveColony(editColony)}>Save</button>
+              <button className="edit-btn" onClick={() => setEditColony(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+function RemovePenguin({ token }: { token: string }) {
+  const [pengNum, setPengNum] = useState('');
+  const [preview, setPreview] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string|null>(null);
+
+  const search = async () => {
+    const num = pengNum.trim().replace('#', '');
+    if (!num) return;
+    setLoading(true); setPreview(null); setResult(null);
+    const r = await fetch(`/api/admin.php?action=preview_penguin_delete&peng_num=${num}`, { headers: { Authorization: `Bearer ${token}` } });
+    const d = await r.json();
+    if (d.error) { setResult(`Error: ${d.error}`); }
+    else { setPreview(d); }
+    setLoading(false);
+  };
+
+  const deletePenguin = async () => {
+    if (!preview) return;
+    const num = preview.penguin.peng_num;
+    if (!confirm(`Permanently delete penguin #${num}?\n\nThis will remove:\n- ${preview.chips.length} chip record(s)\n- ${preview.scan_count} scan(s) from observations\n- All biometric data\n\nThis cannot be undone.`)) return;
+    setLoading(true);
+    const r = await fetch('/api/admin.php?action=delete_penguin', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peng_num: num }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      setResult(`Penguin #${num} deleted. ${d.scans_deleted} scans removed, ${d.chips_deleted} chips removed.`);
+      setPreview(null); setPengNum('');
+    } else {
+      setResult(`Error: ${d.error}`);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
+      <h3 style={{margin:'0 0 8px'}}>Remove Penguin</h3>
+      <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
+        <input type="text" value={pengNum} onChange={e => setPengNum(e.target.value)} placeholder="Penguin #"
+          onKeyDown={e => e.key === 'Enter' && search()}
+          style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:100}} />
+        <button className="edit-btn" onClick={search} disabled={loading}>{loading ? '...' : 'Search'}</button>
+      </div>
+
+      {preview && (
+        <div className="obs-card" style={{marginBottom:8}}>
+          <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
+            <tbody>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Peng #</td><td style={{padding:'2px 8px', fontWeight:600}}>{preview.penguin.peng_num}</td></tr>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Sex</td><td style={{padding:'2px 8px'}}>{preview.penguin.sex || '—'}</td></tr>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Life stage</td><td style={{padding:'2px 8px'}}>{preview.penguin.life_stage || '—'}</td></tr>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Chipped as</td><td style={{padding:'2px 8px'}}>{preview.penguin.chipped_as_adult ? 'Adult' : 'Chick'}</td></tr>
+            </tbody>
+          </table>
+
+          <h4 style={{margin:'8px 0 4px', fontSize:13}}>Chips ({preview.chips.length})</h4>
+          {preview.chips.map((c: any, i: number) => (
+            <div key={i} style={{fontSize:12, padding:'2px 8px', fontFamily:'monospace'}}>{c.pit_id} {c.is_active ? '(active)' : '(inactive)'} — chipped {c.chip_date || '?'}</div>
+          ))}
+
+          <h4 style={{margin:'8px 0 4px', fontSize:13}}>Scans ({preview.scan_count})</h4>
+          {preview.scans.length === 0 ? <p className="muted" style={{fontSize:12, margin:0}}>No scans</p> : (
+            <table style={{fontSize:11, borderCollapse:'collapse', width:'100%'}}>
+              <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Date</th><th style={{textAlign:'left'}}>Box</th></tr></thead>
+              <tbody>{preview.scans.slice(0, 20).map((s: any, i: number) => (
+                <tr key={i} style={{borderBottom:'1px solid #eee'}}>
+                  <td style={{padding:'2px 8px'}}>{s.observation_time_utc?.substring(0, 10)}</td>
+                  <td style={{padding:'2px 8px'}}><a className="clickable" href={`/box/${s.box_name}`}>Box {s.box_name}</a></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          {preview.scans.length > 20 && <p className="muted" style={{fontSize:11}}>...and {preview.scans.length - 20} more</p>}
+
+          {preview.biometrics.length > 0 && (
+            <>
+              <h4 style={{margin:'8px 0 4px', fontSize:13}}>Biometrics ({preview.biometrics.length})</h4>
+              <p className="muted" style={{fontSize:11, margin:0}}>Will be soft-deleted</p>
+            </>
+          )}
+
+          <button onClick={deletePenguin} disabled={loading}
+            style={{marginTop:12, background:'#F44336', color:'#fff', border:'none', padding:'8px 20px', borderRadius:4, cursor:'pointer', fontWeight:600}}>
+            Delete penguin #{preview.penguin.peng_num}
+          </button>
+        </div>
+      )}
+
+      {result && <p style={{color: result.startsWith('Error') ? '#F44336' : '#4CAF50', marginTop:8, fontSize:13}}>{result}</p>}
     </div>
   );
 }

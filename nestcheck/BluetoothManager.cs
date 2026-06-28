@@ -1,303 +1,293 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Android.Bluetooth;
+using Android.Content;
 using Java.Util;
 
 namespace PenguinMonitor
 {
     public class BluetoothManager : IDisposable
     {
-        // Bluetooth components
-        private BluetoothSocket? _bluetoothSocket;
+        private static readonly UUID SppUuid = UUID.FromString("00001101-0000-1000-8000-00805F9B34FB")!;
+
+        private BluetoothSocket? _socket;
         private Stream? _inputStream;
-        private Stream? _outputStream;
-        private bool _isConnected = false;
-        private const string READER_BLUETOOTH_ADDRESS = "00:07:80:E6:95:52";
-        private static string Serial_Port_Profile_UUID = "00001101-0000-1000-8000-00805F9B34FB"; 
+        private CancellationTokenSource? _cts;
+        private bool _isConnected;
+        private bool _shouldReconnect = true;
+        private string? _deviceAddress;
 
-        // Connection management
-        private CancellationTokenSource? _connectionCancellation;
-        private bool _isConnecting = false;
-        private bool _shouldAutoReconnect = true;
+        private const int ConnectTimeoutMs = 10000;
+        private const int InitialRetryMs = 2000;
+        private const int MaxRetryMs = 30000;
 
-        // Connection parameters
-        private const int CONNECTION_TIMEOUT_MS = 10000; // 10 seconds timeout
-        private const int INITIAL_RETRY_DELAY_MS = 2000; // Start with 2 seconds
-        private const int MAX_RETRY_DELAY_MS = 30000; // Cap at 30 seconds
-        private const double BACKOFF_MULTIPLIER = 1.5; // Gradual increase
-
-        // Events for communicating with MainActivity
         public event Action<string>? StatusChanged;
         public event Action<string>? EidDataReceived;
 
         public bool IsConnected => _isConnected;
-        public bool IsConnecting => _isConnecting;
+        public bool IsConnecting { get; private set; }
+        public string? ConnectedDeviceName { get; private set; }
 
-        public async Task StartConnectionAsync()
+        /// <summary>
+        /// Returns all paired Bluetooth devices.
+        /// </summary>
+        public static List<(string Address, string Name)> GetPairedDevices()
         {
-            if (_isConnecting || _isConnected)
-            {
-                return; // Already connecting or connected
-            }
-
-            _shouldAutoReconnect = true;
-            _connectionCancellation = new CancellationTokenSource();
-            
-            await ConnectToReaderBluetoothAsync();
+            var adapter = BluetoothAdapter.DefaultAdapter;
+            if (adapter?.IsEnabled != true) return new();
+            return (adapter.BondedDevices ?? Enumerable.Empty<BluetoothDevice>())
+                .Where(d => d.Address != null)
+                .Select(d => (d.Address!, d.Name ?? d.Address!))
+                .OrderBy(d => d.Item2)
+                .ToList();
         }
 
-        private async Task ConnectToReaderBluetoothAsync()
+        /// <summary>
+        /// Discovers nearby Bluetooth devices (paired and unpaired).
+        /// Runs for ~12 seconds. Calls onDeviceFound for each device discovered.
+        /// Call from an Activity context.
+        /// </summary>
+        public static IDisposable StartDiscovery(Context context, Action<string, string> onDeviceFound, Action? onFinished = null)
         {
-            _isConnecting = true;
+            var adapter = BluetoothAdapter.DefaultAdapter;
+            if (adapter?.IsEnabled != true)
+            {
+                onFinished?.Invoke();
+                return new NoOpDisposable();
+            }
+
+            var seen = new HashSet<string>();
+            // Include already-paired devices immediately
+            foreach (var d in adapter.BondedDevices ?? Enumerable.Empty<BluetoothDevice>())
+            {
+                if (d.Address != null && seen.Add(d.Address))
+                    onDeviceFound(d.Address, d.Name ?? d.Address);
+            }
+
+            var receiver = new DiscoveryReceiver(seen, onDeviceFound, onFinished);
+            var filter = new IntentFilter();
+            filter.AddAction(BluetoothDevice.ActionFound);
+            filter.AddAction(BluetoothAdapter.ActionDiscoveryFinished);
+            context.RegisterReceiver(receiver, filter);
+
+            adapter.CancelDiscovery();
+            adapter.StartDiscovery();
+
+            return new DiscoveryHandle(context, receiver, adapter);
+        }
+
+        private class DiscoveryReceiver : BroadcastReceiver
+        {
+            private readonly HashSet<string> _seen;
+            private readonly Action<string, string> _onFound;
+            private readonly Action? _onFinished;
+
+            public DiscoveryReceiver(HashSet<string> seen, Action<string, string> onFound, Action? onFinished)
+            {
+                _seen = seen; _onFound = onFound; _onFinished = onFinished;
+            }
+
+            public override void OnReceive(Context? context, Intent? intent)
+            {
+                if (intent?.Action == BluetoothDevice.ActionFound)
+                {
+                    var device = intent.GetParcelableExtra(BluetoothDevice.ExtraDevice) as BluetoothDevice;
+                    if (device?.Address != null && _seen.Add(device.Address))
+                        _onFound(device.Address, device.Name ?? device.Address);
+                }
+                else if (intent?.Action == BluetoothAdapter.ActionDiscoveryFinished)
+                {
+                    _onFinished?.Invoke();
+                }
+            }
+        }
+
+        private class DiscoveryHandle : IDisposable
+        {
+            private readonly Context _context;
+            private readonly BroadcastReceiver _receiver;
+            private readonly BluetoothAdapter _adapter;
+            private bool _disposed;
+
+            public DiscoveryHandle(Context context, BroadcastReceiver receiver, BluetoothAdapter adapter)
+            {
+                _context = context; _receiver = receiver; _adapter = adapter;
+            }
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _adapter.CancelDiscovery();
+                try { _context.UnregisterReceiver(_receiver); } catch { }
+            }
+        }
+
+        private class NoOpDisposable : IDisposable { public void Dispose() { } }
+
+        /// <summary>
+        /// Connect to a Bluetooth device by MAC address. Retries with exponential backoff.
+        /// </summary>
+        public async Task ConnectAsync(string deviceAddress)
+        {
+            if (IsConnecting || _isConnected) return;
+
+            _deviceAddress = deviceAddress;
+            _shouldReconnect = true;
+            _cts = new CancellationTokenSource();
+
+            await ConnectLoop();
+        }
+
+        private async Task ConnectLoop()
+        {
+            IsConnecting = true;
             var attempt = 0;
-            var currentRetryDelay = INITIAL_RETRY_DELAY_MS;
+            var retryMs = InitialRetryMs;
 
             try
             {
-                var bluetoothAdapter = BluetoothAdapter.DefaultAdapter;
-                if (bluetoothAdapter?.IsEnabled != true)
+                var adapter = BluetoothAdapter.DefaultAdapter;
+                if (adapter?.IsEnabled != true)
                 {
-                    StatusChanged?.Invoke("❌ Bluetooth not available");
+                    StatusChanged?.Invoke("Bluetooth is off");
                     return;
                 }
 
-                // Keep trying until connected or cancelled
-                while (!_isConnected && !_connectionCancellation?.Token.IsCancellationRequested == true)
+                while (!_isConnected && _cts?.Token.IsCancellationRequested != true)
                 {
                     attempt++;
-                    
                     try
                     {
                         if (attempt > 1)
                         {
-                            StatusChanged?.Invoke($"🔄 Retry {attempt} (waiting {currentRetryDelay/1000}s)...");
-                            await Task.Delay(currentRetryDelay, _connectionCancellation.Token);
-                        }
-                        else
-                        {
-                            StatusChanged?.Invoke("🔗 Connecting to HR5...");
+                            StatusChanged?.Invoke($"Retry {attempt} in {retryMs / 1000}s...");
+                            await Task.Delay(retryMs, _cts!.Token);
                         }
 
-                        var device = bluetoothAdapter.GetRemoteDevice(READER_BLUETOOTH_ADDRESS);
-                        if (device == null)
-                        {
-                            throw new Exception("HR5 device not found");
-                        }
+                        var device = adapter.GetRemoteDevice(_deviceAddress);
+                        if (device == null) throw new Exception($"Device {_deviceAddress} not found");
 
-                        // Check if device is paired
-                        if (device.BondState != Bond.Bonded)
-                        {
-                            StatusChanged?.Invoke("⚠️ HR5 not paired - check Android Bluetooth settings");
-                            await Task.Delay(5000, _connectionCancellation.Token);
-                            continue;
-                        }
+                        ConnectedDeviceName = device.Name ?? _deviceAddress;
+                        StatusChanged?.Invoke($"Connecting to {ConnectedDeviceName}...");
 
-                        StatusChanged?.Invoke($"🔗 Connecting to {device.Name ?? "HR5"} (attempt {attempt})...");
+                        adapter.CancelDiscovery();
+                        CleanupSocket();
 
-                        var uuid = UUID.FromString(Serial_Port_Profile_UUID);
-                        
-                        // Clean up any existing socket first
-                        CleanupConnection();
-                        
-                        _bluetoothSocket = device.CreateRfcommSocketToServiceRecord(uuid);
+                        _socket = device.CreateRfcommSocketToServiceRecord(SppUuid);
+                        if (_socket == null) throw new Exception("Failed to create socket");
 
-                        if (_bluetoothSocket != null)
-                        {
-                            // TIMEOUT HANDLING: Use Task.WhenAny for connection timeout
-                            var connectTask = Task.Run(() => _bluetoothSocket.Connect(), _connectionCancellation.Token);
-                            var timeoutTask = Task.Delay(CONNECTION_TIMEOUT_MS, _connectionCancellation.Token);
+                        var connectTask = Task.Run(() => _socket.Connect(), _cts!.Token);
+                        if (await Task.WhenAny(connectTask, Task.Delay(ConnectTimeoutMs, _cts.Token)) != connectTask)
+                            throw new TimeoutException("Connection timed out");
+                        await connectTask; // propagate exceptions
 
-                            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+                        if (!_socket.IsConnected) throw new Exception("Socket not connected");
 
-                            if (completedTask == timeoutTask)
-                            {
-                                throw new TimeoutException($"Connection timeout after {CONNECTION_TIMEOUT_MS/1000} seconds");
-                            }
+                        _inputStream = _socket.InputStream;
+                        _isConnected = true;
+                        retryMs = InitialRetryMs;
+                        StatusChanged?.Invoke($"{ConnectedDeviceName} connected");
 
-                            await connectTask; // Re-await to get any exceptions
-
-                            if (_bluetoothSocket.IsConnected)
-                            {
-                                _inputStream = _bluetoothSocket.InputStream;
-                                _isConnected = true;
-
-                                StatusChanged?.Invoke($"✅ HR5 Connected after {attempt} attempt{(attempt > 1 ? "s" : "")} - Ready to scan");
-                                
-                                // Reset retry delay on successful connection
-                                currentRetryDelay = INITIAL_RETRY_DELAY_MS;
-                                
-                                // Start listening in background
-                                _ = Task.Run(async () => await ListenForEidDataAsync(), _connectionCancellation.Token);
-                                return; // Success!
-                            }
-                        }
+                        _ = Task.Run(ListenLoop, _cts.Token);
+                        return;
                     }
-                    catch (OperationCanceledException)
-                    {
-                        break; // User cancelled
-                    }
+                    catch (OperationCanceledException) { break; }
                     catch (Exception ex)
                     {
-                        StatusChanged?.Invoke($"⚠️ Attempt {attempt} failed: {ex.Message}");
-                        
-                        // Clean up failed connection
-                        CleanupConnection();
-                        
-                        // RETRY MECHANISM: Increase delay for next attempt (exponential backoff)
-                        currentRetryDelay = Math.Min(
-                            (int)(currentRetryDelay * BACKOFF_MULTIPLIER), 
-                            MAX_RETRY_DELAY_MS
-                        );
-                        
-                        // Reset backoff periodically to avoid getting stuck at max delay
-                        if (attempt % 10 == 0)
-                        {
-                            currentRetryDelay = INITIAL_RETRY_DELAY_MS;
-                            StatusChanged?.Invoke($"🔄 Reset retry timing after {attempt} attempts");
-                        }
+                        StatusChanged?.Invoke($"Attempt {attempt}: {ex.Message}");
+                        CleanupSocket();
+                        retryMs = Math.Min((int)(retryMs * 1.5), MaxRetryMs);
+                        if (attempt % 10 == 0) retryMs = InitialRetryMs;
                     }
                 }
-
-                if (!_isConnected && _connectionCancellation?.Token.IsCancellationRequested == true)
-                {
-                    StatusChanged?.Invoke("🚫 Connection cancelled");
-                }
             }
-            catch (OperationCanceledException)
-            {
-                StatusChanged?.Invoke("🚫 Connection cancelled");
-            }
-            finally
-            {
-                _isConnecting = false;
-            }
+            catch (OperationCanceledException) { }
+            finally { IsConnecting = false; }
         }
 
-        private async Task ListenForEidDataAsync()
+        private async Task ListenLoop()
         {
             var buffer = new byte[1024];
-            var receivedData = new StringBuilder();
+            var sb = new StringBuilder();
 
             try
             {
-                while (_isConnected && _bluetoothSocket?.IsConnected == true && _inputStream != null)
+                while (_isConnected && _socket?.IsConnected == true && _inputStream != null
+                       && _cts?.Token.IsCancellationRequested != true)
                 {
-                    if (_connectionCancellation?.Token.IsCancellationRequested == true)
-                        break;
+                    var n = await _inputStream.ReadAsync(buffer, 0, buffer.Length, _cts?.Token ?? CancellationToken.None);
+                    if (n <= 0) continue;
 
-                    try
+                    sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
+                    var raw = sb.ToString();
+                    var clean = new string(raw.Where(char.IsLetterOrDigit).ToArray());
+
+                    if (clean.Length >= 10)
                     {
-                        var bytesRead = await _inputStream.ReadAsync(buffer, 0, buffer.Length, _connectionCancellation?.Token ?? CancellationToken.None);
-
-                        if (bytesRead > 0)
-                        {
-                            var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                            receivedData.Append(data);
-
-                            var completeData = receivedData.ToString();
-
-                            if (completeData.Length >= 10)
-                            {
-                                var cleanData = new string(completeData.Where(c => char.IsLetterOrDigit(c)).ToArray());
-                                if (cleanData.Length >= 10)
-                                {
-                                    EidDataReceived?.Invoke(cleanData);
-                                    receivedData.Clear();
-                                }
-                            }
-
-                            if (receivedData.Length > 1000)
-                            {
-                                receivedData.Clear();
-                            }
-                        }
+                        EidDataReceived?.Invoke(clean);
+                        sb.Clear();
                     }
-                    catch (Exception ex) when (!(ex is OperationCanceledException))
+                    else if (sb.Length > 1000)
                     {
-                        StatusChanged?.Invoke($"⚠️ Scanning error: {ex.Message}");
-                        break; // Exit listening loop on error
+                        sb.Clear();
                     }
 
-                    await Task.Delay(100, _connectionCancellation?.Token ?? CancellationToken.None);
+                    await Task.Delay(100, _cts?.Token ?? CancellationToken.None);
                 }
             }
-            catch (OperationCanceledException)
-            {
-                // Normal cancellation
-            }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                StatusChanged?.Invoke($"❌ Scanning error: {ex.Message}");
+                StatusChanged?.Invoke($"Read error: {ex.Message}");
             }
-            finally
+
+            // Auto-reconnect on disconnect
+            _isConnected = false;
+            if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true && _deviceAddress != null)
             {
-                // AUTOMATIC RECONNECTION: Connection dropped, try to reconnect
-                if (_isConnected)
-                {
-                    _isConnected = false;
-                    StatusChanged?.Invoke("🔌 HR5 Disconnected - Attempting reconnection...");
-                    
-                    // Auto-reconnect after disconnect (unless manually cancelled)
-                    if (_shouldAutoReconnect && !_connectionCancellation?.Token.IsCancellationRequested == true)
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            await Task.Delay(3000); // Brief pause before auto-reconnect
-                            if (_shouldAutoReconnect && !_connectionCancellation?.Token.IsCancellationRequested == true)
-                            {
-                                await ConnectToReaderBluetoothAsync();
-                            }
-                        });
-                    }
-                }
+                StatusChanged?.Invoke($"{ConnectedDeviceName ?? "Scanner"} disconnected — reconnecting...");
+                await Task.Delay(3000);
+                if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true)
+                    await ConnectLoop();
             }
         }
 
-        // RECOVERY LOGIC: Clean up resources properly
-        private void CleanupConnection()
+        private void CleanupSocket()
         {
-            try
-            {
-                _isConnected = false;
-                _bluetoothSocket?.Close();
-                _inputStream?.Dispose();
-                _outputStream?.Dispose();
-                _bluetoothSocket?.Dispose();
-                _bluetoothSocket = null;
-                _inputStream = null;
-                _outputStream = null;
-            }
-            catch (Exception)
-            {
-                // Ignore cleanup errors
-            }
+            _isConnected = false;
+            try { _inputStream?.Dispose(); } catch { }
+            try { _socket?.Close(); } catch { }
+            try { _socket?.Dispose(); } catch { }
+            _socket = null;
+            _inputStream = null;
         }
 
         public void Disconnect()
         {
-            _shouldAutoReconnect = false; // Disable auto-reconnect
-            _connectionCancellation?.Cancel();
-            CleanupConnection();
+            _shouldReconnect = false;
+            _cts?.Cancel();
+            CleanupSocket();
+            ConnectedDeviceName = null;
+        }
+
+        public async Task RetryAsync()
+        {
+            if (IsConnecting || string.IsNullOrEmpty(_deviceAddress)) return;
+            Disconnect();
+            await Task.Delay(500);
+            await ConnectAsync(_deviceAddress);
         }
 
         public void Dispose()
         {
             Disconnect();
-            _connectionCancellation?.Dispose();
-        }
-
-        // Manual retry method (resets backoff timing)
-        public async Task RetryConnectionAsync()
-        {
-            if (_isConnecting) return;
-            
-            Disconnect();
-            await Task.Delay(1000); // Brief pause before retry
-            await StartConnectionAsync();
+            _cts?.Dispose();
         }
     }
 }

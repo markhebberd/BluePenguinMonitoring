@@ -14,12 +14,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 requireAuth();
 
 $pdo = getDbConnection();
+// colonies.updated_at added for change tracking (one-time migration already applied)
 $stmt = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
     COALESCE((SELECT MAX(deleted_at) FROM observations), '2000-01-01'),
     COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
     COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
-    COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01')
+    COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
+    COALESCE((SELECT MAX(updated_at) FROM colonies), '2000-01-01')
 ) as wm");
 $wm = $stmt->fetch()['wm'];
 

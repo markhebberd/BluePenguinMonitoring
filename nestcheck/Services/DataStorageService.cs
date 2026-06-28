@@ -170,8 +170,7 @@ namespace PenguinMonitor.Services
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
 
-                // Fetch default colony if not set
-                if (appSettings.SelectedColonyId == 0 || string.IsNullOrEmpty(appSettings.SelectedColonyName))
+                // Fetch colony data (always, so box sets stay current)
                 {
                     try
                     {
@@ -184,11 +183,12 @@ namespace PenguinMonitor.Services
                             var colonies = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(colonyJson);
                             if (colonies != null && colonies.Count > 0)
                             {
-                                var first = colonies[0];
-                                appSettings.SelectedColonyId = Convert.ToInt32(first["colony_id"]);
-                                appSettings.SelectedColonyName = first["colony_name"]?.ToString() ?? "";
-                                appSettings.AllBoxSetsString = first["location_sets_string"]?.ToString() ?? "";
-                                appSettings.BoxSetString = "All";
+                                var match = colonies.FirstOrDefault(c => Convert.ToInt32(c["colony_id"]) == appSettings.SelectedColonyId) ?? colonies[0];
+                                appSettings.SelectedColonyId = Convert.ToInt32(match["colony_id"]);
+                                appSettings.SelectedColonyName = match["colony_name"]?.ToString() ?? "";
+                                appSettings.AllBoxSetsString = match["location_sets_string"]?.ToString() ?? "";
+                                if (string.IsNullOrEmpty(appSettings.BoxSetString))
+                                    appSettings.BoxSetString = "All";
                             }
                             else
                             {
@@ -231,6 +231,7 @@ namespace PenguinMonitor.Services
                     });
                 }
 
+                result.Error = $"DEBUG pending:{pendingBoxes.Count} obs:{colonyState.PendingObservations.Count(p=>p.IsPendingUpload)}";
                 if (pendingBoxes.Count > 0)
                 {
                     var uploadBody = JsonConvert.SerializeObject(new {
@@ -250,6 +251,7 @@ namespace PenguinMonitor.Services
                     }
 
                     var uploadJson = await uploadResponse.Content.ReadAsStringAsync();
+                    result.Error = $"DEBUG: {uploadJson?.Substring(0, Math.Min(uploadJson?.Length ?? 0, 400))}";
                     var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(uploadJson);
 
                     if (uploadResult != null && uploadResult.ContainsKey("created"))
@@ -537,9 +539,10 @@ namespace PenguinMonitor.Services
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { result.Error = "Session expired"; result.AuthFailed = true; return result; }
 
             var json = await response.Content.ReadAsStringAsync();
-            if (string.IsNullOrEmpty(json) || !json.TrimStart().StartsWith("{"))
-            { result.Error = $"Upload failed: {json?.Substring(0, Math.Min(json?.Length ?? 0, 100))}"; return result; }
+            if (!response.IsSuccessStatusCode || string.IsNullOrEmpty(json) || !json.TrimStart().StartsWith("{"))
+            { result.Error = $"Upload failed ({(int)response.StatusCode}): {json?.Substring(0, Math.Min(json?.Length ?? 0, 200))}"; return result; }
 
+            result.Error = $"DEBUG upload response: {json?.Substring(0, Math.Min(json?.Length ?? 0, 300))}";
             var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
             if (uploadResult != null && uploadResult.ContainsKey("created"))
             {

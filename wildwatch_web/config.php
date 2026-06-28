@@ -237,6 +237,7 @@ function checkDiskDescentAlert($pdo, $asOfUtc = null, $recipients = ['markhebber
     $nowNz = (new DateTime($nowUtc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('H:i D j M Y T');
     $freeGb = round($result['current_free_mb'] / 1024, 1);
     $subject = "DISK ALERT - wildwatch.co.nz hits zero in {$result['hours_to_zero']}h";
+    $from = 'mark@wildwatch.co.nz';
     $boundary = '----=_DiskAlert_' . md5(uniqid());
     $cid = 'disk-graph@wildwatch.co.nz';
 
@@ -266,7 +267,6 @@ function checkDiskDescentAlert($pdo, $asOfUtc = null, $recipients = ['markhebber
         . chunk_split(base64_encode($pngData)) . "\r\n"
         . "--{$boundary}--";
 
-    $from = 'mark@wildwatch.co.nz';
     $headers = "From: $from\r\n"
         . "Reply-To: $from\r\n"
         . "MIME-Version: 1.0\r\n"

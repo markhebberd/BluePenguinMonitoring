@@ -43,14 +43,23 @@ function ww_maybe_alert_low_disk($freeMb) {
 $isCli = php_sapi_name() === 'cli';
 $cronKey = $_GET['cron'] ?? '';
 if ($isCli || ($cronKey !== '' && hash_equals(API_KEY, $cronKey))) {
-    $freeMb = recordDiskSample(getDbConnection());
+    // Descent detection check (range=check with cron key)
+    if (($_GET['range'] ?? '') === 'check') {
+        header('Content-Type: application/json');
+        $result = checkDiskDescentAlert(getDbConnection(), null, []);
+        echo json_encode($result ?: ['detected' => false]);
+        exit;
+    }
+    $pdo = getDbConnection();
+    $freeMb = recordDiskSample($pdo);
     if (!$isCli) header('Content-Type: application/json');
     if ($freeMb === null) {
         if (!$isCli) http_response_code(500);
         echo json_encode(['ok' => false, 'error' => 'disk_free_space failed']);
         exit;
     }
-    ww_maybe_alert_low_disk($freeMb); // low-space warning fires from whichever cron records the sample
+    ww_maybe_alert_low_disk($freeMb);
+    checkDiskDescentAlert($pdo); // email alert if linear descent detected
     echo json_encode(['ok' => true, 'disk_free_mb' => $freeMb, 'low_disk_threshold_mb' => 50 * 1024]);
     exit;
 }

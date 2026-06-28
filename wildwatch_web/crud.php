@@ -239,13 +239,27 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
+        // Auto-generate peng_num for new penguins
+        if ($table === 'penguins' && !isset($input['peng_num'])) {
+            $maxNum = (int)$pdo->query("SELECT MAX(CAST(peng_num AS UNSIGNED)) FROM penguins")->fetchColumn();
+            $input['peng_num'] = (string)($maxNum + 1);
+            $cols = array_keys($input);
+        }
         $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
         $pdo->prepare($sql)->execute(array_values($input));
         $newId = $pdo->lastInsertId();
+        // For penguins, use peng_num as the ID since it's not auto-increment
+        $recordId = ($table === 'penguins' && isset($input['peng_num'])) ? $input['peng_num'] : $newId;
         $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'INSERT', ?, ?)")
-            ->execute([$table, $newId, $observer['observer_id'], json_encode($input)]);
+            ->execute([$table, $recordId, $observer['observer_id'], json_encode($input)]);
         $pdo->commit();
-        echo json_encode(['success'=>true, 'id'=>$newId]);
+        $result = ['success'=>true, 'id'=>$recordId];
+        // Return the full inserted row so callers get auto-generated fields (e.g. peng_num)
+        $row = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?");
+        $row->execute([$recordId]);
+        $inserted = $row->fetch();
+        if ($inserted) $result = array_merge($result, $inserted);
+        echo json_encode($result);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
 }
 
