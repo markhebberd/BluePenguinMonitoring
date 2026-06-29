@@ -368,6 +368,25 @@ function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chip
   return s === 'F' ? '\u2640' : s === 'M' ? '\u2642' : '';
 }
 
+/** Field-observation sex + confidence, stored on biometrics.observed_sex as PM/MM/U/MF/PF.
+ *  `short` = compact form for mini views (pM/mM/U/mF/pF); otherwise full words.
+ *  Legacy M/F values (and anything unrecognised) fall back gracefully. */
+const OBSERVED_SEX: Record<string, { short: string; full: string }> = {
+  PM: { short: 'pM', full: 'Probably male' },
+  MM: { short: 'mM', full: 'Maybe male' },
+  U:  { short: 'U',  full: 'Unsure' },
+  MF: { short: 'mF', full: 'Maybe female' },
+  PF: { short: 'pF', full: 'Probably female' },
+  M:  { short: 'M',  full: 'Male' },    // legacy
+  F:  { short: 'F',  full: 'Female' },  // legacy
+};
+function observedSexLabel(code: string|null|undefined, short: boolean): string {
+  if (!code) return '';
+  const entry = OBSERVED_SEX[code.toUpperCase()];
+  if (!entry) return code; // unknown \u2014 show raw
+  return short ? entry.short : entry.full;
+}
+
 /** Navigate on click, allow ctrl+click to open in new tab */
 function navClick(e: React.MouseEvent, action: () => void) {
   if (e.ctrlKey || e.metaKey || e.button === 1) return; // let browser handle new tab
@@ -1048,7 +1067,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               const lastComment = biometrics.find((b: any) => b.notes)?.notes;
               const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
               biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
-              const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${s} ${n}x`).join(', ');
+              const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${observedSexLabel(s, true)} ${n}x`).join(', ');
               const weightSummary = weights.length > 0 ? `${Math.min(...weights)}-${Math.max(...weights)}g (${weights.length}x)` : '';
               const summary = [sexSummary, weightSummary, lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
 
@@ -1062,7 +1081,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 ].filter(Boolean);
                 return (<Fragment key={`bio${i}`}>
                 <tr><td className="muted" colSpan={2} style={{fontWeight:600, paddingTop:4, fontSize:11}}>{b.observation_date || ''}</td></tr>
-                {b.observed_sex && <tr><td className="muted">Sex</td><td>{b.observed_sex}</td></tr>}
+                {b.observed_sex && <tr><td className="muted">Sex</td><td>{observedSexLabel(b.observed_sex, false)}</td></tr>}
                 {b.weight && <tr><td className="muted">Weight</td><td>{!editing ? `${parseFloat(b.weight).toFixed(0)}g` : <><EditableField value={parseFloat(b.weight).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>}
                 {b.right_flipper_length && <tr><td className="muted">Flipper</td><td>{!editing ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <><EditableField value={parseFloat(b.right_flipper_length).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>}
                 {flags.length > 0 && <tr><td className="muted">Flags</td><td>{flags.join(', ')}</td></tr>}
