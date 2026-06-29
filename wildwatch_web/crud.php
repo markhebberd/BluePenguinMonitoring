@@ -207,7 +207,7 @@ function handleList($pdo, $table) {
     }
     $sql = "SELECT * FROM $table";
     if ($where) $sql .= " WHERE " . implode(' AND ', $where);
-    $limit = ($table === 'observation_locations' || $table === 'penguins' || $table === 'penguin_chips') ? 5000 : 100;
+    $limit = ($table === 'observation_locations' || $table === 'penguins' || $table === 'penguin_chips' || $table === 'penguin_biometric_data') ? 5000 : 100;
     $sql .= " ORDER BY 1 DESC LIMIT $limit";
     $stmt = $pdo->prepare($sql); $stmt->execute($params);
     echo json_encode($stmt->fetchAll());
