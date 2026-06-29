@@ -4620,7 +4620,7 @@ namespace PenguinMonitor
         private void ShowBiometricFormUI(string birdId, PenguinData? pd, string pengNum, Dictionary<string, object>? existing, int? existingId)
         {
             var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
-            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} Biometrics" : $"{shortId} Biometrics";
+            var title = "pengMiniView detail";
             if (existing != null) title += " (update)";
 
             var scrollView = new ScrollView(this);
@@ -4680,11 +4680,8 @@ namespace PenguinMonitor
             card.AddView(createLabel("Condition"));
             var conditions = new (string label, string field)[] {
                 ("Moulting", "condition_moulting"),
-                ("Underweight", "condition_underweight"),
                 ("Ticks", "condition_ticks"),
                 ("Dead", "condition_dead"),
-                ("Dog attacked", "condition_dog_attacked"),
-                ("Attacked", "condition_attacked"),
             };
             var conditionChecks = new Dictionary<string, CheckBox>();
             foreach (var (label, field) in conditions)
@@ -4885,11 +4882,8 @@ namespace PenguinMonitor
             card.AddView(createLabel("Condition"));
             var bioConditions = new (string label, string field)[] {
                 ("Moulting", "condition_moulting"),
-                ("Underweight", "condition_underweight"),
                 ("Ticks", "condition_ticks"),
                 ("Dead", "condition_dead"),
-                ("Dog attacked", "condition_dog_attacked"),
-                ("Attacked", "condition_attacked"),
             };
             var bioConditionChecks = new Dictionary<string, CheckBox>();
             foreach (var (label, field) in bioConditions)
@@ -5482,11 +5476,11 @@ namespace PenguinMonitor
                     else
                     {
                         // Normal mode — a box tag means "navigate to that box".
-                        if (_pendingBoxTagNavigation != null)
+                        if (_pendingBoxTagNavigation != null && assignedBoxId != _pendingBoxTagNavigation)
                         {
-                            // A navigation is already pending — the user forgot to lock and is now
-                            // scanning yet another box tag. Keep the original destination (first tag wins)
-                            // and freeze the scan queue so nothing else is recorded into it.
+                            // A navigation is already pending and the user scanned a *different* box tag.
+                            // Keep the original destination (first tag wins) and freeze the scan queue
+                            // so nothing else is recorded into it.
                             _pendingScanQueueFrozen = true;
                             TriggerAlert();
                             Toast.MakeText(this, $"⚠️ Lock Box {_currentBoxName} first — heading to Box {_pendingBoxTagNavigation}", ToastLength.Long)?.Show();
