@@ -14,7 +14,10 @@
 #   WW_DISK_FORCE=1           send a test alert now, ignoring the throttle
 set -u
 
-API_KEY="tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# API key lives in the git-ignored repo-root .env (not committed). Add it on each host that runs this cron.
+[ -f "$SCRIPT_DIR/../.env" ] && . "$SCRIPT_DIR/../.env"
+: "${API_KEY:?API_KEY not set — add it to the repo-root .env}"
 THRESHOLD_GB="${WW_DISK_THRESHOLD_GB:-20}"     # normal free space is ~300-440 GB; 20 GB = real emergency
 ALERT_TO="markhebberd@gmail.com,bdot@snotch.com"
 THROTTLE_SECS=21600                            # at most one alert per 6h while a condition persists

@@ -12,10 +12,10 @@
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'wildwatch_nestcheck');
 define('DB_USER', 'wildwatch_nestcheck_api');       // Update this
-define('DB_PASS', '9_?KPS7U~h7Pt_=K');              // Update this
+define('DB_PASS', 'CHANGE_ME_DB_PASSWORD');              // Update this
 
 // API Key — read-only access for legacy app (v37). Write access requires Bearer token.
-define('API_KEY', 'tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf');
+define('API_KEY', 'CHANGE_ME_API_KEY');
 
 // CORS settings (adjust for production)
 define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain

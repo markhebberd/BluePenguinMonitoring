@@ -402,4 +402,9 @@ FodyWeavers.xsd
 /secrets.props
 my-release-key.keystore
 .env
+
+# Secrets — keep these out of the repo (real copies live on the dev/build machines only)
+secrets.props
+nestcheck/secrets.props
+wildwatch_web/config.php
 backups/

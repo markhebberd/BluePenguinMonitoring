@@ -8,9 +8,8 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.env"
-
-API_KEY="tJcyrnfhZht3a4oSUQt1JIB09f2MXBaf"
+source "$SCRIPT_DIR/.env"   # provides FTP_USER, FTP_PASS, API_KEY
+: "${API_KEY:?API_KEY not set — add it to $SCRIPT_DIR/.env}"
 DATE="${1:-$(date +%Y-%m-%d)}"
 YEAR=$(echo "$DATE" | cut -d- -f1)
 MONTH=$(echo "$DATE" | cut -d- -f2)
