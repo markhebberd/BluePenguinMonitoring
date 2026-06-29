@@ -160,6 +160,7 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     cache.bioByPeng.get(b.peng_num)!.push(b);
   }
   // Compute hasReturned for chick-chipped penguins: scanned >90 days after chip date
+  console.time('buildIndexes:hasReturned');
   const CHICK_WINDOW = 90 * 86400000;
   for (const p of data.penguins) {
     if (p.chipped_as_adult) { p.hasReturned = false; continue; }
@@ -180,7 +181,10 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     }
     p.hasReturned = returned;
   }
+  console.timeEnd('buildIndexes:hasReturned');
+  console.time('buildIndexes:dateStats');
   buildDateStats(cache);
+  console.timeEnd('buildIndexes:dateStats');
   return cache;
 }
 
@@ -269,11 +273,16 @@ function applyEditCounts(observations: any[], editCounts: Record<string, number>
 /** Load all data from IndexedDB into memory */
 async function loadMemFromIDB(): Promise<void> {
   const db = await openDB();
+  console.time('loadMemFromIDB:getAll');
   const [observations, scans, penguins, chips, locations, biometrics] = await Promise.all([
     getAll(db, 'observations'), getAll(db, 'scans'), getAll(db, 'penguins'),
     getAll(db, 'chips'), getAll(db, 'locations'), getAll(db, 'biometrics'),
   ]);
+  console.timeEnd('loadMemFromIDB:getAll');
+  console.log(`loadMemFromIDB: ${observations.length} obs, ${scans.length} scans, ${penguins.length} penguins, ${locations.length} locations`);
+  console.time('loadMemFromIDB:buildIndexes');
   mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics });
+  console.timeEnd('loadMemFromIDB:buildIndexes');
   notifySubscribers();
 }
 
@@ -376,6 +385,24 @@ async function fetchWithProgress(url: string, onProgress?: (pct: number, label: 
     return JSON.parse(decompressed);
   }
   return JSON.parse(new TextDecoder().decode(merged));
+}
+
+/**
+ * Load already-cached data into memory if a prior snapshot exists, so the UI can
+ * paint immediately while syncDatabase() checks the server in the background.
+ * Returns true if cache was present (safe to render now), false on first-ever visit
+ * or a stale cache format (caller must keep the spinner up for the full download).
+ */
+export async function primeFromCache(): Promise<boolean> {
+  const db = await openDB();
+  const cachedVersion = await getMeta(db, 'cache_version');
+  if (cachedVersion !== CACHE_VERSION) return false; // stale format → full re-sync needed first
+  const lastSync = await getMeta(db, 'snapshot_time');
+  if (!lastSync) return false;
+  console.time('primeFromCache');
+  if (!mem) await loadMemFromIDB();
+  console.timeEnd('primeFromCache');
+  return true;
 }
 
 export async function syncDatabase(onProgress?: (msg: string, pct?: number) => void): Promise<void> {

@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchReport } from './api/boxtags';
-import { syncDatabase, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling } from './api/localdb';
+import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -3731,6 +3731,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const lastLoadRef = useRef(0);
   const loadColony = useCallback(async () => {
+    // Paint immediately from the cached snapshot if we have one — the network sync
+    // and overview fetches below then refresh in the background. Only a first-ever
+    // visit (no cache) keeps the spinner up for the full download.
+    try {
+      if (await primeFromCache()) setLoading(false);
+    } catch (e) {
+      console.warn('primeFromCache failed; falling back to full sync', e);
+    }
     // A sync failure (e.g. flaky mobile network on resume) must NOT block the
     // box-grid fetches below, or the grid renders empty ("Nest Boxes (0)").
     try {
