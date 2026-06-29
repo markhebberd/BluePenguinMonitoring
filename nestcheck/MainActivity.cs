@@ -4579,6 +4579,18 @@ namespace PenguinMonitor
             dialog.Show();
         }
 
+        // Observed sex-guess scale stored in penguin_biometric_data.observed_sex (wildwatch codes PM/MM/U/MF/PF).
+        // First entry is the blank "not recorded" default.
+        private static readonly (string code, string label)[] ObservedSexOptions = new[]
+        {
+            ("", ""),
+            ("PM", "Probably male"),
+            ("MM", "Maybe male"),
+            ("U", "Unsure"),
+            ("MF", "Maybe female"),
+            ("PF", "Probably female"),
+        };
+
         private void ShowBiometricForm(string birdId, PenguinData? pd, string pengNum)
         {
             var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
@@ -4619,8 +4631,8 @@ namespace PenguinMonitor
 
         private void ShowBiometricFormUI(string birdId, PenguinData? pd, string pengNum, Dictionary<string, object>? existing, int? existingId)
         {
-            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
-            var title = "pengMiniView detail";
+            var (pengLabel, _, _, _) = LookupPenguinLabel(birdId);
+            var title = $"{pengLabel} detail";
             if (existing != null) title += " (update)";
 
             var scrollView = new ScrollView(this);
@@ -4666,10 +4678,9 @@ namespace PenguinMonitor
 
             // Sex
             card.AddView(createLabel("Sex"));
-            var sexOptions = new List<string> { "", "M", "F" };
-            var sexSpinner = _uiFactory.CreateSpinner(sexOptions);
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
             var savedSex = existVal("observed_sex");
-            var sexIdx = sexOptions.IndexOf(savedSex);
+            var sexIdx = Array.FindIndex(ObservedSexOptions, o => o.code == savedSex);
             if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
             var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             spinnerParams.SetMargins(0, 4, 0, 12);
@@ -4728,7 +4739,8 @@ namespace PenguinMonitor
                         var fields = new Dictionary<string, object>();
                         if (!string.IsNullOrEmpty(weightInput.Text)) fields["weight"] = weightInput.Text;
                         if (!string.IsNullOrEmpty(flipperInput.Text)) fields["right_flipper_length"] = flipperInput.Text;
-                        var selectedSex = sexSpinner.SelectedItem?.ToString() ?? "";
+                        var selectedSexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
+                        var selectedSex = ObservedSexOptions.FirstOrDefault(o => o.label == selectedSexLabel).code;
                         if (!string.IsNullOrEmpty(selectedSex)) fields["observed_sex"] = selectedSex;
                         foreach (var (field, cb) in conditionChecks)
                             if (cb.Checked) fields[field] = true;
@@ -4806,7 +4818,7 @@ namespace PenguinMonitor
 
             // Sex
             card.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(new List<string> { "", "M", "F" });
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
             var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             spinnerParams.SetMargins(0, 4, 0, 12);
             sexSpinner.LayoutParameters = spinnerParams;
@@ -4913,7 +4925,8 @@ namespace PenguinMonitor
                 addButton.Enabled = false;
                 addButton.Text = "Adding...";
                 var isChick = chippedAsChick.Checked;
-                var sex = sexSpinner.SelectedItem?.ToString() ?? "";
+                var sexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
+                var sex = ObservedSexOptions.FirstOrDefault(o => o.label == sexLabel).code;
                 var chickSize = "";
                 if (isChick)
                 {
