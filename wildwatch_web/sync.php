@@ -324,15 +324,23 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $pitId = $scan['pit_id'] ?? '';
                 if (empty($pitId)) continue;
 
-                // Resolve short IDs to full pit_id
-                $cleanId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $pitId));
-                $fullPitId = $chipLookup[$cleanId] ?? $chipLookup[substr($cleanId, -8)] ?? null;
-                if (!$fullPitId) { $errors[] = ['error' => "Unknown pit_id: $pitId", 'box' => $boxName]; continue; }
-
                 $scanTime = $scan['scan_time_utc'] ?? $obsTime;
                 $lat = isset($scan['latitude']) && $scan['latitude'] != 0 ? $scan['latitude'] : null;
                 $lon = isset($scan['longitude']) && $scan['longitude'] != 0 ? $scan['longitude'] : null;
                 $acc = isset($scan['accuracy']) && $scan['accuracy'] > 0 ? $scan['accuracy'] : null;
+
+                // No-scan placeholder — store with pit_id as-is, no chip lookup needed
+                if (str_starts_with(strtoupper($pitId), 'NOSCAN')) {
+                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
+                        ->execute([$observationId, $pitId, $scanTime, $lat, $lon, $acc]);
+                    $scansCreated++;
+                    continue;
+                }
+
+                // Resolve short IDs to full pit_id
+                $cleanId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $pitId));
+                $fullPitId = $chipLookup[$cleanId] ?? $chipLookup[substr($cleanId, -8)] ?? null;
+                if (!$fullPitId) { $errors[] = ['error' => "Unknown pit_id: $pitId", 'box' => $boxName]; continue; }
 
                 // Skip duplicate pit_id for same observation
                 $dupCheck = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");

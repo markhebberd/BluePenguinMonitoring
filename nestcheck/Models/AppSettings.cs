@@ -259,6 +259,19 @@ namespace PenguinMonitor.Models
                 }
             }
         }
+        private bool showNoScanBoxesInMultiboxView;
+        public bool ShowNoScanBoxesInMultiboxView
+        {
+            get => showNoScanBoxesInMultiboxView;
+            set
+            {
+                if (showNoScanBoxesInMultiboxView != value)
+                {
+                    showNoScanBoxesInMultiboxView = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
         private bool showDCMBoxesInMultiboxView;
         public bool ShowDCMBoxesInMultiboxView
         {

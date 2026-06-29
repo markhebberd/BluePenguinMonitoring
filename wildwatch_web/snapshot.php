@@ -49,7 +49,7 @@ if ($since) {
         WHERE ol.colony_id = ? AND o.updated_at >= ?");
     $obs->execute([$colonyId, $ts]);
 
-    // Scans belonging to changed observations
+    // Scans: belonging to changed observations, or deleted since last sync
     $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted
         FROM penguin_scans ps
         JOIN observations o ON ps.observation_id = o.observation_id
@@ -60,10 +60,10 @@ if ($since) {
     $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins WHERE updated_at >= ?");
     $penguins->execute([$ts]);
 
-    // Chips don't have updated_at — use audit_log to find recently changed ones
+    // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
     $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.chip_by, pc.rechip_by, pc.solo
         FROM penguin_chips pc
-        WHERE pc.pit_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_chips' AND change_timestamp >= ?)
+        WHERE pc.created_at >= ?
            OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");
     $chips->execute([$ts, $ts]);
 
@@ -88,7 +88,9 @@ if ($since) {
     $wmStmt = $pdo->query("SELECT GREATEST(
         COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
         COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
-        COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01')
+        COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
+        COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
+        COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01')
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
@@ -143,7 +145,10 @@ $elapsed = round((microtime(true) - $t0) * 1000);
 $fullWm = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
     COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
-    COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01')
+    COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
+    COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
+    COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01'),
+    COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
 ) as wm")->fetch()['wm'];
 
 $json = json_encode([
