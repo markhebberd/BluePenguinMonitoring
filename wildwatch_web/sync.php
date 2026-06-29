@@ -331,6 +331,9 @@ function handleUpload($pdo, $colonyId, $observer) {
 
                 // No-scan placeholder — store with pit_id as-is, no chip lookup needed
                 if (str_starts_with(strtoupper($pitId), 'NOSCAN')) {
+                    $dupCheck = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+                    $dupCheck->execute([$observationId, $pitId]);
+                    if ($dupCheck->fetch()) continue;
                     $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
                         ->execute([$observationId, $pitId, $scanTime, $lat, $lon, $acc]);
                     $scansCreated++;
