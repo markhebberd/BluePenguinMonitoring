@@ -4593,43 +4593,15 @@ namespace PenguinMonitor
 
         private void ShowBiometricForm(string birdId, PenguinData? pd, string pengNum)
         {
-            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
-            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} Biometrics" : $"{shortId} Biometrics";
-
-            // Fetch existing biometric data for today in background, then show form
-            _ = Task.Run(async () =>
-            {
-                Dictionary<string, object>? existing = null;
-                int? existingId = null;
-                if (!string.IsNullOrEmpty(pengNum))
-                {
-                    try
-                    {
-                        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
-                        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                        var req = new HttpRequestMessage(HttpMethod.Get,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=list&table=penguin_biometric_data&peng_num={pengNum}&observation_date={today}");
-                        req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                        var resp = await client.SendAsync(req);
-                        if (resp.IsSuccessStatusCode)
-                        {
-                            var json = await resp.Content.ReadAsStringAsync();
-                            var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json);
-                            if (rows != null && rows.Count > 0)
-                            {
-                                existing = rows[0];
-                                if (existing.ContainsKey("biometric_id"))
-                                    existingId = Convert.ToInt32(existing["biometric_id"]);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                RunOnUiThread(() => ShowBiometricFormUI(birdId, pd, pengNum, existing, existingId));
-            });
+            // Read today's biometric record from the local cache (kept fresh by the main sync) —
+            // opens instantly and works offline. Any unsynced edit is already in this cache.
+            BiometricRecord? existing = null;
+            if (!string.IsNullOrEmpty(pengNum))
+                _colonyState.TodayBiometrics.TryGetValue(pengNum, out existing);
+            ShowBiometricFormUI(birdId, pd, pengNum, existing);
         }
 
-        private void ShowBiometricFormUI(string birdId, PenguinData? pd, string pengNum, Dictionary<string, object>? existing, int? existingId)
+        private void ShowBiometricFormUI(string birdId, PenguinData? pd, string pengNum, BiometricRecord? existing)
         {
             var (pengLabel, _, _, _) = LookupPenguinLabel(birdId);
             var title = $"{pengLabel} detail";
@@ -4662,24 +4634,22 @@ namespace PenguinMonitor
                 return lbl;
             }
 
-            string existVal(string key) => existing != null && existing.ContainsKey(key) && existing[key] != null ? existing[key].ToString() ?? "" : "";
-
             // Weight
             card.AddView(createLabel("Weight (g)"));
             var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
-            weightInput.Text = existVal("weight");
+            weightInput.Text = existing?.Weight ?? "";
             card.AddView(weightInput);
 
             // Right flipper length
             card.AddView(createLabel("Flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
-            flipperInput.Text = existVal("right_flipper_length");
+            flipperInput.Text = existing?.RightFlipperLength ?? "";
             card.AddView(flipperInput);
 
             // Sex
             card.AddView(createLabel("Sex"));
             var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
-            var savedSex = existVal("observed_sex");
+            var savedSex = existing?.ObservedSex ?? "";
             var sexIdx = Array.FindIndex(ObservedSexOptions, o => o.code == savedSex);
             if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
             var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -4694,13 +4664,19 @@ namespace PenguinMonitor
                 ("Ticks", "condition_ticks"),
                 ("Dead", "condition_dead"),
             };
+            bool condChecked(string field) => existing != null && field switch
+            {
+                "condition_moulting" => existing.ConditionMoulting,
+                "condition_ticks" => existing.ConditionTicks,
+                "condition_dead" => existing.ConditionDead,
+                _ => false,
+            };
             var conditionChecks = new Dictionary<string, CheckBox>();
             foreach (var (label, field) in conditions)
             {
                 var cb = new CheckBox(this) { Text = label };
                 cb.SetTextColor(Color.Black);
-                var val = existVal(field);
-                cb.Checked = val == "1" || val.Equals("true", StringComparison.OrdinalIgnoreCase);
+                cb.Checked = condChecked(field);
                 conditionChecks[field] = cb;
                 card.AddView(cb);
             }
@@ -4709,7 +4685,7 @@ namespace PenguinMonitor
             card.AddView(createLabel("Notes"));
             var notesInput = createInput("Observations about this bird",
                 Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
-            notesInput.Text = existVal("notes");
+            notesInput.Text = existing?.Notes ?? "";
             card.AddView(notesInput);
 
             // Save button
@@ -4732,47 +4708,39 @@ namespace PenguinMonitor
                     Toast.MakeText(this, "Cannot save — penguin not in database", ToastLength.Short)?.Show();
                     return;
                 }
+
+                // Save to the local cache + sync queue — instant, offline-safe. The next sync (and the
+                // prompt background flush below) uploads it; the server id is preserved so edits update.
+                var selectedSexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
+                var record = new BiometricRecord
+                {
+                    PengNum = pengNum,
+                    ObservationDate = NzNow.ToString("yyyy-MM-dd"),
+                    Weight = string.IsNullOrEmpty(weightInput.Text) ? null : weightInput.Text,
+                    RightFlipperLength = string.IsNullOrEmpty(flipperInput.Text) ? null : flipperInput.Text,
+                    ObservedSex = ObservedSexOptions.FirstOrDefault(o => o.label == selectedSexLabel).code,
+                    ConditionMoulting = conditionChecks["condition_moulting"].Checked,
+                    ConditionTicks = conditionChecks["condition_ticks"].Checked,
+                    ConditionDead = conditionChecks["condition_dead"].Checked,
+                    Notes = string.IsNullOrEmpty(notesInput.Text) ? null : notesInput.Text,
+                    BiometricId = existing?.BiometricId,
+                    IsPendingUpload = true,
+                    PendingUploadSinceUtc = DateTime.UtcNow,
+                };
+                _colonyState.SaveBiometric(record);
+                SaveToAppDataDir();
+                Toast.MakeText(this, $"Saved for #{pengNum} — will sync", ToastLength.Short)?.Show();
+                dialog.Dismiss();
+
+                // Prompt background flush so it uploads promptly; a full sync also flushes it.
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        var fields = new Dictionary<string, object>();
-                        if (!string.IsNullOrEmpty(weightInput.Text)) fields["weight"] = weightInput.Text;
-                        if (!string.IsNullOrEmpty(flipperInput.Text)) fields["right_flipper_length"] = flipperInput.Text;
-                        var selectedSexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
-                        var selectedSex = ObservedSexOptions.FirstOrDefault(o => o.label == selectedSexLabel).code;
-                        if (!string.IsNullOrEmpty(selectedSex)) fields["observed_sex"] = selectedSex;
-                        foreach (var (field, cb) in conditionChecks)
-                            if (cb.Checked) fields[field] = true;
-                        if (!string.IsNullOrEmpty(notesInput.Text)) fields["notes"] = notesInput.Text;
-                        fields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
-                        fields["peng_num"] = pengNum;
-
-                        var json = JsonConvert.SerializeObject(fields);
-                        var url = existingId != null
-                            ? $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguin_biometric_data&id={existingId}"
-                            : $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data";
-                        var request = new HttpRequestMessage(HttpMethod.Post, url);
-                        request.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                        request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                        var response = await new HttpClient { Timeout = TimeSpan.FromSeconds(15) }.SendAsync(request);
-
-                        RunOnUiThread(() =>
-                        {
-                            if (response.IsSuccessStatusCode)
-                            {
-                                Toast.MakeText(this, $"Biometric data saved for #{pengNum}", ToastLength.Short)?.Show();
-                                dialog.Dismiss();
-                            }
-                            else
-                                Toast.MakeText(this, $"Save failed: {response.StatusCode}", ToastLength.Short)?.Show();
-                        });
+                        await _dataStorageService.UploadPendingBiometricsOnly(_colonyState, _appSettings);
+                        DataStorageService.SaveColonyState(this, _colonyState);
                     }
-                    catch (Exception ex)
-                    {
-                        RunOnUiThread(() =>
-                            Toast.MakeText(this, $"Save failed: {ex.Message}", ToastLength.Short)?.Show());
-                    }
+                    catch { }
                 });
             };
 

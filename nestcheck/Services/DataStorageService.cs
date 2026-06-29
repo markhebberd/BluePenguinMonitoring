@@ -145,6 +145,9 @@ namespace PenguinMonitor.Services
             public int BoxCount { get; set; }
             public int Uploaded { get; set; }
             public int UploadErrors { get; set; }
+            public int BiometricCount { get; set; }
+            public int BiometricsUploaded { get; set; }
+            public int BiometricUploadErrors { get; set; }
             public string? Error { get; set; }
             public bool AuthFailed { get; set; }
             /// <summary>
@@ -282,6 +285,9 @@ namespace PenguinMonitor.Services
                     }
                 }
 
+                // Step 1b: Upload any pending biometric edits (independent of pending observations)
+                await UploadPendingBiometrics(colonyState, token, result);
+
                 // Step 2: Fetch + process in parallel — each task reports its own progress
                 var nzToday = MainActivity.NzToday;
                 bool authFailed = false;
@@ -379,6 +385,36 @@ namespace PenguinMonitor.Services
                     return result.BirdCount;
                 }, "Penguins", s => onLineProgress?.Invoke(1, s), isCancelled);
 
+                // Biometrics: fetch today's records so the detail form opens instantly/offline.
+                // Non-critical — failures don't fail the sync.
+                Task bioTask = WithRetry(async () =>
+                {
+                    var nzTodayStr = MainActivity.NzToday.ToString("yyyy-MM-dd");
+                    var req = new HttpRequestMessage(HttpMethod.Get,
+                        $"{WILDWATCH_API_URL}?action=list&table=penguin_biometric_data&observation_date={nzTodayStr}");
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
+                    resp.EnsureSuccessStatusCode();
+                    var bioJson = await resp.Content.ReadAsStringAsync();
+                    if (string.IsNullOrEmpty(bioJson) || !bioJson.TrimStart().StartsWith("["))
+                        throw new Exception("Biometrics API: expected JSON array");
+                    var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(bioJson) ?? new();
+                    int merged = 0;
+                    foreach (var row in rows)
+                    {
+                        var pengNum = row.TryGetValue("peng_num", out var pn) ? pn?.ToString() : null;
+                        if (string.IsNullOrEmpty(pengNum)) continue;
+                        // Never clobber a local unsynced edit
+                        if (colonyState.TodayBiometrics.TryGetValue(pengNum, out var local) && local.IsPendingUpload)
+                            continue;
+                        colonyState.TodayBiometrics[pengNum] = BiometricRecordFromRow(row, nzTodayStr);
+                        merged++;
+                    }
+                    result.BiometricCount = merged;
+                    return merged;
+                }, "Biometrics", null, isCancelled);
+
                 // Tags: fetch + sync
                 Task<BoxTagService.SyncResult?> tagSyncTask;
                 if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)
@@ -392,7 +428,7 @@ namespace PenguinMonitor.Services
                     tagSyncTask = Task.FromResult<BoxTagService.SyncResult?>(null);
 
                 // Wait for all — don't throw if individual tasks fail
-                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask); } catch { }
+                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask, bioTask); } catch { }
 
                 // Save colony state after all tasks complete (boxes task already mutated it)
                 SaveColonyState(context, colonyState);
@@ -571,6 +607,92 @@ namespace PenguinMonitor.Services
             if (uploadResult != null && uploadResult.ContainsKey("conflicts"))
                 result.Conflicts = JsonConvert.DeserializeObject<List<SyncConflict>>(uploadResult["conflicts"].ToString());
 
+            return result;
+        }
+
+        // ===== Biometrics: cache + queue =====
+
+        /// <summary>Build a BiometricRecord from a crud.php penguin_biometric_data row.</summary>
+        private static BiometricRecord BiometricRecordFromRow(Dictionary<string, object> row, string dateFallback)
+        {
+            string? S(string k) => row.TryGetValue(k, out var v) && v != null ? v.ToString() : null;
+            bool B(string k) { var s = S(k); return s == "1" || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase); }
+            int? I(string k) { var s = S(k); return int.TryParse(s, out var n) ? n : (int?)null; }
+            return new BiometricRecord
+            {
+                PengNum = S("peng_num") ?? "",
+                ObservationDate = S("observation_date") ?? dateFallback,
+                Weight = S("weight"),
+                RightFlipperLength = S("right_flipper_length"),
+                ObservedSex = S("observed_sex"),
+                ConditionMoulting = B("condition_moulting"),
+                ConditionTicks = B("condition_ticks"),
+                ConditionDead = B("condition_dead"),
+                Notes = S("notes"),
+                BiometricId = I("biometric_id"),
+                IsPendingUpload = false,
+            };
+        }
+
+        private static int? ExtractBiometricId(string createResponseJson)
+        {
+            try
+            {
+                var obj = JsonConvert.DeserializeObject<Dictionary<string, object>>(createResponseJson);
+                if (obj == null) return null;
+                foreach (var key in new[] { "biometric_id", "id" })
+                    if (obj.TryGetValue(key, out var v) && v != null && int.TryParse(v.ToString(), out var n)) return n;
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>Upload all pending biometric edits via crud.php (create or update). Mutates colonyState.</summary>
+        private async Task UploadPendingBiometrics(ColonyState colonyState, string token, SyncResult result)
+        {
+            foreach (var bio in colonyState.TodayBiometrics.Values.Where(b => b.IsPendingUpload).ToList())
+            {
+                try
+                {
+                    var fields = new Dictionary<string, object>
+                    {
+                        ["peng_num"] = bio.PengNum,
+                        ["observation_date"] = bio.ObservationDate,
+                    };
+                    if (!string.IsNullOrEmpty(bio.Weight)) fields["weight"] = bio.Weight;
+                    if (!string.IsNullOrEmpty(bio.RightFlipperLength)) fields["right_flipper_length"] = bio.RightFlipperLength;
+                    if (!string.IsNullOrEmpty(bio.ObservedSex)) fields["observed_sex"] = bio.ObservedSex;
+                    if (bio.ConditionMoulting) fields["condition_moulting"] = true;
+                    if (bio.ConditionTicks) fields["condition_ticks"] = true;
+                    if (bio.ConditionDead) fields["condition_dead"] = true;
+                    if (!string.IsNullOrEmpty(bio.Notes)) fields["notes"] = bio.Notes;
+
+                    var url = bio.BiometricId.HasValue
+                        ? $"{WILDWATCH_API_URL}?action=update&table=penguin_biometric_data&id={bio.BiometricId.Value}"
+                        : $"{WILDWATCH_API_URL}?action=create&table=penguin_biometric_data";
+                    var req = new HttpRequestMessage(HttpMethod.Post, url);
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (!resp.IsSuccessStatusCode) { result.BiometricUploadErrors++; continue; }
+
+                    // Capture the new id on create so a later edit updates instead of duplicating
+                    if (!bio.BiometricId.HasValue)
+                        bio.BiometricId = ExtractBiometricId(await resp.Content.ReadAsStringAsync());
+                    bio.IsPendingUpload = false;
+                    result.BiometricsUploaded++;
+                }
+                catch { result.BiometricUploadErrors++; }
+            }
+        }
+
+        /// <summary>Upload only pending biometrics (used for prompt background flush after a save).</summary>
+        internal async Task<SyncResult> UploadPendingBiometricsOnly(ColonyState colonyState, AppSettings appSettings)
+        {
+            var result = new SyncResult();
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
+            await UploadPendingBiometrics(colonyState, token, result);
             return result;
         }
 

@@ -28,7 +28,15 @@ namespace PenguinMonitor.Models
         /// </summary>
         public Dictionary<string, BoxObservation> TodayBoxes { get; set; } = new();
 
+        /// <summary>
+        /// Today's penguin biometric records, keyed by peng_num.
+        /// Downloaded during sync and/or edited locally (IsPendingUpload until uploaded).
+        /// </summary>
+        public Dictionary<string, BiometricRecord> TodayBiometrics { get; set; } = new();
+
         public int PendingUploadCount => PendingObservations.Count(o => o.IsPendingUpload);
+
+        public int PendingBiometricCount => TodayBiometrics.Values.Count(b => b.IsPendingUpload);
 
         /// <summary>
         /// Get all pending observations for a specific box, newest first.
@@ -69,6 +77,23 @@ namespace PenguinMonitor.Models
                 DailyLabel = "";
                 DailyLabelDate = "";
             }
+
+            // Drop downloaded biometrics from a previous day; keep unsynced edits so they aren't lost
+            var staleBio = TodayBiometrics
+                .Where(kvp => kvp.Value.ObservationDate != nzTodayStr && !kvp.Value.IsPendingUpload)
+                .Select(kvp => kvp.Key)
+                .ToList();
+            foreach (var key in staleBio)
+                TodayBiometrics.Remove(key);
+        }
+
+        /// <summary>
+        /// Store a biometric record for today, keyed by peng_num, replacing any existing one.
+        /// </summary>
+        public void SaveBiometric(BiometricRecord record)
+        {
+            if (string.IsNullOrEmpty(record.PengNum)) return;
+            TodayBiometrics[record.PengNum] = record;
         }
 
         public BoxObservation? GetTodayForBox(string boxName)
