@@ -4943,7 +4943,7 @@ namespace PenguinMonitor
                             }
                             SaveCurrentBoxData();
                             buildScannedIdsLayout(boxData.ScannedIds);
-                            Toast.MakeText(this, $"🗑️ Bird {scanToDelete.BirdId} deleted from Box {_currentBoxIndex}", ToastLength.Short)?.Show();
+                            Toast.MakeText(this, $"🗑️ Bird {scanToDelete.BirdId} deleted from Box {_currentBoxName}", ToastLength.Short)?.Show();
                             DrawPageLayouts();
                         }
                     }
@@ -5404,7 +5404,7 @@ namespace PenguinMonitor
                                        penguinCheck.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
                     }
                     string birdIcon = isReturning ? "🔄🐧" : "🐧";
-                    string toastMessage = $"{birdIcon} Bird {displayId} added to Box {_currentBoxIndex}";
+                    string toastMessage = $"{birdIcon} Bird {displayId} added to Box {_currentBoxName}";
                     if (_remotePenguinData != null && _remotePenguinData.TryGetValue(cleanEid.ToUpper(), out var penguin))
                     {
                         if (penguin.LastKnownLifeStage == LifeStage.Adult ||
