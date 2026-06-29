@@ -4470,11 +4470,39 @@ namespace PenguinMonitor
             };
             scanText.SetTextColor(UIFactory.TEXT_PRIMARY);
             scanText.Clickable = true;
-            var birdIdForClick = scan.BirdId;
-            scanText.Click += (s, e) => ShowBirdDialog(birdIdForClick, isTodayScan: true);
+            // Tapping the bird opens it on the website directly (no modal)
+            scanText.Click += (s, e) =>
+            {
+                var pn = penguinData?.PengNum ?? "";
+                if (!string.IsNullOrEmpty(pn))
+                    StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
+                        Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pn}")));
+                else
+                    Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
+            };
             var textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             scanText.LayoutParameters = textParams;
             scanLayout.AddView(scanText);
+
+            // Detail button — opens the biometric detail directly
+            var detailButton = new Button(this)
+            {
+                Text = "Detail",
+                TextSize = 12
+            };
+            detailButton.SetTextColor(Color.White);
+            detailButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            detailButton.SetPadding(12, 8, 12, 8);
+            detailButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.SUCCESS_GREEN, 8);
+            detailButton.SetAllCaps(false);
+
+            var detailButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            detailButtonParams.SetMargins(8, 0, 4, 0);
+            detailButton.LayoutParameters = detailButtonParams;
+
+            detailButton.Click += (sender, e) => ShowBiometricForm(scan.BirdId, penguinData, penguinData?.PengNum ?? "");
+
+            scanLayout.AddView(detailButton);
 
             // Move button
             var moveButton = new Button(this)
