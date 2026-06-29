@@ -201,17 +201,9 @@ h3.collapsible { cursor:pointer; user-select:none; }
 h3.collapsible:hover { color:#1a5276; }
 .bird-title-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; gap:8px; }
 .bird-title-peng { white-space:nowrap; min-width:0; display:flex; align-items:center; gap:4px; }
-.bird-nav-btn { background:none; border:1px solid #ddd; color:#1a5276; font-size:16px; padding:2px 8px; border-radius:4px; cursor:pointer; line-height:1; }
-.bird-nav-btn:hover { background:#e3f2fd; }
-.bird-nav-btn.disabled { color:#ccc; border-color:#eee; cursor:default; }
 .bird-title-peng .scan { font-size:20px; padding:6px 12px; cursor:default; }
 .bird-title-peng .scan .sex-icon { font-size:20px; }
 .bird-title-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; min-width:60px; text-align:center; }
-.bird-nav { display:flex; align-items:center; gap:4px; }
-.bird-nav-btn { background:none; border:1px solid #ccc; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:13px; color:#555; }
-.bird-nav-btn:hover:not(:disabled) { background:#f0f0f0; }
-.bird-nav-btn:disabled { opacity:0.3; cursor:default; }
-.bird-nav-input { width:50px; text-align:center; border:1px solid #ccc; border-radius:4px; padding:4px; font-size:13px; }
 .header-nav { display:flex; gap:6px; align-items:center; }
 .admin-panel { max-width:800px; margin:0 auto; padding:16px 20px; }
 .admin-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
@@ -298,7 +290,8 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
-.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
+/* Section divider only — must not bleed onto .scan chips that share this class name */
+div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
 .bird-section h3 { font-size:15px; color:#1a5276; margin-bottom:8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
 .partner-card { background:#f8f9fa; border-radius:6px; padding:10px; margin-bottom:8px; }

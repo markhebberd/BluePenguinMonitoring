@@ -448,17 +448,31 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}</a>;
 }
 
-function PenguinMini({ scan, onClick, observationDate, navigateDirectly }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean }) {
+function PenguinMini({ scan, onClick, observationDate, navigateDirectly, currentStatus }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean; currentStatus?: boolean }) {
   const sex = (scan.sex || '').toUpperCase();
-  const cls = penguinSexClass(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
-  const icon = penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.pit_id ? scan.pit_id.slice(-8) : '';
   const wasChippedAsChick = !scan.chipped_as_adult;
-  const isChickNow = isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, observationDate);
-  const unprovenAdult = wasChippedAsChick && !isChickNow && !sex && !observationDate;
-  const chipCls = wasChippedAsChick ? 'chipped-chick' : '';
-  const grayCls = unprovenAdult ? 'unproven' : '';
+  // currentStatus (bird-page header): a chick-chipped bird stays a chick (yellow) until it
+  // has been scanned as an adult (hasReturned). Once an adult it shows its sex colour
+  // (blue/pink) — or grey if unsexed — with the yellow "chipped as chick" inset.
+  // Without currentStatus, life-stage is judged as at the given observation date.
+  const stillChick = currentStatus
+    ? (wasChippedAsChick && !scan.hasReturned)
+    : isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, observationDate);
+  const cls = currentStatus
+    ? (stillChick ? 'chick' : (sex === 'F' ? 'f' : sex === 'M' ? 'm' : ''))
+    : penguinSexClass(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
+  const icon = currentStatus
+    ? (stillChick ? '🐣' : (sex === 'F' ? '♀' : sex === 'M' ? '♂' : ''))
+    : penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
+  const provenChickOrigin = wasChippedAsChick && !stillChick;
+  const chipCls = currentStatus
+    ? (provenChickOrigin && sex ? 'chipped-chick' : '')
+    : (wasChippedAsChick ? 'chipped-chick' : '');
+  const grayCls = currentStatus
+    ? (provenChickOrigin && !sex ? 'unproven' : '')
+    : (wasChippedAsChick && !stillChick && !sex && !observationDate ? 'unproven' : '');
   const obsNzDate = observationDate ? new Date(observationDate).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '';
   const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
@@ -944,7 +958,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, onNavigateToBird, token, canEdit, penguinList }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; onNavigateToBird?: (num:string)=>void; token?: string; canEdit?: boolean; penguinList?: string[] }) {
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
@@ -989,16 +1003,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     <div className="bird-detail">
       <div className="bird-title-row">
         <span className="bird-title-peng">
-          {(() => {
-            const idx = penguinList?.indexOf(p.peng_num) ?? -1;
-            const prev = idx > 0 ? penguinList![idx - 1] : null;
-            const next = penguinList && idx >= 0 && idx < penguinList.length - 1 ? penguinList[idx + 1] : null;
-            return <>
-              {prev ? <button className="bird-nav-btn" onClick={() => onNavigateToBird?.(prev)}>&larr;</button> : <span className="bird-nav-btn disabled">&larr;</span>}
-              <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}} onClick={() => {}} />
-              {next ? <button className="bird-nav-btn" onClick={() => onNavigateToBird?.(next)}>&rarr;</button> : <span className="bird-nav-btn disabled">&rarr;</span>}
-            </>;
-          })()}
+          <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, hasReturned: p.hasReturned}} onClick={() => {}} currentStatus />
         </span>
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -2026,6 +2031,62 @@ function DistinctAdultsChart() {
   );
 }
 
+function PeakAdultsChart() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReport('peak_adults').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
+  }, []);
+
+  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
+  if (data.length === 0) return <div className="report-card"><p className="muted">No observation data available</p></div>;
+
+  const W = 800, H = 400, PAD = { top: 30, right: 30, bottom: 70, left: 55 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+
+  const maxCount = Math.max(...data.map((d: any) => d.adults));
+  const barW = Math.min(60, plotW / data.length - 4);
+  const xScale = (i: number) => PAD.left + (i + 0.5) * (plotW / data.length);
+  const yScale = (v: number) => PAD.top + plotH - (v / maxCount) * plotH;
+
+  // YYYY-MM-DD → "12 Nov"
+  const shortDate = (iso: string) => {
+    const [, m, d] = iso.split('-');
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1] || '';
+    return `${parseInt(d, 10)} ${mon}`;
+  };
+
+  return (
+    <div className="report-card">
+      <h3>Most Adults on a Single Day per Season</h3>
+      <p className="muted">Highest total adults present across the colony on any one day each breeding season (Apr–Mar)</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(maxCount * frac)} y2={yScale(maxCount * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+          <text key={frac} x={PAD.left - 8} y={yScale(maxCount * frac) + 4} textAnchor="end" fontSize="11" fill="#888">{Math.round(maxCount * frac)}</text>
+        ))}
+        {data.map((d: any, i: number) => (
+          <Fragment key={d.season}>
+            <rect x={xScale(i) - barW / 2} y={yScale(d.adults)} width={barW} height={PAD.top + plotH - yScale(d.adults)} fill="#FF9800" opacity="0.85" rx="3">
+              <title>{`${d.season}: ${d.adults} adults on ${d.date}`}</title>
+            </rect>
+            <text x={xScale(i)} y={yScale(d.adults) - 6} textAnchor="middle" fontSize="11" fill="#333" fontWeight="600">{d.adults}</text>
+            <text x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#666">{d.season}</text>
+            <text x={xScale(i)} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="9" fill="#999">{shortDate(d.date)}</text>
+          </Fragment>
+        ))}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <text x={14} y={PAD.top + plotH / 2} textAnchor="middle" fontSize="12" fill="#666" transform={`rotate(-90, 14, ${PAD.top + plotH / 2})`}>Peak adults</text>
+      </svg>
+    </div>
+  );
+}
+
 function EggArrivalChart() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2874,9 +2935,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
             onBoxClick={(box: string) => onBoxClick(box)}
             onSightingClick={(box: string) => onBoxClick(box)}
             onDayClick={onDayClick}
-            onNavigateToBird={handleBirdClick}
-            token={token} canEdit={canEdit}
-            penguinList={data.observations.flatMap((o: any) => (o.scans || []).map((s: any) => s.peng_num)).filter((v: any, i: number, a: any[]) => v && a.indexOf(v) === i).sort((a: string, b: string) => { const na = parseInt(a), nb = parseInt(b); return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b); })} />
+            token={token} canEdit={canEdit} />
         </div>
       </>)}
     </div>
@@ -3664,10 +3723,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const allPenguins = useAllPenguins();
-  const allPenguinNums = useMemo(() => allPenguins.map(p => p.peng_num).filter(Boolean).sort((a: string, b: string) => {
-    const na = parseInt(a), nb = parseInt(b);
-    return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
-  }), [allPenguins]);
   const [penguinSearch, setPenguinSearch] = useState('');
   const [serverStats, setServerStats] = useState<any>(null);
   const [showEntry, setShowEntry] = useState(initial.enter || false);
@@ -4025,6 +4080,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="reports-page">
           <DistinctAdultsChart />
+          <PeakAdultsChart />
           <EggArrivalChart />
           <ChickReturnChart />
           <ChickSexChart />
@@ -4069,7 +4125,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
               onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
-              onDayClick={goToDay} penguinList={allPenguinNums} onNavigateToBird={openBird} />
+              onDayClick={goToDay} />
           ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
           : <p className="muted">Bird not found</p>}
         </div>
@@ -4212,9 +4268,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
-                  onDayClick={goToDay}
-                  onNavigateToBird={(num: string) => { setSelectedBox(null); setSelectedBird(num); }}
-                  penguinList={allPenguinNums} />
+                  onDayClick={goToDay} />
               ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird...</p>; })()
               : <p className="muted">Select a bird</p>}
             </div>

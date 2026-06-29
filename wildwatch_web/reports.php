@@ -12,6 +12,7 @@ switch ($report) {
     case 'chick_sex': chickSex($pdo); break;
     case 'chick_return': chickReturn($pdo); break;
     case 'distinct_adults': distinctAdults($pdo, $colonyId); break;
+    case 'peak_adults': peakAdults($pdo, $colonyId); break;
     case 'chick_sex_both_returned': chickSexBothReturned($pdo); break;
     default: echo json_encode(['error' => 'Unknown report']); break;
 }
@@ -233,6 +234,55 @@ function distinctAdults($pdo, $colonyId) {
     $result = [];
     foreach ($seasons as $season => $count) {
         $result[] = ['season' => $season, 'count' => $count];
+    }
+
+    echo json_encode($result);
+}
+
+function peakAdults($pdo, $colonyId) {
+    // Highest total adults present on a single day, per breeding season (Apr-Mar).
+    // A box can be observed more than once a day, so take the max adults per box per
+    // day, then sum across boxes for that day's colony total.
+    $stmt = $pdo->prepare("
+        SELECT season_year, obs_date, SUM(box_adults) AS day_adults
+        FROM (
+            SELECT
+                CASE WHEN MONTH(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) >= 4
+                     THEN YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
+                     ELSE YEAR(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) - 1 END AS season_year,
+                DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) AS obs_date,
+                ol.location_name AS box,
+                MAX(o.adults) AS box_adults
+            FROM observations o
+            JOIN observation_locations ol ON o.location_id = ol.location_id
+            WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+            GROUP BY season_year, obs_date, box
+        ) daily
+        GROUP BY season_year, obs_date
+        ORDER BY season_year, obs_date
+    ");
+    $stmt->execute([$colonyId]);
+    $rows = $stmt->fetchAll();
+
+    // Per season, keep the day with the most adults (earliest day wins ties)
+    $peak = [];
+    foreach ($rows as $row) {
+        $sy = (int)$row['season_year'];
+        $adults = (int)$row['day_adults'];
+        if (!isset($peak[$sy]) || $adults > $peak[$sy]['adults']) {
+            $peak[$sy] = ['adults' => $adults, 'date' => $row['obs_date']];
+        }
+    }
+
+    ksort($peak);
+
+    $result = [];
+    foreach ($peak as $sy => $p) {
+        $result[] = [
+            'season' => $sy . '/' . substr($sy + 1, -2),
+            'adults' => $p['adults'],
+            'date' => $p['date'],
+        ];
     }
 
     echo json_encode($result);
