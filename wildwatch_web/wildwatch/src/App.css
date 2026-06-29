@@ -186,6 +186,7 @@ header h1:hover { opacity:.8; }
 .scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 85%, #FDD835 85%); }
 .scan.unproven { background: linear-gradient(to right, #E0E0E0 85%, #FDD835 85%); }
 .scan.chipped-here { background:#C8E6C9; border-color:#81C784; }
+.scan.no-scan { background:#E8F5E9; border-color:#A5D6A7; color:#2E7D32; font-style:italic; }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
 .chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
 

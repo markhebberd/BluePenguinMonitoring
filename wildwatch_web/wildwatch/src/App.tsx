@@ -824,11 +824,12 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         </div>
         </>
       )}
-      {!editing && obs.scans.length>0 && (
+      {!editing && (obs.scans.length>0 || obs.no_scan) && (
         <div className="scans">
           {[...obs.scans].sort(scanSortMFC).map((s,j) => (
             <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
           ))}
+          {obs.no_scan && <span className="scan no-scan">no scan</span>}
         </div>
       )}
       {showHistory && token && obsId && <HistoryPanel token={token} table="observations" id={obsId} onClose={() => setShowHistory(false)} />}
@@ -2916,6 +2917,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                           <PenguinMini scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />
                         </span>
                       ))}
+                      {o.no_scan && <span className="scan no-scan">no scan</span>}
                       {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
