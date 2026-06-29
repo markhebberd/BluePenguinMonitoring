@@ -4611,7 +4611,7 @@ namespace PenguinMonitor
         // First entry is the blank "not recorded" default.
         private static readonly (string code, string label)[] ObservedSexOptions = new[]
         {
-            ("", ""),
+            ("", "— Not recorded"),
             ("PM", "Probably male"),
             ("MM", "Maybe male"),
             ("U", "Unsure"),
