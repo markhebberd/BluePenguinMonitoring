@@ -56,7 +56,7 @@ function handleDownload($pdo, $colonyId, $observer) {
         SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
             o.observation_time_utc, o.monitor_filename, o.observer_id,
             ob.observer_name,
-            o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
+            o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
         LEFT JOIN observers ob ON o.observer_id = ob.observer_id
@@ -85,7 +85,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
                 o.observation_time_utc, o.monitor_filename, o.observer_id,
                 ob.observer_name,
-                o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
+                o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
             FROM observations o
             JOIN observation_locations ol ON o.location_id = ol.location_id
             LEFT JOIN observers ob ON o.observer_id = ob.observer_id
@@ -142,6 +142,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             'adults' => (int)$obs['adults'],
             'eggs' => (int)$obs['eggs'],
             'chicks' => (int)$obs['chicks'],
+            'no_scan' => (int)($obs['no_scan'] ?? 0),
             'breeding_status' => $obs['breeding_status'],
             'gate_status' => $obs['gate_status'],
             'notes' => $obs['notes'],
@@ -159,6 +160,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             'adults' => (int)$obs['adults'],
             'eggs' => (int)$obs['eggs'],
             'chicks' => (int)$obs['chicks'],
+            'no_scan' => (int)($obs['no_scan'] ?? 0),
             'breeding_status' => $obs['breeding_status'],
             'gate_status' => $obs['gate_status'],
             'notes' => $obs['notes'],
@@ -237,7 +239,7 @@ function handleUpload($pdo, $colonyId, $observer) {
 
             // Check if this box already has today's observation on the server
             if (!$forceReplace) {
-                $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
+                $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.no_scan,
                     o.breeding_status, o.gate_status, o.notes, o.monitor_filename, ob.observer_name
                     FROM observations o LEFT JOIN observers ob ON o.observer_id = ob.observer_id
                     WHERE o.location_id = ? AND o.is_deleted = FALSE
@@ -263,6 +265,7 @@ function handleUpload($pdo, $colonyId, $observer) {
                                 'adults' => (int)$existing['adults'],
                                 'eggs' => (int)$existing['eggs'],
                                 'chicks' => (int)$existing['chicks'],
+                                'no_scan' => (int)($existing['no_scan'] ?? 0),
                                 'breeding_status' => $existing['breeding_status'],
                                 'gate_status' => $existing['gate_status'],
                                 'notes' => $existing['notes'],
