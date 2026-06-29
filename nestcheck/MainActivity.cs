@@ -1757,16 +1757,10 @@ namespace PenguinMonitor
                 }
                 foreach (var dup in penguinBoxes2.Where(kvp => kvp.Value.Count > 1))
                 {
-                    var shortId = dup.Key.Length >= 8 ? dup.Key.Substring(dup.Key.Length - 8) : dup.Key;
-                    var pengNum = "";
-                    if (_remotePenguinData != null)
-                    {
-                        if (_remotePenguinData.TryGetValue(dup.Key, out var pd)) pengNum = $"#{pd.PengNum} ";
-                        else if (_remotePenguinData.TryGetValue(shortId, out var pd2)) pengNum = $"#{pd2.PengNum} ";
-                    }
+                    var (dupLabel, _, _, _) = LookupPenguinLabel(dup.Key);
                     var warn = new TextView(this)
                     {
-                        Text = $"⚠ {pengNum}{shortId} in Box {string.Join(" & Box ", dup.Value)}",
+                        Text = $"⚠ {dupLabel} in Box {string.Join(" & Box ", dup.Value)}",
                         TextSize = 13
                     };
                     warn.SetTextColor(UIFactory.DANGER_RED);
@@ -3055,14 +3049,8 @@ namespace PenguinMonitor
                                     if (otherObs == null) continue;
                                     if (otherObs.ScannedIds.Any(s => s.BirdId.ToUpper() == key))
                                     {
-                                        var shortId = key.Length >= 8 ? key.Substring(key.Length - 8) : key;
-                                        var pengNum = "";
-                                        if (_remotePenguinData != null)
-                                        {
-                                            if (_remotePenguinData.TryGetValue(key, out var pd)) pengNum = $"#{pd.PengNum} ";
-                                            else if (_remotePenguinData.TryGetValue(shortId, out var pd2)) pengNum = $"#{pd2.PengNum} ";
-                                        }
-                                        dupWarnings.Add($"⚠ {pengNum}{shortId} also in Box {otherBox}");
+                                        var (dupLabel, _, _, _) = LookupPenguinLabel(scan.BirdId);
+                                        dupWarnings.Add($"⚠ {dupLabel} also in Box {otherBox}");
                                     }
                                 }
                             }
@@ -3192,9 +3180,36 @@ namespace PenguinMonitor
 
             return adults == 0 && eggs == 0 && chicks == 0  && noGate && noNotes;
         }
-        /// <summary>
-        /// Build the observation detail lines for an orange or red card.
-        /// </summary>
+        private (string label, string sex, bool isChick, PenguinData? pd) LookupPenguinLabel(string birdId)
+        {
+            var cleanId = new string(birdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
+            var shortId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8) : cleanId;
+            string label = shortId;
+            string sex = "";
+            bool isChick = false;
+
+            PenguinData? pd = null;
+            if (_remotePenguinData != null)
+            {
+                if (!_remotePenguinData.TryGetValue(cleanId, out pd))
+                    if (!_remotePenguinData.TryGetValue(shortId, out pd))
+                        pd = _remotePenguinData.Values.FirstOrDefault(p => p.VidForScanner == birdId);
+            }
+
+            if (pd != null)
+            {
+                sex = pd.Sex?.ToUpper() ?? "";
+                isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
+                var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
+                var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
+                    ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
+                    : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
+                label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
+            }
+
+            return (label, sex, isChick, pd);
+        }
+
         private TextView CreateScanBadge(string birdId, Action? onClick = null, float textSize = 10)
         {
             if (birdId.StartsWith("NOSCAN_"))
@@ -3208,29 +3223,7 @@ namespace PenguinMonitor
                 nsb.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 return nsb;
             }
-            var cleanId = new string(birdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
-            var shortId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8) : cleanId;
-            string label = shortId;
-            string sex = "";
-            bool isChick = false;
-
-            PenguinData? pd = null;
-            if (_remotePenguinData != null)
-            {
-                if (!_remotePenguinData.TryGetValue(cleanId, out pd))
-                    _remotePenguinData.TryGetValue(shortId, out pd);
-            }
-
-            if (pd != null)
-            {
-                sex = pd.Sex?.ToUpper() ?? "";
-                isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
-                var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
-                var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
-                    ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
-                    : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
-                label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
-            }
+            var (label, sex, isChick, _) = LookupPenguinLabel(birdId);
 
             var badge = new TextView(this) { Text = label, TextSize = textSize };
             var padH = (int)(8 * textSize / 10);
@@ -3332,57 +3325,9 @@ namespace PenguinMonitor
 
             foreach (var s in obs.ScannedIds)
             {
-                if (s.BirdId.StartsWith("NOSCAN_"))
-                {
-                    var nsBadge = new TextView(this) { Text = "No scan", TextSize = 10 };
-                    nsBadge.SetPadding(8, 3, 8, 3);
-                    nsBadge.LayoutParameters = flowParams;
-                    nsBadge.Background = _uiFactory.CreateRoundedBackground(SCAN_CHIPPED_TODAY_BG, 4);
-                    nsBadge.SetTextColor(Color.DarkGray);
-                    nsBadge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
-                    scansRow.AddView(nsBadge);
-                    continue;
-                }
-                var cleanId = new string(s.BirdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
-                var shortId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8) : cleanId;
-                string label = shortId;
-                string sex = "";
-                bool isChick = false;
-
-                PenguinData pd = null;
-                if (_remotePenguinData != null)
-                {
-                    if (!_remotePenguinData.TryGetValue(cleanId, out pd))
-                    {
-                        pd = _remotePenguinData.Values.FirstOrDefault(p =>
-                            p.VidForScanner == s.BirdId);
-                    }
-                }
-
-                if (pd != null)
-                {
-                    sex = pd.Sex?.ToUpper() ?? "";
-                    isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
-                    var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
-                    var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
-                        ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
-                        : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
-                    label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
-                }
-
-                var badge = new TextView(this) { Text = label, TextSize = 10 };
-                badge.SetPadding(8, 3, 8, 3);
-                badge.LayoutParameters = flowParams;
-
-                Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
-                badge.Background = _uiFactory.CreateRoundedBackground(bg, 4);
-                badge.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
-                badge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
-
-                badge.Clickable = true;
                 var badgeBirdId = s.BirdId;
-                badge.Click += (s2, e2) => ShowBirdDialog(badgeBirdId, isTodayScan: false);
-
+                var badge = CreateScanBadge(badgeBirdId, () => ShowBirdDialog(badgeBirdId, isTodayScan: false), textSize: 10);
+                badge.LayoutParameters = flowParams;
                 scansRow.AddView(badge);
             }
 
@@ -4388,39 +4333,19 @@ namespace PenguinMonitor
 
                 foreach (var pd in results)
                 {
-                    var sex = pd.Sex?.ToUpper() ?? "";
-                    bool isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
-                    var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
-                    var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
-                        ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
-                        : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
-                    var label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
-
-                Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
-
-                    var resultView = new TextView(this)
-                    {
-                        Text = label,
-                        TextSize = 12,
-                    };
-                    resultView.SetPadding(12, 8, 12, 8);
-                    resultView.Background = _uiFactory.CreateRoundedBackground(bg, 4);
-                    resultView.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
-                    resultView.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
-                    var resultParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                    resultParams.SetMargins(0, 2, 0, 2);
-                    resultView.LayoutParameters = resultParams;
-
                     var fullPitId = !string.IsNullOrEmpty(pd.FullPitId) ? pd.FullPitId : pd.ScannedId;
-                    resultView.Click += (s2, e2) =>
+                    var resultView = CreateScanBadge(fullPitId, () =>
                     {
                         AddScannedId(fullPitId, 0, isManualEntry: true);
                         _manualScanEditText.Text = "";
                         _searchResultsLayout.RemoveAllViews();
-                        // Hide keyboard
                         var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
                         imm?.HideSoftInputFromWindow(_manualScanEditText.WindowToken, 0);
-                    };
+                    }, textSize: 12);
+                    resultView.SetPadding(12, 8, 12, 8);
+                    var resultParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                    resultParams.SetMargins(0, 2, 0, 2);
+                    resultView.LayoutParameters = resultParams;
 
                     _searchResultsLayout.AddView(resultView);
                 }
@@ -4452,26 +4377,14 @@ namespace PenguinMonitor
                 return scanLayout;
             }
 
-            var lookupId = new string(scan.BirdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
-            var shortLookupId = lookupId.Length >= 8 ? lookupId.Substring(lookupId.Length - 8) : lookupId;
-            PenguinData? penguinData = null;
-            if (_remotePenguinData != null)
-            {
-                if (!_remotePenguinData.TryGetValue(lookupId, out penguinData))
-                    _remotePenguinData.TryGetValue(shortLookupId, out penguinData);
-            }
+            var (label, sex, isChick, penguinData) = LookupPenguinLabel(scan.BirdId);
 
             if (penguinData != null)
             {
-                // Check if chipped on this observation date
                 bool chippedToday = penguinData.ChipDate > DateTime.MinValue && ToNzTime(penguinData.ChipDate).Date == NzToday;
-
-                // Check for returning birds
                 bool isReturning = penguinData.LastKnownLifeStage == LifeStage.Returnee ||
                                    (!string.IsNullOrEmpty(penguinData.ChipAs) &&
                                     penguinData.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                // Check if it's a recent chick (< 3 months old)
                 bool isRecentChick = penguinData.LastKnownLifeStage == LifeStage.Chick &&
                                      !(penguinData.ChipDate > NzToday.AddYears(-20) &&
                                        NzToday > penguinData.ChipDate.AddMonths(3));
@@ -4486,39 +4399,33 @@ namespace PenguinMonitor
                     backgroundColor = UIFactory.CHICK_BACKGROUND;
                     additionalInfo = isReturning ? " 🐣🔄" : " 🐣";
                 }
-                else if (penguinData.Sex.Equals("F", StringComparison.OrdinalIgnoreCase))
+                else if (sex == "F")
                 {
                     backgroundColor = UIFactory.FEMALE_BACKGROUND;
-                    additionalInfo = isReturning ? " 🐧♀🔄" : " 🐧♀";
+                    additionalInfo = isReturning ? " 🔄" : "";
                 }
-                else if (penguinData.Sex.Equals("M", StringComparison.OrdinalIgnoreCase))
+                else if (sex == "M")
                 {
                     backgroundColor = UIFactory.MALE_BACKGROUND;
-                    additionalInfo = isReturning ? " 🐧♂🔄" : " 🐧♂";
+                    additionalInfo = isReturning ? " 🔄" : "";
                 }
                 else
                 {
                     backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
-                    additionalInfo = isReturning ? " 🐧🔄" : " 🐧";
+                    additionalInfo = isReturning ? " 🔄" : "";
                 }
             }
             else
             {
-                // Penguin not found in remote data, use alternating colors
                 backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
             }
 
             scanLayout.Background = _uiFactory.CreateRoundedBackground(backgroundColor, 4);
             scanLayout.SetPadding(12, 8, 12, 8);
 
-            // Scan info text with additional penguin information
-            var timeStr = ToNzTime(scan.Timestamp).ToString("MMM dd, HH:mm");
-            var shortBirdId = scan.BirdId.Length > 8 ? scan.BirdId.Substring(scan.BirdId.Length - 8) : scan.BirdId;
-            var pengNum = _remotePenguinData != null && _remotePenguinData.TryGetValue(scan.BirdId, out var pd2) && !string.IsNullOrEmpty(pd2.PengNum)
-                ? $"#{pd2.PengNum} " : "";
             var scanText = new TextView(this)
             {
-                Text = $"• {pengNum}{shortBirdId}{additionalInfo} at {ToNzTime(scan.Timestamp):HH:mm}",
+                Text = $"• {label}{additionalInfo} at {ToNzTime(scan.Timestamp):HH:mm}",
                 TextSize = 14
             };
             scanText.SetTextColor(UIFactory.TEXT_PRIMARY);
