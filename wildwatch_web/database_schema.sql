@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS observations (
     adults INT DEFAULT 0,
     eggs INT DEFAULT 0,
     chicks INT DEFAULT 0,
+    no_scan INT DEFAULT 0,
     breeding_status VARCHAR(50),
     gate_status VARCHAR(50),
     notes TEXT,

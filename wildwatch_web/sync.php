@@ -276,6 +276,12 @@ function handleUpload($pdo, $colonyId, $observer) {
                 }
             }
 
+            // Count no-scan placeholders
+            $noScanCount = 0;
+            foreach ($obs['scans'] ?? [] as $sc) {
+                if (str_starts_with(strtoupper($sc['pit_id'] ?? ''), 'NOSCAN')) $noScanCount++;
+            }
+
             // Create or force-replace (update in-place to preserve audit trail)
             if ($forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT observation_id FROM observations
@@ -287,12 +293,12 @@ function handleUpload($pdo, $colonyId, $observer) {
 
                 if ($existingId) {
                     // Update existing observation in-place
-                    $pdo->prepare("UPDATE observations SET observer_id=?, observation_time_utc=?, adults=?, eggs=?, chicks=?, breeding_status=?, gate_status=?, notes=?, monitor_filename=? WHERE observation_id=?")
+                    $pdo->prepare("UPDATE observations SET observer_id=?, observation_time_utc=?, adults=?, eggs=?, chicks=?, breeding_status=?, gate_status=?, notes=?, monitor_filename=?, no_scan=? WHERE observation_id=?")
                         ->execute([
                             $observerId, $obsTime,
                             (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
                             $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
-                            $dailyLabel ?: null, $existingId,
+                            $dailyLabel ?: null, $noScanCount, $existingId,
                         ]);
                     $observationId = $existingId;
                     // Soft-delete old scans — will be recreated below
@@ -300,20 +306,20 @@ function handleUpload($pdo, $colonyId, $observer) {
                         ->execute([$observerId, $observationId]);
                 } else {
                     // No existing — create new
-                    $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                    $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename, no_scan) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
                         ->execute([$locationId, $observerId, $obsTime,
                             (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
                             $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
-                            $dailyLabel ?: null]);
+                            $dailyLabel ?: null, $noScanCount]);
                     $observationId = $pdo->lastInsertId();
                 }
             } else {
-                $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
+                $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename, no_scan) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
                 $stmt->execute([
                     $locationId, $observerId, $obsTime,
                     (int)($obs['adults'] ?? 0), (int)($obs['eggs'] ?? 0), (int)($obs['chicks'] ?? 0),
                     $obs['breeding_status'] ?? null, $obs['gate_status'] ?? null, $obs['notes'] ?? '',
-                    $dailyLabel ?: null,
+                    $dailyLabel ?: null, $noScanCount,
                 ]);
                 $observationId = $pdo->lastInsertId();
             }
@@ -329,16 +335,8 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $lon = isset($scan['longitude']) && $scan['longitude'] != 0 ? $scan['longitude'] : null;
                 $acc = isset($scan['accuracy']) && $scan['accuracy'] > 0 ? $scan['accuracy'] : null;
 
-                // No-scan placeholder — store with pit_id as-is, no chip lookup needed
-                if (str_starts_with(strtoupper($pitId), 'NOSCAN')) {
-                    $dupCheck = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
-                    $dupCheck->execute([$observationId, $pitId]);
-                    if ($dupCheck->fetch()) continue;
-                    $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
-                        ->execute([$observationId, $pitId, $scanTime, $lat, $lon, $acc]);
-                    $scansCreated++;
-                    continue;
-                }
+                // No-scan placeholder — skip DB, these are app-only placeholders
+                if (str_starts_with(strtoupper($pitId), 'NOSCAN')) continue;
 
                 // Resolve short IDs to full pit_id
                 $cleanId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $pitId));

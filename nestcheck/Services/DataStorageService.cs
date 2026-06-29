@@ -314,6 +314,8 @@ namespace PenguinMonitor.Services
                             obs.BoxName = kvp.Key;
                             if (b.scans != null) foreach (var scan in b.scans)
                                 obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
+                            for (int ns = 0; ns < b.no_scan; ns++)
+                                obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });
 
                             var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
                             if (obsNzDate == nzToday)
@@ -336,6 +338,8 @@ namespace PenguinMonitor.Services
                             var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
                             obs.BoxName = kvp.Key;
                             if (b.scans != null) foreach (var scan in b.scans) obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
+                            for (int ns = 0; ns < b.no_scan; ns++)
+                                obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });
                             colonyState.PreviousBoxes[kvp.Key] = obs;
                         }
                     colonyState.LastSyncedUtc = DateTime.UtcNow;
@@ -736,6 +740,7 @@ namespace PenguinMonitor.Services
             public int adults { get; set; }
             public int eggs { get; set; }
             public int chicks { get; set; }
+            public int no_scan { get; set; }
             public string? breeding_status { get; set; }
             public string? gate_status { get; set; }
             public string? notes { get; set; }
