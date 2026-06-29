@@ -1056,9 +1056,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
               {showBio && biometrics.map((b: any, i: number) => {
                 const flags = [
-                  b.is_moulting && 'Moulting', b.condition_underweight && 'Underweight',
+                  b.is_moulting && 'Moulting',
                   b.condition_ticks && 'Ticks', b.condition_dead && 'Dead',
-                  b.condition_dog_attacked && 'Dog Attacked', b.condition_attacked && 'Attacked',
                   b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
                 ].filter(Boolean);
                 return (<Fragment key={`bio${i}`}>

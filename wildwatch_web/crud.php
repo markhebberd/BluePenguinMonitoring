@@ -221,9 +221,25 @@ function handleGet($pdo, $table, $pk, $id) {
     echo json_encode($row);
 }
 
+/**
+ * Drop retired columns from a write payload so older clients (e.g. a nestcheck build
+ * still sending removed biometric condition fields) don't error after the columns are
+ * dropped from the table.
+ */
+function stripRetiredColumns($table, $input) {
+    $retired = [
+        'penguin_biometric_data' => ['condition_underweight', 'condition_dog_attacked', 'condition_attacked'],
+    ];
+    if (isset($retired[$table]) && is_array($input)) {
+        foreach ($retired[$table] as $col) unset($input[$col]);
+    }
+    return $input;
+}
+
 function handleCreate($pdo, $table, $pk, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
+    $input = stripRetiredColumns($table, $input);
 
     $cols = array_keys($input);
     $pdo->beginTransaction();
@@ -279,6 +295,7 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     if (!$id) { http_response_code(400); echo json_encode(['error'=>'id required']); return; }
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
+    $input = stripRetiredColumns($table, $input);
 
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $old = $stmt->fetch();
