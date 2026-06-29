@@ -2963,8 +2963,14 @@ namespace PenguinMonitor
                     // Hide expand/collapse button in tag mode, but keep lock icon and click area
                     if (_expandButton != null)
                     {
-                        bool hideExpand = tagMode || (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null);
-                        _expandButton.Visibility = hideExpand ? ViewStates.Gone : ViewStates.Visible;
+                        // Expand/collapse button is always available (except tag mode, which replaces the content)
+                        _expandButton.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
+                        // Keep the fold/unfold icon in sync with the actual content state
+                        bool contentExpanded = _singleBoxDataContentLayout != null && _singleBoxDataContentLayout.Visibility == ViewStates.Visible;
+                        _expandButton.SetImageResource(contentExpanded ? Resource.Drawable.fold : Resource.Drawable.unfold);
+                        // Nav buttons are visible whenever the box is expanded (and always in tag mode for box navigation)
+                        if (_boxNavigationButtonsLayout != null)
+                            _boxNavigationButtonsLayout.Visibility = (tagMode || contentExpanded) ? ViewStates.Visible : ViewStates.Gone;
                         if (_discardButton != null)
                             _discardButton.Visibility = !_isBoxLocked && !tagMode ? ViewStates.Visible : ViewStates.Gone;
                     }
@@ -3123,12 +3129,6 @@ namespace PenguinMonitor
 
                     // Update previous observation summary
                     UpdatePreviousObsSummary();
-
-                    // Collapse content when locked with no today data
-                    if (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null && !tagMode)
-                    {
-                        _singleBoxDataContentLayout.Visibility = ViewStates.Gone;
-                    }
 
                     // Nav buttons are item 0, title layout is item 1 — don't disable either
                     for (int i = 2; i < _singleBoxDataOuterLayout.ChildCount; i++)
@@ -3493,9 +3493,6 @@ namespace PenguinMonitor
             expandSingleBoxImageButton.SetBackgroundColor(Color.Transparent);
             expandSingleBoxImageButton.Click += (s, e) =>
             {
-                // Don't expand when locked with no data — must unlock first
-                if (_isBoxLocked && GetDisplayBoxData(_currentBoxName) == null) return;
-
                 if (_singleBoxDataContentLayout.Visibility == ViewStates.Gone)
                 {
                     _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
@@ -5466,6 +5463,7 @@ namespace PenguinMonitor
                             // Same box - just unlock
                             _isBoxLocked = false;
                             selectedPage = UIFactory.selectedPage.BoxDataSingle;
+                            if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                             if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
                             else { DrawPageLayouts(); Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show(); }
                         }
@@ -5478,6 +5476,7 @@ namespace PenguinMonitor
                                 _currentBoxName = assignedBoxId;
                                 _isBoxLocked = false;
                                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
+                                if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                                 if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
                                 else { DrawPageLayouts(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
                             }
