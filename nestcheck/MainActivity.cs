@@ -59,6 +59,12 @@ namespace PenguinMonitor
         // Held scans — penguin chips scanned while no box is unlocked
         private readonly List<ScanRecord> _heldScans = new();
         private AlertDialog? _heldScansDialog;
+        // Set when the user scans another box's tag before locking the current box.
+        // Penguin scans are recorded into _heldScans and replayed into this box once the current box is locked.
+        private string? _pendingBoxTagNavigation;
+        // Once a pending navigation exists, scanning a different box tag freezes the recording:
+        // the destination is fixed (first tag wins) and no further scans are queued.
+        private bool _pendingScanQueueFrozen;
 
         // Suppress ALL sync while data-entry dialogs are open
         private bool _dialogActive;
@@ -470,8 +476,36 @@ namespace PenguinMonitor
             {
                 // Box tag scanned — navigate to box and flush any held scans
                 HandleBoxTagScan(cleanEid);
-                if (_heldScans.Count > 0)
+                // Don't flush while a "forgot to lock" navigation is pending — those held scans
+                // belong to the pending box and are replayed once the current box is locked.
+                if (_heldScans.Count > 0 && _pendingBoxTagNavigation == null)
                     FlushHeldScansToCurrentBox();
+                return;
+            }
+
+            if (_pendingBoxTagNavigation != null)
+            {
+                // The user scanned another box's tag before locking the current box.
+                // Record penguin scans so they can be replayed into the pending box once it's locked —
+                // unless the queue was frozen by a further box-tag scan, in which case ignore them.
+                if (_pendingScanQueueFrozen)
+                {
+                    TriggerAlert();
+                    Toast.MakeText(this, $"⚠️ Scan ignored — lock Box {_currentBoxName} first", ToastLength.Short)?.Show();
+                    return;
+                }
+                if (!_heldScans.Any(s => s.BirdId == cleanEid))
+                {
+                    _heldScans.Add(new ScanRecord
+                    {
+                        BirdId = cleanEid,
+                        Timestamp = DateTime.UtcNow,
+                        Latitude = _currentLocation?.Latitude ?? 0,
+                        Longitude = _currentLocation?.Longitude ?? 0,
+                        Accuracy = _currentLocation?.Accuracy ?? -1
+                    });
+                }
+                Toast.MakeText(this, $"Held — lock Box {_currentBoxName} to continue to Box {_pendingBoxTagNavigation}", ToastLength.Short)?.Show();
                 return;
             }
 
@@ -3166,6 +3200,15 @@ namespace PenguinMonitor
 
                     createMultiBoxViewCard();
                     createBreedingDatesCard();
+
+                    // Complete a deferred "forgot to lock" navigation once the box is finally locked
+                    if (_isBoxLocked && _pendingBoxTagNavigation != null)
+                    {
+                        var pending = _pendingBoxTagNavigation;
+                        _pendingBoxTagNavigation = null;
+                        _pendingScanQueueFrozen = false;
+                        NavigateToPendingBox(pending!);
+                    }
                 });
         }
         private bool dataCardHasZeroData()
@@ -5438,13 +5481,33 @@ namespace PenguinMonitor
                     }
                     else
                     {
-                        // Normal mode — just navigate if tag is assigned
-                        if (assignedBoxId != null)
+                        // Normal mode — a box tag means "navigate to that box".
+                        if (_pendingBoxTagNavigation != null)
                         {
-                            _currentBoxIndex = _boxNamesAndIndexes.ContainsKey(assignedBoxId) ? _boxNamesAndIndexes[assignedBoxId] : _currentBoxIndex;
-                            _currentBoxName = assignedBoxId;
-                            DrawPageLayouts();
-                            Toast.MakeText(this, $"📍 Box {assignedBoxId}", ToastLength.Short)?.Show();
+                            // A navigation is already pending — the user forgot to lock and is now
+                            // scanning yet another box tag. Keep the original destination (first tag wins)
+                            // and freeze the scan queue so nothing else is recorded into it.
+                            _pendingScanQueueFrozen = true;
+                            TriggerAlert();
+                            Toast.MakeText(this, $"⚠️ Lock Box {_currentBoxName} first — heading to Box {_pendingBoxTagNavigation}", ToastLength.Long)?.Show();
+                        }
+                        else if (assignedBoxId != null && assignedBoxId != _currentBoxName)
+                        {
+                            // Current box is unlocked — the user forgot to lock it before moving on.
+                            // Remind them, defer the navigation, and record incoming scans until they lock.
+                            _pendingBoxTagNavigation = assignedBoxId;
+                            _pendingScanQueueFrozen = false;
+                            TriggerAlert();
+                            new AlertDialog.Builder(this)
+                                .SetTitle("Box not locked")
+                                .SetMessage($"You forgot to lock Box {_currentBoxName}!\n\nValidate the data and lock the box — we'll continue to Box {assignedBoxId} once it's locked.")
+                                .SetCancelable(false)
+                                .SetPositiveButton("OK", (s, e) => { })
+                                .Show();
+                        }
+                        else if (assignedBoxId == _currentBoxName)
+                        {
+                            Toast.MakeText(this, $"Already at Box {_currentBoxName} — lock it when done", ToastLength.Short)?.Show();
                         }
                         else
                         {
@@ -5494,6 +5557,33 @@ namespace PenguinMonitor
                     }
                 }
             });
+        }
+
+        // Completes a deferred "forgot to lock" navigation: jump to the box whose tag was scanned
+        // and replay the recorded penguin scans into it.
+        private void NavigateToPendingBox(string boxName)
+        {
+            if (!_boxNamesAndIndexes.ContainsKey(boxName))
+            {
+                Toast.MakeText(this, $"⚠️ Box {boxName} not in current scope", ToastLength.Long)?.Show();
+                _heldScans.Clear();
+                return;
+            }
+            _currentBoxIndex = _boxNamesAndIndexes[boxName];
+            _currentBoxName = boxName;
+            _isBoxLocked = false;
+            selectedPage = UIFactory.selectedPage.BoxDataSingle;
+            if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+            if (_heldScans.Count > 0)
+            {
+                // Replay the recorded scans into the now-current box
+                FlushHeldScansToCurrentBox();
+            }
+            else
+            {
+                DrawPageLayouts();
+                Toast.MakeText(this, $"📍 Box {boxName}", ToastLength.Short)?.Show();
+            }
         }
 
         private void AddScannedId(String fullEid, int _unused = 0, bool isManualEntry = false)
