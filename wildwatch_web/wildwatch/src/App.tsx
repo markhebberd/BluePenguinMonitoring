@@ -3735,15 +3735,20 @@ function RegionsAndColonies({ token }: { token: string }) {
     const res = await fetch('/api/admin.php?action=save_colony', { method: 'POST', headers: auth, body: JSON.stringify(data) });
     const saved = await res.json().catch(() => ({}));
     const colonyId = data.colony_id || saved.colony_id;
-    // Offer to materialise the box-sets string into actual boxes (observation_locations).
+    // Offer to materialise the box-sets string into boxes — but only the ones that don't exist yet.
     const boxes = expandLocationSets(data.location_sets_string || '');
     if (colonyId && boxes.length > 0) {
-      const preview = boxes.slice(0, 20).join(', ') + (boxes.length > 20 ? ` … (+${boxes.length - 20} more)` : '');
-      if (confirm(`Create the ${boxes.length} box${boxes.length === 1 ? '' : 'es'} for these sets?\n\n${preview}\n\nExisting boxes are kept.`)) {
-        const cr = await fetch('/api/admin.php?action=create_colony_boxes', { method: 'POST', headers: auth, body: JSON.stringify({ colony_id: colonyId, box_names: boxes }) });
-        const cd = await cr.json().catch(() => ({}));
-        if (cd.success) alert(`Created ${cd.created} new box${cd.created === 1 ? '' : 'es'}${cd.requested - cd.created > 0 ? ` (${cd.requested - cd.created} already existed)` : ''}.`);
-        else alert('Failed to create boxes: ' + (cd.error || 'unknown error'));
+      const existing = await fetch(`/api/admin.php?action=colony_box_names&colony_id=${colonyId}`, { headers: auth }).then(r => r.json()).catch(() => []);
+      const have = new Set((Array.isArray(existing) ? existing : []).map(String));
+      const missing = boxes.filter(b => !have.has(String(b)));
+      if (missing.length > 0) {
+        const preview = missing.slice(0, 20).join(', ') + (missing.length > 20 ? ` … (+${missing.length - 20} more)` : '');
+        if (confirm(`Create ${missing.length} new box${missing.length === 1 ? '' : 'es'} for these sets?\n\n${preview}`)) {
+          const cr = await fetch('/api/admin.php?action=create_colony_boxes', { method: 'POST', headers: auth, body: JSON.stringify({ colony_id: colonyId, box_names: missing }) });
+          const cd = await cr.json().catch(() => ({}));
+          if (cd.success) alert(`Created ${cd.created} box${cd.created === 1 ? '' : 'es'}.`);
+          else alert('Failed to create boxes: ' + (cd.error || 'unknown error'));
+        }
       }
     }
     setEditColony(null);

@@ -624,6 +624,15 @@ if ($action === 'save_colony') {
     exit;
 }
 
+if ($action === 'colony_box_names') {
+    $colonyId = (int)($_GET['colony_id'] ?? 0);
+    if (!$colonyId) { echo json_encode([]); exit; }
+    $stmt = $pdo->prepare("SELECT location_name FROM observation_locations WHERE colony_id = ?");
+    $stmt->execute([$colonyId]);
+    echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
+    exit;
+}
+
 if ($action === 'create_colony_boxes') {
     // Materialise a colony's box-sets into observation_locations rows. Idempotent:
     // existing (colony_id, location_name) are kept via INSERT IGNORE.
