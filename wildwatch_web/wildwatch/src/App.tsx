@@ -497,13 +497,20 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
   const sc = scan.chick_size_code || '';
   const sizeLabel = sc ? (sex ? sc + sex.charAt(0) : (scan.hasReturned ? sc + 'U' : sc)) : '';
-  // Unsexed bird: surface biometric sex guesses as "<n>U<sex>" tokens (U = unconfirmed),
-  // most-guessed sex first, e.g. "2UF" or "2UM 1UF".
+  // Unsexed bird: surface biometric sex guesses (U = unconfirmed). A single guess merges
+  // onto the size label with no count/space, sharing one U — "LCU"+M → "LCUM", "LC"+M → "LCUM".
+  // Repeated guesses or guesses for both sexes use numbered tokens, most-guessed first,
+  // space-separated — e.g. "LC 2UM", "1UM 1UF".
   const guess = sex ? { m: 0, f: 0 } : observedSexGuess(scan.peng_num);
-  const guessLabel = (guess.m || guess.f)
-    ? [{ c: guess.m, s: 'M' }, { c: guess.f, s: 'F' }].filter(g => g.c > 0).sort((a, b) => b.c - a.c).map(g => `${g.c}U${g.s}`).join(' ')
-    : '';
-  const mid = [sizeLabel, guessLabel].filter(Boolean).join(' ');
+  const guessSexes = [{ c: guess.m, s: 'M' }, { c: guess.f, s: 'F' }].filter(g => g.c > 0).sort((a, b) => b.c - a.c);
+  let mid: string;
+  if (guessSexes.length === 0) {
+    mid = sizeLabel;
+  } else if (guessSexes.length === 1 && guessSexes[0].c === 1) {
+    mid = (sizeLabel.endsWith('U') ? sizeLabel : sizeLabel + 'U') + guessSexes[0].s;
+  } else {
+    mid = [sizeLabel, guessSexes.map(g => `${g.c}U${g.s}`).join(' ')].filter(Boolean).join(' ');
+  }
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
