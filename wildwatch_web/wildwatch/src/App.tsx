@@ -2727,11 +2727,15 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
 
   const calRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (calRef.current) {
-      const active = calRef.current.querySelector('.cal-day.active');
+    // Defer to the next frame so the scroll runs after the calendar (and its flex
+    // parent) have laid out — otherwise the active day can be centred against a
+    // stale width and the calendar opens scrolled to the wrong place.
+    const raf = requestAnimationFrame(() => {
+      const active = calRef.current?.querySelector('.cal-day.active');
       if (active) active.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
-    }
-  }, [date]);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [date, dates]);
 
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
