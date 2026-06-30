@@ -10,19 +10,33 @@ function authHeaders(): Record<string, string> {
 }
 
 // ============ Active colony ============
-// Which colony the app is currently viewing. Persisted so it survives reloads. All
-// colony-scoped fetches send ?colony_id; switching colony resets the local cache.
-const COLONY_KEY = 'ww_colony';
+// Each colony the user can view is cached in its OWN IndexedDB ("wildwatch-<region>-<colony>"),
+// so switching is instant; only the currently-viewed colony is synced/updated. Persisted across reloads.
+const COLONY_KEY = 'ww_colony';       // active colony_id
+const COLONY_DBKEY = 'ww_colony_key'; // active "<region>-<colony>" key (per-colony DB name)
 export function getColonyId(): number {
   return parseInt(localStorage.getItem(COLONY_KEY) || '1', 10) || 1;
 }
 export function setColonyId(id: number): void {
   localStorage.setItem(COLONY_KEY, String(id));
 }
+/** "<region>-<colony>" key for the active colony (falls back to region 1 before any switch). */
+export function getColonyKey(): string {
+  return localStorage.getItem(COLONY_DBKEY) || `1-${getColonyId()}`;
+}
+/** Switch the active colony: persist its id + region-colony key and drop the in-memory cache so
+ *  the next load uses the new colony's own DB (instant if already cached). */
+export function setActiveColony(colonyId: number, regionColonyKey: string): void {
+  localStorage.setItem(COLONY_KEY, String(colonyId));
+  localStorage.setItem(COLONY_DBKEY, regionColonyKey);
+  mem = null;
+}
 /** `colony_id=N` for appending to query strings. */
 function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 
-const DB_NAME = 'wildwatch';
+// Old single-colony cache is replaced by per-colony DBs — remove it once to reclaim the space.
+try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
+function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
 const CACHE_VERSION = 2; // Bump to force all clients to full re-sync
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
@@ -208,7 +222,7 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(dbName(), DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const store of STORES) {
@@ -413,8 +427,6 @@ export async function primeFromCache(): Promise<boolean> {
   const db = await openDB();
   const cachedVersion = await getMeta(db, 'cache_version');
   if (cachedVersion !== CACHE_VERSION) return false; // stale format → full re-sync needed first
-  const cachedColony = await getMeta(db, 'colony_id');
-  if (Number(cachedColony ?? 1) !== getColonyId()) return false; // colony switched → full re-sync
   const lastSync = await getMeta(db, 'snapshot_time');
   if (!lastSync) return false;
   console.time('primeFromCache');
@@ -424,17 +436,13 @@ export async function primeFromCache(): Promise<boolean> {
 }
 
 export async function syncDatabase(onProgress?: (msg: string, pct?: number) => void): Promise<void> {
-  const db = await openDB();
+  const db = await openDB(); // the active colony's own DB
   const cachedVersion = await getMeta(db, 'cache_version');
-  const cachedColony = await getMeta(db, 'colony_id');
-  const activeColony = getColonyId();
-  const colonyChanged = Number(cachedColony ?? 1) !== activeColony;
-  if (cachedVersion !== CACHE_VERSION || colonyChanged) {
-    onProgress?.(colonyChanged ? 'Loading colony…' : 'Updating data format...');
+  if (cachedVersion !== CACHE_VERSION) {
+    onProgress?.('Updating data format...');
     await resetDatabase();
     const freshDb = await openDB();
     await setMeta(freshDb, 'cache_version', CACHE_VERSION);
-    await setMeta(freshDb, 'colony_id', activeColony);
     // Fall through to full download below (lastSync will be null)
   }
   const lastSync = await getMeta(db, 'snapshot_time');

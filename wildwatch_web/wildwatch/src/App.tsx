@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase, observedSexGuess } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -4162,14 +4162,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // view to the new colony's overview, and reload — syncDatabase resets + re-syncs the cache.
   const switchColony = useCallback(async (id: number) => {
     if (id === getColonyId()) return;
-    setColonyId(id);
+    // Each colony has its own cache, keyed by "<region>-<colony>" so they never overlap.
+    const c = colonies.find((x: any) => Number(x.colony_id) === id);
+    setActiveColony(id, `${c?.region_id ?? 1}-${id}`);
     setColonyIdState(id);
     setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
     setShowAdmin(false); setShowReports(false); setShowEntry(false);
     window.history.pushState({}, '', '/');
     setLoading(true); setLoadProgress('Loading colony…'); setLoadPct(null);
     await loadColony();
-  }, [loadColony]);
+  }, [loadColony, colonies]);
 
   useEffect(() => {
     loadColony(); // also fetches colonies via fetchColonies()
