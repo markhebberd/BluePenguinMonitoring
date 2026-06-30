@@ -408,3 +408,5 @@ secrets.props
 nestcheck/secrets.props
 wildwatch_web/secrets.php
 backups/
+
+.DS_Store
