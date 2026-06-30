@@ -391,6 +391,7 @@ function observedSexLabel(code: string|null|undefined, short: boolean): string {
 function navClick(e: React.MouseEvent, action: () => void) {
   if (e.ctrlKey || e.metaKey || e.button === 1) return; // let browser handle new tab
   e.preventDefault();
+  e.stopPropagation();
   action();
 }
 
@@ -432,7 +433,7 @@ function computeDateStats(date: string) {
 function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
   const multiObs = stats.obs > stats.boxes;
   return (<>
-    {showDate && date && <b>{formatDate(date)}</b>}
+    {showDate && date && <b className="date-stats-date">{formatDate(date)}</b>}
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
@@ -787,7 +788,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   };
 
   return (
-    <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}`} style={deleting ? {opacity: 0.4, pointerEvents: 'none'} : undefined}>
+    <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}${highlight ? ' obs-pinned' : ''}`} style={deleting ? {opacity: 0.4, pointerEvents: 'none'} : undefined}>
       <div className="obs-top">
         {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b> <span className="muted small">{obs.monitor_filename}</span></span>}
         <span className="obs-top-right">
@@ -2784,12 +2785,11 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
+function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
   const sideBirdData = useBirdDetail(sideBird);
-  const [expandedBox, setExpandedBox] = useState<string|null>(null);
 
   useEffect(() => {
     if (externalBird) setSideBird(externalBird);
@@ -2836,7 +2836,8 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
   const [calHidden, setCalHidden] = useState(false);
 
   return (
-    <div className="day-page" ref={dayPageRef}>
+    <div className={`day-page${sideBird && sideBirdData?.penguin ? ' day-page-docked' : ''}`} ref={dayPageRef}>
+      <div className="day-main">
       {!calHidden && (
         <div style={{position:'relative'}}>
           <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
@@ -2965,8 +2966,8 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                   const isDup = obs.length > 1;
                   return (
                   <div key={o.observation_id || oi}>
-                    <div className="day-row" onClick={() => setExpandedBox(expandedBox === `${box}-${oi}` ? null : `${box}-${oi}`)} style={{cursor:'pointer', borderLeft: isDup ? '3px solid #F44336' : undefined}}>
-                      {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>}
+                    <div className="day-row" onClick={() => onBoxClick(box, o.observation_time_utc)} style={{cursor:'pointer', borderLeft: isDup ? '3px solid #F44336' : undefined}}>
+                      {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, o.observation_time_utc))}><b>Box {box}</b></a>}
                       {oi > 0 && <span className="day-box-link" style={{opacity:0.4}}>Box {box}</span>}
                       {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
@@ -2990,9 +2991,6 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                       {hasDupScan && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup scan</span>}
                       {o.notes && <span className="day-note">{o.notes}</span>}
                     </div>
-                    {expandedBox === `${box}-${oi}` && (
-                      <ObsCard obs={o} onBirdClick={handleBirdClick} onDayClick={onDayClick} token={token} canEdit={canEdit} allPenguins={allPenguins} hideDate />
-                    )}
                   </div>
                   );
                 })}
@@ -3014,17 +3012,18 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
       {totalObs === 0 && totalChips === 0 && (
         <p className="muted">No activity recorded on this date.</p>
       )}
+      </div>
 
-      {sideBird && sideBirdData?.penguin && (<>
-        <div className="day-bird-backdrop" onClick={() => setSideBird(null)} />
-        <div className="day-bird-panel">
+      {sideBird && sideBirdData?.penguin && (
+        <div className="day-bird-dock">
+          <button className="day-bird-close" onClick={() => setSideBird(null)} title="Close" aria-label="Close">×</button>
           <BirdPage data={sideBirdData} onBirdClick={handleBirdClick}
             onBoxClick={(box: string) => onBoxClick(box)}
-            onSightingClick={(box: string) => onBoxClick(box)}
+            onSightingClick={(box: string, d: string) => onBoxClick(box, d)}
             onDayClick={onDayClick}
             token={token} canEdit={canEdit} />
         </div>
-      </>)}
+      )}
     </div>
   );
 }
@@ -3275,6 +3274,10 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
 
 function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highlightObs, scrollToObs, token, canEdit, allPenguins, onDataChange }: any) {
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    const target = scrollToObs || highlightObs;
+    if (target && observations.some((o: any) => o.observation_time_utc === target)) setExpanded(true);
+  }, [scrollToObs, highlightObs]);
   return (
     <div>
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
@@ -4204,7 +4207,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // Auto-select bird when box changes
   useEffect(() => {
-    if (!selectedBox || !boxDetail) { setHighlightObs(null); return; }
+    if (!selectedBox) { setHighlightObs(null); return; }
+    if (!boxDetail) return;
     if (window.innerWidth < 900) { setSelectedBird(null); return; }
     const observations = boxDetail.observations || [];
     const pairCounts = new Map<string, number>();
@@ -4484,7 +4488,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box) => { setSelectedDay(null); setSelectedBox(box); }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
         {passwordDialog}
       </div>
     );

@@ -3280,7 +3280,7 @@ namespace PenguinMonitor
                 var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
                 // Sex is shown via the badge colour; chick size code (if any) is the only stage text.
                 var size = pd.ChickSizeCode ?? "";
-                label = string.Join(" ", new[] { num, size, pd.ScannedId }.Where(s => !string.IsNullOrEmpty(s)));
+                label = string.Join(" ", new[] { num, size, pd.ScannedId }.Where(s => !string.IsNullOrEmpty(s))).Replace("  ", " ");
             }
 
             return (label, sex, isChick, pd);
