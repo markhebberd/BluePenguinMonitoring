@@ -3167,7 +3167,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
           <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
             style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
-            onChange={e => setPit(e.target.value)} /></div>
+            onChange={e => setPit(e.target.value.toUpperCase())} /></div>
         {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
         <div className="app-row">
