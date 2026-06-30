@@ -92,8 +92,9 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   const totalChicks = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
   const allScans = obs.flatMap((o: any) => c.scansByObs.get(o.observation_id) || []);
   const uniquePenguins = new Set(allScans.map((s: any) => c.chipByPit.get(s.pit_id)?.peng_num).filter(Boolean));
-  // Chippings on this date
-  const chippedCount = c.chips.filter((ch: any) => ch.chip_date === nzDate).length;
+  // Chippings on this date — only birds chipped in a box belonging to the current colony
+  // (chips are global in the cache; chip_box ties them to a box / colony).
+  const chippedCount = c.chips.filter((ch: any) => ch.chip_date === nzDate && c.locByName.has(String(ch.chip_box))).length;
   // Most common monitor filename
   const nameCounts: Record<string, number> = {};
   for (const o of obs) { if (o.monitor_filename) nameCounts[o.monitor_filename] = (nameCounts[o.monitor_filename] || 0) + 1; }
@@ -1032,9 +1033,9 @@ export function queryDay(date: string): any {
     };
   });
 
-  // Chippings on this date
+  // Chippings on this date — only birds chipped in a box belonging to the current colony
   const chippings = c.chips
-    .filter((ch: any) => ch.chip_date === date)
+    .filter((ch: any) => ch.chip_date === date && c.locByName.has(String(ch.chip_box)))
     .map((ch: any) => {
       const p = c.pengByNum.get(ch.peng_num);
       return {
