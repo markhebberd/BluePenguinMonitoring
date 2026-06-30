@@ -447,7 +447,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     if ($boxName) { $where[] = 'ol.location_name = ?'; $params[] = $boxName; $where[] = 'ol.colony_id = ?'; $params[] = $colonyId; }
     $whereStr = implode(' AND ', $where);
 
-    $stmt = $pdo->prepare("SELECT ps.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code,
+    $stmt = $pdo->prepare("SELECT ps.pit_id, pc.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code,
         pc.chip_date, o.observation_id, ol.location_name AS box_name, o.observation_time_utc,
         o.adults, o.eggs, o.chicks, o.breeding_status, o.notes
         FROM penguin_scans ps
@@ -491,7 +491,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
         if (!isset($penguins[$pnum])) {
             $penguins[$pnum] = [
                 'peng_num' => $pnum, 'pit_id' => $s['pit_id'], 'sex' => $s['sex'],
-                'life_stage' => $s['life_stage'], 'chipped_as_adult' => $s['chipped_as_adult'],
+                'is_dead' => $s['is_dead'], 'chipped_as_adult' => $s['chipped_as_adult'],
                 'chick_size_code' => $s['chick_size_code'], 'chip_date' => $s['chip_date'],
                 'scan_count' => 0, 'last_seen' => $s['observation_time_utc'], 'is_chipped_here' => false,
             ];
@@ -514,7 +514,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     if ($pengNum) { $chipWhere[] = 'pc.peng_num = ?'; $chipParams[] = $pengNum; }
     if ($boxName) { $chipWhere[] = 'pc.chip_box = ?'; $chipParams[] = $boxName; }
     if (!empty($chipWhere)) {
-        $chipStmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, p.sex, p.life_stage, p.chipped_as_adult, p.chick_size_code,
+        $chipStmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code,
             pc.chip_date, pc.chip_box, pc.chip_by
             FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num
             WHERE " . implode(' AND ', $chipWhere) . " ORDER BY pc.chip_date");
@@ -524,7 +524,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
             if (!isset($penguins[$pnum])) {
                 $penguins[$pnum] = [
                     'peng_num' => $pnum, 'pit_id' => $c['pit_id'], 'sex' => $c['sex'],
-                    'life_stage' => $c['life_stage'], 'chipped_as_adult' => $c['chipped_as_adult'],
+                    'is_dead' => $c['is_dead'], 'chipped_as_adult' => $c['chipped_as_adult'],
                     'chick_size_code' => $c['chick_size_code'], 'chip_date' => $c['chip_date'],
                     'scan_count' => 0, 'last_seen' => $c['chip_date'], 'is_chipped_here' => false,
                 ];

@@ -1080,7 +1080,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
             </Fragment>);
             })}
-            <tr><td className="muted">Last Known Life Stage</td><td>{!editing ? (p.life_stage || <span className="muted">-</span>) : <EditableField value={p.life_stage} type="select" options={['Adult','Chick','Returnee','Dead']} onSave={savePenguin('life_stage')} canEdit={true} />}</td></tr>
+            <tr><td className="muted">Dead</td><td>{!editing ? (Number(p.is_dead) ? 'Dead' : <span className="muted">-</span>) : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>
             {(() => {
               if (biometrics.length === 0) return null;
               // Build summary
@@ -1097,7 +1097,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {showBio && biometrics.map((b: any, i: number) => {
                 const flags = [
                   b.is_moulting && 'Moulting',
-                  b.condition_ticks && 'Ticks', b.condition_dead && 'Dead',
+                  b.condition_ticks && 'Ticks',
                   b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
                 ].filter(Boolean);
                 return (<Fragment key={`bio${i}`}>
@@ -1640,7 +1640,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       if (birdInfo.chip_date && parsedDate < birdInfo.chip_date) {
         if (!confirm(`WARNING: Observation date ${parsedDate} is before this penguin's chip date ${birdInfo.chip_date}. Continue?`)) return;
       }
-      if (birdInfo.life_stage === 'Dead') {
+      if (birdInfo.is_dead) {
         if (!confirm(`WARNING: ${short} is recorded as dead. Continue?`)) return;
       }
     }
@@ -3100,12 +3100,12 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [box, setBox] = useState(chipBox);
   const [chipBy, setChipBy] = useState(defaultChipBy);
   const [isAdult, setIsAdult] = useState(true);
+  const [chickSize, setChickSize] = useState('');
   const [weight, setWeight] = useState('');
   const [flipper, setFlipper] = useState('');
   const [observedSex, setObservedSex] = useState('');
   const [moulting, setMoulting] = useState(false);
   const [ticks, setTicks] = useState(false);
-  const [dead, setDead] = useState(false);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -3120,11 +3120,12 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     if (!box.trim()) { setError('Chip box required'); return; }
+    if (!isAdult && !chickSize) { setError('Select chick size (LC / BC / SC)'); return; }
     setSaving(true);
     try {
       const pengRes = await createRecord(token, 'penguins', {
         initial_chip_date: date, chip_date: date,
-        chipped_as_adult: isAdult ? 1 : 0, life_stage: isAdult ? 'Adult' : 'Chick',
+        chipped_as_adult: isAdult ? 1 : 0, chick_size_code: isAdult ? null : chickSize,
       });
       if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
       const pengNum = pengRes.peng_num;
@@ -3138,7 +3139,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       const bio: Record<string, any> = {
         peng_num: pengNum, observation_date: date,
         observed_sex: observedSex || null,
-        is_moulting: moulting ? 1 : 0, condition_ticks: ticks ? 1 : 0, condition_dead: dead ? 1 : 0,
+        is_moulting: moulting ? 1 : 0, condition_ticks: ticks ? 1 : 0,
         notes: notes.trim() || null,
       };
       if (weight.trim()) bio.weight = parseFloat(weight);
@@ -3177,6 +3178,14 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
           <div className="app-field"><label>Chipped by</label>
             <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials" /></div>
         </div>
+        {!isAdult && (
+          <div className="app-field"><label>Chick size</label>
+            <div className="app-toggle">
+              {[['LC', 'Little'], ['BC', 'Big'], ['SC', 'Single']].map(([code, label]) => (
+                <button key={code} type="button" className={chickSize === code ? 'active' : ''} onClick={() => setChickSize(code)}>{code} · {label}</button>
+              ))}
+            </div></div>
+        )}
         <div className="app-row">
           <div className="app-field"><label>Weight (g)</label>
             <input type="number" value={weight} onChange={e => setWeight(e.target.value)} placeholder="—" /></div>
@@ -3195,14 +3204,13 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         <div className="app-checks">
           <label><input type="checkbox" checked={moulting} onChange={e => setMoulting(e.target.checked)} /> Moulting</label>
           <label><input type="checkbox" checked={ticks} onChange={e => setTicks(e.target.checked)} /> Ticks</label>
-          <label><input type="checkbox" checked={dead} onChange={e => setDead(e.target.checked)} /> Dead</label>
         </div>
         <div className="app-field"><label>Notes</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup}>{saving ? 'Saving…' : 'Add penguin'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || (!isAdult && !chickSize)}>{saving ? 'Saving…' : 'Add penguin'}</button>
         </div>
       </div>
     </div>
@@ -3768,7 +3776,7 @@ function RemovePenguin({ token }: { token: string }) {
             <tbody>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Peng #</td><td style={{padding:'2px 8px', fontWeight:600}}>{preview.penguin.peng_num}</td></tr>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Sex</td><td style={{padding:'2px 8px'}}>{preview.penguin.sex || '—'}</td></tr>
-              <tr><td style={{padding:'2px 8px', color:'#666'}}>Life stage</td><td style={{padding:'2px 8px'}}>{preview.penguin.life_stage || '—'}</td></tr>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Status</td><td style={{padding:'2px 8px'}}>{preview.penguin.is_dead ? 'Dead' : 'Alive'}</td></tr>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Chipped as</td><td style={{padding:'2px 8px'}}>{preview.penguin.chipped_as_adult ? 'Adult' : 'Chick'}</td></tr>
             </tbody>
           </table>

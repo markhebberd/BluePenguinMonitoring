@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS penguins (
     chip_date DATE,
     chipped_as_adult BOOLEAN DEFAULT FALSE,
     sex VARCHAR(10),
-    life_stage VARCHAR(20),
+    is_dead BOOLEAN DEFAULT FALSE,
     vid_for_scanner VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -147,7 +147,6 @@ CREATE TABLE IF NOT EXISTS penguin_biometric_data (
     beak_length DECIMAL(5,2),
     condition_healthy BOOLEAN DEFAULT FALSE,
     condition_ticks BOOLEAN DEFAULT FALSE,
-    condition_dead BOOLEAN DEFAULT FALSE,
     notes TEXT,
     is_deleted BOOLEAN DEFAULT FALSE,
     deleted_at TIMESTAMP NULL,

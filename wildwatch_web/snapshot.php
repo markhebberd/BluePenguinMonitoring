@@ -58,7 +58,7 @@ if ($since) {
         WHERE ol.colony_id = ? AND (o.updated_at >= ? OR ps.deleted_at >= ?)");
     $scans->execute([$colonyId, $ts, $ts]);
 
-    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins WHERE updated_at >= ?");
+    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar FROM penguins WHERE updated_at >= ?");
     $penguins->execute([$ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
@@ -71,7 +71,7 @@ if ($since) {
     $locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND updated_at >= ?");
     $locations->execute([$colonyId, $ts]);
 
-    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, condition_dead, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
+    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
     $bio->execute([$ts]);
 
     $obsRows = $obs->fetchAll();
@@ -132,14 +132,14 @@ $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_d
     WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
 $scans->execute([$colonyId]);
 
-$penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, life_stage, vid_for_scanner, chick_size_code, kommentar FROM penguins");
+$penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar FROM penguins");
 
 $chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, chip_by, rechip_by, solo FROM penguin_chips");
 
 $locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ?");
 $locations->execute([$colonyId]);
 
-$bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, condition_dead, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data");
+$bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data");
 
 $elapsed = round((microtime(true) - $t0) * 1000);
 

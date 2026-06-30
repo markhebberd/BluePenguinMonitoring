@@ -4973,7 +4973,6 @@ namespace PenguinMonitor
                         var pengFields = new Dictionary<string, object>
                         {
                             ["chipped_as_adult"] = isChick ? 0 : 1,
-                            ["life_stage"] = isChick ? "Chick" : "Adult",
                         };
                         // sex goes to biometric data as observed_sex, not penguin table
                         if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
@@ -5314,24 +5313,6 @@ namespace PenguinMonitor
                 System.Diagnostics.Debug.WriteLine($"Failed to load data: {ex.Message}");
             }
         }
-        private void UpdatePenguinLifeStage(string pengNum, string lifeStage)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                    var req = new HttpRequestMessage(HttpMethod.Post,
-                        $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguins&id={pengNum}");
-                    req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                    req.Content = new StringContent(
-                        JsonConvert.SerializeObject(new { life_stage = lifeStage }),
-                        System.Text.Encoding.UTF8, "application/json");
-                    await client.SendAsync(req);
-                }
-                catch { }
-            });
-        }
 
         private void SaveToAppDataDir()
         {
@@ -5667,23 +5648,9 @@ namespace PenguinMonitor
                     {
                         if (penguin.LastKnownLifeStage == LifeStage.Chick)
                         {
-                            bool isOldEnoughToReturn = penguin.ChipDate > NzToday.AddYears(-20) && NzToday > penguin.ChipDate.AddMonths(3);
-                            if (isOldEnoughToReturn)
-                            {
-                                // First return — chick is now an adult
-                                _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
-                                toastMessage += $" 🎉 FIRST RETURN!";
-                                triggerAlertAsync();
-                                // Update life_stage to Returnee on server
-                                UpdatePenguinLifeStage(penguin.PengNum, "Returnee");
-                                penguin.LastKnownLifeStage = LifeStage.Returnee;
-                            }
-                            else
-                            {
-                                // Still a chick
-                                _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
-                                toastMessage += $" (+1 Chick)";
-                            }
+                            // Still a chick (a chick chipped >3 months ago is derived as a returnee/adult instead)
+                            _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
+                            toastMessage += $" (+1 Chick)";
                             SaveCurrentBoxData();
                         }
                         else if (penguin.LastKnownLifeStage == LifeStage.Adult ||

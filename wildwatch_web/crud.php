@@ -257,7 +257,8 @@ function handleGet($pdo, $table, $pk, $id) {
  */
 function stripRetiredColumns($table, $input) {
     $retired = [
-        'penguin_biometric_data' => ['condition_underweight', 'condition_dog_attacked', 'condition_attacked'],
+        'penguin_biometric_data' => ['condition_underweight', 'condition_dog_attacked', 'condition_attacked', 'condition_dead'],
+        'penguins' => ['life_stage'],
     ];
     if (isset($retired[$table]) && is_array($input)) {
         foreach ($retired[$table] as $col) unset($input[$col]);

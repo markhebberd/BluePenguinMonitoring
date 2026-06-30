@@ -372,13 +372,18 @@ namespace PenguinMonitor.Services
                         var cleanId = new string(record.pit_id.Where(char.IsLetterOrDigit).ToArray());
                         var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
                         if (eightDigitId.Length != 8) continue;
-                        var lifeStage = LifeStage.Adult;
-                        if (!string.IsNullOrEmpty(record.life_stage)) Enum.TryParse<LifeStage>(record.life_stage, true, out lifeStage);
+                        // life_stage column dropped — derive Adult/Chick/Returnee; is_dead is the only stored flag.
+                        var chipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue;
+                        LifeStage lifeStage;
+                        if (record.is_dead == 1) lifeStage = LifeStage.Dead;
+                        else if (record.chipped_as_adult == 1) lifeStage = LifeStage.Adult;
+                        else if (chipDate > DateTime.MinValue && DateTime.UtcNow > chipDate.AddMonths(3)) lifeStage = LifeStage.Returnee; // chipped as chick, now back as an adult
+                        else lifeStage = LifeStage.Chick;
                         remotePenguinData[cleanId.ToUpper()] = new PenguinData
                         {
                             FullPitId = record.pit_id ?? "", ScannedId = eightDigitId, PengNum = record.peng_num ?? "",
                             LastKnownLifeStage = lifeStage, Sex = record.sex ?? "", VidForScanner = record.vid_for_scanner ?? "",
-                            ChipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue,
+                            ChipDate = chipDate,
                             ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? ""
                         };
                     }
