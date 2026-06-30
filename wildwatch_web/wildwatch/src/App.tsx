@@ -2866,14 +2866,18 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               }
               // Normal row(s) — show each observation separately
               const { obs, chips } = byBox[box];
-              // Chipping-only box (no observation today): a box row of green chip minis.
-              // Observed boxes already appear via their observation row(s), so chippings aren't repeated there.
+              // Chipping-only box (no observation today): show each chipped penguin as a green
+              // mini labelled "Chipped in Box x". Boxes observed today show the chip mini inline
+              // on their observation row instead (handled below), so they aren't repeated here.
               if (obs.length === 0 && chips.length > 0) {
                 return (
                   <div key={box} className="day-row">
-                    <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>
-                    {chips.map((c: any) => <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />)}
-                    <span className="muted" style={{fontSize:10}}>chipped</span>
+                    {chips.map((c: any) => (
+                      <span key={c.pit_id} className="day-chip-item">
+                        <PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
+                        <span className="muted"> Chipped in Box {box}</span>
+                      </span>
+                    ))}
                   </div>
                 );
               }
@@ -2907,6 +2911,9 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                       ))}
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                         <span key={`ns${k}`} className="scan no-scan">no scan</span>
+                      ))}
+                      {oi === 0 && chips.map((c: any) => (
+                        <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
                       ))}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
