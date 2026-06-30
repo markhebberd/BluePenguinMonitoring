@@ -62,10 +62,12 @@ interface MemCache {
 
 let mem: MemCache | null = null;
 
-/** Convert UTC datetime string to NZ date string (YYYY-MM-DD) */
+/** Convert UTC datetime string to NZ date string (YYYY-MM-DD).
+ *  Uses a fixed +12 (NZST) offset, not DST-aware Pacific/Auckland, so a UTC
+ *  instant always maps to a single NZ day and can't roll over a date boundary. */
 function utcToNzDate(utc: string): string {
   const d = new Date(utc.includes('T') || utc.includes('Z') ? utc : utc.replace(' ', 'T') + 'Z');
-  return d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); // en-CA gives YYYY-MM-DD
+  return new Date(d.getTime() + 12 * 3600000).toISOString().slice(0, 10);
 }
 
 /** Compute stats for a single NZ date from cache data */
@@ -87,7 +89,7 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   // Full monitor: a box not observed today is excused if its most recent breeding_status (before today) is DCM
   // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (covers both NZST+12 and NZDT+13)
   const utcCutoff = nzDate + ' 12:00:00';
-  const EXCLUDED_BOXES = new Set(['AA', 'AB', 'AC']);
+  const EXCLUDED_BOXES = new Set(['0', 'AA', 'AB', 'AC']);
   const dcmBoxes = new Set<string>();
   for (const loc of c.locations) {
     if (EXCLUDED_BOXES.has(loc.location_name.toUpperCase())) continue; // not part of FM calculation
@@ -712,6 +714,180 @@ export function queryAllPenguins(): any[] {
     });
   }
   return result;
+}
+
+// ============ Reports (computed client-side from cache) ============
+// These mirror the SQL in reports.php. Breeding season runs Apr–Mar; a date in
+// Jan–Mar belongs to the season that started the previous April.
+
+/** Season year (the April-start year) for a YYYY-MM-DD date string. */
+function seasonYearFromDate(date: string): number {
+  const y = parseInt(date.slice(0, 4), 10);
+  const m = parseInt(date.slice(5, 7), 10);
+  return m >= 4 ? y : y - 1;
+}
+
+/** "2024/25"-style label for a season year. */
+function seasonLabel(sy: number): string {
+  return `${sy}/${String((sy + 1) % 100).padStart(2, '0')}`;
+}
+
+/** Whole days between two YYYY-MM-DD dates (a - b), DST-safe via UTC. */
+function dayDiff(a: string, b: string): number {
+  return (Date.parse(a) - Date.parse(b)) / 86400000;
+}
+
+/** Total eggs across the colony over time, per season. */
+export function computeEggArrival(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows = c.observations
+    .filter((o: any) => !o.is_deleted)
+    .map((o: any) => ({ box: c.locById.get(o.location_id)?.location_name, date: utcToNzDate(o.observation_time_utc), eggs: o.eggs || 0, t: o.observation_time_utc }))
+    .filter((r: any) => r.box)
+    .sort((a: any, b: any) => a.t.localeCompare(b.t));
+
+  const seasonData: Record<string, Record<string, number>> = {};   // season → box → latest eggs
+  const seasonTimeline: Record<string, Record<string, number>> = {}; // season → date → total snapshot
+  for (const row of rows) {
+    const season = seasonLabel(seasonYearFromDate(row.date));
+    if (!seasonData[season]) { seasonData[season] = {}; seasonTimeline[season] = {}; }
+    seasonData[season][row.box] = row.eggs;
+    seasonTimeline[season][row.date] = Object.values(seasonData[season]).reduce((s, v) => s + v, 0);
+  }
+
+  const result: any[] = [];
+  for (const season of Object.keys(seasonTimeline)) {
+    const sy = parseInt(season.split('/')[0], 10);
+    const seasonStart = `${sy}-04-01`;
+    const data = Object.keys(seasonTimeline[season]).map(date => ({
+      day: Math.floor(dayDiff(date, seasonStart)), eggs: seasonTimeline[season][date], date,
+    }));
+    result.push({ season, max_eggs: Math.max(...data.map(d => d.eggs)), data });
+  }
+  result.sort((a, b) => a.season.localeCompare(b.season));
+  return result;
+}
+
+/** Count of distinct adult penguins scanned per season. */
+export function computeDistinctAdults(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const seasons: Record<string, Set<string>> = {};
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    if (!chip || chip.is_active != 1) continue;
+    const peng = c.pengByNum.get(chip.peng_num);
+    if (!peng) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const nzDate = utcToNzDate(obs.observation_time_utc);
+    const isAdult = peng.chipped_as_adult || (chip.chip_date && dayDiff(nzDate, chip.chip_date) > 90);
+    if (!isAdult) continue;
+    const label = seasonLabel(seasonYearFromDate(nzDate));
+    (seasons[label] ||= new Set()).add(s.pit_id);
+  }
+  return Object.keys(seasons).sort().map(season => ({ season, count: seasons[season].size }));
+}
+
+/** Highest total adults present on a single day, per season. */
+export function computePeakAdults(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const boxMax: Record<string, number> = {}; // "season|date|box" → max adults that day
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const box = c.locById.get(o.location_id)?.location_name;
+    if (!box) continue;
+    const nzDate = utcToNzDate(o.observation_time_utc);
+    const key = `${seasonYearFromDate(nzDate)}|${nzDate}|${box}`;
+    const a = o.adults || 0;
+    if (boxMax[key] === undefined || a > boxMax[key]) boxMax[key] = a;
+  }
+  const dayTotal: Record<string, number> = {}; // "season|date" → summed adults
+  for (const key of Object.keys(boxMax)) {
+    const dk = key.slice(0, key.lastIndexOf('|'));
+    dayTotal[dk] = (dayTotal[dk] || 0) + boxMax[key];
+  }
+  const peak: Record<string, { adults: number; date: string }> = {};
+  for (const dk of Object.keys(dayTotal).sort()) { // sorted → earliest day wins ties
+    const [sy, date] = dk.split('|');
+    if (!peak[sy] || dayTotal[dk] > peak[sy].adults) peak[sy] = { adults: dayTotal[dk], date };
+  }
+  return Object.keys(peak).sort((a, b) => +a - +b).map(sy => ({
+    season: seasonLabel(+sy), adults: peak[sy].adults, date: peak[sy].date,
+  }));
+}
+
+/** Chick return rates by size, with return-age points. */
+export function computeChickReturn(): any {
+  if (!mem) return { by_season: {}, totals: {}, points: [] };
+  const c = mem;
+  const curSeasonYear = seasonYearFromDate(utcToNzDate(new Date().toISOString()));
+  const excludeFromYear = curSeasonYear - 1; // chicks from the last two seasons can't have returned yet
+
+  const bySeason: Record<string, Record<string, { chipped: number; returned: number }>> = {};
+  const totals: Record<string, { chipped: number; returned: number; ages: number[] }> = {
+    LC: { chipped: 0, returned: 0, ages: [] }, BC: { chipped: 0, returned: 0, ages: [] }, SC: { chipped: 0, returned: 0, ages: [] },
+  };
+  const points: any[] = [];
+
+  for (const p of c.penguins) {
+    if (p.chipped_as_adult) continue;
+    const size = p.chick_size_code;
+    if (size !== 'LC' && size !== 'BC' && size !== 'SC') continue;
+    const chips = c.chipsByPeng.get(p.peng_num) || [];
+    const active = chips.find((ch: any) => ch.is_active == 1) || chips[0];
+    const chipDate = active?.chip_date;
+    if (!chipDate) continue;
+    const chipSeasonYear = seasonYearFromDate(chipDate);
+    const chipSeason = seasonLabel(chipSeasonYear);
+
+    // First scan in any season after the chip season, across all of this bird's chips.
+    let firstReturn: string | null = null;
+    for (const ch of chips) {
+      for (const s of c.scansByPit.get(ch.pit_id) || []) {
+        if (s.scan_deleted) continue;
+        const obs = c.obsById.get(s.observation_id);
+        if (!obs || obs.is_deleted) continue;
+        const nzDate = utcToNzDate(obs.observation_time_utc);
+        if (seasonYearFromDate(nzDate) > chipSeasonYear && (firstReturn === null || nzDate < firstReturn)) firstReturn = nzDate;
+      }
+    }
+    const returned = !!firstReturn;
+
+    (bySeason[chipSeason] ||= {})[size] ||= { chipped: 0, returned: 0 };
+    bySeason[chipSeason][size].chipped++;
+    if (returned) bySeason[chipSeason][size].returned++;
+
+    if (chipSeasonYear < excludeFromYear) {
+      totals[size].chipped++;
+      if (returned && firstReturn) {
+        totals[size].returned++;
+        const age = Math.round((dayDiff(firstReturn, chipDate) / 365.25) * 10) / 10;
+        totals[size].ages.push(age);
+        points.push({ size, age, peng_num: p.peng_num });
+      }
+    }
+  }
+
+  const summary: Record<string, any> = {};
+  for (const size of ['LC', 'BC', 'SC']) {
+    const ages = totals[size].ages.slice().sort((a, b) => a - b);
+    let median: number | null = null;
+    if (ages.length > 0) {
+      const mid = Math.floor(ages.length / 2);
+      median = ages.length % 2 === 0 ? Math.round(((ages[mid - 1] + ages[mid]) / 2) * 10) / 10 : ages[mid];
+    }
+    summary[size] = {
+      chipped: totals[size].chipped,
+      returned: totals[size].returned,
+      avg_return_age: ages.length > 0 ? Math.round((ages.reduce((s, v) => s + v, 0) / ages.length) * 10) / 10 : null,
+      median_return_age: median,
+    };
+  }
+  return { by_season: bySeason, totals: summary, points };
 }
 
 /** Get all observation locations */

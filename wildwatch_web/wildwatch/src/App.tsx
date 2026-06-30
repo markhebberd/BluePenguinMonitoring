@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats, fetchReport } from './api/boxtags';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats } from './api/boxtags';
 import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -492,7 +492,7 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const grayCls = currentStatus
     ? (provenChickOrigin && !sex ? 'unproven' : '')
     : (wasChippedAsChick && !stillChick && !sex && !observationDate ? 'unproven' : '');
-  const obsNzDate = observationDate ? new Date(observationDate).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '';
+  const obsNzDate = observationDate ? toNzDateStr(observationDate) : '';
   const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
   const sc = scan.chick_size_code || '';
@@ -2006,14 +2006,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B'];
 
 function DistinctAdultsChart() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const data = useDistinctAdults();
 
-  useEffect(() => {
-    fetchReport('distinct_adults').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
-  }, []);
-
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
   if (data.length === 0) return <div className="report-card"><p className="muted">No scan data available</p></div>;
 
   const W = 800, H = 400, PAD = { top: 30, right: 30, bottom: 60, left: 55 };
@@ -2052,14 +2046,8 @@ function DistinctAdultsChart() {
 }
 
 function PeakAdultsChart() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const data = usePeakAdults();
 
-  useEffect(() => {
-    fetchReport('peak_adults').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
-  }, []);
-
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
   if (data.length === 0) return <div className="report-card"><p className="muted">No observation data available</p></div>;
 
   const W = 800, H = 400, PAD = { top: 30, right: 30, bottom: 70, left: 55 };
@@ -2108,14 +2096,8 @@ function PeakAdultsChart() {
 }
 
 function EggArrivalChart() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const data = useEggArrival();
 
-  useEffect(() => {
-    fetchReport('egg_arrival').then(d => { setData(Array.isArray(d) ? d : []); setLoading(false); });
-  }, []);
-
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
   if (data.length === 0) return <div className="report-card"><p className="muted">No egg data available</p></div>;
 
   // Chart dimensions
@@ -2464,15 +2446,9 @@ function ChickSexBothReturnedChart() {
 }
 
 function ChickReturnChart() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const data = useChickReturn();
 
-  useEffect(() => {
-    fetchReport('chick_return').then(d => { setData(d); setLoading(false); });
-  }, []);
-
-  if (loading) return <div className="report-card"><p className="muted">Loading...</p></div>;
-  if (!data || data.error) return <div className="report-card"><p className="muted">No data available</p></div>;
+  if (!data || Object.keys(data.by_season || {}).length === 0) return <div className="report-card"><p className="muted">No data available</p></div>;
 
   const sizes = ['LC', 'BC', 'SC'] as const;
   const sizeLabels: Record<string, string> = { LC: 'Little Chick', BC: 'Big Chick', SC: 'Single Chick' };
@@ -4230,6 +4206,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     );
   }
 
+  const sortedDates = [...(stats?.observation_dates || [])].sort();
+  const latestDay = sortedDates[sortedDates.length - 1] || new Date().toLocaleDateString('en-CA', {timeZone:'Pacific/Auckland'});
+
   return wrap(
     <div className="app">
       {siteHeader}
@@ -4241,7 +4220,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
       </div>
       {(datePickerVisible || (!selectedBox && !selectedBird && !selectedDay)) && (
-        <DayCalendar date={datePickerCenter || new Date().toLocaleDateString('en-CA', {timeZone:'Pacific/Auckland'})} dates={[...(stats?.observation_dates || [])].sort()} onDayClick={goToDay} />
+        <DayCalendar date={datePickerCenter || latestDay} dates={sortedDates} onDayClick={goToDay} />
       )}
 
       {!selectedBox && (
@@ -4387,10 +4366,10 @@ function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
 function fmtDateTime(d:string) { return formatDate(d); }
-/** Returns YYYY-MM-DD in NZ timezone for a datetime string */
+/** Returns YYYY-MM-DD in NZ time for a datetime string.
+ *  Fixed +12 (NZST), matching the bucketing in localdb so dates can't roll over. */
 function toNzDateStr(d: string): string {
-  const nz = parseDate(d).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }); // en-CA gives YYYY-MM-DD
-  return nz;
+  return new Date(parseDate(d).getTime() + 12 * 3600000).toISOString().slice(0, 10);
 }
 
 function AuthenticatedAppWithTooltip(props: { token: string; userName: string; userRole: string; onLogout: () => void }) {
