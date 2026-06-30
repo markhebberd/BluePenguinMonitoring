@@ -1015,7 +1015,7 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
-function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean }) {
+function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
@@ -1065,6 +1065,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         <span className="bird-title-actions">
           {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
           {editing && <><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></>}
+          {onClose && <button className="day-bird-close" onClick={onClose} title="Close" aria-label="Close">×</button>}
           {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
         </span>
       </div>
@@ -3020,11 +3021,10 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
 
       {sideBird && sideBirdData?.penguin && (
         <div className="day-bird-dock">
-          <button className="day-bird-close" onClick={() => setSideBird(null)} title="Close" aria-label="Close">×</button>
           <BirdPage data={sideBirdData} onBirdClick={handleBirdClick}
             onBoxClick={(box: string) => onBoxClick(box)}
             onSightingClick={(box: string, d: string) => onBoxClick(box, d)}
-            onDayClick={onDayClick}
+            onDayClick={onDayClick} onClose={() => setSideBird(null)}
             token={token} canEdit={canEdit} />
         </div>
       )}
