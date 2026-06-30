@@ -509,7 +509,9 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   } else if (guessSexes.length === 1 && guessSexes[0].c === 1) {
     mid = (sizeLabel.endsWith('U') ? sizeLabel : sizeLabel + 'U') + guessSexes[0].s;
   } else {
-    mid = [sizeLabel, guessSexes.map(g => `${g.c}U${g.s}`).join(' ')].filter(Boolean).join(' ');
+    // tokens carry their own U, so drop the size label's redundant returned-unsexed U ("BCU" → "BC")
+    const base = sizeLabel.endsWith('U') ? sizeLabel.slice(0, -1) : sizeLabel;
+    mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join(' ')].filter(Boolean).join(' ');
   }
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
@@ -1714,8 +1716,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     setSaving(true); setMessage('');
 
     try {
-      // Find location_id for this box
-      const dashRes = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      // Find location_id for this box — in the ACTIVE colony (so we never write to the wrong one)
+      const dashRes = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
       const dashData = await dashRes.json();
       const locationId = dashData.location?.location_id;
 
@@ -1775,7 +1777,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
   useEffect(() => {
     if (!box) { setAllBoxObs([]); return; }
-    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setAllBoxObs(d.observations || []))
       .catch(() => setAllBoxObs([]));
@@ -4532,7 +4534,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   <h3 className="season-heading">{thisLabel} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
                       if (!showDeleted && deletedObs.length === 0) {
-                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
                         const d = await r.json();
                         setDeletedObs(d.deleted || []);
                       }
