@@ -24,8 +24,8 @@ if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
     $observer = $stmt->fetch();
 }
 
-if ($observer) {
-    // Return colonies this user has permissions for
+if ($observer && ($observer['role'] ?? '') !== 'admin') {
+    // Non-admin: only colonies this user has explicit permission for
     $stmt = $pdo->prepare("SELECT c.colony_id, c.colony_name, c.location_sets_string, r.region_name
         FROM colonies c
         JOIN regions r ON c.region_id = r.region_id
@@ -37,6 +37,8 @@ if ($observer) {
 
     // No permissions = no colonies
 } else {
+    // Admins get every colony (consistent with requireColonyAccess in config.php);
+    // unauthenticated callers get the public read of all colonies.
     $stmt = $pdo->query("SELECT c.colony_id, c.colony_name, c.location_sets_string, r.region_name
         FROM colonies c JOIN regions r ON c.region_id = r.region_id
         ORDER BY r.region_name, c.colony_name");
