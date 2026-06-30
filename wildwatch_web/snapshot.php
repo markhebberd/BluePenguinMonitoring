@@ -62,7 +62,7 @@ if ($since) {
     $penguins->execute([$ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
-    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.chip_by, pc.rechip_by, pc.solo
+    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.rechip_by, pc.solo
         FROM penguin_chips pc
         WHERE pc.created_at >= ?
            OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");
@@ -134,7 +134,7 @@ $scans->execute([$colonyId]);
 
 $penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar FROM penguins");
 
-$chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, chip_by, rechip_by, solo FROM penguin_chips");
+$chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, rechip_by, solo FROM penguin_chips");
 
 $locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ?");
 $locations->execute([$colonyId]);

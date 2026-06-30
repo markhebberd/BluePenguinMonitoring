@@ -92,9 +92,9 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   const totalChicks = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
   const allScans = obs.flatMap((o: any) => c.scansByObs.get(o.observation_id) || []);
   const uniquePenguins = new Set(allScans.map((s: any) => c.chipByPit.get(s.pit_id)?.peng_num).filter(Boolean));
-  // Chippings on this date — only birds chipped in a box belonging to the current colony
-  // (chips are global in the cache; chip_box ties them to a box / colony).
-  const chippedCount = c.chips.filter((ch: any) => ch.chip_date === nzDate && c.locByName.has(String(ch.chip_box))).length;
+  // Chippings on this date — only birds chipped at a location in the current colony.
+  // Chips are global in the cache; location_id ties each to its colony (locById is colony-scoped).
+  const chippedCount = c.chips.filter((ch: any) => ch.chip_date === nzDate && c.locById.has(ch.location_id)).length;
   // Most common monitor filename
   const nameCounts: Record<string, number> = {};
   for (const o of obs) { if (o.monitor_filename) nameCounts[o.monitor_filename] = (nameCounts[o.monitor_filename] || 0) + 1; }
@@ -736,6 +736,21 @@ export function queryAllPenguins(): any[] {
   return result;
 }
 
+/** Biometric sex-guess tally for a penguin, split into male/female-leaning counts.
+ *  observed_sex codes: PM/MM (and legacy M) → male; PF/MF (and legacy F) → female; U (unsure) ignored.
+ *  Used by PenguinMini to label unsexed birds with their guess history. */
+export function observedSexGuess(pengNum: string | null | undefined): { m: number; f: number } {
+  const out = { m: 0, f: 0 };
+  if (!mem || !pengNum) return out;
+  for (const b of (mem.bioByPeng.get(pengNum) || [])) {
+    if (b.is_deleted) continue;
+    const s = (b.observed_sex || '').toUpperCase();
+    if (s === 'PM' || s === 'MM' || s === 'M') out.m++;
+    else if (s === 'PF' || s === 'MF' || s === 'F') out.f++;
+  }
+  return out;
+}
+
 // ============ Reports (computed client-side from cache) ============
 // These mirror the SQL in reports.php. Breeding season runs Apr–Mar; a date in
 // Jan–Mar belongs to the season that started the previous April.
@@ -1033,9 +1048,9 @@ export function queryDay(date: string): any {
     };
   });
 
-  // Chippings on this date — only birds chipped in a box belonging to the current colony
+  // Chippings on this date — only birds chipped at a location in the current colony
   const chippings = c.chips
-    .filter((ch: any) => ch.chip_date === date && c.locByName.has(String(ch.chip_box)))
+    .filter((ch: any) => ch.chip_date === date && c.locById.has(ch.location_id))
     .map((ch: any) => {
       const p = c.pengByNum.get(ch.peng_num);
       return {

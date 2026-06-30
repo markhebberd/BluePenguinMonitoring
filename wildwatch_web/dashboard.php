@@ -168,9 +168,11 @@ function handleOverview($pdo, $colonyId) {
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
         WHERE ol.colony_id = ? AND o.is_deleted = FALSE
         UNION
-        SELECT chip_date as d FROM penguin_chips WHERE chip_date IS NOT NULL
+        SELECT pc.chip_date as d FROM penguin_chips pc
+        JOIN observation_locations ol2 ON pc.location_id = ol2.location_id
+        WHERE ol2.colony_id = ? AND pc.chip_date IS NOT NULL
     ) dates ORDER BY d DESC");
-    $stmt->execute([$colonyId]);
+    $stmt->execute([$colonyId, $colonyId]);
     $dates = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
     echo json_encode([

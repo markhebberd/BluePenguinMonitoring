@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase, observedSexGuess } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -497,10 +497,17 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
   const sc = scan.chick_size_code || '';
   const sizeLabel = sc ? (sex ? sc + sex.charAt(0) : (scan.hasReturned ? sc + 'U' : sc)) : '';
+  // Unsexed bird: surface biometric sex guesses as "<n>U<sex>" tokens (U = unconfirmed),
+  // most-guessed sex first, e.g. "2UF" or "2UM 1UF".
+  const guess = sex ? { m: 0, f: 0 } : observedSexGuess(scan.peng_num);
+  const guessLabel = (guess.m || guess.f)
+    ? [{ c: guess.m, s: 'M' }, { c: guess.f, s: 'F' }].filter(g => g.c > 0).sort((a, b) => b.c - a.c).map(g => `${g.c}U${g.s}`).join(' ')
+    : '';
+  const mid = [sizeLabel, guessLabel].filter(Boolean).join(' ');
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
-      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{sizeLabel ? ` ${sizeLabel} ` : (num || icon) && chip ? ' ' : ''}{chip}
+      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );
 }
@@ -3132,9 +3139,10 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
       const pengNum = pengRes.peng_num;
 
+      const chipLoc = queryAllLocations().find((l: any) => String(l.location_name) === box.trim());
       const chipRes = await createRecord(token, 'penguin_chips', {
         pit_id: pitNorm, peng_num: pengNum, chip_date: date,
-        chip_box: box.trim(), chip_by: chipBy.trim() || null, is_active: 1,
+        chip_box: box.trim(), location_id: chipLoc?.location_id ?? null, chip_by: chipBy.trim() || null, is_active: 1,
       });
       if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + ` (penguin #${pengNum} was created)`); setSaving(false); return; }
 
