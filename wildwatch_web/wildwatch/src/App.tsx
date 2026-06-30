@@ -4262,6 +4262,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    // Day view: left/right step to the previous/next date that has an observation.
+    if (selectedDay) {
+      const ds = [...(stats?.observation_dates || [])].sort();
+      const di = ds.indexOf(selectedDay);
+      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setSelectedDay(ds[di + 1]); }
+      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setSelectedDay(ds[di - 1]); }
+      else if (e.key === 'Escape') { setSelectedDay(null); }
+      return;
+    }
     if (!selectedBox || sortedBoxIds.length === 0) return;
     const idx = sortedBoxIds.indexOf(selectedBox);
     if (idx < 0) return;
@@ -4272,7 +4281,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     } else if (e.key === 'Escape') {
       setSelectedBox(null);
     }
-  }, [selectedBox, sortedBoxIds]);
+  }, [selectedBox, selectedDay, sortedBoxIds, stats]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
