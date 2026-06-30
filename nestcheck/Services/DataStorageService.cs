@@ -240,7 +240,7 @@ namespace PenguinMonitor.Services
                         daily_label = colonyState.DailyLabel,
                         observations = pendingBoxes,
                     });
-                    var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload");
+                    var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
                     uploadRequest.Headers.Add("Authorization", $"Bearer {token}");
                     uploadRequest.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
 
@@ -295,7 +295,7 @@ namespace PenguinMonitor.Services
                 // Boxes: fetch, parse, update colony state
                 Task boxesTask = WithRetry(async () =>
                 {
-                    var req = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_SYNC_URL);
+                    var req = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_SYNC_URL}?colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
                     req.Headers.Add("Authorization", $"Bearer {token}");
                     var resp = await _httpClient.SendAsync(req);
                     if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
@@ -569,7 +569,7 @@ namespace PenguinMonitor.Services
             }
 
             var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel, observations = pendingBoxes });
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload");
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
 

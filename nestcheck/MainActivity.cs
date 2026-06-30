@@ -113,6 +113,7 @@ namespace PenguinMonitor
         private bool _isBoxLocked;
         private bool _dataChangedSinceUnlock;
         private bool _suppressDataChanged;
+        private bool _suppressColonySwitch;
         // Track server observation IDs that user already confirmed locally (fallback for non-optimistic paths)
         private Dictionary<string, int> _confirmedAgainstServerObsId = new();
         private bool _highOffspringCountConfirmed;
@@ -2585,24 +2586,54 @@ namespace PenguinMonitor
                         // When colony changes, apply it
                         colonySpinner.ItemSelected += (s, e) =>
                         {
+                            if (_suppressColonySwitch) return;
                             var selectedRegion = regionSpinner.SelectedItem?.ToString() ?? "";
                             var coloniesInRegion = allColonies.Where(c => c["region_name"]?.ToString() == selectedRegion).ToList();
-                            if (e.Position < coloniesInRegion.Count)
+                            if (e.Position >= coloniesInRegion.Count) return;
+
+                            var selected = coloniesInRegion[e.Position];
+                            var newId = Convert.ToInt32(selected["colony_id"]);
+                            if (newId == _appSettings.SelectedColonyId) return;
+
+                            // Block switching while there are unsynced changes — they belong to the
+                            // current colony and must not be uploaded to a different one.
+                            int unsynced = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
+                            if (unsynced > 0)
                             {
-                                var selected = coloniesInRegion[e.Position];
-                                var newId = Convert.ToInt32(selected["colony_id"]);
-                                if (newId != _appSettings.SelectedColonyId)
-                                {
-                                    _appSettings.SelectedColonyId = newId;
-                                    _appSettings.SelectedColonyName = selected["colony_name"]?.ToString() ?? "";
-                                    _appSettings.AllBoxSetsString = selected["location_sets_string"]?.ToString() ?? "";
-                                    _appSettings.BoxSetString = "All";
-                                    CreateBoxSetsDictionary();
-                                    if (_boxNamesAndIndexes.Count > 0)
-                                        JumpToBox(_boxNamesAndIndexes.First().Key);
-                                    DrawPageLayouts();
-                                }
+                                Toast.MakeText(this, $"Sync before switching colony — {unsynced} unsynced change{(unsynced == 1 ? "" : "s")}", ToastLength.Long)?.Show();
+                                // Revert the spinner to the current colony
+                                _suppressColonySwitch = true;
+                                var curIdx = coloniesInRegion.FindIndex(c => Convert.ToInt32(c["colony_id"]) == _appSettings.SelectedColonyId);
+                                if (curIdx >= 0) colonySpinner.SetSelection(curIdx, false);
+                                _suppressColonySwitch = false;
+                                return;
                             }
+
+                            _appSettings.SelectedColonyId = newId;
+                            _appSettings.SelectedColonyName = selected["colony_name"]?.ToString() ?? "";
+                            _appSettings.AllBoxSetsString = selected["location_sets_string"]?.ToString() ?? "";
+                            _appSettings.BoxSetString = "All";
+                            DataStorageService.saveApplicationSettings(_appSettings);
+
+                            // Reset the single-colony cached state so the new colony's sync repopulates cleanly
+                            _colonyState.TodayBoxes.Clear();
+                            _colonyState.PreviousBoxes.Clear();
+                            _colonyState.TodayBiometrics.Clear();
+                            _colonyState.LastSyncedUtc = DateTime.MinValue;
+                            DataStorageService.SaveColonyState(this, _colonyState);
+
+                            CreateBoxSetsDictionary();
+                            if (_boxNamesAndIndexes.Count > 0)
+                            {
+                                var first = _boxNamesAndIndexes.First().Key;
+                                _currentBoxName = first;
+                                _currentBoxIndex = _boxNamesAndIndexes[first];
+                                _isBoxLocked = true;
+                            }
+                            DrawPageLayouts();
+
+                            // Download the new colony's data
+                            StartSync();
                         };
 
                         // Pre-select current region
