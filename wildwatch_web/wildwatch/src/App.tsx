@@ -2787,7 +2787,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
       {(totalObs > 0 || totalChips > 0) && (
         <div className="day-section">
           <h3 className="day-header-row">
-            <span className="day-stats"><DateStatsLine stats={getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, chipped:0, label:null, isFullMonitor:false, totalLocations:0 }} showDate date={date} /></span>
+            <span className="day-stats"><DateStatsLine stats={{ ...(getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, label:null, isFullMonitor:false, totalLocations:0 }), chipped: totalChips }} showDate date={date} /></span>
             <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
               Changed {changedExpanded ? '▴' : '▾'}
             </button>
@@ -2810,6 +2810,16 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               )}
             </span>
           </h3>
+          {totalChips > 0 && (
+            <div className="day-chippings">
+              {data.chippings.map((c: any) => (
+                <span key={c.pit_id} className="day-chip-item">
+                  <PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
+                  <span className="muted"> chipped in Box {c.chip_box || '?'}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="day-grid">
           {(() => {
             // DCM boxes for this date
@@ -2865,7 +2875,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                 );
               }
               // Normal row(s) — show each observation separately
-              const { obs, chips } = byBox[box];
+              const { obs } = byBox[box];
               return (
               <div key={box}>
                 {obs.map((o: any, oi: number) => {
@@ -2897,7 +2907,6 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                         <span key={`ns${k}`} className="scan no-scan">no scan</span>
                       ))}
-                      {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
                       {hasDupScan && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup scan</span>}
