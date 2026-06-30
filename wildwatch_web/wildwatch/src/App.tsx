@@ -4071,9 +4071,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, [loadColony]);
 
   useEffect(() => {
-    loadColony();
-    fetch('/api/colonies.php', { headers: { Authorization: `Bearer ${localStorage.getItem('ww_token')}` } })
-      .then(r => r.json()).then(d => setColonies(Array.isArray(d) ? d : [])).catch(() => {});
+    loadColony(); // also fetches colonies via fetchColonies()
     startPolling(() => { fetchOverview().then(ov => setStats(ov)).catch(() => {}); });
 
     // Re-sync when the app is reopened/refocused (mobile PWA resume) or network
