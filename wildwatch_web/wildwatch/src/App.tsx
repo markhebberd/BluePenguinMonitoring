@@ -2704,13 +2704,15 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
     return fm;
   }, [dates, statsCache]);
 
-  // Group dates by month, show months around current date
-  const current = new Date(date + 'T00:00:00');
+  // Group dates by month, show months around current date. With no date (e.g. a brand-new
+  // colony with no observations) fall back to today so the calendar still renders.
+  const valid = date && !isNaN(new Date(date + 'T00:00:00').getTime());
+  const current = valid ? new Date(date + 'T00:00:00') : new Date();
   const currentMonth = current.getFullYear() * 12 + current.getMonth();
 
   // All months from first to last date (inclusive, no gaps)
   const allMonths = useMemo(() => {
-    if (dates.length === 0) return [];
+    if (dates.length === 0) { const t = new Date(); return [t.getFullYear() * 12 + t.getMonth()]; } // empty colony → at least the current month
     const first = dates[0];
     const last = dates[dates.length - 1];
     const [fy, fm] = first.split('-').map(Number);
