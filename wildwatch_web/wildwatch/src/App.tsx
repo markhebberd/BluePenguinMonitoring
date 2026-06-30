@@ -684,11 +684,6 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const [flashing, setFlashing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [editCount, setEditCount] = useState(parseInt(String(obs.edit_count || '0')) || 0);
-  const trackEdit = (field: string) => async (val: any) => {
-    const result = await saveObs(field)(val);
-    if (result?.changed) setEditCount(c => c + 1);
-    return result;
-  };
   useEffect(() => {
     if (scrollTo && ref.current) {
       ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -699,82 +694,80 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   }, [highlight]);
   const obsId = obs.observation_id;
   const localObs = obs;
-  const saveObs = (field: string) => async (val: any) => {
-    if (!obsId) return;
-    const oldVal = localObs[field as keyof typeof localObs] ?? '';
-    if (String(oldVal) === String(val ?? '')) return { changed: 0 };
-    const desc = `Change ${field} from "${oldVal}" to "${val ?? ''}"${obs.observation_time_utc ? ` (${formatDate(obs.observation_time_utc)})` : ''}`;
-    const reason = prompt(`${desc}\n\nReason for change (optional):`);
-    if (reason === null) return { changed: 0 }; // cancelled
-    const result = await updateRecord(token || '', 'observations', obsId, {[field]: val}, reason || undefined);
-    if (result?.changed) { onDataChange?.(); }
-    return result;
-  };
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
-  const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
-  useEffect(() => { setLocalScans(obs.scans); }, [obs.observation_id]);
-  const [localNoScan, setLocalNoScan] = useState<number>(Number(obs.no_scan) || 0);
-  useEffect(() => { setLocalNoScan(Number(obs.no_scan) || 0); }, [obs.observation_id]);
+
+  // Edit mode is a local DRAFT — nothing is written to the server until "Done"
+  // (Cancel discards). This removes the silent last-write-wins where each field saved
+  // live, letting a second editor's stale view clobber the first's data.
+  type Draft = { adults:number; eggs:number; chicks:number; breeding_status:string; gate_status:string; notes:string; no_scan:number };
+  const [draft, setDraft] = useState<Draft|null>(null);
+  const [draftScans, setDraftScans] = useState<Scan[]>([]);
+  const setField = (f: keyof Draft, v: any) => setDraft(d => d ? { ...d, [f]: v } : d);
+  const scanKey = (s: any) => String(s.scan_id ?? s.pit_id);
+
+  const startEdit = () => {
+    setDraft({
+      adults: Number(obs.adults)||0, eggs: Number(obs.eggs)||0, chicks: Number(obs.chicks)||0,
+      breeding_status: obs.breeding_status || '', gate_status: obs.gate_status || '',
+      notes: obs.notes || '', no_scan: Number(obs.no_scan)||0,
+    });
+    setDraftScans([...obs.scans]);
+    setEditing(true);
+  };
+  const cancelEdit = () => { setEditing(false); setDraft(null); setDraftScans([]); setBirdSearch(''); };
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
         (p.peng_num === birdSearch || (p.pit_id && p.pit_id.includes(birdSearch)))
-        && !localScans.some(s => s.pit_id === p.pit_id)
+        && !draftScans.some(s => s.pit_id === p.pit_id)
       ).slice(0, 8)
     : [];
 
-  // Adding/removing a scan bumps the matching count: a bird that is a chick at the
-  // observation date (chipped as a chick < 3 months prior) adjusts #chicks; an adult
-  // (chipped as adult, or chipped > 3 months ago) adjusts #adults. Never goes below 0.
-  const adjustCountForScan = async (scan: any, delta: number) => {
-    if (!obsId || !token) return;
-    const field = isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, obs.observation_time_utc) ? 'chicks' : 'adults';
-    const current = Number((localObs as any)[field] || 0);
-    const next = Math.max(0, current + delta);
-    if (next === current) return;
-    await updateRecord(token, 'observations', obsId, { [field]: next },
-      `${delta > 0 ? '+1' : '-1'} ${field} (penguin #${scan.peng_num || scan.pit_id} ${delta > 0 ? 'added' : 'removed'})`);
-  };
-
-  const addScan = async (p: any) => {
-    if (!obsId || !token) return;
-    if (localScans.some(s => s.pit_id === p.pit_id)) return;
-    const result = await createRecord(token, 'penguin_scans', {
-      observation_id: obsId, pit_id: p.pit_id, scan_time_utc: obs.observation_time_utc
-    });
-    if (result?.id) {
-      const newScan: Scan = { scan_id: result.id, peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult };
-      setLocalScans([...localScans, newScan]);
-      await adjustCountForScan(p, 1);
-    }
+  // Adding/removing a penguin bumps the matching count in the draft (chick if chipped as
+  // a chick < 3 months before this obs, else adult); it's all committed together on Done.
+  const countField = (s: any): keyof Draft => isChickAtObsDate(s.chip_date, s.chipped_as_adult, obs.observation_time_utc) ? 'chicks' : 'adults';
+  const draftAddScan = (p: any) => {
+    if (!draft || draftScans.some(s => s.pit_id === p.pit_id)) return;
+    const f = countField(p);
+    setDraftScans([...draftScans, { peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult }]);
+    setField(f, (draft[f] || 0) + 1);
     setBirdSearch('');
-    onDataChange?.();
   };
-
-  const removeScan = async (scan: Scan) => {
-    if (!scan.scan_id || !token) return;
-    await deleteRecord(token, 'penguin_scans', scan.scan_id);
-    setLocalScans(localScans.filter(s => s.scan_id !== scan.scan_id));
-    await adjustCountForScan(scan, -1);
-    onDataChange?.();
+  const draftRemoveScan = (scan: any) => {
+    if (!draft) return;
+    const f = countField(scan);
+    setDraftScans(draftScans.filter(s => scanKey(s) !== scanKey(scan)));
+    setField(f, Math.max(0, (draft[f] || 0) - 1));
   };
+  const draftAddNoScan = () => { if (draft) setField('no_scan', (draft.no_scan || 0) + 1); };
+  const draftRemoveNoScan = () => { if (draft) setField('no_scan', Math.max(0, (draft.no_scan || 0) - 1)); };
 
-  const addNoScan = async () => {
-    if (!obsId || !token) return;
-    const next = localNoScan + 1;
-    setLocalNoScan(next); // optimistic — chip appears immediately
-    await updateRecord(token, 'observations', obsId, { no_scan: next }, '+1 no scan');
-    onDataChange?.();
-  };
-
-  const removeNoScan = async () => {
-    if (!obsId || !token || localNoScan <= 0) return;
-    const next = localNoScan - 1;
-    setLocalNoScan(next);
-    await updateRecord(token, 'observations', obsId, { no_scan: next }, '-1 no scan');
-    onDataChange?.();
+  // Commit the whole draft on Done: one observations update for changed fields, plus
+  // create/delete for added/removed scans. Nothing was written before this point.
+  const commit = async () => {
+    if (!obsId || !token || !draft) { cancelEdit(); return; }
+    const fields: Record<string, any> = {};
+    for (const f of ['adults','eggs','chicks','no_scan'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
+    for (const f of ['breeding_status','gate_status','notes'] as (keyof Draft)[]) if (((obs as any)[f]||'') !== (draft[f]||'')) fields[f] = draft[f] || null;
+    const draftKeys = new Set(draftScans.map(scanKey));
+    const toAdd = draftScans.filter(s => !s.scan_id);
+    const toRemove = obs.scans.filter((s: any) => s.scan_id && !draftKeys.has(scanKey(s)));
+    const changed = Object.keys(fields).length + toAdd.length + toRemove.length;
+    if (changed === 0) { cancelEdit(); return; }
+    const reason = prompt(`Save ${changed} change${changed===1?'':'s'} to this observation?\n\nReason (optional):`);
+    if (reason === null) return; // cancelled — stay in edit mode
+    setEditing(false);
+    try {
+      if (Object.keys(fields).length > 0) await updateRecord(token, 'observations', obsId, fields, reason || undefined);
+      for (const p of toAdd) await createRecord(token, 'penguin_scans', { observation_id: obsId, pit_id: p.pit_id, scan_time_utc: obs.observation_time_utc });
+      for (const s of toRemove) await deleteRecord(token, 'penguin_scans', s.scan_id!);
+      setEditCount(c => c + 1);
+    } finally {
+      setDraft(null); setDraftScans([]); setBirdSearch('');
+      onDataChange?.();
+    }
   };
 
   return (
@@ -783,10 +776,10 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b> <span className="muted small">{obs.monitor_filename}</span></span>}
         <span className="obs-top-right">
           {canEdit && editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
-          {canEdit && obsId && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+          {canEdit && obsId && !editing && <button className="edit-btn" onClick={startEdit}>Edit</button>}
           {editing && <>
-            <button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button>
+            <button className="edit-btn" onClick={cancelEdit}>Cancel</button>
+            <button className="edit-btn done-btn" onClick={commit}>Done</button>
             <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={async () => {
               const reason = prompt(`Delete observation from ${formatDate(obs.observation_time_utc)}?\n\nReason for deletion (optional):`);
               if (reason === null) return;
@@ -813,16 +806,16 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
       ) : (
         <>
         <div className="obs-edit-birds">
-          {[...localScans].sort(scanSortMFC).map(s => (
-            <span key={s.scan_id || s.pit_id} className="scan-removable">
+          {[...draftScans].sort(scanSortMFC).map(s => (
+            <span key={scanKey(s)} className="scan-removable">
               <PenguinMini scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
-              <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
+              <button className="remove-scan" onClick={() => draftRemoveScan(s)}>&times;</button>
             </span>
           ))}
-          {Array.from({ length: localNoScan }).map((_, k) => (
+          {Array.from({ length: draft?.no_scan || 0 }).map((_, k) => (
             <span key={`ns${k}`} className="scan-removable">
               <span className="scan no-scan">No scan</span>
-              <button className="remove-scan" onClick={removeNoScan}>&times;</button>
+              <button className="remove-scan" onClick={draftRemoveNoScan}>&times;</button>
             </span>
           ))}
           <div className="add-scan-search">
@@ -830,22 +823,22 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             {filteredAdd.length > 0 && (
               <div className="add-scan-results">
                 {filteredAdd.map((p: any) => (
-                  <div key={p.pit_id} className="add-scan-option" onClick={() => addScan(p)}>
-                    <PenguinMini scan={p} onClick={() => addScan(p)} />
+                  <div key={p.pit_id} className="add-scan-option" onClick={() => draftAddScan(p)}>
+                    <PenguinMini scan={p} onClick={() => draftAddScan(p)} />
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <button type="button" className="add-noscan-btn" onClick={addNoScan}>Add no scan</button>
+          <button type="button" className="add-noscan-btn" onClick={draftAddNoScan}>Add no scan</button>
         </div>
         <div className="obs-edit-row">
-          <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline narrow min={0} />
-          <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} inline narrow min={0} />
-          <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline narrow min={0} />
-          <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
-          <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
-          <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline multiline />
+          <label>{'\uD83D\uDC27'}</label><EditableField value={draft?.adults ?? 0} type="number" onSave={async v => { setField('adults', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
+          <label>{'\uD83E\uDD5A'}</label><EditableField value={draft?.eggs ?? 0} type="number" onSave={async v => { setField('eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
+          <label>{'\uD83D\uDC23'}</label><EditableField value={draft?.chicks ?? 0} type="number" onSave={async v => { setField('chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
+          <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Location status" />
+          <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
+          <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />
         </div>
         </>
       )}
