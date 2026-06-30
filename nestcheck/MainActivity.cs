@@ -564,11 +564,9 @@ namespace PenguinMonitor
             }
             if (added > 0)
             {
-                boxData.IsPendingUpload = true;
-                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
-                _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+                _colonyState.SaveBoxObservation(_currentBoxName, boxData); // draft until the box is locked
                 SaveToAppDataDir();
             }
 
@@ -3659,6 +3657,7 @@ namespace PenguinMonitor
                         ShowEmptyBoxDialog(() =>
                         {
                             SaveCurrentBoxData();
+                            CommitDraftForUpload();
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                             TryBackgroundUpload();
@@ -3680,6 +3679,7 @@ namespace PenguinMonitor
                                 if (serverVersion.ObservationId.HasValue)
                                     _confirmedAgainstServerObsId[_currentBoxName] = serverVersion.ObservationId.Value;
                                 SaveCurrentBoxData();
+                                CommitDraftForUpload();
                                 // Stamp the confirmed obs ID onto the pending observation
                                 var pending = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
                                 if (pending != null && serverVersion.ObservationId.HasValue)
@@ -3689,8 +3689,8 @@ namespace PenguinMonitor
                                 TryBackgroundUpload();
                             }, () =>
                             {
-                                // Restore server version — remove any pending edit for this box
-                                _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
+                                // Restore server version — discard this box's local draft/pending edit for today
+                                _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday);
                                 _dataChangedSinceUnlock = false;
                                 DrawPageLayouts();
                             });
@@ -3698,6 +3698,7 @@ namespace PenguinMonitor
                         else
                         {
                             SaveCurrentBoxData();
+                            CommitDraftForUpload();
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                             TryBackgroundUpload();
@@ -3764,7 +3765,7 @@ namespace PenguinMonitor
                         .SetMessage(hasServerData ? "Discard changes?" : "Discard data?")
                         .SetPositiveButton(hasServerData ? "Discard changes" : "Discard data", (s2, e2) =>
                         {
-                            _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && p.IsPendingUpload);
+                            _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday);
                             _isBoxLocked = true;
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
@@ -3970,6 +3971,7 @@ namespace PenguinMonitor
                 if (status.Equals("Gate up") || status.Equals("Regate"))
                 {
                     SaveCurrentBoxData();
+                    CommitDraftForUpload();
                     _isBoxLocked = true;
                     DrawPageLayouts();
                     TryBackgroundUpload();
@@ -4301,15 +4303,28 @@ namespace PenguinMonitor
             if (changed)
             {
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
-                boxData.IsPendingUpload = true;
-                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
-                // Auto-replace on server if this box was already synced
-                if (boxData.ObservationId.HasValue)
-                    boxData.ConfirmedAgainstObsId = boxData.ObservationId.Value;
+                // Draft only — not flagged for upload until the box is locked (see CommitDraftForUpload).
                 _colonyState.SaveBoxObservation(_currentBoxName, boxData);
                 SaveToAppDataDir();
             }
+        }
+
+        /// <summary>
+        /// Confirm the current box's draft for upload — called when the box is locked/finalised.
+        /// Until this runs, edits are saved locally but not counted as "pending upload" or synced.
+        /// </summary>
+        private void CommitDraftForUpload()
+        {
+            var obs = _colonyState.GetTodayForBox(_currentBoxName);
+            if (obs == null) return;
+            obs.IsPendingUpload = true;
+            obs.PendingUploadSinceUtc ??= DateTime.UtcNow;
+            // Auto-replace on server if this box was already synced
+            if (obs.ObservationId.HasValue)
+                obs.ConfirmedAgainstObsId = obs.ObservationId.Value;
+            _colonyState.SaveBoxObservation(_currentBoxName, obs);
+            SaveToAppDataDir();
         }
         private void buildScannedIdsLayout(List<ScanRecord> scans)
         {
@@ -4396,14 +4411,9 @@ namespace PenguinMonitor
                 var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
                 var noScanId = $"NOSCAN_{boxData.ScannedIds.Count(s2 => s2.BirdId.StartsWith("NOSCAN_")) + 1}";
                 boxData.ScannedIds.Add(new ScanRecord { BirdId = noScanId, Timestamp = DateTime.UtcNow });
-                boxData.IsPendingUpload = true;
-                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
-                // Auto-replace if this box was already synced
-                if (boxData.ObservationId.HasValue)
-                    boxData.ConfirmedAgainstObsId = boxData.ObservationId.Value;
-                _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+                _colonyState.SaveBoxObservation(_currentBoxName, boxData); // draft until the box is locked
                 SaveCurrentBoxData();
                 _dataChangedSinceUnlock = true;
                 DrawPageLayouts();
@@ -5627,10 +5637,9 @@ namespace PenguinMonitor
                     Accuracy = _currentLocation?.Accuracy ?? -1
                 };
                 boxData.ScannedIds.Add(scanRecord);
-                boxData.IsPendingUpload = true;
-                boxData.PendingUploadSinceUtc ??= DateTime.UtcNow;
+                boxData.WhenDataCollectedUtc = DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
-                _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+                _colonyState.SaveBoxObservation(_currentBoxName, boxData); // draft until the box is locked
                 SaveCurrentBoxData();
                 RunOnUiThread(() =>
                 {
