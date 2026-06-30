@@ -24,7 +24,7 @@ $observer = requireAuth();
 
 $pdo = getDbConnection();
 $colonyId = (int)($_GET['colony_id'] ?? 1);
-requireColonyAccess($pdo, $observer, $colonyId); // view access to this colony
+requireColonyAccess($pdo, $observer, $colonyId);
 $since = $_GET['since'] ?? null;
 
 function getTotalCounts($pdo, $colonyId) {

@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory } from './api/boxtags';
-import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId } from './api/localdb';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
+import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -4046,8 +4046,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       console.warn('syncDatabase failed; continuing with cached/API data', e);
     }
     try {
-      const [tags, ov] = await Promise.all([fetchBoxTags(), fetchOverview()]);
+      const [tags, ov, cols] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchColonies()]);
       setBoxTags(tags); setStats(ov);
+      if (Array.isArray(cols) && cols.length > 0) setColonies(cols);
     } catch (e) {
       console.warn('overview/tags fetch failed', e);
     } finally {

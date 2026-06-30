@@ -1305,6 +1305,8 @@ namespace PenguinMonitor
                     if (server.scans != null)
                         foreach (var scan in server.scans)
                             serverObs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                    for (int ns = 0; ns < server.no_scan; ns++)
+                        serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                 }
 
                 var local = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
@@ -1339,6 +1341,8 @@ namespace PenguinMonitor
                             if (server.scans != null)
                                 foreach (var scan in server.scans)
                                     restored.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                            for (int ns = 0; ns < server.no_scan; ns++)
+                                restored.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                             restored.IsPendingUpload = false;
                             _colonyState.TodayBoxes[boxName] = restored;
                         }
@@ -2117,8 +2121,7 @@ namespace PenguinMonitor
             bool hasNoScan = thisBoxData != null && thisBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"));
             if (hasNoScan && !selected)
             {
-                var currentBg = boxOverviewCard.Background as Android.Graphics.Drawables.GradientDrawable;
-                currentBg?.SetColor(SCAN_CHIPPED_TODAY_BG);
+                ((Android.Graphics.Drawables.GradientDrawable)boxOverviewCard.Background).SetColor(SCAN_CHIPPED_TODAY_BG);
             }
 
             var title = new TextView(this)

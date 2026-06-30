@@ -30,6 +30,10 @@ export async function fetchServerStats() {
   return checkAuth(await fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
+export async function fetchColonies() {
+  return checkAuth(await fetch('/api/colonies.php', { headers: authHeaders() })).json();
+}
+
 export async function fetchTimeline() {
   return (await fetch(`/api/dashboard.php?view=timeline&${colonyQS()}`, { headers: authHeaders() })).json();
 }

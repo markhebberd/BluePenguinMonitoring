@@ -719,6 +719,7 @@ namespace PenguinMonitor.Services
             public int adults { get; set; }
             public int eggs { get; set; }
             public int chicks { get; set; }
+            public int no_scan { get; set; }
             public string? breeding_status { get; set; }
             public string? gate_status { get; set; }
             public string? notes { get; set; }
