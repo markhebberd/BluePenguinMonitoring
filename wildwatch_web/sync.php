@@ -20,7 +20,7 @@ $observer = authenticate($pdo);
 if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
 
 $action = $_GET['action'] ?? '';
-$colonyId = 1;
+$colonyId = (int)($_GET['colony_id'] ?? 1);
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === '') {
     requireColonyAccess($pdo, $observer, $colonyId);        // view
