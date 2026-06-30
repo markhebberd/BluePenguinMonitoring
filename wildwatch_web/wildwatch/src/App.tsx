@@ -821,7 +821,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           ))}
           {Array.from({ length: localNoScan }).map((_, k) => (
             <span key={`ns${k}`} className="scan-removable">
-              <span className="scan no-scan">no scan</span>
+              <span className="scan no-scan">No scan</span>
               <button className="remove-scan" onClick={removeNoScan}>&times;</button>
             </span>
           ))}
@@ -837,7 +837,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
               </div>
             )}
           </div>
-          <button type="button" className="add-noscan-btn" onClick={addNoScan}>add no scan</button>
+          <button type="button" className="add-noscan-btn" onClick={addNoScan}>Add no scan</button>
         </div>
         <div className="obs-edit-row">
           <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline narrow min={0} />
@@ -855,7 +855,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
           ))}
           {Array.from({ length: Number(obs.no_scan) || 0 }).map((_, k) => (
-            <span key={`ns${k}`} className="scan no-scan">no scan</span>
+            <span key={`ns${k}`} className="scan no-scan">No scan</span>
           ))}
         </div>
       )}
@@ -2935,7 +2935,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                         </span>
                       ))}
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
-                        <span key={`ns${k}`} className="scan no-scan">no scan</span>
+                        <span key={`ns${k}`} className="scan no-scan">No scan</span>
                       ))}
                       {oi === 0 && chips.map((c: any) => (
                         <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
