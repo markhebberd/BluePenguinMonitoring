@@ -398,12 +398,18 @@ function navClick(e: React.MouseEvent, action: () => void) {
 function useDateTooltip() {
   const [tip, setTip] = useState<{ date: string; x: number; y: number } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const autoHideRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const show = useCallback((date: string, e: React.MouseEvent) => {
     clearTimeout(timerRef.current);
+    clearTimeout(autoHideRef.current);
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    timerRef.current = setTimeout(() => setTip({ date, x: rect.left, y: rect.bottom + 4 }), 350);
+    timerRef.current = setTimeout(() => {
+      setTip({ date, x: rect.left, y: rect.bottom + 4 });
+      // Auto-dismiss after 5s even if the pointer stays on the day.
+      autoHideRef.current = setTimeout(() => setTip(null), 5000);
+    }, 350);
   }, []);
-  const hide = useCallback(() => { clearTimeout(timerRef.current); setTip(null); }, []);
+  const hide = useCallback(() => { clearTimeout(timerRef.current); clearTimeout(autoHideRef.current); setTip(null); }, []);
   return { tip, show, hide };
 }
 
