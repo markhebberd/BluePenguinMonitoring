@@ -3088,6 +3088,127 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   );
 }
 
+/** Add a new penguin chipped in a given box: creates the penguin, its chip (17-char PIT),
+ *  and a biometric record (matching nestcheck's biometric fields). */
+function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose, onAdded }: {
+  token: string; chipBox: string; defaultChipBy: string; allPenguins: any[];
+  onClose: () => void; onAdded: (pengNum: string) => void;
+}) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+  const [date, setDate] = useState(today);
+  const [pit, setPit] = useState('');
+  const [box, setBox] = useState(chipBox);
+  const [chipBy, setChipBy] = useState(defaultChipBy);
+  const [isAdult, setIsAdult] = useState(true);
+  const [weight, setWeight] = useState('');
+  const [flipper, setFlipper] = useState('');
+  const [observedSex, setObservedSex] = useState('');
+  const [moulting, setMoulting] = useState(false);
+  const [ticks, setTicks] = useState(false);
+  const [dead, setDead] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const pitNorm = pit.toUpperCase().trim();
+  const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
+  const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
+
+  const save = async () => {
+    setError('');
+    if (!date) { setError('Date required'); return; }
+    if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
+    if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
+    if (!box.trim()) { setError('Chip box required'); return; }
+    setSaving(true);
+    try {
+      const pengRes = await createRecord(token, 'penguins', {
+        initial_chip_date: date, chip_date: date,
+        chipped_as_adult: isAdult ? 1 : 0, life_stage: isAdult ? 'Adult' : 'Chick',
+      });
+      if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
+      const pengNum = pengRes.peng_num;
+
+      const chipRes = await createRecord(token, 'penguin_chips', {
+        pit_id: pitNorm, peng_num: pengNum, chip_date: date,
+        chip_box: box.trim(), chip_by: chipBy.trim() || null, is_active: 1,
+      });
+      if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + ` (penguin #${pengNum} was created)`); setSaving(false); return; }
+
+      const bio: Record<string, any> = {
+        peng_num: pengNum, observation_date: date,
+        observed_sex: observedSex || null,
+        is_moulting: moulting ? 1 : 0, condition_ticks: ticks ? 1 : 0, condition_dead: dead ? 1 : 0,
+        notes: notes.trim() || null,
+      };
+      if (weight.trim()) bio.weight = parseFloat(weight);
+      if (flipper.trim()) bio.right_flipper_length = parseFloat(flipper);
+      await createRecord(token, 'penguin_biometric_data', bio);
+
+      onAdded(pengNum);
+    } catch (e: any) {
+      setError('Error: ' + e.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="login-page" onClick={onClose}>
+      <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
+        <h2>Add penguin · Box {chipBox}</h2>
+        <div className="app-row">
+          <div className="app-field"><label>Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+          <div className="app-field"><label>Chip box</label>
+            <input type="text" value={box} onChange={e => setBox(e.target.value)} /></div>
+        </div>
+        <div className="app-field"><label>PIT id (2 letters + 15 digits)</label>
+          <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
+            style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
+            onChange={e => setPit(e.target.value)} /></div>
+        {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
+        {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
+        <div className="app-row">
+          <div className="app-field"><label>Life stage</label>
+            <div className="app-toggle">
+              <button type="button" className={isAdult ? 'active' : ''} onClick={() => setIsAdult(true)}>Adult</button>
+              <button type="button" className={!isAdult ? 'active' : ''} onClick={() => setIsAdult(false)}>Chick</button>
+            </div></div>
+          <div className="app-field"><label>Chipped by</label>
+            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials" /></div>
+        </div>
+        <div className="app-row">
+          <div className="app-field"><label>Weight (g)</label>
+            <input type="number" value={weight} onChange={e => setWeight(e.target.value)} placeholder="—" /></div>
+          <div className="app-field"><label>Flipper (mm)</label>
+            <input type="number" value={flipper} onChange={e => setFlipper(e.target.value)} placeholder="—" /></div>
+        </div>
+        <div className="app-field"><label>Sex guess</label>
+          <select value={observedSex} onChange={e => setObservedSex(e.target.value)}>
+            <option value="">—</option>
+            <option value="PM">Probably male</option>
+            <option value="MM">Maybe male</option>
+            <option value="U">Unsure</option>
+            <option value="MF">Maybe female</option>
+            <option value="PF">Probably female</option>
+          </select></div>
+        <div className="app-checks">
+          <label><input type="checkbox" checked={moulting} onChange={e => setMoulting(e.target.checked)} /> Moulting</label>
+          <label><input type="checkbox" checked={ticks} onChange={e => setTicks(e.target.checked)} /> Ticks</label>
+          <label><input type="checkbox" checked={dead} onChange={e => setDead(e.target.checked)} /> Dead</label>
+        </div>
+        <div className="app-field"><label>Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
+        {error && <div className="login-error">{error}</div>}
+        <div className="app-actions">
+          <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup}>{saving ? 'Saving…' : 'Add penguin'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highlightObs, scrollToObs, token, canEdit, allPenguins, onDataChange }: any) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -3820,6 +3941,7 @@ function SameGenderConflicts({ token }: { token: string }) {
 
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [addPenguinBox, setAddPenguinBox] = useState<string | null>(null);
   const initial = parseUrl();
   const [boxTags, setBoxTags] = useState<Record<string, BoxTag>>({});
   const [stats, setStats] = useState<any>(null);
@@ -4338,7 +4460,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
                 {(() => {
                   const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
-                  return chipped.length > 0 && (
+                  const canEdit = userRole !== 'viewer';
+                  if (chipped.length === 0 && !canEdit) return null;
+                  return (
                   <div className="chipped-here">
                     <div className="muted">Chipped in this box: {chipped.length}</div>
                     <div className="bird-row">
@@ -4348,6 +4472,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                           <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                       ))}
+                      {canEdit && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => setAddPenguinBox(selectedBox)}>+ 🐧</button>}
                     </div>
                   </div>
                   );
@@ -4426,6 +4551,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         )}
       </div>
       {passwordDialog}
+      {addPenguinBox !== null && (
+        <AddPenguinDialog
+          token={token}
+          chipBox={addPenguinBox}
+          defaultChipBy={userName.split(/\s+/).map(s => s[0] || '').join('').toUpperCase()}
+          allPenguins={allPenguins}
+          onClose={() => setAddPenguinBox(null)}
+          onAdded={(pengNum) => { setAddPenguinBox(null); refreshStats(); openBird(pengNum); }}
+        />
+      )}
     </div>
   );
 }
