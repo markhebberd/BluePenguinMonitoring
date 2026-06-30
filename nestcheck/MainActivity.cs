@@ -3275,10 +3275,9 @@ namespace PenguinMonitor
                 sex = pd.Sex?.ToUpper() ?? "";
                 isChick = pd.ChipAs != "Adult" && pd.ChipDate > DateTime.MinValue && (DateTime.UtcNow - pd.ChipDate).TotalDays < 90;
                 var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
-                var sexOrSize = !string.IsNullOrEmpty(pd.ChickSizeCode)
-                    ? (sex != "" ? $"{pd.ChickSizeCode}{sex[0]}" : pd.ChickSizeCode)
-                    : (sex == "M" ? "♂" : sex == "F" ? "♀" : "");
-                label = $"{num} {sexOrSize} {pd.ScannedId}".Trim();
+                // Sex is shown via the badge colour; chick size code (if any) is the only stage text.
+                var size = pd.ChickSizeCode ?? "";
+                label = string.Join(" ", new[] { num, size, pd.ScannedId }.Where(s => !string.IsNullOrEmpty(s)));
             }
 
             return (label, sex, isChick, pd);
@@ -3297,15 +3296,18 @@ namespace PenguinMonitor
                 nsb.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 return nsb;
             }
-            var (label, sex, isChick, _) = LookupPenguinLabel(birdId);
+            var (label, sex, isChick, pd) = LookupPenguinLabel(birdId);
 
             var badge = new TextView(this) { Text = label, TextSize = textSize };
             var padH = (int)(8 * textSize / 10);
             var padV = (int)(3 * textSize / 10);
-            badge.SetPadding(padH, padV, padH, padV);
+            // Chipped-as-chick (includes returnees) gets a yellow strip on the right 15%, like wildwatch.
+            bool chippedAsChick = pd != null && pd.ChipAs != "Adult";
+            badge.SetPadding(padH, padV, chippedAsChick ? padH * 3 : padH, padV);
 
-            Color bg = isChick ? SCAN_CHICK_BG : sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
-            badge.Background = _uiFactory.CreateRoundedBackground(bg, 4);
+            Color bg = sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
+            float radiusPx = 4 * (Resources?.DisplayMetrics?.Density ?? 2f);
+            badge.Background = new BadgeBackground(bg, chippedAsChick, SCAN_CHICK_BG, radiusPx);
             badge.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
             badge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
 
@@ -3316,6 +3318,43 @@ namespace PenguinMonitor
             }
 
             return badge;
+        }
+
+        // Badge background: rounded base colour with an optional yellow strip on the right 15% (chipped-as-chick).
+        private class BadgeBackground : Android.Graphics.Drawables.Drawable
+        {
+            private readonly Color _baseColor;
+            private readonly Color _stripColor;
+            private readonly bool _chick;
+            private readonly float _radius;
+            private readonly Paint _paint = new Paint(PaintFlags.AntiAlias);
+
+            public BadgeBackground(Color baseColor, bool chick, Color stripColor, float radius)
+            {
+                _baseColor = baseColor; _chick = chick; _stripColor = stripColor; _radius = radius;
+            }
+
+            public override void Draw(Canvas canvas)
+            {
+                var b = Bounds;
+                var rect = new RectF(b.Left, b.Top, b.Right, b.Bottom);
+                _paint.Color = _baseColor;
+                canvas.DrawRoundRect(rect, _radius, _radius, _paint);
+                if (_chick && b.Width() > 0)
+                {
+                    canvas.Save();
+                    var clip = new Path();
+                    clip.AddRoundRect(rect, _radius, _radius, Path.Direction.Cw);
+                    canvas.ClipPath(clip);
+                    _paint.Color = _stripColor;
+                    canvas.DrawRect(b.Left + b.Width() * 0.85f, b.Top, b.Right, b.Bottom, _paint);
+                    canvas.Restore();
+                }
+            }
+
+            public override void SetAlpha(int alpha) { }
+            public override void SetColorFilter(ColorFilter? colorFilter) { }
+            public override int Opacity => (int)Format.Translucent;
         }
 
         private static readonly Color SCAN_MALE_BG = Color.ParseColor("#E6F3FF");
@@ -4433,10 +4472,6 @@ namespace PenguinMonitor
             layoutParams.SetMargins(0, 2, 0, 2);
             scanLayout.LayoutParameters = layoutParams;
 
-            // Determine background color based on penguin sex data
-            Color backgroundColor;
-            string additionalInfo = "";
-            
             // Handle "No scan" placeholder entries
             if (scan.BirdId.StartsWith("NOSCAN_"))
             {
@@ -4448,61 +4483,15 @@ namespace PenguinMonitor
                 return scanLayout;
             }
 
-            var (label, sex, isChick, penguinData) = LookupPenguinLabel(scan.BirdId);
+            var (_, _, _, penguinData) = LookupPenguinLabel(scan.BirdId);
 
-            if (penguinData != null)
-            {
-                bool chippedToday = penguinData.ChipDate > DateTime.MinValue && ToNzTime(penguinData.ChipDate).Date == NzToday;
-                bool isReturning = penguinData.LastKnownLifeStage == LifeStage.Returnee ||
-                                   (!string.IsNullOrEmpty(penguinData.ChipAs) &&
-                                    penguinData.ChipAs.IndexOf("chick", StringComparison.OrdinalIgnoreCase) >= 0);
-                bool isRecentChick = penguinData.LastKnownLifeStage == LifeStage.Chick &&
-                                     !(penguinData.ChipDate > NzToday.AddYears(-20) &&
-                                       NzToday > penguinData.ChipDate.AddMonths(3));
-
-                if (chippedToday)
-                {
-                    backgroundColor = SCAN_CHIPPED_TODAY_BG;
-                    additionalInfo = " 🆕";
-                }
-                else if (isRecentChick)
-                {
-                    backgroundColor = UIFactory.CHICK_BACKGROUND;
-                    additionalInfo = isReturning ? " 🐣🔄" : " 🐣";
-                }
-                else if (sex == "F")
-                {
-                    backgroundColor = UIFactory.FEMALE_BACKGROUND;
-                    additionalInfo = isReturning ? " 🔄" : "";
-                }
-                else if (sex == "M")
-                {
-                    backgroundColor = UIFactory.MALE_BACKGROUND;
-                    additionalInfo = isReturning ? " 🔄" : "";
-                }
-                else
-                {
-                    backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
-                    additionalInfo = isReturning ? " 🔄" : "";
-                }
-            }
-            else
-            {
-                backgroundColor = index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD;
-            }
-
-            scanLayout.Background = _uiFactory.CreateRoundedBackground(backgroundColor, 4);
+            // Neutral alternating row — the pengMiniView badge carries the colour now (no whole-line colour)
+            scanLayout.Background = _uiFactory.CreateRoundedBackground(index % 2 == 0 ? UIFactory.SCAN_ROW_EVEN : UIFactory.SCAN_ROW_ODD, 4);
             scanLayout.SetPadding(12, 8, 12, 8);
+            scanLayout.SetGravity(GravityFlags.CenterVertical);
 
-            var scanText = new TextView(this)
-            {
-                Text = $"• {label}{additionalInfo} at {ToNzTime(scan.Timestamp):HH:mm}",
-                TextSize = 14
-            };
-            scanText.SetTextColor(UIFactory.TEXT_PRIMARY);
-            scanText.Clickable = true;
-            // Tapping the bird opens it on the website directly (no modal)
-            scanText.Click += (s, e) =>
+            // pengMiniView badge — tap opens the bird on the website
+            var badge = CreateScanBadge(scan.BirdId, () =>
             {
                 var pn = penguinData?.PengNum ?? "";
                 if (!string.IsNullOrEmpty(pn))
@@ -4510,10 +4499,20 @@ namespace PenguinMonitor
                         Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pn}")));
                 else
                     Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
+            }, textSize: 14);
+            scanLayout.AddView(badge);
+
+            // Time (with a 🆕 marker for birds chipped today)
+            bool chippedToday = penguinData != null && penguinData.ChipDate > DateTime.MinValue && ToNzTime(penguinData.ChipDate).Date == NzToday;
+            var timeText = new TextView(this)
+            {
+                Text = (chippedToday ? "🆕 " : "") + $"{ToNzTime(scan.Timestamp):HH:mm}",
+                TextSize = 12
             };
-            var textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-            scanText.LayoutParameters = textParams;
-            scanLayout.AddView(scanText);
+            timeText.SetTextColor(UIFactory.TEXT_SECONDARY);
+            timeText.SetPadding(10, 0, 10, 0);
+            timeText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            scanLayout.AddView(timeText);
 
             // Detail button — opens the biometric detail directly
             var detailButton = new Button(this)
