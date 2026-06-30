@@ -109,7 +109,8 @@
       "Bash(grep -nA15 \"function requireColonyAccess\" config.php)",
       "Bash(curl -sS \"https://wildwatch.co.nz/api/colonies.php\" --max-time 20)",
       "Bash(grep -n 'colony\\\\|requireAuth\\\\|requireReadAuth\\\\|$observer' events.php)",
-      "Bash(grep -n \"const loadColony = useCallback\\\\|loadColony\\(\\);\\\\|startPolling\\(\\\\|const \\\\[loading, setLoading\\\\]\\\\|const \\\\[serverStats\\\\|import { syncDatabase\" App.tsx)"
+      "Bash(grep -n \"const loadColony = useCallback\\\\|loadColony\\(\\);\\\\|startPolling\\(\\\\|const \\\\[loading, setLoading\\\\]\\\\|const \\\\[serverStats\\\\|import { syncDatabase\" App.tsx)",
+      "Bash(grep -n \"\\\\[dead, setDead\\\\]\\\\|useState.*[Dd]ead\\\\|setDead\\\\|>Dead<\\\\|Dead</label\\\\|checked={dead}\\\\|const \\\\[moulting\" App.tsx)"
     ],
     "additionalDirectories": [
       "/Users/mark/src/penguins/wildwatch_web/wildwatch/src/api"
