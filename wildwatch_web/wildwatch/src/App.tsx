@@ -3159,9 +3159,9 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
         <h2>Add penguin · Box {chipBox}</h2>
         <div className="app-row">
-          <div className="app-field"><label>Date</label>
+          <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div className="app-field"><label>Chip box</label>
+          <div className="app-field"><label className="req">Chip box</label>
             <input type="text" value={box} onChange={e => setBox(e.target.value)} /></div>
         </div>
         <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
