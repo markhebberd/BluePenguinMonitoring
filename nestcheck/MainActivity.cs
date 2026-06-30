@@ -3346,8 +3346,8 @@ namespace PenguinMonitor
                 if (_chick && b.Width() > 0)
                 {
                     canvas.Save();
-                    var clip = new Path();
-                    clip.AddRoundRect(rect, _radius, _radius, Path.Direction.Cw);
+                    var clip = new Android.Graphics.Path();
+                    clip.AddRoundRect(rect, _radius, _radius, Android.Graphics.Path.Direction.Cw);
                     canvas.ClipPath(clip);
                     _paint.Color = _stripColor;
                     canvas.DrawRect(b.Left + b.Width() * 0.85f, b.Top, b.Right, b.Bottom, _paint);
@@ -3357,7 +3357,7 @@ namespace PenguinMonitor
 
             public override void SetAlpha(int alpha) { }
             public override void SetColorFilter(ColorFilter? colorFilter) { }
-            public override int Opacity => (int)Format.Translucent;
+            public override int Opacity => (int)Android.Graphics.Format.Translucent;
         }
 
         private static readonly Color SCAN_MALE_BG = Color.ParseColor("#E6F3FF");
