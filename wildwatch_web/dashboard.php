@@ -5,10 +5,11 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
 header('Cache-Control: public, max-age=300');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
-requireReadAuth();
+$observer = requireReadAuth();
 $pdo = getDbConnection();
 $view = $_GET['view'] ?? 'overview';
 $colonyId = 1;
+requireColonyAccess($pdo, $observer, $colonyId); // view access (global API key / admin = all)
 switch ($view) {
     case 'timeline': handleTimeline($pdo, $colonyId); break;
     case 'box': handleBox($pdo, $colonyId, $_GET['name'] ?? ''); break;

@@ -23,9 +23,11 @@ $colonyId = 1;
 
 // GETs accept API key (legacy app), writes require Bearer
 if ($method === 'GET') {
-    requireReadAuth($pdo);
+    $observer = requireReadAuth($pdo);
+    requireColonyAccess($pdo, $observer, $colonyId);          // view
 } else {
-    requireAuth($pdo);
+    $observer = requireAuth($pdo);
+    requireColonyAccess($pdo, $observer, $colonyId, true);    // edit
 }
 
 switch ($method) {

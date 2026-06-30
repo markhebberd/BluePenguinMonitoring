@@ -1,10 +1,11 @@
 <?php
 require_once 'config.php';
 setHeaders();
-requireAuth();
+$observer = requireAuth();
 
 $pdo = getDbConnection();
 $colonyId = $_GET['colony'] ?? 1;
+requireColonyAccess($pdo, $observer, $colonyId); // view access to this colony
 $report = $_GET['report'] ?? '';
 
 switch ($report) {

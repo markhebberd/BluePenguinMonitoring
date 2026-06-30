@@ -1,9 +1,10 @@
 <?php
 require_once 'config.php';
 setHeaders();
-requireAuth();
+$observer = requireAuth();
 
 $pdo = getDbConnection();
+requireColonyAccess($pdo, $observer, 1); // view access (day view is colony-1 in the single-colony app)
 $date = $_GET['date'] ?? '';
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     echo json_encode(['error' => 'date required (YYYY-MM-DD)']);

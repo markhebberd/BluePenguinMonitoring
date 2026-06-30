@@ -13,10 +13,11 @@
  */
 require_once 'config.php';
 setHeaders();
-requireAuth();
+$observer = requireAuth();
 
 $pdo = getDbConnection();
 $colonyId = $_GET['colony_id'] ?? 1;
+requireColonyAccess($pdo, $observer, $colonyId); // view access to this colony
 $locationName = $_GET['location'] ?? null;
 $summary = isset($_GET['summary']);
 

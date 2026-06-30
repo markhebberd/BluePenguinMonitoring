@@ -23,8 +23,10 @@ $action = $_GET['action'] ?? '';
 $colonyId = 1;
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === '') {
+    requireColonyAccess($pdo, $observer, $colonyId);        // view
     handleDownload($pdo, $colonyId, $observer);
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($action === 'upload' || $action === 'confirm')) {
+    requireColonyAccess($pdo, $observer, $colonyId, true);  // edit
     handleUpload($pdo, $colonyId, $observer);
 } else {
     echo json_encode(['error' => 'Unknown action']);

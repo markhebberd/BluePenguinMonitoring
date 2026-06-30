@@ -125,10 +125,39 @@ switch ($action) {
     case 'update':
     case 'delete':
         if (!$canWrite) { http_response_code(403); echo json_encode(['error'=>'Editors only']); break; }
+        requireWriteColony($pdo, $observer, $table, $id, json_decode(file_get_contents('php://input'), true) ?: []);
         if ($action === 'create') handleCreate($pdo, $table, $pk, $observer);
         elseif ($action === 'update') handleUpdate($pdo, $table, $pk, $id, $observer);
         else handleDelete($pdo, $table, $pk, $id, $observer);
         break;
+}
+
+/**
+ * Resolve the colony a CRUD write targets and require edit access to it. Colony-scoped
+ * tables only (observations/scans/biometrics via the observation's location, and
+ * observation_locations directly). Global tables (penguins, penguin_chips) aren't
+ * colony-scoped, so they keep the global-role gate already applied above.
+ */
+function requireWriteColony($pdo, $observer, $table, $id, $input) {
+    $col = function($sql, $arg) use ($pdo) { $s = $pdo->prepare($sql); $s->execute([$arg]); return $s->fetchColumn(); };
+    $colonyId = null;
+    if ($table === 'observation_locations') {
+        $colonyId = $id ? $col("SELECT colony_id FROM observation_locations WHERE location_id = ?", $id)
+                        : ($input['colony_id'] ?? null);
+    } elseif ($table === 'observations') {
+        $locId = $id ? $col("SELECT location_id FROM observations WHERE observation_id = ?", $id)
+                     : ($input['location_id'] ?? null);
+        if ($locId) $colonyId = $col("SELECT colony_id FROM observation_locations WHERE location_id = ?", $locId);
+    } elseif ($table === 'penguin_scans' || $table === 'penguin_biometric_data') {
+        $pk = $table === 'penguin_scans' ? 'scan_id' : 'biometric_id';
+        $obsId = $id ? $col("SELECT observation_id FROM $table WHERE $pk = ?", $id)
+                     : ($input['observation_id'] ?? null);
+        if ($obsId) {
+            $locId = $col("SELECT location_id FROM observations WHERE observation_id = ?", $obsId);
+            if ($locId) $colonyId = $col("SELECT colony_id FROM observation_locations WHERE location_id = ?", $locId);
+        }
+    }
+    if ($colonyId !== null) requireColonyAccess($pdo, $observer, (int)$colonyId, true);
 }
 
 function handleLogin($pdo) {
