@@ -824,12 +824,14 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         </div>
         </>
       )}
-      {!editing && (obs.scans.length>0 || obs.no_scan) && (
+      {!editing && (obs.scans.length>0 || Number(obs.no_scan) > 0) && (
         <div className="scans">
           {[...obs.scans].sort(scanSortMFC).map((s,j) => (
             <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
           ))}
-          {obs.no_scan && <span className="scan no-scan">no scan</span>}
+          {Array.from({ length: Number(obs.no_scan) || 0 }).map((_, k) => (
+            <span key={`ns${k}`} className="scan no-scan" title="Seen, not scanned">{'🐧'}</span>
+          ))}
         </div>
       )}
       {showHistory && token && obsId && <HistoryPanel token={token} table="observations" id={obsId} onClose={() => setShowHistory(false)} />}
@@ -2439,7 +2441,6 @@ function ChickSexBothReturnedChart() {
           })}
         </tbody>
       </table>
-      <p className="muted" style={{marginTop:'0.5em'}}>Which sibling was male — the bigger or smaller chick?</p>
       {bothReturnedTotal > 0 && <p className="muted" style={{marginTop:'0.5em'}}>{bothReturnedTotal} nest{bothReturnedTotal !== 1 ? 's' : ''} total where both chicks returned from a single nest.</p>}
     </div>
   );
@@ -2893,7 +2894,9 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                           <PenguinMini scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />
                         </span>
                       ))}
-                      {o.no_scan && <span className="scan no-scan">no scan</span>}
+                      {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
+                        <span key={`ns${k}`} className="scan no-scan" title="Seen, not scanned">{'🐧'}</span>
+                      ))}
                       {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
