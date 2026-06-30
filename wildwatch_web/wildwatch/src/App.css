@@ -235,6 +235,10 @@ h3.collapsible:hover { color:#1a5276; }
 .report-card { background:#fff; border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,.08); margin-bottom:20px; }
 .report-card h3 { color:#1a5276; margin-bottom:4px; }
 .report-chart { width:100%; height:auto; max-height:450px; }
+.guess-rank-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+.guess-rank-table th { text-align:left; color:#888; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #e8ecef; padding:4px 8px; }
+.guess-rank-table td { padding:5px 8px; border-bottom:1px solid #f0f0f0; }
+.guess-rank-table th:not(:first-child), .guess-rank-table td:not(:first-child) { text-align:center; width:60px; }
 
 /* Day calendar */
 .day-calendar { display:flex; overflow-x:auto; overscroll-behavior-x:contain; gap:0; padding:12px 20px; background:#fff; border-bottom:1px solid #e8ecef; }

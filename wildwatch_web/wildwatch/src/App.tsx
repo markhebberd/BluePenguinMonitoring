@@ -500,7 +500,7 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   // Unsexed bird: surface biometric sex guesses (U = unconfirmed). A single guess merges
   // onto the size label with no count/space, sharing one U — "LCU"+M → "LCUM", "LC"+M → "LCUM".
   // Repeated guesses or guesses for both sexes use numbered tokens, most-guessed first,
-  // space-separated — e.g. "LC 2UM", "1UM 1UF".
+  // hyphen-joined so the guess data reads as one unit — e.g. "BC-2UM", "1UM-1UF".
   const guess = sex ? { m: 0, f: 0 } : observedSexGuess(scan.peng_num);
   const guessSexes = [{ c: guess.m, s: 'M' }, { c: guess.f, s: 'F' }].filter(g => g.c > 0).sort((a, b) => b.c - a.c);
   let mid: string;
@@ -511,7 +511,7 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   } else {
     // tokens carry their own U, so drop the size label's redundant returned-unsexed U ("BCU" → "BC")
     const base = sizeLabel.endsWith('U') ? sizeLabel.slice(0, -1) : sizeLabel;
-    mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join(' ')].filter(Boolean).join(' ');
+    mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   return (
@@ -2040,6 +2040,40 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 }
 
 const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4', '#795548', '#607D8B'];
+
+/** Unsexed penguins ranked by how many biometric sex guesses they have — surfaces birds
+ *  worth confirming. Tie-break by female-leaning count then peng_num. */
+function UnsexedByGuessesReport() {
+  const allPenguins = useAllPenguins();
+  const rows = useMemo(() => (allPenguins || [])
+    .filter((p: any) => !(p.sex || '').trim())
+    .map((p: any) => { const g = observedSexGuess(p.peng_num); return { p, m: g.m, f: g.f, total: g.m + g.f }; })
+    .filter((r: any) => r.total > 0)
+    .sort((a: any, b: any) => b.total - a.total || b.f - a.f || (parseInt(a.p.peng_num) || 0) - (parseInt(b.p.peng_num) || 0)),
+  [allPenguins]);
+
+  return (
+    <div className="report-card">
+      <h3>Unsexed penguins by sex guesses</h3>
+      <p className="muted">Birds with no assigned sex, ordered by number of biometric sex guesses ({rows.length})</p>
+      {rows.length === 0 ? <p className="muted">No data available</p> : (
+        <table className="guess-rank-table">
+          <thead><tr><th>Penguin</th><th>Guesses</th><th>{'♂'}</th><th>{'♀'}</th></tr></thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={r.p.peng_num}>
+                <td><PenguinMini scan={r.p} onClick={() => {}} navigateDirectly /></td>
+                <td>{r.total}</td>
+                <td>{r.m || ''}</td>
+                <td>{r.f || ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 function DistinctAdultsChart() {
   const data = useDistinctAdults();
@@ -4376,6 +4410,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
+          <UnsexedByGuessesReport />
           <DistinctAdultsChart />
           <PeakAdultsChart />
           <EggArrivalChart />
