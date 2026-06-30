@@ -242,6 +242,9 @@ h3.collapsible:hover { color:#1a5276; }
 
 /* Day calendar */
 .day-calendar { display:flex; overflow-x:auto; overscroll-behavior-x:contain; gap:0; padding:12px 20px; background:#fff; border-bottom:1px solid #e8ecef; }
+/* Right-align months: auto margin pushes them right when they fit, and collapses to 0
+   (so scrolling still works) when there are enough months to overflow. */
+.day-calendar > :first-child { margin-left:auto; }
 .cal-month { flex-shrink:0; padding:0 6px; border-right:1px solid #f0f0f0; }
 .cal-month:last-child { border-right:none; }
 .cal-month.current { background:#f8fbff; }
