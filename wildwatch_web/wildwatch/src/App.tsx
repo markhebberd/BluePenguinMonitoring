@@ -3120,6 +3120,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     if (!box.trim()) { setError('Chip box required'); return; }
+    if (!chipBy.trim()) { setError('Chipped by is required'); return; }
     if (!isAdult && !chickSize) { setError('Select chick size (LC / BC / SC)'); return; }
     setSaving(true);
     try {
@@ -3163,26 +3164,27 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
           <div className="app-field"><label>Chip box</label>
             <input type="text" value={box} onChange={e => setBox(e.target.value)} /></div>
         </div>
-        <div className="app-field"><label>PIT id (2 letters + 15 digits)</label>
+        <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
           <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
             style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
             onChange={e => setPit(e.target.value)} /></div>
         {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
         <div className="app-row">
-          <div className="app-field"><label>Life stage</label>
+          <div className="app-field"><label className="req">Life stage</label>
             <div className="app-toggle">
               <button type="button" className={isAdult ? 'active' : ''} onClick={() => setIsAdult(true)}>Adult</button>
               <button type="button" className={!isAdult ? 'active' : ''} onClick={() => setIsAdult(false)}>Chick</button>
             </div></div>
-          <div className="app-field"><label>Chipped by</label>
-            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials" /></div>
+          <div className="app-field"><label className="req">Chipped by</label>
+            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials"
+              style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
         </div>
         {!isAdult && (
           <div className="app-field"><label>Chick size</label>
             <div className="app-toggle">
               {[['LC', 'Little'], ['BC', 'Big'], ['SC', 'Single']].map(([code, label]) => (
-                <button key={code} type="button" className={chickSize === code ? 'active' : ''} onClick={() => setChickSize(code)}>{code} · {label}</button>
+                <button key={code} type="button" className={chickSize === code ? 'active' : ''} onClick={() => setChickSize(chickSize === code ? '' : code)}>{code} · {label}</button>
               ))}
             </div></div>
         )}
@@ -3210,7 +3212,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || (!isAdult && !chickSize)}>{saving ? 'Saving…' : 'Add penguin'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (!isAdult && !chickSize)}>{saving ? 'Saving…' : 'Add penguin'}</button>
         </div>
       </div>
     </div>

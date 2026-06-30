@@ -327,6 +327,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .add-penguin-card h2 { color:#1a5276; font-size:18px; margin-bottom:14px; }
 .add-penguin-card .app-field { margin-bottom:10px; }
 .add-penguin-card .app-field > label { display:block; font-size:11px; font-weight:600; color:#888; text-transform:uppercase; letter-spacing:.4px; margin-bottom:3px; }
+.add-penguin-card .app-field > label.req::after { content:' *'; color:#c0392b; }
 .add-penguin-card input, .add-penguin-card select, .add-penguin-card textarea { width:100%; margin-bottom:0; padding:8px 10px; border:2px solid #ddd; border-radius:8px; font-size:14px; outline:none; font-family:inherit; }
 .add-penguin-card input:focus, .add-penguin-card select:focus, .add-penguin-card textarea:focus { border-color:#2196F3; }
 .add-penguin-card .app-row { display:flex; gap:10px; }
