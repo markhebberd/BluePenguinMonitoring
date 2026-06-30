@@ -3678,6 +3678,34 @@ function ColonyAccess({ token }: { token: string }) {
   );
 }
 
+// Base-26 helpers for alpha box ranges (AA, AB, AC...). A=1.
+function alphaToNum(s: string): number { let n = 0; for (const ch of s.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64); return n; }
+function numToAlpha(n: number, len: number): string { let s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s.padStart(len, 'A'); }
+
+/** Expand a colony's box-sets string into box names. Handles {} wrappers, comma-separated
+ *  tokens, and A-B ranges that are numeric (1-150), prefixed (N1-N6), or alpha (AA-AC). */
+function expandLocationSets(str: string): string[] {
+  const out: string[] = [];
+  for (let token of (str || '').replace(/[{}]/g, ' ').split(',')) {
+    token = token.trim();
+    if (!token) continue;
+    const dash = token.indexOf('-');
+    if (dash > 0 && dash < token.length - 1) {
+      const a = token.slice(0, dash).trim(), b = token.slice(dash + 1).trim();
+      const ma = a.match(/^(.*?)(\d+)$/), mb = b.match(/^(.*?)(\d+)$/);
+      if (ma && mb && ma[1] === mb[1]) { // prefixed/numeric: N1-N6, 1-150
+        const start = parseInt(ma[2], 10), end = parseInt(mb[2], 10);
+        if (start <= end && end - start < 1000) { for (let i = start; i <= end; i++) out.push(ma[1] + i); continue; }
+      } else if (a.length === b.length && /^[A-Za-z]+$/.test(a) && /^[A-Za-z]+$/.test(b)) { // alpha: AA-AC
+        const an = alphaToNum(a), bn = alphaToNum(b);
+        if (an <= bn && bn - an < 1000) { for (let i = an; i <= bn; i++) out.push(numToAlpha(i, a.length)); continue; }
+      }
+    }
+    out.push(token);
+  }
+  return [...new Set(out)];
+}
+
 function RegionsAndColonies({ token }: { token: string }) {
   const [regions, setRegions] = useState<any[]|null>(null);
   const [colonies, setColonies] = useState<any[]|null>(null);
@@ -3703,7 +3731,21 @@ function RegionsAndColonies({ token }: { token: string }) {
   };
 
   const saveColony = async (data: any) => {
-    await fetch('/api/admin.php?action=save_colony', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const res = await fetch('/api/admin.php?action=save_colony', { method: 'POST', headers: auth, body: JSON.stringify(data) });
+    const saved = await res.json().catch(() => ({}));
+    const colonyId = data.colony_id || saved.colony_id;
+    // Offer to materialise the box-sets string into actual boxes (observation_locations).
+    const boxes = expandLocationSets(data.location_sets_string || '');
+    if (colonyId && boxes.length > 0) {
+      const preview = boxes.slice(0, 20).join(', ') + (boxes.length > 20 ? ` … (+${boxes.length - 20} more)` : '');
+      if (confirm(`Create the ${boxes.length} box${boxes.length === 1 ? '' : 'es'} for these sets?\n\n${preview}\n\nExisting boxes are kept.`)) {
+        const cr = await fetch('/api/admin.php?action=create_colony_boxes', { method: 'POST', headers: auth, body: JSON.stringify({ colony_id: colonyId, box_names: boxes }) });
+        const cd = await cr.json().catch(() => ({}));
+        if (cd.success) alert(`Created ${cd.created} new box${cd.created === 1 ? '' : 'es'}${cd.requested - cd.created > 0 ? ` (${cd.requested - cd.created} already existed)` : ''}.`);
+        else alert('Failed to create boxes: ' + (cd.error || 'unknown error'));
+      }
+    }
     setEditColony(null);
     load();
   };
@@ -4496,7 +4538,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className={selectedBox ? 'split-view' : ''}>
         {/* Box grid - always visible */}
         <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
-          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} />
+          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
         </div>
 
         {/* Box detail */}

@@ -15,9 +15,10 @@ interface BoxGridProps {
   onBoxSelect: (boxId: string) => void;
   boxInfo?: Record<string, BoxInfo>;
   scrollToBox?: string | null;
+  boxNames?: string[];
 }
 
-export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBox }: BoxGridProps) {
+export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBox, boxNames }: BoxGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [flashBox, setFlashBox] = useState<string|null>(null);
   useEffect(() => {
@@ -31,8 +32,8 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
       }
     }
   }, [scrollToBox]);
-  // Show all boxes from both tags and observations
-  const allIds = new Set([...Object.keys(boxTags), ...Object.keys(boxInfo || {})]);
+  // Show all of the colony's boxes — tagged, observed, and any defined-but-empty ones.
+  const allIds = new Set([...Object.keys(boxTags), ...Object.keys(boxInfo || {}), ...(boxNames || [])]);
   const sorted = Array.from(allIds).sort((a, b) => {
     const na = parseInt(a), nb = parseInt(b);
     if (!isNaN(na) && !isNaN(nb)) return na - nb;

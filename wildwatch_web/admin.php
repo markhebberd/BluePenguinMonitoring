@@ -624,6 +624,25 @@ if ($action === 'save_colony') {
     exit;
 }
 
+if ($action === 'create_colony_boxes') {
+    // Materialise a colony's box-sets into observation_locations rows. Idempotent:
+    // existing (colony_id, location_name) are kept via INSERT IGNORE.
+    $input = json_decode(file_get_contents('php://input'), true);
+    $colonyId = (int)($input['colony_id'] ?? 0);
+    $names = $input['box_names'] ?? [];
+    if (!$colonyId || !is_array($names) || empty($names)) { http_response_code(400); echo json_encode(['error' => 'colony_id and box_names required']); exit; }
+    $stmt = $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')");
+    $created = 0;
+    foreach ($names as $name) {
+        $name = trim((string)$name);
+        if ($name === '') continue;
+        $stmt->execute([$colonyId, $name]);
+        $created += $stmt->rowCount();
+    }
+    echo json_encode(['success' => true, 'created' => $created, 'requested' => count($names)]);
+    exit;
+}
+
 if ($action === 'colony_permissions') {
     $stmt = $pdo->query("SELECT cp.permission_id, cp.colony_id, cp.observer_id, cp.role,
             c.colony_name, o.observer_name
