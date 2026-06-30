@@ -3332,6 +3332,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <RegionsAndColonies token={token} />
 
+      <ColonyAccess token={token} />
+
       <div className="admin-section">
         <h3>Data Security</h3>
         <RemovePenguin token={token} />
@@ -3399,6 +3401,80 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ColonyAccess({ token }: { token: string }) {
+  const [colonies, setColonies] = useState<any[]|null>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [perms, setPerms] = useState<any[]>([]); // {colony_id, observer_id, role}
+  const [colonyId, setColonyId] = useState<number|null>(null);
+  const [loading, setLoading] = useState(false);
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const load = async () => {
+    setLoading(true);
+    const [cr, ur, pr] = await Promise.all([
+      fetch('/api/admin.php?action=colonies', { headers: auth }).then(r => r.json()),
+      fetch('/api/admin.php?action=users', { headers: auth }).then(r => r.json()),
+      fetch('/api/admin.php?action=colony_permissions', { headers: auth }).then(r => r.json()),
+    ]);
+    const cols = Array.isArray(cr) ? cr : [];
+    setColonies(cols);
+    setUsers(Array.isArray(ur) ? ur : []);
+    setPerms(Array.isArray(pr) ? pr : []);
+    if (cols.length && colonyId == null) setColonyId(Number(cols[0].colony_id));
+    setLoading(false);
+  };
+
+  const roleFor = (observerId: number): string =>
+    perms.find(p => Number(p.colony_id) === colonyId && Number(p.observer_id) === observerId)?.role || '';
+
+  const setAccess = async (observerId: number, role: string) => {
+    await fetch('/api/admin.php?action=save_colony_permission', {
+      method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ colony_id: colonyId, observer_id: observerId, role }),
+    });
+    setPerms(prev => {
+      const rest = prev.filter(p => !(Number(p.colony_id) === colonyId && Number(p.observer_id) === observerId));
+      return role ? [...rest, { colony_id: colonyId, observer_id: observerId, role }] : rest;
+    });
+  };
+
+  return (
+    <div className="admin-section">
+      <h3>Colony access</h3>
+      {!colonies && <button className="edit-btn" onClick={load} disabled={loading}>{loading ? 'Loading...' : 'Load'}</button>}
+      {colonies && colonies.length === 0 && <p className="muted">No colonies.</p>}
+      {colonies && colonies.length > 0 && (<>
+        <p className="muted" style={{fontSize:12, marginBottom:8}}>Admins have full access to every colony automatically. Grant other users view/edit per colony here.</p>
+        <label style={{fontSize:13}}>Colony:{' '}
+          <select value={colonyId ?? ''} onChange={e => setColonyId(Number(e.target.value))}>
+            {colonies.map((c:any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}{c.region_name ? ` — ${c.region_name}` : ''}</option>)}
+          </select>
+        </label>
+        <table className="bird-table" style={{width:'100%', marginTop:8}}>
+          <thead><tr><th>User</th><th>Global role</th><th>Access to this colony</th></tr></thead>
+          <tbody>
+            {users.map((u:any) => (
+              <tr key={u.observer_id}>
+                <td>{u.observer_name}</td>
+                <td className="muted">{u.role || 'viewer'}</td>
+                <td>
+                  {u.role === 'admin'
+                    ? <span className="muted">all colonies (admin)</span>
+                    : <select value={roleFor(Number(u.observer_id))} onChange={e => setAccess(Number(u.observer_id), e.target.value)}>
+                        <option value="">No access</option>
+                        <option value="view">View</option>
+                        <option value="edit">Edit</option>
+                      </select>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>)}
     </div>
   );
 }

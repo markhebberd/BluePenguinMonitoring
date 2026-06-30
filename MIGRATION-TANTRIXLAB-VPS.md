@@ -117,15 +117,16 @@ The SPA fetches relative `/api/...`; the PHP lives in `penguin-api/`. Make `/api
 ssh user@vps 'cd /var/www/wildwatch && ln -s penguin-api api'
 ```
 
-### 4.5 `config.php` with the NEW credentials
-On the VPS, create the (git-ignored) real config from the template and fill in the
-**new** DB password + **new** API key:
+### 4.5 `secrets.php` with the NEW credentials
+Secrets live in the git-ignored `secrets.php` (`config.php` is tracked code that
+`require_once`s it). On the VPS, create it from the template with the **new** DB
+password + **new** API key:
 ```bash
 ssh user@vps
-cp /var/www/wildwatch/penguin-api/config.php.sample /var/www/wildwatch/penguin-api/config.php
+cp /var/www/wildwatch/penguin-api/secrets.php.sample /var/www/wildwatch/penguin-api/secrets.php
 # edit: DB_PASS=<NEW-DB-PASSWORD>, API_KEY=<NEW-API_KEY>; DB_HOST=localhost
 ```
-(The repo no longer ships a real `config.php` — only `config.php.sample`.)
+(The repo ships only `secrets.php.sample`; the real `secrets.php` is never committed.)
 
 ### 4.6 `.htaccess`
 Copy `wildwatch_web/.htaccess` to the docroot (`/var/www/wildwatch/.htaccess`). It
@@ -210,7 +211,7 @@ these, in this order, to avoid a window where something 401s:
 - [ ] DB + user created with **new** password; latest backup restored
 - [ ] SPA built and rsynced to docroot (incl. static files)
 - [ ] PHP rsynced to `penguin-api/`; `api → penguin-api` symlink created
-- [ ] `config.php` created from sample with **new** DB pass + **new** API key
+- [ ] `secrets.php` created from sample with **new** DB pass + **new** API key
 - [ ] `.htaccess` in place; `AllowOverride All`; HTTPS redirect works
 - [ ] TLS issued via certbot
 - [ ] Verified via `--resolve` before DNS: SPA loads, `/api` reads + writes, backup downloads

@@ -1,21 +1,12 @@
 <?php
 /**
- * Database Configuration for BoxTags API
+ * Shared config + helpers for the BoxTags/Wildwatch API.
  *
- * INSTRUCTIONS:
- * 1. Copy this file to your cPanel server at: public_html/penguin-api/config.php
- * 2. Update the database credentials below
- * 3. Ensure this file is NOT accessible directly from web (or move outside public_html)
+ * Real credentials (DB_*, API_KEY) live in secrets.php, which is git-ignored.
+ * On a new server: copy secrets.php.sample -> secrets.php and fill in real values.
  */
 
-// Database credentials - UPDATE THESE
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'wildwatch_nestcheck');
-define('DB_USER', 'wildwatch_nestcheck_api');       // Update this
-define('DB_PASS', 'CHANGE_ME_DB_PASSWORD');              // Update this
-
-// API Key — read-only access for legacy app (v37). Write access requires Bearer token.
-define('API_KEY', 'CHANGE_ME_API_KEY');
+require_once __DIR__ . '/secrets.php';   // defines DB_HOST, DB_NAME, DB_USER, DB_PASS, API_KEY
 
 // CORS settings (adjust for production)
 define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain
@@ -120,6 +111,34 @@ function requireAuth($pdo = null) {
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Authentication required']);
     exit;
+}
+
+/**
+ * Per-colony access check. Global 'admin' has full access to every colony; everyone
+ * else needs a colony_permissions row for that colony. Within a granted colony,
+ * role 'edit' (or 'admin') may write, 'view' is read-only.
+ *
+ * Returns the effective per-colony role ('admin' | 'edit' | 'view'), or sends 403 + exits.
+ */
+function requireColonyAccess($pdo, $observer, $colonyId, $needWrite = false) {
+    // Global API key (requireReadAuth returns `true`, not an observer row) is the trusted
+    // app identity used by nestcheck — treat it as full access so field sync never breaks.
+    if (!is_array($observer)) return 'admin';
+    if (($observer['role'] ?? '') === 'admin') return 'admin';   // app admin: all colonies, read+write
+    $stmt = $pdo->prepare("SELECT role FROM colony_permissions WHERE colony_id = ? AND observer_id = ?");
+    $stmt->execute([$colonyId, $observer['observer_id']]);
+    $role = $stmt->fetchColumn();
+    if ($role === false) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'No access to this colony']);
+        exit;
+    }
+    if ($needWrite && !in_array($role, ['edit', 'admin'], true)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'View-only access to this colony']);
+        exit;
+    }
+    return $role;
 }
 
 /**

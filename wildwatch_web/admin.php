@@ -624,4 +624,38 @@ if ($action === 'save_colony') {
     exit;
 }
 
+if ($action === 'colony_permissions') {
+    $stmt = $pdo->query("SELECT cp.permission_id, cp.colony_id, cp.observer_id, cp.role,
+            c.colony_name, o.observer_name
+        FROM colony_permissions cp
+        JOIN colonies c ON cp.colony_id = c.colony_id
+        JOIN observers o ON cp.observer_id = o.observer_id
+        ORDER BY c.colony_name, o.observer_name");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
+if ($action === 'save_colony_permission') {
+    // Grant/change/revoke a user's access to a colony. role 'view' | 'edit', or '' to revoke.
+    $input = json_decode(file_get_contents('php://input'), true);
+    $colonyId = (int)($input['colony_id'] ?? 0);
+    $observerId = (int)($input['observer_id'] ?? 0);
+    $role = trim($input['role'] ?? '');
+    if (!$colonyId || !$observerId) { http_response_code(400); echo json_encode(['error' => 'colony_id and observer_id required']); exit; }
+
+    if ($role === '' || $role === 'none') {
+        $pdo->prepare("DELETE FROM colony_permissions WHERE colony_id = ? AND observer_id = ?")->execute([$colonyId, $observerId]);
+        $logRole = '(revoked)';
+    } else {
+        if (!in_array($role, ['view', 'edit'], true)) { http_response_code(400); echo json_encode(['error' => "role must be 'view', 'edit', or empty to revoke"]); exit; }
+        $pdo->prepare("INSERT INTO colony_permissions (colony_id, observer_id, role) VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE role = VALUES(role)")->execute([$colonyId, $observerId, $role]);
+        $logRole = $role;
+    }
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('colony_permissions', ?, 'UPDATE', ?, ?)")
+        ->execute([$observerId, $observer['observer_id'], json_encode(['colony_id' => $colonyId, 'observer_id' => $observerId, 'role' => $logRole])]);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 echo json_encode(['error'=>'Unknown action']);

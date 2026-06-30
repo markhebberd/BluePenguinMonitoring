@@ -406,5 +406,5 @@ my-release-key.keystore
 # Secrets — keep these out of the repo (real copies live on the dev/build machines only)
 secrets.props
 nestcheck/secrets.props
-wildwatch_web/config.php
+wildwatch_web/secrets.php
 backups/

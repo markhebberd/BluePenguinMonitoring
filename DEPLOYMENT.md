@@ -54,18 +54,23 @@ cd public_html && ln -s penguin-api api
 
 ## 3. Secrets & configuration
 
-### `wildwatch_web/config.php` — git-ignored, contains live DB credentials
-Holds the **DB credentials** (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`) and the
-shared **`API_KEY`**. **No longer tracked in git** — the real file lives only on the
-dev/build machines and on the server. The repo ships **`config.php.sample`** (same
-file with the secret values replaced by `CHANGE_ME_*`).
+### `wildwatch_web/secrets.php` — git-ignored, contains live credentials
+Secrets are isolated in **`secrets.php`** (DB_HOST/NAME/USER/PASS + the shared
+`API_KEY`). This is the **only** git-ignored PHP file; the real copy lives on the
+dev/build machines and on the server. `config.php` (which `require_once`s it) holds all
+the shared code — DB connection, auth helpers — and **is tracked**, so changes to that
+logic are version-controlled. The repo ships **`secrets.php.sample`** as the template.
 
 **On a fresh machine or migration:** copy the sample and fill in real values —
 ```bash
-cp wildwatch_web/config.php.sample wildwatch_web/config.php   # then edit DB_PASS, API_KEY
+cp wildwatch_web/secrets.php.sample wildwatch_web/secrets.php   # then edit DB_PASS, API_KEY
 ```
-`deploy-web.sh` globs `wildwatch_web/*.php`, so the local (untracked) `config.php`
-still uploads on deploy; the `.sample` does not (it doesn't end in `.php`).
+`deploy-web.sh` globs `wildwatch_web/*.php`, so the local (untracked) `secrets.php`
+uploads alongside `config.php`; the `.sample` does not (it doesn't end in `.php`).
+
+> Deploy uploads alphabetically, so `config.php` (which requires `secrets.php`) lands
+> before `secrets.php`. On a **first** deploy to a new server, upload `secrets.php`
+> first (or the API 500s in the gap) — `deploy-web.sh` re-uploads it harmlessly after.
 
 > **Note:** the secrets were tracked historically, so they still exist in **git
 > history and on GitHub**. Removing them from `HEAD` does not erase that — the only
