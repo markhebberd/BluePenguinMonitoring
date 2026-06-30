@@ -2738,11 +2738,13 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
     // parent) have laid out — otherwise the active day can be centred against a
     // stale width and the calendar opens scrolled to the wrong place.
     const raf = requestAnimationFrame(() => {
-      const active = calRef.current?.querySelector('.cal-day.active');
-      if (active) active.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+      // Centre the active day's month, not the day itself — switching days within a
+      // month then leaves the calendar still, instead of jerking to re-centre each day.
+      const target = calRef.current?.querySelector('.cal-month.current') || calRef.current?.querySelector('.cal-day.active');
+      if (target) target.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [date, dates]);
+  }, [currentMonth, dates]);
 
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
