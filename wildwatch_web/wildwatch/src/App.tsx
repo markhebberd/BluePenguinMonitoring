@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, resetDatabase } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -3113,6 +3113,8 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const pitNorm = pit.toUpperCase().trim();
   const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
   const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
+  // Predict the peng_num the server will assign (MAX + 1) for the title.
+  const nextPengNum = useMemo(() => allPenguins.reduce((m: number, p: any) => Math.max(m, parseInt(p.peng_num) || 0), 0) + 1, [allPenguins]);
 
   const save = async () => {
     setError('');
@@ -3156,7 +3158,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>Add penguin · Box {chipBox}</h2>
+        <h2>Enter penguin #{nextPengNum} · Box {chipBox}</h2>
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
@@ -4569,7 +4571,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           defaultChipBy={userName.split(/\s+/).map(s => s[0] || '').join('').toUpperCase()}
           allPenguins={allPenguins}
           onClose={() => setAddPenguinBox(null)}
-          onAdded={(pengNum) => { setAddPenguinBox(null); refreshStats(); openBird(pengNum); }}
+          onAdded={async (pengNum) => {
+            const fromBox = addPenguinBox;
+            setAddPenguinBox(null);
+            await triggerSync();
+            refreshStats();
+            setPreviousBox(fromBox);
+            setSelectedBox(null);
+            setSelectedBird(pengNum);
+          }}
         />
       )}
     </div>
