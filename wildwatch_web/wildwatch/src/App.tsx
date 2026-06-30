@@ -1,5 +1,5 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats } from './api/boxtags';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory } from './api/boxtags';
 import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
@@ -3817,7 +3817,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
   const allPenguins = useAllPenguins();
   const [penguinSearch, setPenguinSearch] = useState('');
-  const [serverStats, setServerStats] = useState<any>(null);
   const [colonies, setColonies] = useState<any[]>([]);
   const [colonyId, setColonyIdState] = useState<number>(getColonyId());
   const [showEntry, setShowEntry] = useState(initial.enter || false);
@@ -3897,8 +3896,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       console.warn('syncDatabase failed; continuing with cached/API data', e);
     }
     try {
-      const [tags, ov, ss] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchServerStats()]);
-      setBoxTags(tags); setStats(ov); setServerStats(ss);
+      const [tags, ov] = await Promise.all([fetchBoxTags(), fetchOverview()]);
+      setBoxTags(tags); setStats(ov);
     } catch (e) {
       console.warn('overview/tags fetch failed', e);
     } finally {
@@ -4058,7 +4057,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     </nav>
   );
 
-  const fmtSize = (mb: number) => mb >= 1024 ? `${(mb/1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+  // Colony <option>s, grouped by region with <optgroup> once there's more than one region.
+  const colonyOptionEls = (() => {
+    const byRegion: Record<string, any[]> = {};
+    for (const c of colonies) (byRegion[c.region_name || ''] ||= []).push(c);
+    const regions = Object.keys(byRegion);
+    const opts = (list: any[]) => list.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>);
+    return regions.length > 1 ? regions.map(r => <optgroup key={r} label={r}>{opts(byRegion[r])}</optgroup>) : opts(colonies);
+  })();
 
   const siteHeader = (
     <header>
@@ -4067,10 +4073,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteNav}
         {colonies.length > 1 && (
           <select className="colony-select" value={colonyId} onChange={e => switchColony(Number(e.target.value))} title="Switch colony">
-            {colonies.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>)}
+            {colonyOptionEls}
           </select>
         )}
-        {serverStats && <span className="header-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</span>}
         <span className="header-user">
           {userName}
           <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
@@ -4088,7 +4093,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="mobile-search-group">
               <label className="mobile-label">Colony</label>
               <select className="colony-select" value={colonyId} onChange={e => { switchColony(Number(e.target.value)); closeMenu(); }}>
-                {colonies.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>)}
+                {colonyOptionEls}
               </select>
             </div>
           )}
@@ -4134,7 +4139,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
           </nav>
           <div style={{marginTop:'auto'}}>
-            {serverStats && <div className="mobile-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</div>}
             <div className="mobile-nav-user" style={{display:'flex', alignItems:'center', gap:12, padding:'8px 12px'}}>
               <span className="mobile-username" style={{padding:0, flex:1}}>{userName}</span>
               <button onClick={() => { setShowSettings(true); closeMenu(); }} style={{background:'none', border:'none', fontSize:20, cursor:'pointer', padding:4, color:'#666'}} title="Settings">{'\u2699'}</button>
