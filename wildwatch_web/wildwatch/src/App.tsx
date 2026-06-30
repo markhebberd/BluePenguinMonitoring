@@ -3125,7 +3125,6 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     setSaving(true);
     try {
       const pengRes = await createRecord(token, 'penguins', {
-        initial_chip_date: date, chip_date: date,
         chipped_as_adult: isAdult ? 1 : 0, chick_size_code: isAdult ? null : chickSize,
       });
       if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
