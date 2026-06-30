@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchServerStats } from './api/boxtags';
-import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling } from './api/localdb';
+import { syncDatabase, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -3818,6 +3818,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const allPenguins = useAllPenguins();
   const [penguinSearch, setPenguinSearch] = useState('');
   const [serverStats, setServerStats] = useState<any>(null);
+  const [colonies, setColonies] = useState<any[]>([]);
+  const [colonyId, setColonyIdState] = useState<number>(getColonyId());
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [showAdmin, setShowAdmin] = useState(initial.admin || false);
   const [showReports, setShowReports] = useState(initial.reports || false);
@@ -3905,8 +3907,23 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     }
   }, []);
 
+  // Switch the active colony: persist it (every colony-scoped fetch reads it), reset the
+  // view to the new colony's overview, and reload — syncDatabase resets + re-syncs the cache.
+  const switchColony = useCallback(async (id: number) => {
+    if (id === getColonyId()) return;
+    setColonyId(id);
+    setColonyIdState(id);
+    setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
+    setShowAdmin(false); setShowReports(false); setShowEntry(false);
+    window.history.pushState({}, '', '/');
+    setLoading(true); setLoadProgress('Loading colony…'); setLoadPct(null);
+    await loadColony();
+  }, [loadColony]);
+
   useEffect(() => {
     loadColony();
+    fetch('/api/colonies.php', { headers: { Authorization: `Bearer ${localStorage.getItem('ww_token')}` } })
+      .then(r => r.json()).then(d => setColonies(Array.isArray(d) ? d : [])).catch(() => {});
     startPolling(() => { fetchOverview().then(ov => setStats(ov)).catch(() => {}); });
 
     // Re-sync when the app is reopened/refocused (mobile PWA resume) or network
@@ -4048,6 +4065,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
       <span className="header-desktop">
         {siteNav}
+        {colonies.length > 1 && (
+          <select className="colony-select" value={colonyId} onChange={e => switchColony(Number(e.target.value))} title="Switch colony">
+            {colonies.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>)}
+          </select>
+        )}
         {serverStats && <span className="header-stats">{fmtSize(serverStats.used_mb)} / {fmtSize(serverStats.quota_mb)} · server {serverStats.disk_free_gb} GB free</span>}
         <span className="header-user">
           {userName}
@@ -4062,6 +4084,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <nav className="mobile-nav">
             <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => { goTo('colony'); closeMenu(); })}>Colony</a>
           </nav>
+          {colonies.length > 1 && (
+            <div className="mobile-search-group">
+              <label className="mobile-label">Colony</label>
+              <select className="colony-select" value={colonyId} onChange={e => { switchColony(Number(e.target.value)); closeMenu(); }}>
+                {colonies.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="mobile-search-group">
             <label className="mobile-label">Penguin</label>
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />

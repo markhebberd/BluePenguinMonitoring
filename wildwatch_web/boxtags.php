@@ -19,7 +19,7 @@ setHeaders();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $pdo = getDbConnection();
-$colonyId = 1;
+$colonyId = (int)($_GET['colony_id'] ?? 1);
 
 // GETs accept API key (legacy app), writes require Bearer
 if ($method === 'GET') {

@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 $observer = requireAuth();
 
 $pdo = getDbConnection();
-$colonyId = 1;
+$colonyId = (int)($_GET['colony_id'] ?? 1);
 requireColonyAccess($pdo, $observer, $colonyId); // view access to this colony
 $since = $_GET['since'] ?? null;
 

@@ -8,7 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 $observer = requireReadAuth();
 $pdo = getDbConnection();
 $view = $_GET['view'] ?? 'overview';
-$colonyId = 1;
+$colonyId = (int)($_GET['colony_id'] ?? 1);
 requireColonyAccess($pdo, $observer, $colonyId); // view access (global API key / admin = all)
 switch ($view) {
     case 'timeline': handleTimeline($pdo, $colonyId); break;

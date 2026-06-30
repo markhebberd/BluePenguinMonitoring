@@ -9,6 +9,19 @@ function authHeaders(): Record<string, string> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// ============ Active colony ============
+// Which colony the app is currently viewing. Persisted so it survives reloads. All
+// colony-scoped fetches send ?colony_id; switching colony resets the local cache.
+const COLONY_KEY = 'ww_colony';
+export function getColonyId(): number {
+  return parseInt(localStorage.getItem(COLONY_KEY) || '1', 10) || 1;
+}
+export function setColonyId(id: number): void {
+  localStorage.setItem(COLONY_KEY, String(id));
+}
+/** `colony_id=N` for appending to query strings. */
+function colonyQS(): string { return `colony_id=${getColonyId()}`; }
+
 const DB_NAME = 'wildwatch';
 const DB_VERSION = 1;
 const CACHE_VERSION = 2; // Bump to force all clients to full re-sync
@@ -399,6 +412,8 @@ export async function primeFromCache(): Promise<boolean> {
   const db = await openDB();
   const cachedVersion = await getMeta(db, 'cache_version');
   if (cachedVersion !== CACHE_VERSION) return false; // stale format → full re-sync needed first
+  const cachedColony = await getMeta(db, 'colony_id');
+  if (Number(cachedColony ?? 1) !== getColonyId()) return false; // colony switched → full re-sync
   const lastSync = await getMeta(db, 'snapshot_time');
   if (!lastSync) return false;
   console.time('primeFromCache');
@@ -410,11 +425,15 @@ export async function primeFromCache(): Promise<boolean> {
 export async function syncDatabase(onProgress?: (msg: string, pct?: number) => void): Promise<void> {
   const db = await openDB();
   const cachedVersion = await getMeta(db, 'cache_version');
-  if (cachedVersion !== CACHE_VERSION) {
-    onProgress?.('Updating data format...');
+  const cachedColony = await getMeta(db, 'colony_id');
+  const activeColony = getColonyId();
+  const colonyChanged = Number(cachedColony ?? 1) !== activeColony;
+  if (cachedVersion !== CACHE_VERSION || colonyChanged) {
+    onProgress?.(colonyChanged ? 'Loading colony…' : 'Updating data format...');
     await resetDatabase();
     const freshDb = await openDB();
     await setMeta(freshDb, 'cache_version', CACHE_VERSION);
+    await setMeta(freshDb, 'colony_id', activeColony);
     // Fall through to full download below (lastSync will be null)
   }
   const lastSync = await getMeta(db, 'snapshot_time');
@@ -424,7 +443,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     if (!mem) await loadMemFromIDB();
 
     // Then check for changes in background
-    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&_=${Date.now()}`, { headers: authHeaders() });
+    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() });
     const data = await resp.json();
     const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0;
     if (hasChanges) {
@@ -446,7 +465,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
         console.warn('Sync count mismatch, doing full re-sync', { server: data._counts, local });
         onProgress?.('Data mismatch — reloading...');
         await resetDatabase();
-        const full = await fetchWithProgress(`/api/snapshot.php?_=${Date.now()}`, (pct, label) => {
+        const full = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`, (pct, label) => {
           onProgress?.(`Reloading colony data... ${label}`, pct);
         });
         await storeSnapshot(full, true);
@@ -458,7 +477,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
   } else {
     onProgress?.('Downloading colony data...', 0);
     console.time('fetch+parse');
-    const data = await fetchWithProgress(`/api/snapshot.php?_=${Date.now()}`, (pct, label) => {
+    const data = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`, (pct, label) => {
       onProgress?.(`Downloading colony data... ${label}`, pct);
     });
     console.timeEnd('fetch+parse');

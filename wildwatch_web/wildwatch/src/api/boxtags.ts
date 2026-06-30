@@ -1,10 +1,13 @@
 import type { BoxTag } from '../types';
-import { triggerSync } from './localdb';
+import { triggerSync, getColonyId } from './localdb';
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('ww_token');
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
+
+/** `colony_id=N` for the active colony. */
+function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 
 // A 401 means the session token is invalid/expired. Signal the app to send the
 // user back to login (automating the manual "log out and back in" workaround).
@@ -14,13 +17,13 @@ function checkAuth(r: Response): Response {
 }
 
 export async function fetchBoxTags(): Promise<Record<string, BoxTag>> {
-  const r = checkAuth(await fetch('/api/boxtags.php', { headers: authHeaders() }));
+  const r = checkAuth(await fetch(`/api/boxtags.php?${colonyQS()}`, { headers: authHeaders() }));
   const d = await r.json();
   return d.data ?? {};
 }
 
 export async function fetchOverview() {
-  return checkAuth(await fetch(`/api/dashboard.php?view=overview&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return checkAuth(await fetch(`/api/dashboard.php?view=overview&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchServerStats() {
@@ -28,11 +31,11 @@ export async function fetchServerStats() {
 }
 
 export async function fetchTimeline() {
-  return (await fetch('/api/dashboard.php?view=timeline', { headers: authHeaders() })).json();
+  return (await fetch(`/api/dashboard.php?view=timeline&${colonyQS()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBoxDetail(name: string) {
-  return (await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(name)}&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(name)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchAllPenguins() {
@@ -92,5 +95,5 @@ export async function fetchDay(date: string) {
 }
 
 export async function fetchReport(report: string) {
-  return (await fetch(`/api/reports.php?report=${report}&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/reports.php?report=${report}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }

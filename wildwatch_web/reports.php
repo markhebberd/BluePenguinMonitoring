@@ -4,7 +4,7 @@ setHeaders();
 $observer = requireAuth();
 
 $pdo = getDbConnection();
-$colonyId = $_GET['colony'] ?? 1;
+$colonyId = (int)($_GET['colony_id'] ?? $_GET['colony'] ?? 1);
 requireColonyAccess($pdo, $observer, $colonyId); // view access to this colony
 $report = $_GET['report'] ?? '';
 
