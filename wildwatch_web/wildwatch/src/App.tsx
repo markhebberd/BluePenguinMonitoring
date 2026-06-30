@@ -2810,16 +2810,6 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               )}
             </span>
           </h3>
-          {totalChips > 0 && (
-            <div className="day-chippings">
-              {data.chippings.map((c: any) => (
-                <span key={c.pit_id} className="day-chip-item">
-                  <PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
-                  <span className="muted"> chipped in Box {c.chip_box || '?'}</span>
-                </span>
-              ))}
-            </div>
-          )}
           <div className="day-grid">
           {(() => {
             // DCM boxes for this date
@@ -2875,7 +2865,18 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                 );
               }
               // Normal row(s) — show each observation separately
-              const { obs } = byBox[box];
+              const { obs, chips } = byBox[box];
+              // Chipping-only box (no observation today): a box row of green chip minis.
+              // Observed boxes already appear via their observation row(s), so chippings aren't repeated there.
+              if (obs.length === 0 && chips.length > 0) {
+                return (
+                  <div key={box} className="day-row">
+                    <a className="day-box-link" href={`/box/${box}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(box)); }}><b>Box {box}</b></a>
+                    {chips.map((c: any) => <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />)}
+                    <span className="muted" style={{fontSize:10}}>chipped</span>
+                  </div>
+                );
+              }
               return (
               <div key={box}>
                 {obs.map((o: any, oi: number) => {
