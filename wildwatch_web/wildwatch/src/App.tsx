@@ -715,6 +715,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const [birdSearch, setBirdSearch] = useState('');
   const [localScans, setLocalScans] = useState<Scan[]>(obs.scans);
   useEffect(() => { setLocalScans(obs.scans); }, [obs.observation_id]);
+  const [localNoScan, setLocalNoScan] = useState<number>(Number(obs.no_scan) || 0);
+  useEffect(() => { setLocalNoScan(Number(obs.no_scan) || 0); }, [obs.observation_id]);
 
   const filteredAdd = birdSearch.length > 0 && allPenguins
     ? allPenguins.filter((p: any) =>
@@ -756,6 +758,22 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     await deleteRecord(token, 'penguin_scans', scan.scan_id);
     setLocalScans(localScans.filter(s => s.scan_id !== scan.scan_id));
     await adjustCountForScan(scan, -1);
+    onDataChange?.();
+  };
+
+  const addNoScan = async () => {
+    if (!obsId || !token) return;
+    const next = localNoScan + 1;
+    setLocalNoScan(next); // optimistic — chip appears immediately
+    await updateRecord(token, 'observations', obsId, { no_scan: next }, '+1 no scan');
+    onDataChange?.();
+  };
+
+  const removeNoScan = async () => {
+    if (!obsId || !token || localNoScan <= 0) return;
+    const next = localNoScan - 1;
+    setLocalNoScan(next);
+    await updateRecord(token, 'observations', obsId, { no_scan: next }, '-1 no scan');
     onDataChange?.();
   };
 
@@ -801,6 +819,12 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
               <button className="remove-scan" onClick={() => removeScan(s)}>&times;</button>
             </span>
           ))}
+          {Array.from({ length: localNoScan }).map((_, k) => (
+            <span key={`ns${k}`} className="scan-removable">
+              <span className="scan no-scan">no scan</span>
+              <button className="remove-scan" onClick={removeNoScan}>&times;</button>
+            </span>
+          ))}
           <div className="add-scan-search">
             <input className="ef-input" placeholder="Add penguin #..." value={birdSearch} onChange={e => setBirdSearch(e.target.value)} />
             {filteredAdd.length > 0 && (
@@ -813,12 +837,12 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
               </div>
             )}
           </div>
+          <button type="button" className="add-noscan-btn" onClick={addNoScan}>add no scan</button>
         </div>
         <div className="obs-edit-row">
           <label>{'\uD83D\uDC27'}</label><EditableField value={localObs.adults} type="number" onSave={trackEdit('adults')} canEdit={true} inline narrow min={0} />
           <label>{'\uD83E\uDD5A'}</label><EditableField value={localObs.eggs} type="number" onSave={trackEdit('eggs')} canEdit={true} inline narrow min={0} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={localObs.chicks} type="number" onSave={trackEdit('chicks')} canEdit={true} inline narrow min={0} />
-          <label style={{fontSize:11}}>no scan</label><EditableField value={localObs.no_scan || 0} type="number" onSave={trackEdit('no_scan')} canEdit={true} inline narrow min={0} />
           <EditableField value={localObs.breeding_status || ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={trackEdit('breeding_status')} canEdit={true} placeholder="Location status" />
           <EditableField value={localObs.gate_status || ''} type="select" options={['','Gate up','Regate']} onSave={trackEdit('gate_status')} canEdit={true} placeholder="Gate status" />
           <EditableField value={localObs.notes || ''} onSave={trackEdit('notes')} placeholder="notes" canEdit={true} inline multiline />

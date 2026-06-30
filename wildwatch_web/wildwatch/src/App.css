@@ -194,6 +194,8 @@ header h1:hover { opacity:.8; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
 .scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); border-color:#81C784; }
 .scan.no-scan { background:#E8F5E9; border-color:#A5D6A7; color:#2E7D32; font-style:italic; }
+.add-noscan-btn { background:#E8F5E9; color:#2E7D32; border:1px solid #A5D6A7; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
+.add-noscan-btn:hover { background:#C8E6C9; }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
 .chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
 
