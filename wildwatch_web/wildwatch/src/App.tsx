@@ -4147,6 +4147,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, [boxTags]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (!selectedBox || sortedBoxIds.length === 0) return;
     const idx = sortedBoxIds.indexOf(selectedBox);
     if (idx < 0) return;
