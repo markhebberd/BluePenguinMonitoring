@@ -830,7 +830,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
           ))}
           {Array.from({ length: Number(obs.no_scan) || 0 }).map((_, k) => (
-            <span key={`ns${k}`} className="scan no-scan" title="Seen, not scanned">{'🐧'}</span>
+            <span key={`ns${k}`} className="scan no-scan">no scan</span>
           ))}
         </div>
       )}
@@ -2895,7 +2895,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                         </span>
                       ))}
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
-                        <span key={`ns${k}`} className="scan no-scan" title="Seen, not scanned">{'🐧'}</span>
+                        <span key={`ns${k}`} className="scan no-scan">no scan</span>
                       ))}
                       {oi === 0 && chips.map((c: any) => <span key={c.pit_id} style={{fontSize:10}}><PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} /> chipped</span>)}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
