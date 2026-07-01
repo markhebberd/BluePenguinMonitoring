@@ -26,16 +26,8 @@ export async function fetchOverview() {
   return checkAuth(await fetch(`/api/dashboard.php?view=overview&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
-export async function fetchServerStats() {
-  return checkAuth(await fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: authHeaders() })).json();
-}
-
 export async function fetchColonies() {
   return checkAuth(await fetch('/api/colonies.php', { headers: authHeaders() })).json();
-}
-
-export async function fetchTimeline() {
-  return (await fetch(`/api/dashboard.php?view=timeline&${colonyQS()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBoxDetail(name: string) {
@@ -98,6 +90,3 @@ export async function fetchDay(date: string) {
   return (await fetch(`/api/day.php?date=${date}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
-export async function fetchReport(report: string) {
-  return (await fetch(`/api/reports.php?report=${report}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
-}
