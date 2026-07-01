@@ -22,7 +22,7 @@ require_once __DIR__ . '/config.php';
  * mail() is known to deliver (the CLI cron's mail did not).
  */
 function ww_maybe_alert_low_disk($freeMb) {
-    $thresholdMb = 50 * 1024; // 50 GB
+    $thresholdMb = 10 * 1024; // 10 GB
     if ($freeMb === null || $freeMb >= $thresholdMb) return false;
     $stateFile = __DIR__ . '/disk_alert_last.txt';
     $last = @file_get_contents($stateFile);
@@ -60,7 +60,7 @@ if ($isCli || ($cronKey !== '' && hash_equals(API_KEY, $cronKey))) {
     }
     ww_maybe_alert_low_disk($freeMb);
     checkDiskDescentAlert($pdo); // email alert if linear descent detected
-    echo json_encode(['ok' => true, 'disk_free_mb' => $freeMb, 'low_disk_threshold_mb' => 50 * 1024]);
+    echo json_encode(['ok' => true, 'disk_free_mb' => $freeMb, 'low_disk_threshold_mb' => 10 * 1024]);
     exit;
 }
 

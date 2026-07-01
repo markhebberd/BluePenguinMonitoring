@@ -79,8 +79,10 @@ function requireReadAuth($pdo = null) {
     }
     // API key — read-only (GET requests only)
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $headers = getallheaders();
-        $apiKey = $headers['X-API-Key'] ?? $headers['x-api-key'] ?? '';
+        // Case-insensitive header lookup: php-fpm's getallheaders() normalises the
+        // name to 'X-Api-Key', whereas Apache preserved the client's 'X-API-Key'.
+        $headers = array_change_key_case(getallheaders(), CASE_LOWER);
+        $apiKey = $headers['x-api-key'] ?? '';
         if (!empty($apiKey)) {
             // Check global API key
             if ($apiKey === API_KEY) return true;

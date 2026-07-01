@@ -3,7 +3,7 @@ $alertEmail = 'markhebberd@gmail.com, bdot@snotch.com';
 $alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
 $testFile = __DIR__ . '/disk_test.tmp';
 $alertStateFile  = __DIR__ . '/disk_alert_last.txt'; // throttle state for the low-space warning
-$lowDiskWarnMb   = 50 * 1024;                         // warn when free space drops below 50 GB
+$lowDiskWarnMb   = 10 * 1024;                         // warn when free space drops below 10 GB
 $lowDiskThrottle = 12 * 3600;                         // at most one low-space warning per 12h
 
 /** Send a disk alert from a real local mailbox, with a valid envelope sender (-f) so the MTA accepts it. */
