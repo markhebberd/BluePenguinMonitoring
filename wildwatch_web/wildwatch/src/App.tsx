@@ -1,4 +1,5 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
@@ -727,6 +728,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   // Quick radial breeding-status picker on a locked (non-edit) observation — the only
   // field editable without entering edit mode. Writes the single field directly.
   const [statusPicker, setStatusPicker] = useState(false);
+  const [pickerPos, setPickerPos] = useState<{x:number;y:number} | null>(null);
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const effectiveStatus = statusOverride ?? localObs.breeding_status ?? '';
   useEffect(() => { setStatusOverride(null); }, [obs.breeding_status, obsId]);
@@ -845,27 +847,38 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
                   <span
                     className={`badge ${ds && DARK_TEXT_STATUSES.has(ds)?'bordered':''}${clickable?' clickable':''}`}
                     style={{background:STATUS_COLORS[ds||'']||'#ccc',color:ds && DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}
-                    onClick={clickable ? () => setStatusPicker(v => !v) : undefined}
+                    onClick={clickable ? (e) => {
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      const m = 84; // keep the whole ring inside the viewport
+                      const x = Math.min(Math.max(r.left + r.width / 2, m), window.innerWidth - m);
+                      const y = Math.min(Math.max(r.top + r.height / 2, m), window.innerHeight - m);
+                      setPickerPos({ x, y });
+                      setStatusPicker(v => !v);
+                    } : undefined}
                     title={clickable ? 'Change breeding status' : (STATUS_NAMES[ds||'']||undefined)}
                   >{ds || '\u2014'}</span>
-                  {statusPicker && (<>
-                    <div className="status-picker-backdrop" onClick={() => setStatusPicker(false)} />
-                    <div className="status-picker" onClick={e => e.stopPropagation()}>
-                      {STATUS_PICK_OPTIONS.map((opt, i) => {
-                        const n = STATUS_PICK_OPTIONS.length;
-                        const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
-                        const r = 52;
-                        const x = Math.cos(angle) * r, y = Math.sin(angle) * r;
-                        const isCur = opt === (effectiveStatus || '');
-                        return (
-                          <button key={opt} type="button"
-                            className={`status-pick-item${DARK_TEXT_STATUSES.has(opt)?' bordered':''}${isCur?' current':''}`}
-                            style={{transform:`translate(-50%,-50%) translate(${x}px, ${y}px)`, background:STATUS_COLORS[opt]||'#ccc', color:DARK_TEXT_STATUSES.has(opt)?'#333':'#fff'}}
-                            title={STATUS_NAMES[opt]||opt} onClick={() => pickStatus(opt)}>{opt}</button>
-                        );
-                      })}
-                    </div>
-                  </>)}
+                  {statusPicker && pickerPos && createPortal((
+                    <>
+                      <div className="status-picker-backdrop" onClick={() => setStatusPicker(false)} />
+                      {/* Rendered viewport-fixed via portal so overflow-clipping ancestors and the
+                          box grid's stacking context can't hide or crop the ring. */}
+                      <div className="status-picker" style={{left:pickerPos.x, top:pickerPos.y}} onClick={e => e.stopPropagation()}>
+                        {STATUS_PICK_OPTIONS.map((opt, i) => {
+                          const n = STATUS_PICK_OPTIONS.length;
+                          const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
+                          const r = 56;
+                          const x = Math.cos(angle) * r, y = Math.sin(angle) * r;
+                          const isCur = opt === (effectiveStatus || '');
+                          return (
+                            <button key={opt} type="button"
+                              className={`status-pick-item${DARK_TEXT_STATUSES.has(opt)?' bordered':''}${isCur?' current':''}`}
+                              style={{transform:`translate(-50%,-50%) translate(${x}px, ${y}px)`, background:STATUS_COLORS[opt]||'#ccc', color:DARK_TEXT_STATUSES.has(opt)?'#333':'#fff'}}
+                              title={STATUS_NAMES[opt]||opt} onClick={() => pickStatus(opt)}>{opt}</button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ), document.body)}
                 </span>
               );
             })()}

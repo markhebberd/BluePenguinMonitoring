@@ -180,8 +180,8 @@ header h1:hover { opacity:.8; }
 .badge.clickable:hover { filter:brightness(1.05); box-shadow:0 0 0 2px rgba(26,82,118,.25); }
 /* Quick radial breeding-status picker on a locked observation */
 .status-anchor { position:relative; display:inline-flex; }
-.status-picker-backdrop { position:fixed; inset:0; z-index:900; }
-.status-picker { position:absolute; left:50%; top:50%; width:0; height:0; z-index:901; }
+.status-picker-backdrop { position:fixed; inset:0; z-index:2000; }
+.status-picker { position:fixed; width:0; height:0; z-index:2001; }
 .status-pick-item { position:absolute; left:0; top:0; min-width:36px; height:28px; padding:0 8px; border:none; border-radius:14px; font-size:11px; font-weight:700; letter-spacing:.3px; cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; transition:filter .12s, box-shadow .12s; animation:status-pop .14s ease-out; }
 .status-pick-item.bordered { box-shadow:0 3px 8px rgba(0,0,0,.28), inset 0 0 0 1px rgba(0,0,0,.18); }
 .status-pick-item.current { outline:2px solid #1a5276; outline-offset:2px; }
