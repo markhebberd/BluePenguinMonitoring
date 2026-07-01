@@ -176,6 +176,17 @@ header h1:hover { opacity:.8; }
 .badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; border:0.5px solid transparent; }
 .badge.bordered { border-color:#999; }
 .gate { font-size:10px; color:#666; background:#e8e8e8; padding:1px 5px; border-radius:3px; }
+.badge.clickable { cursor:pointer; }
+.badge.clickable:hover { filter:brightness(1.05); box-shadow:0 0 0 2px rgba(26,82,118,.25); }
+/* Quick radial breeding-status picker on a locked observation */
+.status-anchor { position:relative; display:inline-flex; }
+.status-picker-backdrop { position:fixed; inset:0; z-index:900; }
+.status-picker { position:absolute; left:50%; top:50%; width:0; height:0; z-index:901; }
+.status-pick-item { position:absolute; left:0; top:0; min-width:36px; height:28px; padding:0 8px; border:none; border-radius:14px; font-size:11px; font-weight:700; letter-spacing:.3px; cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; transition:filter .12s, box-shadow .12s; animation:status-pop .14s ease-out; }
+.status-pick-item.bordered { box-shadow:0 3px 8px rgba(0,0,0,.28), inset 0 0 0 1px rgba(0,0,0,.18); }
+.status-pick-item.current { outline:2px solid #1a5276; outline-offset:2px; }
+.status-pick-item:hover { filter:brightness(1.08); box-shadow:0 4px 12px rgba(0,0,0,.35); }
+@keyframes status-pop { from { opacity:0; } to { opacity:1; } }
 .obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
 .scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
 .scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; color:#333; text-decoration:none; }

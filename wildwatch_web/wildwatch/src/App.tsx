@@ -111,6 +111,10 @@ const STATUS_NAMES: Record<string,string> = {
   DCM:'DCM',
 };
 
+// Observer-settable breeding statuses (matches the edit dropdown), in progression order,
+// for the quick radial status picker on a locked observation.
+const STATUS_PICK_OPTIONS = ['NO','UNL','POT','CON','DCM','ABN'];
+
 function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
   observations: Observation[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
   onHighlight?: (obsDate: string | null) => void;
@@ -720,6 +724,22 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
+  // Quick radial breeding-status picker on a locked (non-edit) observation — the only
+  // field editable without entering edit mode. Writes the single field directly.
+  const [statusPicker, setStatusPicker] = useState(false);
+  const [statusOverride, setStatusOverride] = useState<string | null>(null);
+  const effectiveStatus = statusOverride ?? localObs.breeding_status ?? '';
+  useEffect(() => { setStatusOverride(null); }, [obs.breeding_status, obsId]);
+  const pickStatus = async (val: string) => {
+    setStatusPicker(false);
+    if (val === (localObs.breeding_status || '')) return;
+    setStatusOverride(val);
+    if (obsId && token) {
+      await updateRecord(token, 'observations', obsId, { breeding_status: val });
+      setEditCount(c => c + 1);
+      onDataChange?.();
+    }
+  };
 
   // Edit mode is a local DRAFT — nothing is written to the server until "Done"
   // (Cancel discards). This removes the silent last-write-wins where each field saved
@@ -817,12 +837,49 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
       {!editing ? (
         <>
           <div className="obs-nums">
+            {(() => {
+              const ds = displayStatus(effectiveStatus, localObs.eggs, localObs.chicks);
+              const clickable = canEdit && !!obsId && !!token;
+              return (
+                <span className="status-anchor">
+                  <span
+                    className={`badge ${ds && DARK_TEXT_STATUSES.has(ds)?'bordered':''}${clickable?' clickable':''}`}
+                    style={{background:STATUS_COLORS[ds||'']||'#ccc',color:ds && DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}
+                    onClick={clickable ? () => setStatusPicker(v => !v) : undefined}
+                    title={clickable ? 'Change breeding status' : (STATUS_NAMES[ds||'']||undefined)}
+                  >{ds || '\u2014'}</span>
+                  {statusPicker && (<>
+                    <div className="status-picker-backdrop" onClick={() => setStatusPicker(false)} />
+                    <div className="status-picker" onClick={e => e.stopPropagation()}>
+                      {STATUS_PICK_OPTIONS.map((opt, i) => {
+                        const n = STATUS_PICK_OPTIONS.length;
+                        const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
+                        const r = 52;
+                        const x = Math.cos(angle) * r, y = Math.sin(angle) * r;
+                        const isCur = opt === (effectiveStatus || '');
+                        return (
+                          <button key={opt} type="button"
+                            className={`status-pick-item${DARK_TEXT_STATUSES.has(opt)?' bordered':''}${isCur?' current':''}`}
+                            style={{transform:`translate(-50%,-50%) translate(${x}px, ${y}px)`, background:STATUS_COLORS[opt]||'#ccc', color:DARK_TEXT_STATUSES.has(opt)?'#333':'#fff'}}
+                            title={STATUS_NAMES[opt]||opt} onClick={() => pickStatus(opt)}>{opt}</button>
+                        );
+                      })}
+                    </div>
+                  </>)}
+                </span>
+              );
+            })()}
             {localObs.adults === 0 && localObs.eggs === 0 && localObs.chicks === 0 && <span className="muted">Empty</span>}
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
-            {(() => { const ds = displayStatus(localObs.breeding_status, localObs.eggs, localObs.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
+            {[...obs.scans].sort(scanSortMFC).map((s,j) => (
+              <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
+            ))}
+            {Array.from({ length: Number(obs.no_scan) || 0 }).map((_, k) => (
+              <span key={`ns${k}`} className="scan no-scan">No scan</span>
+            ))}
           </div>
           {localObs.notes && <div className="obs-notes">{localObs.notes}</div>}
         </>
@@ -864,16 +921,6 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />
         </div>
         </>
-      )}
-      {!editing && (obs.scans.length>0 || Number(obs.no_scan) > 0) && (
-        <div className="scans">
-          {[...obs.scans].sort(scanSortMFC).map((s,j) => (
-            <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
-          ))}
-          {Array.from({ length: Number(obs.no_scan) || 0 }).map((_, k) => (
-            <span key={`ns${k}`} className="scan no-scan">No scan</span>
-          ))}
-        </div>
       )}
       {showHistory && token && obsId && <HistoryPanel token={token} table="observations" id={obsId} onClose={() => setShowHistory(false)} />}
     </div>

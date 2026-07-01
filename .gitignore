@@ -410,3 +410,6 @@ wildwatch_web/secrets.php
 backups/
 
 .DS_Store
+
+# Local server access notes (host/user/paths; no secrets)
+SERVER-ACCESS.local.md
