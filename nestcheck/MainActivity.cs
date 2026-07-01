@@ -2387,7 +2387,7 @@ namespace PenguinMonitor
 
             _isBluetoothEnabledCheckBox = new CheckBox(this)
             {
-                Text = "Enable Bluetooth and GPS",
+                Text = "Enable BT & GPS",
             };
             _isBluetoothEnabledCheckBox.SetTextColor(Color.Black);
             _isBluetoothEnabledCheckBox.CheckedChange += (s, e) =>
@@ -2694,8 +2694,7 @@ namespace PenguinMonitor
             _settingsCard.AddView(regionColonyLayout);
             // 2. Daily label
             _settingsCard.AddView(dailyLabelLayout);
-            // 3. Bluetooth
-            _settingsCard.AddView(_isBluetoothEnabledCheckBox);
+            // 3. Bluetooth enable + Scan BT are added together as a row below
 
             // Scanner device picker
             // Scanner selection
@@ -2709,11 +2708,24 @@ namespace PenguinMonitor
             scannerStatus.Text = currentScanner != null ? $"Scanner: {pairedName ?? currentScanner}" : "No scanner selected";
 
             IDisposable? discoveryHandle = null;
-            var scanButton = _uiFactory.CreateStyledButton("Scan for scanners", UIFactory.PRIMARY_BLUE);
+            var scanButton = _uiFactory.CreateStyledButton("Scan BT", UIFactory.PRIMARY_BLUE);
             var deviceListLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
 
             scanButton.Click += (s, e) =>
             {
+                // Android 12+ needs BLUETOOTH_SCAN/CONNECT granted at runtime — re-request if missing
+                if (OperatingSystem.IsAndroidVersionAtLeast(31))
+                {
+                    var missing = new[] { Android.Manifest.Permission.BluetoothScan, Android.Manifest.Permission.BluetoothConnect }
+                        .Where(p => CheckSelfPermission(p) != Android.Content.PM.Permission.Granted).ToArray();
+                    if (missing.Length > 0)
+                    {
+                        RequestPermissions(missing, 1);
+                        Toast.MakeText(this, "Allow Bluetooth, then tap 'Scan for scanners' again", ToastLength.Long)?.Show();
+                        return;
+                    }
+                }
+
                 scannerStatus.Visibility = Android.Views.ViewStates.Visible;
                 deviceListLayout.Visibility = Android.Views.ViewStates.Visible;
                 discoveryHandle?.Dispose();
@@ -2735,7 +2747,7 @@ namespace PenguinMonitor
                             _appSettings.SelectedBluetoothDevice = address;
                             scannerStatus.Text = $"Scanner: {name}";
                             deviceListLayout.RemoveAllViews();
-                            scanButton.Text = "Scan for scanners";
+                            scanButton.Text = "Scan BT";
                             scanButton.Enabled = true;
                             if (_isBluetoothEnabledCheckBox.Checked)
                             {
@@ -2760,11 +2772,20 @@ namespace PenguinMonitor
 
             scannerStatus.Visibility = Android.Views.ViewStates.Gone;
             deviceListLayout.Visibility = Android.Views.ViewStates.Gone;
-            scannerSection.AddView(scannerStatus);
-            var scanBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            scanBtnParams.SetMargins(0, 4, 0, 4);
+
+            // "Enable BT & GPS" checkbox with "Scan BT" to its right (checkbox text keeps full size — it wraps rather than shrinks)
+            var btRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            btRow.SetGravity(GravityFlags.CenterVertical);
+            btRow.SetPadding(8, 4, 8, 4);
+            _isBluetoothEnabledCheckBox.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            btRow.AddView(_isBluetoothEnabledCheckBox);
+            var scanBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            scanBtnParams.SetMargins(8, 0, 0, 0);
             scanButton.LayoutParameters = scanBtnParams;
-            scannerSection.AddView(scanButton);
+            btRow.AddView(scanButton);
+            _settingsCard.AddView(btRow);
+
+            scannerSection.AddView(scannerStatus);
             scannerSection.AddView(deviceListLayout);
             _settingsCard.AddView(scannerSection);
 

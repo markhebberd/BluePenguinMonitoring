@@ -62,23 +62,34 @@ namespace PenguinMonitor
             }
 
             var seen = new HashSet<string>();
-            // Include already-paired devices immediately
-            foreach (var d in adapter.BondedDevices ?? Enumerable.Empty<BluetoothDevice>())
+            try
             {
-                if (d.Address != null && seen.Add(d.Address))
-                    onDeviceFound(d.Address, d.Name ?? d.Address);
+                // Include already-paired devices immediately
+                foreach (var d in adapter.BondedDevices ?? Enumerable.Empty<BluetoothDevice>())
+                {
+                    if (d.Address != null && seen.Add(d.Address))
+                        onDeviceFound(d.Address, d.Name ?? d.Address);
+                }
+
+                var receiver = new DiscoveryReceiver(seen, onDeviceFound, onFinished);
+                var filter = new IntentFilter();
+                filter.AddAction(BluetoothDevice.ActionFound);
+                filter.AddAction(BluetoothAdapter.ActionDiscoveryFinished);
+                context.RegisterReceiver(receiver, filter);
+
+                adapter.CancelDiscovery();
+                adapter.StartDiscovery();
+
+                return new DiscoveryHandle(context, receiver, adapter);
             }
-
-            var receiver = new DiscoveryReceiver(seen, onDeviceFound, onFinished);
-            var filter = new IntentFilter();
-            filter.AddAction(BluetoothDevice.ActionFound);
-            filter.AddAction(BluetoothAdapter.ActionDiscoveryFinished);
-            context.RegisterReceiver(receiver, filter);
-
-            adapter.CancelDiscovery();
-            adapter.StartDiscovery();
-
-            return new DiscoveryHandle(context, receiver, adapter);
+            catch (Exception ex)
+            {
+                // Missing BLUETOOTH_SCAN/CONNECT permission (SecurityException) or other failure —
+                // don't crash; let the caller reset its UI.
+                System.Diagnostics.Debug.WriteLine($"StartDiscovery failed: {ex.Message}");
+                onFinished?.Invoke();
+                return new NoOpDisposable();
+            }
         }
 
         private class DiscoveryReceiver : BroadcastReceiver
