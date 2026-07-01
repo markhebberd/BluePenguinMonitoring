@@ -4277,30 +4277,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const boxDetail = useBoxDetail(loading ? null : selectedBox);
 
-  // Auto-select bird when box changes
+  // On box change, keep the penguin panel collapsed until a penguin is clicked
+  // (don't auto-open a bird).
   useEffect(() => {
     if (!selectedBox) { setHighlightObs(null); return; }
-    if (!boxDetail) return;
-    if (window.innerWidth < 900) { setSelectedBird(null); return; }
-    const observations = boxDetail.observations || [];
-    const pairCounts = new Map<string, number>();
-    for (const obs of observations) {
-      if (obs.eggs > 0 || obs.chicks > 0) {
-        const males = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'M');
-        const females = obs.scans.filter((s: any) => (s.sex || '').toUpperCase() === 'F');
-        for (const m of males) for (const f of females) {
-          const key = `${m.peng_num}|${f.peng_num}`;
-          pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
-        }
-      }
-    }
-    let bestPair = '', bestCount = 0;
-    for (const [key, count] of pairCounts) if (count > bestCount) { bestCount = count; bestPair = key; }
-    if (bestPair) { setSelectedBird(bestPair.split('|')[0]); }
-    else {
-      for (const obs of observations) if (obs.scans.length > 0) { setSelectedBird(obs.scans[0].peng_num || null); return; }
-      setSelectedBird(boxDetail.all_penguins?.[0]?.peng_num || null);
-    }
+    setSelectedBird(null);
   }, [selectedBox]);
 
   const birdData = useBirdDetail(loading ? null : selectedBird);
@@ -4667,12 +4648,18 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   <div className="chipped-here">
                     <div className="muted">Chipped in this box: {chipped.length}</div>
                     <div className="bird-row">
-                      {chipped.map((c: any) => (
+                      {chipped.map((c: any) => {
+                        // Show each bird by its current status (chick until it returns as an
+                        // adult, then its sex), not relative to any observation/chip date —
+                        // hasReturned is computed client-side, so merge it in from allPenguins.
+                        const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
+                        return (
                         <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={c} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date} />
+                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} currentStatus />
                           <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
-                      ))}
+                        );
+                      })}
                       {canEdit && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => setAddPenguinBox(selectedBox)}>+ 🐧</button>}
                     </div>
                   </div>
@@ -4737,15 +4724,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 </>);
               })()}
             </div>
+            {selectedBird && (
             <div className="detail-bird">
               {birdData?.penguin ? (
-                <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
+                <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'} onClose={() => setSelectedBird(null)}
                   onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
                   onDayClick={goToDay} />
-              ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird...</p>; })()
-              : <p className="muted">Select a bird</p>}
+              ) : <p className="muted">Loading bird...</p>}
             </div>
+            )}
           </div>
           )}
         </div>
