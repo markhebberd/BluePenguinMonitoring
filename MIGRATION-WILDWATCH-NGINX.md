@@ -90,7 +90,7 @@ secrets.php` mode 640.) OPcache is on by default in the FPM SAPI — no extra co
 > **The app writes into its own directory** (cPanel-style): the Disk Write Test streams
 > to `penguin-api/disk_test.tmp`, and the disk-alert throttle writes
 > `penguin-api/disk_alert_last.txt`. So `penguin-api/` must be owned by the pool user
-> (`wildwatch`), not the deploy user — `deploy.sh` §6 chowns it after each rsync. If PHP
+> (`wildwatch`), not the deploy user — `deploy.sh` §6 chowns it after each build. If PHP
 > ran as a user that couldn't write its own dir, the Disk Write Test 500s.
 
 ---
@@ -154,7 +154,7 @@ One-time setup:
 ```bash
 ssh tantrixlab
 sudo mkdir -p /var/www/wildwatch/{releases,shared}
-sudo chown -R mark:mark /var/www/wildwatch        # mark owns the tree for rsync deploys
+sudo chown -R mark:mark /var/www/wildwatch        # mark owns the tree; clones repo + builds releases
 ```
 
 `secrets.php` lives in `shared/` (created from `secrets.php.sample` with the **new** DB
@@ -242,113 +242,95 @@ host running; low TTL makes rollback a one-line DNS revert.
 
 ---
 
-## 6. Deploy strategy (rethought, now that we're off cPanel)
+## 6. Deploy — GitHub Actions, VPS pulls & builds (implemented)
 
-cPanel forced `deploy-web.sh` to push files through the UAPI (port 2083) — no shell, no
-symlinks, partial uploads, icons uploaded once by hand. With full SSH we can do much
-better. **Keep** the script's lint (`grep` for unstyled `<a>`) + `vite build`; **replace**
-the upload.
+Push to `main` → GitHub Actions SSHes to the VPS → the **VPS pulls `origin/main` and
+builds the SPA itself**, then assembles an atomic release and flips `current` with a smoke
+test + auto-rollback. No build or rsync happens in CI — CI only *triggers* the server-side
+deploy. (cPanel's `deploy-web.sh` — UAPI file pushes over port 2083 — is dead here.)
 
-**Improvements adopted:**
+### Layout on the VPS
 
-1. **Atomic releases + symlink flip** (§4 layout). Deploy into a *new* `releases/<ts>/`,
-   then repoint `current` — the switch is one atomic `ln -sfn`. No half-updated docroot,
-   and **rollback = point `current` at the previous release** (instant).
-2. **`secrets.php` in `shared/`**, symlinked in — deploys can `rsync --delete` freely and
-   never risk the secret; config is decoupled from code.
-3. **Build off-box.** The SPA is built in CI/dev; the VPS only receives `dist/` + PHP.
-   No Node toolchain needed on the VPS for wildwatch (smaller surface). PHP isn't compiled.
-4. **`rsync --link-dest` against the previous release** — unchanged files hardlink, so each
-   release costs only the changed bytes and transfers are minimal.
-5. **Smoke test + auto-rollback** baked into the release flip.
+```
+/var/www/wildwatch/
+  repo/                      git clone of markhebberd/PenguinMonitor (pulled by deploy.sh)
+  releases/<timestamp>/      one atomic release each deploy (built dist + penguin-api/)
+  shared/secrets.php         created once, symlinked into each release — never in git/CI
+  current -> releases/<ts>   nginx docroot + php-fpm read through this
+  deploy.sh                  the server-side pull-build-release script
+```
 
-`deploy.sh` (run from your dev machine):
+### Auth (two keys, both least-privilege)
+
+| Direction | Key | Scope |
+|---|---|---|
+| **VPS → GitHub** | `~mark/.ssh/github_penguinmonitor` (ed25519), added as a **read-only deploy key** on the repo; used via the `github-penguin` ssh alias | clone/pull the private repo only |
+| **GitHub Actions → VPS** | dedicated keypair; private half in repo secret `VPS_SSH_KEY`; public half in `~mark/.ssh/authorized_keys` **pinned to a forced command** `command="/var/www/wildwatch/deploy.sh",no-pty,…` | can *only* run `deploy.sh`, never a shell (matters — `mark` has sudo) |
+
+Repo secrets: `VPS_SSH_KEY`, `VPS_HOST` (`204.168.139.151`), `VPS_USER` (`mark`).
+`secrets.php` never enters git or CI — it lives only in `shared/` on the box.
+
+### Server-side `/var/www/wildwatch/deploy.sh`
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-HOST=tantrixlab
-BASE=/var/www/wildwatch
-TS=$(date +%Y%m%d-%H%M%S)
-REL="$BASE/releases/$TS"
-
-# 1. lint + build (kept from deploy-web.sh)
-grep -rn '<a ' wildwatch_web/wildwatch/src && echo "unstyled <a> — fix first" >&2 || true
-( cd wildwatch_web/wildwatch && npm ci && npx vite build )
-
-# 2. stage release dir on the VPS, hardlinking unchanged files from the live release
-ssh "$HOST" "mkdir -p '$REL' && cp -al '$BASE/current/.' '$REL/' 2>/dev/null || true"
-
-# 3. ship SPA + PHP into the new release
-rsync -a --delete            wildwatch_web/wildwatch/dist/  "$HOST:$REL/"
-rsync -a --include='*.php' --include='*/' --exclude='*' \
-                              wildwatch_web/               "$HOST:$REL/penguin-api/"
-
-# 4. wire aliases + shared secrets, then flip atomically
-ssh "$HOST" bash -s <<EOF
-set -e
+BASE=/var/www/wildwatch; REPO="$BASE/repo"; APP="$REPO/wildwatch_web"
+cd "$REPO"; git fetch --quiet origin; git reset --hard origin/main   # 1. pull
+REV=$(git rev-parse --short HEAD)
+cd "$APP/wildwatch"; npm ci --silent; npx vite build                 # 2. build on server
+TS=$(date +%Y%m%d-%H%M%S); REL="$BASE/releases/$TS"                  # 3. assemble release
+mkdir -p "$REL/penguin-api"
+cp -a "$APP/wildwatch/dist/." "$REL/"
+find "$APP" -maxdepth 1 -name '*.php' ! -name 'secrets.php' ! -name 'secrets.php.sample' \
+     -exec cp {} "$REL/penguin-api/" \;
 ln -sfn penguin-api "$REL/api"
 ln -sfn "$BASE/shared/secrets.php" "$REL/penguin-api/secrets.php"
-# The PHP app writes into its own dir (disk_test.tmp write-test, disk_alert_last.txt
-# throttle state — cPanel-style). rsync lands it as \$USER; hand penguin-api to the
-# wildwatch pool user so those writes work. Without this the Disk Write Test 500s.
-sudo chown -R wildwatch:wildwatch "$REL/penguin-api"
+sudo chown -R wildwatch:wildwatch "$REL/penguin-api"   # app writes its own dir (§1 note)
+PREV=$(readlink -f "$BASE/current" || true)                          # 4. flip + smoke test
 ln -sfn "$REL" "$BASE/current"
-# smoke test; roll back if it fails
-code=\$(curl -s -o /dev/null -w '%{http_code}' --resolve wildwatch.co.nz:443:127.0.0.1 https://wildwatch.co.nz/ || echo 000)
-if [ "\$code" != "200" ]; then
-  prev=\$(ls -1dt "$BASE"/releases/*/ | sed -n 2p)
-  ln -sfn "\${prev%/}" "$BASE/current"
-  echo "smoke test failed (\$code) — rolled back to \$prev" >&2; exit 1
+spa=$(curl -s -o /dev/null -w '%{http_code}' --resolve wildwatch.co.nz:443:127.0.0.1 https://wildwatch.co.nz/ || echo 000)
+api=$(curl -s -o /dev/null -w '%{http_code}' --resolve wildwatch.co.nz:443:127.0.0.1 https://wildwatch.co.nz/api/snapshot.php || echo 000)
+if [ "$spa" != "200" ] || [ "$api" != "401" ]; then
+  [ -n "$PREV" ] && ln -sfn "$PREV" "$BASE/current"                  # auto-rollback
+  echo "SMOKE FAILED (spa=$spa api=$api) — rolled back to $PREV" >&2; exit 1
 fi
-# keep last 5 releases
-ls -1dt "$BASE"/releases/*/ | tail -n +6 | xargs -r rm -rf
-echo "deployed $TS"
-EOF
+ls -1dt "$BASE"/releases/*/ | tail -n +6 | xargs -r rm -rf           # 5. keep last 5
+echo "OK: deployed $TS @ $REV (spa=$spa api=$api)"
 ```
 
-### Option: GitHub Actions (you raised this — recommended *after* the manual cutover)
+Smoke test asserts **SPA=200 AND `/api/snapshot.php`=401** (proves PHP+DB+auth wired), so a
+broken `config.php`/DB rolls back instead of going live. Rollback is a one-line
+`ln -sfn` back to the prior release.
 
-Once the manual `deploy.sh` flow is proven, lifting it into CI gives push-to-deploy. Keep
-the same release-flip; CI just becomes the thing that builds + rsyncs.
-
-- **Auth:** a dedicated **deploy SSH key** (its own keypair, not your personal one), public
-  half in a restricted `~/.ssh/authorized_keys` line for a `deploy` user (or `mark`),
-  private half in repo **Settings → Secrets → `DEPLOY_SSH_KEY`**. Optionally lock the key
-  down with `command="..."`/`restrict` so it can only run the release script.
-- **Secrets stay on the box.** `secrets.php` lives in `shared/` and is never in the repo
-  or CI — CI only ever ships code, never credentials. This is a real upgrade over the
-  cPanel era.
-- **Trigger:** `on: push: branches: [main]` for the `wildwatch_web/**` paths, plus
-  `workflow_dispatch` for manual runs.
+### Workflow `.github/workflows/deploy-wildwatch.yml`
 
 ```yaml
-# .github/workflows/deploy-wildwatch.yml
 name: Deploy wildwatch
 on:
-  push: { branches: [main], paths: ['wildwatch_web/**'] }
+  push: { branches: [main], paths: ['wildwatch_web/**', '.github/workflows/deploy-wildwatch.yml'] }
   workflow_dispatch:
-concurrency: deploy-wildwatch          # never two deploys at once
+concurrency: { group: deploy-wildwatch, cancel-in-progress: false }
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: wildwatch_web/wildwatch/package-lock.json }
-      - run: cd wildwatch_web/wildwatch && npm ci && npx vite build
-      - uses: webfactory/ssh-agent@v0.9.0
-        with: { ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }} }
-      - run: |
-          echo "204.168.139.151 tantrixlab" | sudo tee -a /etc/hosts
-          ssh-keyscan tantrixlab >> ~/.ssh/known_hosts
-          ./deploy.sh            # same script, CI-side build already done — or a thin remote-only variant
+      - name: Trigger VPS pull-and-build deploy
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key; chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" deploy
 ```
 
-**Recommendation:** ship the migration with `deploy.sh` for tight control during cutover;
-add the Actions workflow once it's stable so routine SPA changes are push-to-deploy.
-GitHub Actions is a clear win here (cPanel couldn't do it at all) — the only new surface
-is one scoped deploy key, and no secret ever enters CI.
+The `deploy` argument is ignored — the forced command runs `deploy.sh`; its stdout and exit
+code stream back, so a failed smoke test fails the workflow. **Rollback / manual deploy:**
+re-run from the Actions tab (`workflow_dispatch`), or `ssh tantrixlab /var/www/wildwatch/deploy.sh`.
+
+> **Trade-off vs. build-off-box:** building on the VPS adds npm/node load to the prod box
+> and needs the toolchain there (already present for tantrix). In exchange, CI carries no
+> secrets, ships nothing over the wire, and the artifact is built in its target
+> environment. For this small SPA that's the right call; revisit if build time grows.
 
 ---
 
@@ -425,7 +407,7 @@ to route a filesystem check through PHP/HTTP.
 - Web config: `/etc/nginx/sites-available/wildwatch.co.nz` · `nginx -t` / `systemctl reload nginx`
 - PHP: php-fpm 8.4, pool socket `/run/php/wildwatch.sock` (or `php8.4-fpm.sock`)
 - TLS: `certbot --nginx -d wildwatch.co.nz -d www.wildwatch.co.nz` (existing certbot + timer)
-- Deploy: `deploy.sh` (build off-box → rsync to new release → atomic symlink flip → smoke test → auto-rollback); GH Actions optional
+- Deploy: **push to `main`** → GitHub Actions → VPS `deploy.sh` (git pull → npm/vite build on server → atomic release → chown → flip → smoke test → auto-rollback). Manual: `ssh tantrixlab /var/www/wildwatch/deploy.sh`
 - Rotate on migration: `DB_PASS`, `API_KEY` (NOT the Android keystore)
 - Don't touch: tantrix (nginx vhost, `:3001` pm2 app, `mark` DB user) — fully separate
 - Architecture / `/api` rationale / schema-of-record (= latest backup): **DEPLOYMENT.md**
