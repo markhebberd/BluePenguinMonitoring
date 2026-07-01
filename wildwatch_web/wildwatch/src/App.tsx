@@ -1672,6 +1672,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [adults, setAdults] = useState(0);
   const [eggs, setEggs] = useState(0);
   const [chicks, setChicks] = useState(0);
+  const [noScan, setNoScan] = useState(0);
   const [gateStatus, setGateStatus] = useState('');
   const [breedingStatus, setBreedingStatus] = useState('');
   const [notes, setNotes] = useState('');
@@ -1801,7 +1802,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           location_id: locationId,
           observer_id: observerId,
           observation_time_utc: parsedDate + ' 02:00:00',
-          adults, eggs, chicks,
+          adults, eggs, chicks, no_scan: noScan,
           breeding_status: breedingStatus || null,
           gate_status: gateStatus || null,
           notes,
@@ -1833,7 +1834,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       setMessage(`Saved: Box ${box}, ${formatDate(parsedDate)}, ${scannedBirds.length} birds`);
       setLastSavedObsId(obsData.id);
       // Reset form
-      setAdults(0); setEggs(0); setChicks(0); setGateStatus(''); setBreedingStatus('');
+      setAdults(0); setEggs(0); setChicks(0); setNoScan(0); setGateStatus(''); setBreedingStatus('');
       setNotes(''); setScannedBirds([]); setDateInput('');
     } catch (e: any) {
       setMessage('Error: ' + e.message);
@@ -2037,7 +2038,14 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                 <button className="remove-scan" onClick={() => removeBird(b)}>&times;</button>
               </span>;
             })}
-            {scannedBirds.length === 0 && <span className="muted">Click birds above or search to add</span>}
+            {scannedBirds.length === 0 && noScan === 0 && <span className="muted">Click birds above or search to add</span>}
+            {Array.from({ length: noScan }).map((_, k) => (
+              <span key={`ns${k}`} className="scan-removable">
+                <span className="scan no-scan">No scan</span>
+                <button className="remove-scan" onClick={() => { setNoScan(n => n - 1); setAdults(a => Math.max(0, a - 1)); }}>&times;</button>
+              </span>
+            ))}
+            <button type="button" className="add-noscan-btn" onClick={() => { setNoScan(n => n + 1); setAdults(a => a + 1); }}>+ No scan</button>
           </div>
         </div>
 
