@@ -1,4 +1,4 @@
-import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess } from './api/localdb';
@@ -2858,7 +2858,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
+function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
@@ -2907,6 +2907,14 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
 
   const dayPageRef = useRef<HTMLDivElement>(null);
   const [calHidden, setCalHidden] = useState(false);
+
+  // When arriving from a box's date link, centre that box's row up-front (before paint,
+  // so it doesn't jerk into place after the user has started scrolling) and highlight it.
+  useLayoutEffect(() => {
+    if (!highlightBox || !data) return;
+    const el = dayPageRef.current?.querySelector(`[data-daybox="${(window.CSS && CSS.escape) ? CSS.escape(highlightBox) : highlightBox}"]`);
+    if (el) (el as HTMLElement).scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
+  }, [highlightBox, data]);
 
   return (
     <div className={`day-page${sideBird && sideBirdData?.penguin ? ' day-page-docked' : ''}`} ref={dayPageRef}>
@@ -2996,7 +3004,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                   .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
                 const cfDs = displayStatus(cf.breeding_status, cf.eggs, cf.chicks);
                 return (
-                  <div key={box} className="day-row day-row-cf">
+                  <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}>
                     <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}><b>Box {box}</b></a>
                     {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
                     {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
@@ -3015,7 +3023,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
               // on their observation row instead (handled below), so they aren't repeated here.
               if (obs.length === 0 && chips.length > 0) {
                 return (
-                  <div key={box} className="day-row">
+                  <div key={box} data-daybox={box} className={`day-row${box === highlightBox ? ' day-box-highlight' : ''}`}>
                     {chips.map((c: any) => (
                       <span key={c.pit_id} className="day-chip-item">
                         <PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
@@ -3026,7 +3034,7 @@ function DayView({ date, dates, onBoxClick, onBirdClick: _onBirdClick, onDayClic
                 );
               }
               return (
-              <div key={box}>
+              <div key={box} data-daybox={box} className={box === highlightBox ? 'day-box-highlight' : undefined}>
                 {obs.map((o: any, oi: number) => {
                   // Keep duplicate scans visible — the same penguin scanned >1x in one observation is a
                   // data-entry error worth surfacing, not noise to hide.
@@ -4141,6 +4149,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // birdData from useBirdDetail hook
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
+  const [dayBox, setDayBox] = useState<string|null>(null); // box to centre+highlight in day view
   const allPenguins = useAllPenguins();
   const [penguinSearch, setPenguinSearch] = useState('');
   const [colonies, setColonies] = useState<any[]>([]);
@@ -4362,9 +4371,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     setShowEntry(section === 'enter');
   };
 
-  const goToDay = (day: string) => {
+  const goToDay = (day: string, box?: string) => {
     setSelectedBox(null); setSelectedBird(null);
     setShowAdmin(false); setShowReports(false); setShowEntry(false);
+    setDayBox(box ?? null);
     setSelectedDay(day);
   };
 
@@ -4550,7 +4560,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
         {passwordDialog}
       </div>
     );
@@ -4703,7 +4713,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   {mergedObs.map((obs: any, i: number) => obs._deleted ? (
                     <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
                       <div className="obs-top">
-                        <span><s><DateLink date={obs.observation_time_utc} onDayClick={goToDay} /></s></span>
+                        <span><s><DateLink date={obs.observation_time_utc} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} /></s></span>
                         <span className="muted">deleted {obs.deleted_at ? formatDate(obs.deleted_at) : ''} by {obs.deleted_by_name || '?'}{obs.delete_reason ? ` — ${obs.delete_reason}` : ''}</span>
                       </div>
                       <div className="obs-nums">
@@ -4716,10 +4726,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
                   ) : (
-                    <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={goToDay} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
+                    <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
                   {sortedPrev.map(([label, obs]) => (
-                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={goToDay} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
+                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
                 </>);
               })()}
