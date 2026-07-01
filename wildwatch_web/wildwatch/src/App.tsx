@@ -112,9 +112,9 @@ const STATUS_NAMES: Record<string,string> = {
   DCM:'DCM',
 };
 
-// Observer-settable breeding statuses (matches the edit dropdown), in progression order,
-// for the quick radial status picker on a locked observation.
-const STATUS_PICK_OPTIONS = ['NO','UNL','POT','CON','DCM','ABN'];
+// Observer-settable breeding statuses for the quick radial status picker on a locked
+// observation. Order = ring position: CON at top (12 o'clock), then clockwise.
+const STATUS_PICK_OPTIONS = ['CON','POT','UNL','NO','ABN','DCM'];
 
 function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
   observations: Observation[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
