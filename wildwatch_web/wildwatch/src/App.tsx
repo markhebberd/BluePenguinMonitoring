@@ -662,7 +662,7 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
 
 const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[] }) {
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
   // Group birds by season
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; scanCount: number }>>();
   const seasonObs = new Map<string, Observation[]>();
@@ -708,12 +708,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
 
   const seasons = Array.from(seasonBirds.entries())
     .sort((a, b) => b[0].localeCompare(a[0]));
-
-  // Each season is a collapsible section; the newest starts expanded.
-  const [expandedSeasons, setExpandedSeasons] = useState<Set<string>>(() => new Set(seasons.slice(0, 1).map(([l]) => l)));
-  const toggleSeason = (l: string) => setExpandedSeasons(s => {
-    const n = new Set(s); n.has(l) ? n.delete(l) : n.add(l); return n;
-  });
 
   if (seasons.every(([, m]) => m.size === 0)) return null;
 
@@ -845,18 +839,20 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
 
         const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
 
-        const isExpanded = expandedSeasons.has(label);
+        // Newest observation in this season — the scroll/expand target for the matching
+        // season section in the observation list lower on the page.
+        const latestObs = (seasonObs.get(label) || []).reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
 
         return (
           <div key={label} className="season-birds">
-            <div className="season-title clickable" onClick={() => toggleSeason(label)}>
-              {isExpanded ? '▾' : '▸'} Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+            <div className={`season-title${latestObs ? ' clickable' : ''}`} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
+              Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
             </div>
             {/* One row per breeding window, newest on top. Family (date range + pair +
                 offspring at final life stage) sits in the black box; window visitors sit
                 to its right. Outside-window birds interleave chronologically: above a
                 window = seen after it, below = seen before it. */}
-            {isExpanded && (() => {
+            {(() => {
               const gapRow = (gi: number) => {
                 const gb = slotRow(`g${gi}`);
                 return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
@@ -4951,7 +4947,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {!false && boxDetail && (
           <div className="detail-split">
             <div className="detail-obs">
-                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
+                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
+                  onSeasonClick={(t: string) => { setHighlightObs(t); setScrollToObs(t); }} />
                 {(() => {
                   const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
                   const canEdit = userRole !== 'viewer';

@@ -164,7 +164,7 @@ header h1:hover { opacity:.8; }
 .deleted-obs { opacity:0.5; border-left:3px solid #F44336 !important; }
 .season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
 .season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
-.season-divider span { font-size:13px; color:#888; white-space:nowrap; }
+.season-divider span { font-size:14px; color:#1a5276; white-space:nowrap; }
 .obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
@@ -333,7 +333,7 @@ h3.collapsible:hover { color:#1a5276; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
 .breeding-pair .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
-.season-title { font-weight:700; color:#1a5276; margin-top:6px; }
+.season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
 .clutch-row { margin:6px 0; }
 .clutch-label { font-size:11px; font-weight:600; margin-bottom:2px; }
 .clutch-dates { align-self:center; font-size:10px; color:#666; margin-right:2px; }
