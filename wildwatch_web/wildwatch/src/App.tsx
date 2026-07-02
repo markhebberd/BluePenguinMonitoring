@@ -1103,6 +1103,27 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
   );
 }
 
+/** A chipping event shown as a sighting card: green left border (vs blue for
+ *  observations), date + bird mini + "Chipped by X" — no adult/egg/chick counts,
+ *  since a chipping isn't an observation and those values are unknown. */
+function ChipCard({ date, chipBy, scan, box, onBoxClick, onBirdClick, onDayClick }: {
+  date: string; chipBy?: string | null; scan: any; box?: string;
+  onBoxClick?: (box: string) => void; onBirdClick: (num: string) => void; onDayClick?: (day: string) => void;
+}) {
+  return (
+    <div className="obs-card chip-card">
+      <div className="obs-top">
+        <span><b><DateLink date={date} onDayClick={onDayClick} /></b></span>
+        {box && onBoxClick && <a className="bird-chip clickable" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>}
+      </div>
+      <div className="obs-nums">
+        <PenguinMini scan={scan} onClick={() => onBirdClick(scan.peng_num)} observationDate={chickContextDate(date)} />
+        <span className="muted">Chipped by {chipBy || '?'}</span>
+      </div>
+    </div>
+  );
+}
+
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
@@ -1272,7 +1293,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {/* Sighting history */}
       {sightings.length > 0 && <div className="bird-section">
         <h3 className="collapsible" onClick={() => toggleSection('sightings')}>{expandedSections.sightings ? '▾' : '▸'} Sighting history ({sightings.length})</h3>
-        {expandedSections.sightings && sightings.map((s: any, i: number) => (
+        {expandedSections.sightings && sightings.map((s: any, i: number) => s.source === 'chip' ? (
+          <ChipCard key={i} date={s.date} box={s.box} onBoxClick={onBoxClick} onDayClick={onDayClick} onBirdClick={onBirdClick}
+            chipBy={(chips.find((c: any) => c.chip_date === s.date && c.chip_box === s.box) || {}).chip_by}
+            scan={{ peng_num: p.peng_num, pit_id: (chips.find((c: any) => c.chip_date === s.date && c.chip_box === s.box) || activeChip)?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code }} />
+        ) : (
           <div key={i} className="obs-card">
             <div className="obs-top">
               <b><DateLink date={s.date} onDayClick={onDayClick} /></b>
@@ -3396,7 +3421,9 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   return (
     <div>
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
-      {expanded && observations.map((o: any, i: number) => <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
+      {expanded && observations.map((o: any, i: number) => o._chip
+        ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} chipBy={o.chip_by} scan={o} onBirdClick={onBirdClick} onDayClick={onDayClick} />
+        : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
 }
@@ -4715,8 +4742,26 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
                 const thisLabel = getSeasonLabel();
-                const thisSeason = boxDetail.observations.filter((o: any) => o.observation_time_utc >= thisSeasonStart);
-                const prevObs = boxDetail.observations.filter((o: any) => o.observation_time_utc < thisSeasonStart);
+
+                // Chippings in this box with no matching scan in one of the box's
+                // observations on the chip day become their own sighting card —
+                // otherwise a chipping without an observation is invisible here.
+                const scannedPitsByDay = new Map<string, Set<string>>();
+                for (const o of boxDetail.observations) {
+                  const day = toNzDateStr(o.observation_time_utc);
+                  if (!scannedPitsByDay.has(day)) scannedPitsByDay.set(day, new Set());
+                  for (const s of (o.scans || [])) if (s.pit_id) scannedPitsByDay.get(day)!.add(s.pit_id);
+                }
+                const chipEvents = (boxDetail.all_penguins || [])
+                  .filter((p: any) => p.is_chipped_here && p.chip_date)
+                  .filter((p: any) => !scannedPitsByDay.get(p.chip_date)?.has(p.pit_id))
+                  .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
+
+                const byTimeDesc = (a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc);
+                const thisSeason = [...boxDetail.observations, ...chipEvents]
+                  .filter((o: any) => o.observation_time_utc >= thisSeasonStart).sort(byTimeDesc);
+                const prevObs = [...boxDetail.observations, ...chipEvents]
+                  .filter((o: any) => o.observation_time_utc < thisSeasonStart).sort(byTimeDesc);
 
                 // Group previous observations by season
                 const prevSeasons = new Map<string, Observation[]>();
@@ -4762,6 +4807,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       </div>
                       {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
+                  ) : obs._chip ? (
+                    <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} chipBy={obs.chip_by} scan={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} />
                   ) : (
                     <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}

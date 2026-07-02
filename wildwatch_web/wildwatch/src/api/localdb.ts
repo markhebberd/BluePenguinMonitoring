@@ -675,11 +675,15 @@ function queryBirdDetailInner(pengNum: string): any {
     }
   }
 
-  // Chip events
+  // Chip events — skipped when the bird was also scanned in that box on the chip
+  // day (the observation sighting already shows it; don't list the day twice).
+  const nzDay = (utc: string) => new Date(new Date(utc.replace(' ', 'T') + 'Z').getTime() + 12 * 3600000).toISOString().slice(0, 10);
   for (const chip of chips) {
     if (chip.chip_box && chip.chip_date) {
       const key = `${pengNum}|${chip.chip_date}|${chip.chip_box}`;
-      if (!sightingMap.has(key)) {
+      const scannedSameDay = Array.from(sightingMap.values()).some(
+        (s: any) => s.source === 'scan' && s.box === chip.chip_box && nzDay(s.date) === chip.chip_date);
+      if (!sightingMap.has(key) && !scannedSameDay) {
         sightingMap.set(key, {
           peng_num: pengNum, date: chip.chip_date, box: chip.chip_box, source: 'chip',
           adults: 0, eggs: 0, chicks: 0, breeding_status: null,

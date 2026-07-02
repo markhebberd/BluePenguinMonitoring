@@ -169,6 +169,7 @@ header h1:hover { opacity:.8; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
 .obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
+.obs-card.chip-card { border-left-color:#4CAF50; } /* chipping event, not an observation */
 .obs-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
 .obs-top-right { display:flex; gap:6px; align-items:center; }
 .obs-top b { font-size:12px; }
