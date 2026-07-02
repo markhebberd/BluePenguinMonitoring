@@ -334,6 +334,8 @@ h3.collapsible:hover { color:#1a5276; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
 .breeding-pair .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
+.season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
+.issue-badge { font-size:10px; background:#FFF3E0; color:#E65100; border:1px solid #FFCC80; border-radius:4px; padding:1px 5px; cursor:help; white-space:pre-line; }
 .clutch-row { margin:6px 0; }
 .clutch-label { font-size:11px; font-weight:600; margin-bottom:2px; }
 .clutch-dates { align-self:center; font-size:10px; color:#666; margin-right:2px; }

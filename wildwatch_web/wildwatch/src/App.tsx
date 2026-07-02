@@ -664,6 +664,54 @@ const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3r
 /** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
+/** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
+ *  observations). All dates are NZ days. Returns human-readable detail lines so the
+ *  season summary can list what's wrong. */
+function seasonDataIssues(obs: Observation[]) {
+  const byDay = new Map<string, Observation[]>();
+  for (const o of obs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)!.push(o);
+  }
+  // Duplicate observations: 2+ non-deleted observations for this box on the same day
+  const dupObs: string[] = [];
+  for (const [day, list] of byDay) if (list.length > 1) dupObs.push(`${day} (${list.length})`);
+  // Duplicate scans: within one observation, the same pit scanned 2+ times, or one
+  // penguin scanned via 2+ different chips
+  const dupScans: string[] = [];
+  for (const o of obs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    const pitCounts = new Map<string, number>();
+    const pengPits = new Map<string, Set<string>>();
+    for (const s of o.scans) {
+      pitCounts.set(s.pit_id, (pitCounts.get(s.pit_id) || 0) + 1);
+      if (s.peng_num) {
+        if (!pengPits.has(s.peng_num)) pengPits.set(s.peng_num, new Set());
+        pengPits.get(s.peng_num)!.add(s.pit_id);
+      }
+    }
+    for (const [pit, n] of pitCounts) if (n > 1) dupScans.push(`${day}: ${pit.slice(-8)} ×${n}`);
+    for (const [peng, pits] of pengPits) if (pits.size > 1) dupScans.push(`${day}: #${peng} (${pits.size} chips)`);
+  }
+  // Same-gender conflicts: 2+ distinct penguins of the same sex on the same day
+  const conflicts: string[] = [];
+  for (const [day, list] of byDay) {
+    const bySex = new Map<string, Set<string>>();
+    for (const o of list) for (const s of o.scans) {
+      const sex = (s.sex || '').toUpperCase();
+      if ((sex === 'M' || sex === 'F') && s.peng_num) {
+        if (!bySex.has(sex)) bySex.set(sex, new Set());
+        bySex.get(sex)!.add(s.peng_num);
+      }
+    }
+    for (const [sex, pengs] of bySex) if (pengs.size > 1) {
+      conflicts.push(`${day}: ${pengs.size} ${sex} (${Array.from(pengs).map(p => `#${p}`).join(', ')})`);
+    }
+  }
+  return { dupObs, dupScans, conflicts };
+}
+
 function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
   // Group birds by season
   const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; scanCount: number }>>();
@@ -844,12 +892,27 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         // Newest observation in this season — the scroll/expand target for the matching
         // season section in the observation list lower on the page.
         const latestObs = (seasonObs.get(label) || []).reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
+        const issues = seasonDataIssues(seasonObs.get(label) || []);
+        const issueBadges = [
+          { n: issues.dupObs.length, label: 'duplicate observation', detail: issues.dupObs },
+          { n: issues.conflicts.length, label: 'same-sex conflict', detail: issues.conflicts },
+          { n: issues.dupScans.length, label: 'duplicate scan', detail: issues.dupScans },
+        ].filter(b => b.n > 0);
 
         return (
           <div key={label} className="season-birds">
             <div className={`season-title${latestObs ? ' clickable' : ''}`} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
               Season {seasonRange(label)}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
             </div>
+            {issueBadges.length > 0 && (
+              <div className="season-issues">
+                {issueBadges.map(b => (
+                  <span key={b.label} className="issue-badge" title={b.detail.join('\n')}>
+                    ⚠ {b.n} {b.label}{b.n !== 1 ? 's' : ''}
+                  </span>
+                ))}
+              </div>
+            )}
             {/* One row per breeding window, newest on top. Family (date range + pair +
                 offspring at final life stage) sits in the black box; window visitors sit
                 to its right. Outside-window birds interleave chronologically: above a
