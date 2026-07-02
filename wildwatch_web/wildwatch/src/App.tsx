@@ -548,6 +548,7 @@ interface Clutch {
   laid: number | null;      // estimated laid time; null when un-estimable
   laidFailed: boolean;      // eggs already present at first check — data needs fixing
   start: number;            // first obs with offspring present (egg appearance)
+  startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
   end: number | null;       // obs that ended the attempt; null = still running
   windowStart: number;      // breeding window: egg appearance …
   windowEnd: number;        // … fledge (laid + 87d) or earlier failure
@@ -589,7 +590,7 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
         const found = (o.eggs || 0) > 1 ? t - 2 * DAY : t;
         laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
       }
-      current = { laid, laidFailed: laid === null, start: t, end: null,
+      current = { laid, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
       if (abn) { current.end = t; current = null; awaitingEmpty = true; }
@@ -954,7 +955,15 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
                     {clutches.length > 1 && <div className="clutch-label muted">{ordinal(ci + 1)} clutch</div>}
-                    {clutch.laidFailed && <div className="season-issues"><span className="issue-badge">{'⚠'} laid date could not be estimated</span></div>}
+                    {clutch.laidFailed && (
+                      <div className="season-issues">
+                        <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
+                          title="Go to where the egg/chick was first detected"
+                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>
+                          {'⚠'} laid date could not be estimated
+                        </span>
+                      </div>
+                    )}
                     <div className="bird-row">
                       <span className="breeding-pair">
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}

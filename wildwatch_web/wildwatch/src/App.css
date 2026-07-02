@@ -338,6 +338,8 @@ h3.collapsible:hover { color:#1a5276; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
 .season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
 .issue-badge { position:relative; font-size:10px; background:#FFF3E0; color:#E65100; border:1px solid #FFCC80; border-radius:4px; padding:1px 5px; cursor:help; }
+.issue-badge.clickable { cursor:pointer; }
+.issue-badge.clickable:hover { filter:brightness(.95); }
 .issue-tip { display:none; position:absolute; top:100%; left:0; flex-direction:column; gap:1px; background:#fff; border:1px solid #FFCC80; border-radius:6px; padding:5px 6px; box-shadow:0 4px 12px rgba(0,0,0,.18); white-space:nowrap; z-index:600; min-width:max-content; }
 .issue-badge:hover .issue-tip { display:flex; }
 .issue-row { font-size:11px; color:#333; padding:2px 4px; border-radius:3px; }
