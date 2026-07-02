@@ -4,7 +4,9 @@ setHeaders();
 $observer = requireAuth();
 
 $pdo = getDbConnection();
-requireColonyAccess($pdo, $observer, 1); // view access (day view is colony-1 in the single-colony app)
+$colonyId = (int)($_GET['colony_id'] ?? 1);
+requireColonyAccess($pdo, $observer, $colonyId); // view access
+$viewPrefix = getColonyPrefix($pdo, $colonyId);
 $date = $_GET['date'] ?? '';
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     echo json_encode(['error' => 'date required (YYYY-MM-DD)']);
@@ -39,7 +41,7 @@ if (!empty($obsIds)) {
         GROUP BY ps.observation_id, pc.peng_num");
     $stmt->execute(array_values($obsIds));
     foreach ($stmt->fetchAll() as $row) {
-        $row['peng_num'] = displayPengNum($row['peng_num'] ?? '');
+        $row['peng_num'] = displayPengNum($row['peng_num'] ?? '', $viewPrefix);
         $scans[$row['observation_id']][] = $row;
     }
 }
@@ -57,7 +59,7 @@ $stmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_box, pc.chip_by, p
     ORDER BY pc.chip_box + 0");
 $stmt->execute([$date]);
 $chippings = $stmt->fetchAll();
-stripPengPrefix($chippings);
+stripPengPrefix($chippings, $viewPrefix);
 
 echo json_encode([
     'date' => $date,

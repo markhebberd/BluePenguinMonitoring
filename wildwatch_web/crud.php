@@ -244,7 +244,8 @@ function handleList($pdo, $table) {
     $sql .= " ORDER BY 1 DESC LIMIT $limit";
     $stmt = $pdo->prepare($sql); $stmt->execute($params);
     $rows = $stmt->fetchAll();
-    if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data'])) stripPengPrefix($rows);
+    if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data']))
+        stripPengPrefix($rows, getColonyPrefix($pdo, (int)($_GET['colony_id'] ?? 1)));
     echo json_encode($rows);
 }
 
@@ -257,7 +258,7 @@ function handleGet($pdo, $table, $pk, $id) {
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $row = $stmt->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'Not found']); return; }
-    if (isset($row['peng_num'])) $row['peng_num'] = displayPengNum($row['peng_num']);
+    if (isset($row['peng_num'])) $row['peng_num'] = displayPengNum($row['peng_num'], getColonyPrefix($pdo, (int)($_GET['colony_id'] ?? 1)));
     echo json_encode($row);
 }
 
@@ -282,7 +283,8 @@ function handleCreate($pdo, $table, $pk, $observer) {
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
     $input = stripRetiredColumns($table, $input);
 
-    $cols = array_keys($input);
+    $cid = (int)($_GET['colony_id'] ?? 1);
+    $viewPrefix = getColonyPrefix($pdo, $cid);
     $pdo->beginTransaction();
     try {
         // Prevent duplicate penguin scans for same observation
@@ -303,25 +305,26 @@ function handleCreate($pdo, $table, $pk, $observer) {
             $existing = $dup->fetch();
             if ($existing) {
                 $pdo->rollBack();
-                echo json_encode(['success' => false, 'error' => "pit_id already assigned to penguin #" . displayPengNum($existing['peng_num']), 'peng_num' => displayPengNum($existing['peng_num'])]);
+                echo json_encode(['success' => false, 'error' => "pit_id already assigned to penguin #" . displayPengNum($existing['peng_num'], $viewPrefix), 'peng_num' => displayPengNum($existing['peng_num'], $viewPrefix)]);
                 return;
             }
         }
 
-        // Auto-generate peng_num for new penguins (colony-prefixed)
+        // Auto-generate peng_num for new penguins (next number in the requested colony)
         if ($table === 'penguins' && !isset($input['peng_num'])) {
-            $cid = (int)($_GET['colony_id'] ?? 1);
-            $prefix = getColonyPrefix($pdo, $cid);
-            $stmt = $pdo->prepare("SELECT MAX(CAST(REGEXP_REPLACE(peng_num, '^[A-Z]+', '') AS UNSIGNED)) FROM penguins WHERE peng_num LIKE ?");
-            $stmt->execute([$prefix . '%']);
-            $input['peng_num'] = $prefix . (string)((int)$stmt->fetchColumn() + 1);
-            $cols = array_keys($input);
+            $stmt = $pdo->prepare("SELECT MAX(CAST(REGEXP_REPLACE(peng_num, '^[A-Z]+', '') AS UNSIGNED)) FROM penguins WHERE colony_id = ?");
+            $stmt->execute([$cid]);
+            $input['peng_num'] = $viewPrefix . (string)((int)$stmt->fetchColumn() + 1);
+        }
+        // New penguins are stamped with their home colony
+        if ($table === 'penguins' && !isset($input['colony_id'])) {
+            $input['colony_id'] = $cid;
         }
         // Prepend colony prefix to bare peng_num on penguin/chip/bio creates
         if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data']) && isset($input['peng_num'])) {
-            $cid = (int)($_GET['colony_id'] ?? 1);
             $input['peng_num'] = dbPengNum($pdo, $cid, $input['peng_num']);
         }
+        $cols = array_keys($input);
         $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
         $pdo->prepare($sql)->execute(array_values($input));
         $newId = $pdo->lastInsertId();
@@ -336,10 +339,10 @@ function handleCreate($pdo, $table, $pk, $observer) {
         $row->execute([$recordId]);
         $inserted = $row->fetch();
         if ($inserted) {
-            if (isset($inserted['peng_num'])) $inserted['peng_num'] = displayPengNum($inserted['peng_num']);
+            if (isset($inserted['peng_num'])) $inserted['peng_num'] = displayPengNum($inserted['peng_num'], $viewPrefix);
             $result = array_merge($result, $inserted);
         }
-        if (isset($result['id']) && is_string($result['id'])) $result['id'] = displayPengNum($result['id']);
+        if (isset($result['id']) && is_string($result['id'])) $result['id'] = displayPengNum($result['id'], $viewPrefix);
         echo json_encode($result);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
 }

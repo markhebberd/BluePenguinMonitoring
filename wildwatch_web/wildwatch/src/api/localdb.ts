@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 3; // Bump to force all clients to full re-sync (v3: colony prefix now stripped server-side)
+const CACHE_VERSION = 4; // Bump to force all clients to full re-sync (v4: only home-colony prefix stripped; foreign birds keep theirs)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 type StoreNames = typeof STORES[number];
 

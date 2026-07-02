@@ -95,9 +95,10 @@ if ($since) {
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
-    $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows);
-    $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows);
-    $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows);
+    $viewPrefix = getColonyPrefix($pdo, $colonyId);
+    $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows, $viewPrefix);
+    $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
+    $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
     echo json_encode([
         'incremental' => true,
         'since' => $ts,
@@ -155,9 +156,10 @@ $fullWm = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
 ) as wm")->fetch()['wm'];
 
-$pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows);
-$chipRows = $chips->fetchAll(); stripPengPrefix($chipRows);
-$bioRows = $bio->fetchAll(); stripPengPrefix($bioRows);
+$viewPrefix = getColonyPrefix($pdo, $colonyId);
+$pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows, $viewPrefix);
+$chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
+$bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
 $json = json_encode([
     'incremental' => false,
     'snapshot_time' => $fullWm,

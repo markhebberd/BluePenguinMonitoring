@@ -12,12 +12,20 @@ require_once __DIR__ . '/secrets.php';   // defines DB_HOST, DB_NAME, DB_USER, D
 define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain
 
 // ============ Colony penguin number prefix ============
-// Penguins are numbered per-colony with a 2-letter prefix (e.g. PT319, NI1).
-// The prefix is stripped for API output and re-added on input.
+// Penguins are numbered per-colony with a 2-4 letter prefix (e.g. PT319, NI1); the
+// prefixed value is the DB primary key, and penguins.colony_id records the home
+// colony. For display, only the VIEWING colony's prefix is stripped — birds at their
+// home colony show bare numbers ("319"), visitors keep theirs ("NI7" seen at PT).
+// This keeps a visiting PT706 distinguishable from a local NI706.
 
-/** Strip colony prefix from a peng_num for display (e.g. "PT319" → "319"). */
-function displayPengNum(string $pengNum): string {
-    return preg_replace('/^[A-Z]{2,4}/', '', $pengNum);
+/** Strip the viewing colony's prefix for display ("PT319" viewed from PT → "319";
+ *  foreign-colony birds keep their prefix so they stay unambiguous). */
+function displayPengNum(string $pengNum, string $viewPrefix): string {
+    $len = strlen($viewPrefix);
+    if ($len > 0 && strncmp($pengNum, $viewPrefix, $len) === 0 && ctype_digit(substr($pengNum, $len))) {
+        return substr($pengNum, $len);
+    }
+    return $pengNum;
 }
 
 /** Get colony prefix for a colony_id. Cached per-request. */
@@ -37,10 +45,10 @@ function dbPengNum($pdo, int $colonyId, string $pengNum): string {
     return getColonyPrefix($pdo, $colonyId) . $pengNum;
 }
 
-/** Strip prefix from peng_num in all rows (array of associative arrays). Modifies in-place and returns. */
-function stripPengPrefix(array &$rows, string $field = 'peng_num'): array {
+/** Strip the viewing colony's prefix from peng_num in all rows. Modifies in-place and returns. */
+function stripPengPrefix(array &$rows, string $viewPrefix, string $field = 'peng_num'): array {
     foreach ($rows as &$row) {
-        if (isset($row[$field])) $row[$field] = displayPengNum($row[$field]);
+        if (isset($row[$field])) $row[$field] = displayPengNum($row[$field], $viewPrefix);
     }
     return $rows;
 }
@@ -592,10 +600,11 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     }
 
     usort($sightings, function($a, $b) { return strcmp($b['date'], $a['date']); });
-    $pengArr = array_values($penguins); stripPengPrefix($pengArr);
-    $sightArr = array_values($sightings); stripPengPrefix($sightArr);
+    $viewPrefix = getColonyPrefix($pdo, $colonyId);
+    $pengArr = array_values($penguins); stripPengPrefix($pengArr, $viewPrefix);
+    $sightArr = array_values($sightings); stripPengPrefix($sightArr, $viewPrefix);
     // Also strip peng_num in seen_with arrays
-    foreach ($sightArr as &$s) { if (!empty($s['seen_with'])) stripPengPrefix($s['seen_with']); }
+    foreach ($sightArr as &$s) { if (!empty($s['seen_with'])) stripPengPrefix($s['seen_with'], $viewPrefix); }
     return ['penguins' => $pengArr, 'sightings' => $sightArr];
 }
 ?>

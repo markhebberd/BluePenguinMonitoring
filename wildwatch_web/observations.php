@@ -91,6 +91,7 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
     $observations = $stmt->fetchAll();
 
     // Get scans for each observation
+    $viewPrefix = getColonyPrefix($pdo, $colonyId);
     foreach ($observations as &$obs) {
         $scanSql = "SELECT ps.scan_time_utc, ps.pit_id, pc.peng_num, p.sex, p.vid_for_scanner
                     FROM penguin_scans ps
@@ -101,6 +102,7 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
         $scanStmt = $pdo->prepare($scanSql);
         $scanStmt->execute([$obs['observation_id']]);
         $obs['scans'] = $scanStmt->fetchAll();
+        stripPengPrefix($obs['scans'], $viewPrefix);
     }
 
     // Get location info
