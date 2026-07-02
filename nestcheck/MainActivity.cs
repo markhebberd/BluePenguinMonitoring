@@ -2451,9 +2451,9 @@ namespace PenguinMonitor
             {
                 if (_isBluetoothEnabledCheckBox.Checked)
                 {
+                    _appSettings.IsBlueToothEnabled = true;   // must be set before InitializeBluetooth (it gates connect on this)
                     InitializeBluetooth();
                     InitializeGPS();
-                    _appSettings.IsBlueToothEnabled = true;
                 }
                 else
                 {
