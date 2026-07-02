@@ -667,6 +667,7 @@ const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) 
 /** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
  *  observations). All dates are NZ days. Returns human-readable detail lines so the
  *  season summary can list what's wrong. */
+interface DataIssue { day: string; text: string }
 function seasonDataIssues(obs: Observation[]) {
   const byDay = new Map<string, Observation[]>();
   for (const o of obs) {
@@ -675,11 +676,11 @@ function seasonDataIssues(obs: Observation[]) {
     byDay.get(day)!.push(o);
   }
   // Duplicate observations: 2+ non-deleted observations for this box on the same day
-  const dupObs: string[] = [];
-  for (const [day, list] of byDay) if (list.length > 1) dupObs.push(`${day} (${list.length})`);
+  const dupObs: DataIssue[] = [];
+  for (const [day, list] of byDay) if (list.length > 1) dupObs.push({ day, text: `${day} — ${list.length} observations` });
   // Duplicate scans: within one observation, the same pit scanned 2+ times, or one
   // penguin scanned via 2+ different chips
-  const dupScans: string[] = [];
+  const dupScans: DataIssue[] = [];
   for (const o of obs) {
     const day = toNzDateStr(o.observation_time_utc);
     const pitCounts = new Map<string, number>();
@@ -691,11 +692,11 @@ function seasonDataIssues(obs: Observation[]) {
         pengPits.get(s.peng_num)!.add(s.pit_id);
       }
     }
-    for (const [pit, n] of pitCounts) if (n > 1) dupScans.push(`${day}: ${pit.slice(-8)} ×${n}`);
-    for (const [peng, pits] of pengPits) if (pits.size > 1) dupScans.push(`${day}: #${peng} (${pits.size} chips)`);
+    for (const [pit, n] of pitCounts) if (n > 1) dupScans.push({ day, text: `${day} — ${pit.slice(-8)} ×${n}` });
+    for (const [peng, pits] of pengPits) if (pits.size > 1) dupScans.push({ day, text: `${day} — #${peng} (${pits.size} chips)` });
   }
   // Same-gender conflicts: 2+ distinct penguins of the same sex on the same day
-  const conflicts: string[] = [];
+  const conflicts: DataIssue[] = [];
   for (const [day, list] of byDay) {
     const bySex = new Map<string, Set<string>>();
     for (const o of list) for (const s of o.scans) {
@@ -706,7 +707,7 @@ function seasonDataIssues(obs: Observation[]) {
       }
     }
     for (const [sex, pengs] of bySex) if (pengs.size > 1) {
-      conflicts.push(`${day}: ${pengs.size} ${sex} (${Array.from(pengs).map(p => `#${p}`).join(', ')})`);
+      conflicts.push({ day, text: `${day} — ${pengs.size} ${sex} (${Array.from(pengs).map(p => `#${p}`).join(', ')})` });
     }
   }
   return { dupObs, dupScans, conflicts };
@@ -894,10 +895,17 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         const latestObs = (seasonObs.get(label) || []).reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
         const issues = seasonDataIssues(seasonObs.get(label) || []);
         const issueBadges = [
-          { n: issues.dupObs.length, label: 'duplicate observation', detail: issues.dupObs },
-          { n: issues.conflicts.length, label: 'same-sex conflict', detail: issues.conflicts },
-          { n: issues.dupScans.length, label: 'duplicate scan', detail: issues.dupScans },
-        ].filter(b => b.n > 0);
+          { key: 'dupobs', label: 'duplicate observation', detail: issues.dupObs },
+          { key: 'conflict', label: 'same-sex conflict', detail: issues.conflicts },
+          { key: 'dupscan', label: 'duplicate scan', detail: issues.dupScans },
+        ].filter(b => b.detail.length > 0);
+        // NZ day → newest observation that day, so an issue row can scroll to it.
+        const dayToObsTime = new Map<string, string>();
+        for (const o of (seasonObs.get(label) || [])) {
+          const day = toNzDateStr(o.observation_time_utc);
+          const prev = dayToObsTime.get(day);
+          if (!prev || o.observation_time_utc > prev) dayToObsTime.set(day, o.observation_time_utc);
+        }
 
         return (
           <div key={label} className="season-birds">
@@ -907,8 +915,16 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             {issueBadges.length > 0 && (
               <div className="season-issues">
                 {issueBadges.map(b => (
-                  <span key={b.label} className="issue-badge" title={b.detail.join('\n')}>
-                    ⚠ {b.n} {b.label}{b.n !== 1 ? 's' : ''}
+                  <span key={b.key} className="issue-badge">
+                    ⚠ {b.detail.length} {b.label}{b.detail.length !== 1 ? 's' : ''}
+                    <span className="issue-tip">
+                      {b.detail.map((d, i) => {
+                        const t = dayToObsTime.get(d.day);
+                        return (
+                          <a key={i} className={`issue-row${t ? ' clickable' : ''}`} onClick={t ? () => onSeasonClick?.(t) : undefined}>{d.text}</a>
+                        );
+                      })}
+                    </span>
                   </span>
                 ))}
               </div>
