@@ -1893,12 +1893,13 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
   // Load all observations for this box (for status bar + season list)
   const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
+  const [boxPenguins, setBoxPenguins] = useState<any[]>([]);
   useEffect(() => {
-    if (!box) { setAllBoxObs([]); return; }
+    if (!box) { setAllBoxObs([]); setBoxPenguins([]); return; }
     fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => setAllBoxObs(d.observations || []))
-      .catch(() => setAllBoxObs([]));
+      .then(d => { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); })
+      .catch(() => { setAllBoxObs([]); setBoxPenguins([]); });
   }, [box, saving]);
 
   const seasonStart = `${season}-04-01`;
@@ -1906,6 +1907,21 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
   );
+
+  // Chippings in this box+season, unless the bird is already visible as a scan in
+  // one of the box's observations on the chip day (same rule as the box view).
+  const entryScannedByDay = new Map<string, Set<string>>();
+  for (const o of allBoxObs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    if (!entryScannedByDay.has(day)) entryScannedByDay.set(day, new Set());
+    for (const s of ((o as any).scans || [])) if (s.pit_id) entryScannedByDay.get(day)!.add(s.pit_id);
+  }
+  const entryChips = boxPenguins
+    .filter((p: any) => p.is_chipped_here && p.chip_date && p.chip_date >= seasonStart && p.chip_date <= seasonEnd)
+    .filter((p: any) => !entryScannedByDay.get(p.chip_date)?.has(p.pit_id))
+    .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
+  const entryRows = [...existingObs.map((o: any) => o), ...entryChips]
+    .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
 
   return (
     <div className="entry-page">
@@ -1998,11 +2014,17 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         )}
       </div>
 
-      {/* Existing observations for this box+season */}
-      {box && existingObs.length > 0 && (
+      {/* Existing observations + chippings for this box+season */}
+      {box && entryRows.length > 0 && (
         <div className="entry-existing">
-          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
-          {existingObs.map((o: any, i: number) => (
+          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
+          {entryRows.map((o: any, i: number) => o._chip ? (
+            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
+              <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
+              <PenguinMini scan={o} onClick={() => {}} observationDate={o.chip_date} navigateDirectly />
+              <span className="muted">Chipped by {o.chip_by || '?'}</span>
+            </div>
+          ) : (
             <div key={i} className="entry-existing-row">
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>

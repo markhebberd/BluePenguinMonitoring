@@ -99,10 +99,12 @@ function handleBox($pdo, $colonyId, $boxName) {
         if (!isset($allPenguins[$pnum])) {
             $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$c['pit_id'], 'sex'=>$c['sex'],
                 'is_dead'=>$c['is_dead'], 'chipped_as_adult'=>$c['chipped_as_adult'],
-                'chick_size_code'=>$c['chick_size_code'], 'chip_date'=>$c['chip_date'],
+                'chick_size_code'=>$c['chick_size_code'], 'chip_date'=>$c['chip_date'], 'chip_by'=>$c['chip_by'],
                 'scan_count'=>0, 'last_seen'=>$c['chip_date'], 'is_chipped_here'=>true];
         } else {
             $allPenguins[$pnum]['is_chipped_here'] = true;
+            $allPenguins[$pnum]['chip_by'] = $c['chip_by'];
+            if (empty($allPenguins[$pnum]['chip_date'])) $allPenguins[$pnum]['chip_date'] = $c['chip_date'];
         }
     }
     $allPenguins = array_values($allPenguins);
