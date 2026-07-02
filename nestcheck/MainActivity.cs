@@ -773,7 +773,12 @@ namespace PenguinMonitor
             if (_bluetoothManager == null)
                 bt = "BT:off";
             else if (_bluetoothManager.IsConnected)
-                bt = "BT🔗";
+            {
+                var nick = _appSettings.RememberedScanners
+                    .FirstOrDefault(s => s.Address == _bluetoothManager.ConnectedDeviceAddress)?.DisplayName
+                    ?? _bluetoothManager.ConnectedDeviceName;
+                bt = string.IsNullOrWhiteSpace(nick) ? "BT🔗" : $"BT🔗 ({nick})";
+            }
             else if (_bluetoothManager.IsConnecting)
                 bt = "BT🔄";
             else
@@ -2551,8 +2556,17 @@ namespace PenguinMonitor
             };
             dailyLabelLayout.AddView(setLabelButton);
 
-            var dailyLabelWarningCheckBox = new CheckBox(this) { Text = "⚠", Checked = _appSettings.ShowDailyLabelWarning };
-            dailyLabelWarningCheckBox.SetTextColor(UIFactory.DANGER_RED);
+            // Warning icon to the LEFT of the checkbox
+            var dailyLabelWarningIcon = new TextView(this) { Text = "⚠", TextSize = 16 };
+            dailyLabelWarningIcon.SetTextColor(UIFactory.DANGER_RED);
+            dailyLabelWarningIcon.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var warnIconParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            warnIconParams.Gravity = GravityFlags.CenterVertical;
+            warnIconParams.SetMargins(8, 0, 2, 0);
+            dailyLabelWarningIcon.LayoutParameters = warnIconParams;
+            dailyLabelLayout.AddView(dailyLabelWarningIcon);
+
+            var dailyLabelWarningCheckBox = new CheckBox(this) { Checked = _appSettings.ShowDailyLabelWarning };
             dailyLabelWarningCheckBox.SetPadding(0, 0, 0, 0);
             dailyLabelWarningCheckBox.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             dailyLabelWarningCheckBox.CheckedChange += (s, e) =>
