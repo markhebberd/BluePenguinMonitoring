@@ -685,15 +685,20 @@ function seasonDataIssues(obs: Observation[]) {
   for (const o of obs) {
     const day = toNzDateStr(o.observation_time_utc);
     const pitCounts = new Map<string, number>();
+    const pitPeng = new Map<string, string | null>();
     const pengPits = new Map<string, Set<string>>();
     for (const s of o.scans) {
       pitCounts.set(s.pit_id, (pitCounts.get(s.pit_id) || 0) + 1);
+      pitPeng.set(s.pit_id, s.peng_num);
       if (s.peng_num) {
         if (!pengPits.has(s.peng_num)) pengPits.set(s.peng_num, new Set());
         pengPits.get(s.peng_num)!.add(s.pit_id);
       }
     }
-    for (const [pit, n] of pitCounts) if (n > 1) dupScans.push({ day, text: `${day} — ${pit.slice(-8)} ×${n}` });
+    for (const [pit, n] of pitCounts) if (n > 1) {
+      const peng = pitPeng.get(pit);
+      dupScans.push({ day, text: `${day} — ${peng ? `#${peng}` : pit.slice(-8)} ×${n}` });
+    }
     for (const [peng, pits] of pengPits) if (pits.size > 1) dupScans.push({ day, text: `${day} — #${peng} (${pits.size} chips)` });
   }
   // Same-gender conflicts: 2+ distinct penguins of the same sex on the same day
