@@ -11,6 +11,40 @@ require_once __DIR__ . '/secrets.php';   // defines DB_HOST, DB_NAME, DB_USER, D
 // CORS settings (adjust for production)
 define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain
 
+// ============ Colony penguin number prefix ============
+// Penguins are numbered per-colony with a 2-letter prefix (e.g. PT319, NI1).
+// The prefix is stripped for API output and re-added on input.
+
+/** Strip colony prefix from a peng_num for display (e.g. "PT319" → "319"). */
+function displayPengNum(string $pengNum): string {
+    return preg_replace('/^[A-Z]{2,4}/', '', $pengNum);
+}
+
+/** Get colony prefix for a colony_id. Cached per-request. */
+function getColonyPrefix($pdo, int $colonyId): string {
+    static $cache = [];
+    if (!isset($cache[$colonyId])) {
+        $stmt = $pdo->prepare("SELECT colony_prefix FROM colonies WHERE colony_id = ?");
+        $stmt->execute([$colonyId]);
+        $cache[$colonyId] = $stmt->fetchColumn() ?: '';
+    }
+    return $cache[$colonyId];
+}
+
+/** Prepend colony prefix to a bare peng_num (e.g. "319" → "PT319"). Skips if already prefixed. */
+function dbPengNum($pdo, int $colonyId, string $pengNum): string {
+    if (preg_match('/^[A-Z]{2,4}/', $pengNum)) return $pengNum; // already prefixed
+    return getColonyPrefix($pdo, $colonyId) . $pengNum;
+}
+
+/** Strip prefix from peng_num in all rows (array of associative arrays). Modifies in-place and returns. */
+function stripPengPrefix(array &$rows, string $field = 'peng_num'): array {
+    foreach ($rows as &$row) {
+        if (isset($row[$field])) $row[$field] = displayPengNum($row[$field]);
+    }
+    return $rows;
+}
+
 /**
  * Get database connection with retry logic for shared hosting
  *
@@ -558,6 +592,10 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     }
 
     usort($sightings, function($a, $b) { return strcmp($b['date'], $a['date']); });
-    return ['penguins' => array_values($penguins), 'sightings' => array_values($sightings)];
+    $pengArr = array_values($penguins); stripPengPrefix($pengArr);
+    $sightArr = array_values($sightings); stripPengPrefix($sightArr);
+    // Also strip peng_num in seen_with arrays
+    foreach ($sightArr as &$s) { if (!empty($s['seen_with'])) stripPengPrefix($s['seen_with']); }
+    return ['penguins' => $pengArr, 'sightings' => $sightArr];
 }
 ?>

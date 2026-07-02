@@ -76,7 +76,8 @@ function handleBox($pdo, $colonyId, $boxName) {
     // Build allPenguins from already-fetched scans + chipped-here birds
     $allPenguins = [];
     foreach ($scansByObs as $scans) {
-        foreach ($scans as $scan) {
+        foreach ($scans as &$scan) {
+            if (isset($scan['peng_num'])) $scan['peng_num'] = displayPengNum($scan['peng_num']);
             $pnum = $scan['peng_num'];
             if (!$pnum) continue;
             if (!isset($allPenguins[$pnum])) {
@@ -93,7 +94,7 @@ function handleBox($pdo, $colonyId, $boxName) {
         FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE pc.chip_box = ?");
     $chipStmt->execute([$boxName]);
     foreach ($chipStmt->fetchAll() as $c) {
-        $pnum = $c['peng_num'];
+        $pnum = displayPengNum($c['peng_num']);
         if (!isset($allPenguins[$pnum])) {
             $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$c['pit_id'], 'sex'=>$c['sex'],
                 'is_dead'=>$c['is_dead'], 'chipped_as_adult'=>$c['chipped_as_adult'],

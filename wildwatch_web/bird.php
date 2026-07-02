@@ -13,8 +13,9 @@ $tag = $_GET['tag'] ?? '';
 if (empty($num) && empty($tag)) { echo json_encode(['error'=>'num or tag required']); exit; }
 
 if (!empty($num)) {
-    $stmt = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ?");
-    $stmt->execute([$num]);
+    // Try exact match first (handles prefixed input), then suffix match (bare number)
+    $stmt = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ? OR peng_num REGEXP CONCAT('[A-Z]+', ?) ORDER BY peng_num LIMIT 1");
+    $stmt->execute([$num, $num]);
     $penguin = $stmt->fetch();
 } else {
     $stmt = $pdo->prepare("SELECT p.* FROM penguins p JOIN penguin_chips pc ON p.peng_num = pc.peng_num WHERE pc.pit_id = ? OR pc.pit_id LIKE ?");
@@ -23,7 +24,8 @@ if (!empty($num)) {
 }
 if (!$penguin) { echo json_encode(['error'=>'penguin not found']); exit; }
 
-$pid = $penguin['peng_num'];
+$pid = $penguin['peng_num'];  // full prefixed value for DB queries
+$penguin['peng_num'] = displayPengNum($pid);  // strip for output
 
 // Chips
 $chipsStmt = $pdo->prepare("SELECT pit_id, chip_date, is_active, chip_box, chip_by, rechip_by, solo FROM penguin_chips WHERE peng_num = ? ORDER BY chip_date");

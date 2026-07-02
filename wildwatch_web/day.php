@@ -39,6 +39,7 @@ if (!empty($obsIds)) {
         GROUP BY ps.observation_id, pc.peng_num");
     $stmt->execute(array_values($obsIds));
     foreach ($stmt->fetchAll() as $row) {
+        $row['peng_num'] = displayPengNum($row['peng_num'] ?? '');
         $scans[$row['observation_id']][] = $row;
     }
 }
@@ -56,6 +57,7 @@ $stmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_box, pc.chip_by, p
     ORDER BY pc.chip_box + 0");
 $stmt->execute([$date]);
 $chippings = $stmt->fetchAll();
+stripPengPrefix($chippings);
 
 echo json_encode([
     'date' => $date,

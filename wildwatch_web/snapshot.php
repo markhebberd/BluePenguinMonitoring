@@ -95,16 +95,19 @@ if ($since) {
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
+    $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows);
+    $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows);
+    $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows);
     echo json_encode([
         'incremental' => true,
         'since' => $ts,
         'snapshot_time' => $snapshotTime,
         'observations' => $obsRows,
         'scans' => $scans->fetchAll(),
-        'penguins' => $penguins->fetchAll(),
-        'chips' => $chips->fetchAll(),
+        'penguins' => $pengRows,
+        'chips' => $chipRows,
         'locations' => $locations->fetchAll(),
-        'biometrics' => $bio->fetchAll(),
+        'biometrics' => $bioRows,
         'edit_counts' => $editCounts,
         '_counts' => getTotalCounts($pdo, $colonyId),
     ]);
@@ -152,16 +155,19 @@ $fullWm = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
 ) as wm")->fetch()['wm'];
 
+$pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows);
+$chipRows = $chips->fetchAll(); stripPengPrefix($chipRows);
+$bioRows = $bio->fetchAll(); stripPengPrefix($bioRows);
 $json = json_encode([
     'incremental' => false,
     'snapshot_time' => $fullWm,
     'query_ms' => $elapsed,
     'observations' => $observations,
     'scans' => $scans->fetchAll(),
-    'penguins' => $penguins->fetchAll(),
-    'chips' => $chips->fetchAll(),
+    'penguins' => $pengRows,
+    'chips' => $chipRows,
     'locations' => $locations->fetchAll(),
-    'biometrics' => $bio->fetchAll(),
+    'biometrics' => $bioRows,
     'edit_counts' => $editCounts,
     '_counts' => getTotalCounts($pdo, $colonyId),
 ]);

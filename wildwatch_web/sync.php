@@ -121,7 +121,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             $scansByObs[$scan['observation_id']][] = [
                 'pit_id' => $scan['pit_id'],
                 'scan_time_utc' => $scan['scan_time_utc'],
-                'peng_num' => $scan['peng_num'],
+                'peng_num' => displayPengNum($scan['peng_num'] ?? ''),
                 'sex' => $scan['sex'],
                 'chick_size_code' => $scan['chick_size_code'],
                 'chipped_as_adult' => $scan['chipped_as_adult'],
@@ -218,7 +218,9 @@ function handleUpload($pdo, $colonyId, $observer) {
             FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
             LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $s->execute([$obsId]);
-        return $s->fetchAll();
+        $rows = $s->fetchAll();
+        stripPengPrefix($rows);
+        return $rows;
     };
 
     $pdo->beginTransaction();

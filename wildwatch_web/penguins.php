@@ -64,6 +64,7 @@ $sql = "SELECT
 
 $stmt = $pdo->query($sql);
 $penguins = $stmt->fetchAll();
+stripPengPrefix($penguins);
 
 echo json_encode($penguins);
 
