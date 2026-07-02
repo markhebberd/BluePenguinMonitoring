@@ -350,6 +350,12 @@ function isChickAtObsDate(chipDate?: string|null, chippedAsAdult?: number|null, 
   return ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
 }
 
+/** One day after chipping — renders a chick-chipped bird in its chick-time context
+ *  (pale yellow) without triggering the same-day chipped-here (green) styling. */
+function chickContextDate(chipDate: string): string {
+  return new Date(new Date(chipDate).getTime() + 86400000).toISOString().slice(0, 10);
+}
+
 /** Sort scans: M first, F second, chicks/unknown last */
 function scanSortMFC(a: any, b: any): number {
   const order = (s: any) => {
@@ -662,25 +668,36 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return true;
         });
 
-        // Season rows are a year summary, not a specific day — render birds by
-        // current knowledge (no observationDate): never-returned chick-chipped
-        // birds show grey "unproven" with the chick-origin tail, returned ones
-        // show their sex colour with the tail, current-season chicks stay yellow.
+        // Season context: a bird chipped as a chick during the listed season renders
+        // as a chick (pale yellow) — we're looking at it during its chick time. The
+        // context date is the day AFTER chipping so the same-day chipped-here (green)
+        // styling never applies here. In later seasons the bird renders as an adult.
+        const seasonYear = parseInt(label);
+        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
+        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+        const seasonObsDate = (b: any) => {
+          if (!b.chipped_as_adult && b.chip_date) {
+            const cd = new Date(b.chip_date);
+            if (cd >= seasonStart && cd < seasonEnd) return chickContextDate(b.chip_date);
+          }
+          return undefined;
+        };
+
         return (
           <div key={label} className="season-birds">
-            <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
+            <div className="muted">Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
             <div className="bird-row">
               {pair.length === 2 && (
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
                   {chicks.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
@@ -688,7 +705,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
               )}
               {others.map(b => (
                 <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
+                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
                   <span className="scan-count">{b.scanCount}x</span>
                 </span>
               ))}
@@ -4677,13 +4694,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="muted">Chipped in this box: {chipped.length}</div>
                     <div className="bird-row">
                       {chipped.map((c: any) => {
-                        // Show each bird by its current status (chick until it returns as an
-                        // adult, then its sex), not relative to any observation/chip date —
-                        // hasReturned is computed client-side, so merge it in from allPenguins.
+                        // Show each bird as at its chipping time: chick-chipped → pale
+                        // yellow, adult-chipped → sex colour. Context is the day AFTER
+                        // chipping so the chipped-here (green) day styling never applies.
+                        // hasReturned (size-code U suffix) is computed client-side, so
+                        // merge it in from allPenguins.
                         const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
                         return (
                         <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} currentStatus />
+                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
                           <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                         );

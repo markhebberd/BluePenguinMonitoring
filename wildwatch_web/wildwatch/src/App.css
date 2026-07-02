@@ -202,10 +202,10 @@ header h1:hover { opacity:.8; }
 .scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF 85%, #FDD835 85%); }
 .scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 85%, #FDD835 85%); }
 .scan.unproven { background: linear-gradient(to right, #E0E0E0 85%, #FDD835 85%); }
-.scan.chipped-here { background:#C8E6C9; border-color:#81C784; }
+.scan.chipped-here { background:#C8E6C9; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
-.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); border-color:#81C784; }
-.scan.no-scan { background:#E8F5E9; border-color:#A5D6A7; color:#000; display:inline-block; min-width:84px; text-align:center; }
+.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); }
+.scan.no-scan { background:#E8F5E9; color:#000; display:inline-block; min-width:84px; text-align:center; }
 .add-noscan-btn { background:#E8F5E9; color:#2E7D32; border:1px solid #A5D6A7; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .add-noscan-btn:hover { background:#C8E6C9; }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
