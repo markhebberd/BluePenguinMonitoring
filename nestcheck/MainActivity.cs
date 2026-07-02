@@ -2833,8 +2833,9 @@ namespace PenguinMonitor
                         return b;
                     }
 
-                    // Increase preference — move up so it's tried earlier
+                    // Increase preference — move up so it's tried earlier (wide tap target)
                     var upBtn = chip("^", UIFactory.PRIMARY_BLUE);
+                    upBtn.SetPadding(96, 6, 96, 6);   // ~5x wider than a normal chip
                     if (_appSettings.RememberedScanners.IndexOf(sc) <= 0) { upBtn.Enabled = false; upBtn.Alpha = 0.4f; }
                     upBtn.Click += (s2, e2) =>
                     {
