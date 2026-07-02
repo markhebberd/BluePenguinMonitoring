@@ -661,6 +661,8 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
 }
 
 const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+/** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
+const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
 function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
   // Group birds by season
@@ -846,7 +848,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         return (
           <div key={label} className="season-birds">
             <div className={`season-title${latestObs ? ' clickable' : ''}`} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
-              Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+              Season {seasonRange(label)}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
             </div>
             {/* One row per breeding window, newest on top. Family (date range + pair +
                 offspring at final life stage) sits in the black box; window visitors sit
@@ -3648,7 +3650,7 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   }, [scrollToObs, highlightObs]);
   return (
     <div>
-      <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
+      <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{seasonRange(label)} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
       {expanded && observations.map((o: any, i: number) => o._chip
         ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} chipBy={o.chip_by} scan={o} onBirdClick={onBirdClick} onDayClick={onDayClick} />
         : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
@@ -5018,7 +5020,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   : thisSeason;
 
                 return (<>
-                  <h3 className="season-heading">{thisLabel} ({thisSeason.length})
+                  <h3 className="season-heading">{seasonRange(thisLabel)} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
                       if (!showDeleted && deletedObs.length === 0) {
                         const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });

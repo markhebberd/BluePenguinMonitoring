@@ -158,13 +158,13 @@ header h1:hover { opacity:.8; }
 .box-tag-id { font-size:11px; color:#999; font-weight:400; font-family:monospace; margin-left:8px; }
 .muted { font-size:12px; color:#888; margin-bottom:8px; }
 .small { font-size:10px; }
-.season-heading { font-size:14px; color:#1a5276; margin:12px 0 8px; }
+.season-heading { font-size:12px; font-weight:700; color:#1a5276; margin:12px 0 8px; }
 .deleted-indicator { font-size:11px; color:#999; font-weight:400; cursor:pointer; }
 .deleted-indicator:hover { color:#F44336; }
 .deleted-obs { opacity:0.5; border-left:3px solid #F44336 !important; }
 .season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
 .season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
-.season-divider span { font-size:14px; color:#1a5276; white-space:nowrap; }
+.season-divider span { font-size:12px; font-weight:700; color:#1a5276; white-space:nowrap; }
 .obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
