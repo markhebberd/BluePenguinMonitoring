@@ -603,11 +603,15 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
           peng_num: chip.peng_num, pit_id: chip.pit_id, sex: peng?.sex || null,
           life_stage: peng?.life_stage || null, chipped_as_adult: peng?.chipped_as_adult || 0,
           chick_size_code: peng?.chick_size_code || null, chip_date: chip.chip_date,
+          chip_by: chip.chip_by || null,
           hasReturned: peng?.hasReturned || false,
           scan_count: 0, last_seen: chip.chip_date, is_chipped_here: true,
         });
       } else {
-        seenPenguins.get(chip.peng_num)!.is_chipped_here = true;
+        const sp = seenPenguins.get(chip.peng_num)!;
+        sp.is_chipped_here = true;
+        sp.chip_by = chip.chip_by || null;
+        if (!sp.chip_date) sp.chip_date = chip.chip_date;
       }
     }
   }

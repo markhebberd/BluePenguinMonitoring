@@ -1117,7 +1117,9 @@ function ChipCard({ date, chipBy, scan, box, onBoxClick, onBirdClick, onDayClick
         {box && onBoxClick && <a className="bird-chip clickable" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>}
       </div>
       <div className="obs-nums">
-        <PenguinMini scan={scan} onClick={() => onBirdClick(scan.peng_num)} observationDate={chickContextDate(date)} />
+        {/* Pass the chip day itself so the mini gets the green chipped-here styling —
+            this card IS the chipping event. */}
+        <PenguinMini scan={scan} onClick={() => onBirdClick(scan.peng_num)} observationDate={date} />
         <span className="muted">Chipped by {chipBy || '?'}</span>
       </div>
     </div>
