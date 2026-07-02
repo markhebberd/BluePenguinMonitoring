@@ -912,8 +912,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
 
         return (
           <div key={label} className="season-birds">
-            <div className={`season-title${latestObs ? ' clickable' : ''}`} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
-              Season {seasonRange(label)}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+            <div className="season-title">
+              <span className={latestObs ? 'clickable' : undefined} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
+                Season {seasonRange(label)}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+              </span>
             </div>
             {issueBadges.length > 0 && (
               <div className="season-issues">
