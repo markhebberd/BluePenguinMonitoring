@@ -729,6 +729,42 @@ function queryBirdDetailInner(pengNum: string): any {
     if (s.chicks > bs.max_chicks) bs.max_chicks = s.chicks;
     if (s.breeding_status && !bs.statuses.includes(s.breeding_status)) bs.statuses.push(s.breeding_status);
   }
+  // Chicks chipped in this bird's box(es) during each breeding season — shown with
+  // a green ring in the breeding history; tooltip carries scan count + seasons seen.
+  for (const bs of bsMap.values()) {
+    const seasonYear = parseInt(bs.season);
+    const seasonFrom = `${seasonYear}-04-01`, seasonTo = `${seasonYear + 1}-04-01`;
+    const seen = new Set<string>();
+    bs.chipped_chicks = [];
+    for (const chip of c.chips) {
+      if (!chip.chip_box || !chip.chip_date || chip.peng_num === pengNum) continue;
+      if (!bs.boxes.includes(chip.chip_box)) continue;
+      if (chip.chip_date < seasonFrom || chip.chip_date >= seasonTo) continue;
+      if (seen.has(chip.peng_num)) continue;
+      const peng = c.pengByNum.get(chip.peng_num);
+      if (!peng || peng.chipped_as_adult) continue; // only birds chipped as chicks
+      seen.add(chip.peng_num);
+      // Scan count + distinct seasons scanned, for the hover tooltip
+      let scanCount = 0;
+      const seasons = new Set<string>();
+      for (const ch2 of (c.chipsByPeng.get(chip.peng_num) || [])) {
+        for (const sc of (c.scansByPit.get(ch2.pit_id) || [])) {
+          const obs = c.obsById.get(sc.observation_id);
+          if (!obs || obs.is_deleted) continue;
+          scanCount++;
+          const d2 = new Date(obs.observation_time_utc.replace(' ', 'T') + 'Z');
+          const sy = d2.getUTCMonth() + 1 >= 4 ? d2.getUTCFullYear() : d2.getUTCFullYear() - 1;
+          seasons.add(`${sy}/${String(sy + 1).slice(-2)}`);
+        }
+      }
+      bs.chipped_chicks.push({
+        peng_num: chip.peng_num, pit_id: chip.pit_id, sex: peng.sex,
+        chipped_as_adult: peng.chipped_as_adult, chick_size_code: peng.chick_size_code,
+        chip_date: chip.chip_date, hasReturned: peng.hasReturned || false,
+        scan_count: scanCount, seasons_scanned: Array.from(seasons).sort(),
+      });
+    }
+  }
   const breedingStats = Array.from(bsMap.values()).sort((a, b) => b.season.localeCompare(a.season));
 
   return { penguin: result, sightings, biometrics, partners, breeding_stats: breedingStats };

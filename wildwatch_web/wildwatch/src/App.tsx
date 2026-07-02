@@ -1251,18 +1251,39 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {breedingStats.length > 0 && (
         <div className="bird-section">
           <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history</h3>
-          {expandedSections.breeding && breedingStats.map((bs: any) => (
+          {expandedSections.breeding && breedingStats.map((bs: any) => {
+            // Eggs that never became chicks are struck through with a red \u2715;
+            // chicks chipped in this nest get a green ring + hover detail.
+            const eggsShown = Math.min(bs.max_eggs, 4);
+            const failedEggs = Math.min(Math.max(0, bs.max_eggs - bs.max_chicks), eggsShown);
+            const okEggs = eggsShown - failedEggs;
+            const chippedChicks: any[] = bs.chipped_chicks || [];
+            const plainChicks = Math.max(0, Math.min(bs.max_chicks, 4) - chippedChicks.length);
+            return (
             <div key={bs.season} className="obs-card">
               <b>{bs.season}</b>
               <div className="obs-nums">
                 <span>{bs.scans} scan{bs.scans!==1?'s':''}</span>
                 <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
-                {bs.max_eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(bs.max_eggs,4))}</span>}
-                {bs.max_chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(bs.max_chicks,4))}</span>}
+                {okEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(okEggs)}</span>}
+                {Array.from({ length: failedEggs }).map((_, i) => (
+                  <span key={`fe${i}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">\u2715</span></span>
+                ))}
+                {plainChicks > 0 && <span>{'\uD83D\uDC23'.repeat(plainChicks)}</span>}
+                {chippedChicks.map((ck: any) => (
+                  <span key={ck.peng_num} className="chick-chipped-marker" onClick={() => onBirdClick(ck.peng_num)}>
+                    {'\uD83D\uDC23'}
+                    <span className="chick-tip">
+                      <PenguinMini scan={ck} onClick={() => onBirdClick(ck.peng_num)} />
+                      <span className="muted">scanned {ck.scan_count} time{ck.scan_count !== 1 ? 's' : ''}{ck.seasons_scanned.length > 0 ? ` in season ${ck.seasons_scanned.join(', ')}` : ''}</span>
+                    </span>
+                  </span>
+                ))}
                 {bs.statuses.map((s:string) => <span key={s} className={`badge ${DARK_TEXT_STATUSES.has(s)?'bordered':''}`} style={{background:STATUS_COLORS[s]||'#ccc',color:DARK_TEXT_STATUSES.has(s)?'#333':'#fff'}}>{s}</span>)}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
