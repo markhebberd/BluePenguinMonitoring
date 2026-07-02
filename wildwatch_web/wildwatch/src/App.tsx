@@ -748,33 +748,47 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return b.scanCount - a.scanCount;
         });
 
-        // Birds present in each clutch's breeding window (egg appearance → fledge)
-        const windowBirds = clutches.map(c => {
-          const present = new Set<string>();
-          for (const o of sObsChrono) {
-            const t = parseDate(o.observation_time_utc).getTime();
-            if (t < c.windowStart || t > c.windowEnd) continue;
-            for (const s of o.scans) present.add(s.pit_id.slice(-8));
+        // Every non-family sighting is placed in a slot by WHEN it happened: inside a
+        // breeding window (`w<ci>`, shown as a visitor beside that family box) or in a
+        // gap between/around windows (`g<gi>`, gi = index of the next window, so g0 is
+        // before the first and g<n> is after the last). A bird seen across several
+        // slots appears in each, its per-slot counts summing to its season visits.
+        const slotCounts = new Map<string, Map<string, number>>();
+        const bump = (k: string, slot: string, n: number) => {
+          if (!slotCounts.has(k)) slotCounts.set(k, new Map());
+          const m = slotCounts.get(k)!;
+          m.set(slot, (m.get(slot) || 0) + n);
+        };
+        for (const o of sObsChrono) {
+          const t = parseDate(o.observation_time_utc).getTime();
+          let slot = '';
+          for (let ci = 0; ci < clutches.length; ci++) {
+            if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; break; }
           }
-          return present;
-        });
-        // Birds never seen inside any breeding window (all birds when no clutches)
-        const leftover = sorted.filter(b => {
+          if (!slot) { let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++; slot = `g${gi}`; }
+          const seen = new Set<string>();
+          for (const s of o.scans) {
+            const k = s.pit_id.slice(-8);
+            if (seen.has(k)) continue; // one visit per observation
+            seen.add(k);
+            if (parentKeys.has(k) || chickFamily.has(k)) continue;
+            bump(k, slot, 1);
+          }
+        }
+        // Birds chipped here but never scanned have no observation to slot — place them
+        // by chip date (their lastSeen) in the matching gap.
+        for (const b of sorted) {
           const k = b.pit_id.slice(-8);
-          if (parentKeys.has(k) || chickFamily.has(k)) return false;
-          return !windowBirds.some(s => s.has(k));
-        });
-        // Place each outside-window bird chronologically — before, between, or after
-        // the breeding windows — by its most recent sighting. Gap i sits before clutch
-        // i (chronologically); gap clutches.length is after the last window.
-        const gapBirds: any[][] = Array.from({ length: clutches.length + 1 }, () => []);
-        for (const b of leftover) {
+          if (parentKeys.has(k) || chickFamily.has(k) || slotCounts.has(k)) continue;
           const ls = b.lastSeen || '';
           const t = parseDate(ls.length > 10 ? ls : ls + ' 00:00:00').getTime();
-          let gi = 0;
-          while (gi < clutches.length && t >= clutches[gi].windowStart) gi++;
-          gapBirds[gi].push(b);
+          let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++;
+          bump(k, `g${gi}`, Math.max(1, b.scanCount || 0));
         }
+        // Birds (in sorted order) with a sighting in a given slot, with that slot's count
+        const slotBirds = (slot: string) => sorted
+          .map(b => ({ b, n: slotCounts.get(b.pit_id.slice(-8))?.get(slot) || 0 }))
+          .filter(x => x.n > 0);
 
         // Season context: a bird chipped as a chick during the listed season renders
         // as a chick (pale yellow) — we're looking at it during its chick time. The
@@ -788,26 +802,28 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return undefined;
         };
 
-        const birdWithCount = (b: any) => (
+        const birdWithCount = (b: any, count?: number) => (
           <span key={b.pit_id.slice(-8)} className="bird-with-count">
             <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-            <span className="scan-count">{b.scanCount}x</span>
+            <span className="scan-count">{count ?? b.scanCount}x</span>
           </span>
         );
+        const slotRow = (slot: string) => slotBirds(slot).map(x => birdWithCount(x.b, x.n));
 
         const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
 
         return (
           <div key={label} className="season-birds">
-            <div className="muted">Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
-            {/* One row per breeding window, newest on top. Family (pair + offspring at
-                final life stage) sits in the black box; window visitors sit to its
-                right. Outside-window birds interleave chronologically: above a window
-                = seen after it, below = seen before it. */}
+            <div className="season-title">Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span></div>
+            {/* One row per breeding window, newest on top. Family (date range + pair +
+                offspring at final life stage) sits in the black box; window visitors sit
+                to its right. Outside-window birds interleave chronologically: above a
+                window = seen after it, below = seen before it. */}
             {(() => {
-              const gapRow = (gi: number) => gapBirds[gi].length > 0 ? (
-                <div key={`gap${gi}`} className="bird-row">{gapBirds[gi].map(birdWithCount)}</div>
-              ) : null;
+              const gapRow = (gi: number) => {
+                const gb = slotRow(`g${gi}`);
+                return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
+              };
               const clutchRow = (ci: number) => {
                 const { clutch, pair } = families[ci];
                 const pairBirds = pair ? [birdMap.get(pair.male), birdMap.get(pair.female)].filter(Boolean) : [];
@@ -816,38 +832,23 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
                 // chick never chipped → plain chick, chipped chick → PenguinMini.
                 const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
                 const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - famChicks.length);
-                // Visitors: scanned during this window but not in this family. A parent
-                // of the season's other clutch can legitimately appear here.
-                const visitors = sorted.filter(b => {
-                  const k = b.pit_id.slice(-8);
-                  if (!windowBirds[ci].has(k)) return false;
-                  if (pair && (k === pair.male || k === pair.female)) return false;
-                  if (chickFamily.has(k)) return false;
-                  return true;
-                });
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
-                    <div className="clutch-head muted">
-                      {clutches.length > 1 && <span className="clutch-label">{ordinal(ci + 1)} clutch</span>}
-                      <span>{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
-                    </div>
-                    {clutch.laidFailed && (
-                      <div className="laid-warning">
-                        {'⚠'} laid date could not be estimated — eggs already present at the first check. Check this season's earlier observations.
-                      </div>
-                    )}
+                    {clutches.length > 1 && <div className="clutch-label muted">{ordinal(ci + 1)} clutch</div>}
+                    {clutch.laidFailed && <div className="laid-warning">{'⚠'} laid date could not be estimated</div>}
                     <div className="bird-row">
                       <span className="breeding-pair">
-                        {pairBirds.length === 2 && pairBirds.map(birdWithCount)}
+                        <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
+                        {pairBirds.length === 2 && pairBirds.map(b => birdWithCount(b))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
                           <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
-                        {famChicks.map(birdWithCount)}
+                        {famChicks.map(b => birdWithCount(b))}
                       </span>
-                      {visitors.map(birdWithCount)}
+                      {slotRow(`w${ci}`)}
                     </div>
                   </div>
                 );
