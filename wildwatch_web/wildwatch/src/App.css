@@ -331,6 +331,12 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
+/* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
+.breeding-pair .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
+.clutch-row { margin:6px 0; }
+.clutch-head { display:flex; gap:8px; align-items:baseline; font-size:11px; }
+.clutch-label { font-weight:600; }
+.laid-warning { color:#F44336; font-size:11px; margin:2px 0 4px; }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }

@@ -540,60 +540,139 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[] }) {
-  // Group birds by season, track co-sightings during breeding window
-  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
-  const seasonPairs = new Map<string, Map<string, number>>();
+/** One breeding attempt in a season. A clutch starts when eggs/chicks appear after
+ *  an empty check, and its window ends at ABN, egg removal / offspring absence
+ *  (implies death), or fledge (laid + 87d) — whichever comes first. A later egg
+ *  appearance after an empty check is a SECOND clutch with its own family. */
+interface Clutch {
+  laid: number | null;      // estimated laid time; null when un-estimable
+  laidFailed: boolean;      // eggs already present at first check — data needs fixing
+  start: number;            // first obs with offspring present (egg appearance)
+  end: number | null;       // obs that ended the attempt; null = still running
+  windowStart: number;      // breeding window: egg appearance …
+  windowEnd: number;        // … fledge (laid + 87d) or earlier failure
+  guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
+  maxEggs: number;
+  maxChicks: number;
+}
 
-  // First pass: estimate laid date per season using C# algorithm
-  const seasonLaidDate = new Map<string, number>();
+function segmentClutches(sObs: Observation[]): Clutch[] {
+  const clutches: Clutch[] = [];
+  let current: Clutch | null = null;
+  // After an ABN close the doomed eggs may linger in later checks — require an
+  // empty check before a new clutch can start.
+  let awaitingEmpty = false;
+  let prevEmpty: number | null = null;
+  for (const o of sObs) {
+    const t = parseDate(o.observation_time_utc).getTime();
+    const off = (o.eggs || 0) + (o.chicks || 0);
+    const abn = o.breeding_status === 'ABN';
+    if (current) {
+      if (off === 0) {
+        current.end = t; current = null; prevEmpty = t; awaitingEmpty = false;
+      } else {
+        current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
+        current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
+        if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+      }
+    } else if (off === 0) {
+      prevEmpty = t; awaitingEmpty = false;
+    } else if (!awaitingEmpty) {
+      // Laid estimate (C# midpoint): halfway between last empty check and discovery,
+      // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
+      let laid: number | null = null;
+      if (prevEmpty !== null && !abn) {
+        const found = (o.eggs || 0) > 1 ? t - 2 * DAY : t;
+        laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
+      }
+      current = { laid, laidFailed: laid === null, start: t, end: null,
+        windowStart: 0, windowEnd: 0, guardEnd: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
+      clutches.push(current);
+      if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+    }
+  }
+  for (const c of clutches) {
+    const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
+    c.windowStart = c.start;
+    c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
+    c.windowEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.fledge * DAY);
+  }
+  return clutches;
+}
+
+/** Detect the breeding pair for one clutch. Any bird scanned inside the clutch window
+ *  is a candidate — a single sighting is better than nothing — but the scoring means a
+ *  once-seen bird only wins a slot when no better-evidenced bird exists. A valid pair
+ *  is one M + one F where at least one sex is confirmed — the other may come from
+ *  majority biometric sex guesses (M+F, M+UF, F+UM; never UM+UF). Pairs actually
+ *  scanned together in the same observation outrank pairs that merely share the
+ *  window; ties break on combined sighting counts. */
+function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, any>, excluded: (b: any) => boolean): { male: string; female: string } | null {
+  const counts = new Map<string, number>();
+  const co = new Map<string, number>();
+  for (const o of sObs) {
+    const t = parseDate(o.observation_time_utc).getTime();
+    // Parents attend the nest from egg appearance to the end of guard; after that
+    // (post-guard) both feed at sea, so later scans are no evidence of parenthood.
+    if (t < c.windowStart || t > c.guardEnd) continue;
+    const present = Array.from(new Set(o.scans.map((s: Scan) => s.pit_id.slice(-8))));
+    for (const k of present) counts.set(k, (counts.get(k) || 0) + 1);
+    for (let i = 0; i < present.length; i++) for (let j = i + 1; j < present.length; j++) {
+      const key = [present[i], present[j]].sort().join('|');
+      co.set(key, (co.get(key) || 0) + 1);
+    }
+  }
+  const sexOf = (b: any): { sex: string; confirmed: boolean } | null => {
+    const s = (b.sex || '').toUpperCase();
+    if (s === 'M' || s === 'F') return { sex: s, confirmed: true };
+    const g = observedSexGuess(b.peng_num);
+    if (g.m > g.f) return { sex: 'M', confirmed: false };
+    if (g.f > g.m) return { sex: 'F', confirmed: false };
+    return null;
+  };
+  const cands = Array.from(counts.entries())
+    .map(([key, n]) => ({ key, n, bird: birdMap.get(key) }))
+    .filter(x => x.bird && !excluded(x.bird));
+  let best: { male: string; female: string; score: number } | null = null;
+  for (let i = 0; i < cands.length; i++) for (let j = i + 1; j < cands.length; j++) {
+    const a = sexOf(cands[i].bird), b = sexOf(cands[j].bird);
+    if (!a || !b || a.sex === b.sex || (!a.confirmed && !b.confirmed)) continue;
+    const coN = co.get([cands[i].key, cands[j].key].sort().join('|')) || 0;
+    const score = coN * 1000 + cands[i].n + cands[j].n;
+    if (!best || score > best.score) {
+      best = { male: a.sex === 'M' ? cands[i].key : cands[j].key, female: a.sex === 'F' ? cands[i].key : cands[j].key, score };
+    }
+  }
+  return best ? { male: best.male, female: best.female } : null;
+}
+
+const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[] }) {
+  // Group birds by season
+  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; scanCount: number }>>();
   const seasonObs = new Map<string, Observation[]>();
   for (const obs of observations) {
     const label = getSeasonLabel(parseDate(obs.observation_time_utc));
     if (!seasonObs.has(label)) seasonObs.set(label, []);
     seasonObs.get(label)!.push(obs);
   }
-  for (const [label, obs] of seasonObs) {
-    const laid = estimateLaidDate(obs);
-    if (laid) seasonLaidDate.set(label, laid);
-  }
 
   for (const obs of observations) {
-    const obsDate = parseDate(obs.observation_time_utc);
-    const label = getSeasonLabel(obsDate);
+    const label = getSeasonLabel(parseDate(obs.observation_time_utc));
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
-    if (!seasonPairs.has(label)) seasonPairs.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
-    const pairMap = seasonPairs.get(label)!;
-
-    // Breeding window: 1 week before probable laid date to fledge (laid + 87 days)
-    const laidDate = seasonLaidDate.get(label);
-    const obsTime = obsDate.getTime();
-    const inBreedingWindow = laidDate && obsTime >= (laidDate - 7 * DAY) && obsTime <= (laidDate + BREEDING_OFFSETS.fledge * DAY);
-
     for (const scan of obs.scans) {
       const key = scan.pit_id.slice(-8);
       const existing = birdMap.get(key);
       if (!existing) {
-        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, igCount: inBreedingWindow ? 1 : 0, scanCount: 1 });
+        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, scanCount: 1 });
       } else {
         existing.scanCount++;
-        if (inBreedingWindow) existing.igCount++;
         if (obs.observation_time_utc > existing.lastSeen) {
           existing.lastSeen = obs.observation_time_utc;
           existing.sex = scan.sex;
           existing.life_stage = scan.life_stage;
-        }
-      }
-    }
-
-    // Track individual M and F sightings during breeding window
-    if (inBreedingWindow) {
-      for (const scan of obs.scans) {
-        const sex = (scan.sex || '').toUpperCase();
-        if (sex === 'M' || sex === 'F') {
-          const key = sex + '|' + scan.pit_id.slice(-8);
-          pairMap.set(key, (pairMap.get(key) || 0) + 1);
         }
       }
     }
@@ -609,7 +688,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
     const birdMap = seasonBirds.get(label)!;
     const key = p.pit_id.slice(-8);
     if (!birdMap.has(key)) {
-      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: p.scan_count || 1 });
+      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, scanCount: p.scan_count || 1 });
     }
   }
 
@@ -624,57 +703,83 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
         const birds = Array.from(birdMap.values());
         if (birds.length === 0) return null;
 
-        // Find breeding pair: most-seen M and most-seen F during breeding window
-        const pairMap = seasonPairs.get(label) || new Map();
-        let breedingMale = '';
-        let breedingFemale = '';
-        let maxMale = 0;
-        let maxFemale = 0;
-        for (const [key, count] of pairMap.entries()) {
-          const [sex, pit8] = key.split('|');
-          if (sex === 'M' && count > maxMale) { maxMale = count; breedingMale = pit8; }
-          if (sex === 'F' && count > maxFemale) { maxFemale = count; breedingFemale = pit8; }
+        const seasonYear = parseInt(label);
+        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
+        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+        // A bird counts as this season's chick only if chipped as a chick DURING this
+        // season — a returning adult that was chick-chipped in an earlier season is a
+        // visitor to the box, not this season's offspring.
+        const chippedThisSeason = (b: any) => {
+          if (b.chipped_as_adult || !b.chip_date) return false;
+          const cd = new Date(b.chip_date);
+          return cd >= seasonStart && cd < seasonEnd;
+        };
+
+        // One family per clutch: segment the season into breeding attempts, then
+        // detect each attempt's pair. This season's chicks can never be parents.
+        const sObsChrono = (seasonObs.get(label) || []).slice()
+          .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+        const clutches = segmentClutches(sObsChrono);
+        const families = clutches.map(c => ({ clutch: c, pair: detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason) }));
+        const parentKeys = new Set<string>();
+        for (const f of families) if (f.pair) { parentKeys.add(f.pair.male); parentKeys.add(f.pair.female); }
+
+        // Assign each season chick to the clutch whose window holds its chip date;
+        // chips land at the end of an attempt, so otherwise default to the season's
+        // last detected family.
+        const familyIdxs = families.map((f, i) => f.pair ? i : -1).filter(i => i >= 0);
+        const chickFamily = new Map<string, number>();
+        for (const b of birds) {
+          const k = b.pit_id.slice(-8);
+          if (!chippedThisSeason(b) || parentKeys.has(k)) continue;
+          const ct = new Date(b.chip_date!).getTime();
+          let fi = families.findIndex(f => f.pair && ct >= f.clutch.windowStart && ct <= f.clutch.windowEnd);
+          if (fi < 0 && familyIdxs.length > 0) fi = familyIdxs[familyIdxs.length - 1];
+          if (fi >= 0) chickFamily.set(k, fi);
         }
 
-        // Sort: breeding M (0), breeding F (1), other M (2), other F (3), unsexed (4)
-        // Within same group, sort by scan count descending
+        // Sort birds: M, F, unsexed; within a group by scan count descending
         const sorted = birds.sort((a, b) => {
-          const aKey = a.pit_id.slice(-8);
-          const bKey = b.pit_id.slice(-8);
           const aSex = (a.sex || '').toUpperCase();
           const bSex = (b.sex || '').toUpperCase();
-
-          const aOrder = aKey === breedingMale ? 0 : aKey === breedingFemale ? 1 : aSex === 'M' ? 2 : aSex === 'F' ? 3 : 4;
-          const bOrder = bKey === breedingMale ? 0 : bKey === breedingFemale ? 1 : bSex === 'M' ? 2 : bSex === 'F' ? 3 : 4;
+          const aOrder = aSex === 'M' ? 0 : aSex === 'F' ? 1 : 2;
+          const bOrder = bSex === 'M' ? 0 : bSex === 'F' ? 1 : 2;
           if (aOrder !== bOrder) return aOrder - bOrder;
           return b.scanCount - a.scanCount;
         });
 
-        const pair = breedingMale && breedingFemale ? sorted.filter(b => {
-          const k = b.pit_id.slice(-8);
-          return k === breedingMale || k === breedingFemale;
-        }) : [];
-        const hasPair = pair.length === 2;
-        // Chicks go inside breeding pair border only if pair exists
-        const chicks = hasPair ? sorted.filter(b => {
-          const k = b.pit_id.slice(-8);
-          if (k === breedingMale || k === breedingFemale) return false;
-          return !b.chipped_as_adult && b.chip_date;
-        }) : [];
-        const others = sorted.filter(b => {
-          const k = b.pit_id.slice(-8);
-          if (k === breedingMale || k === breedingFemale) return false;
-          if (hasPair && !b.chipped_as_adult && b.chip_date) return false;
-          return true;
+        // Birds present in each clutch's breeding window (egg appearance → fledge)
+        const windowBirds = clutches.map(c => {
+          const present = new Set<string>();
+          for (const o of sObsChrono) {
+            const t = parseDate(o.observation_time_utc).getTime();
+            if (t < c.windowStart || t > c.windowEnd) continue;
+            for (const s of o.scans) present.add(s.pit_id.slice(-8));
+          }
+          return present;
         });
+        // Birds never seen inside any breeding window (all birds when no clutches)
+        const leftover = sorted.filter(b => {
+          const k = b.pit_id.slice(-8);
+          if (parentKeys.has(k) || chickFamily.has(k)) return false;
+          return !windowBirds.some(s => s.has(k));
+        });
+        // Place each outside-window bird chronologically — before, between, or after
+        // the breeding windows — by its most recent sighting. Gap i sits before clutch
+        // i (chronologically); gap clutches.length is after the last window.
+        const gapBirds: any[][] = Array.from({ length: clutches.length + 1 }, () => []);
+        for (const b of leftover) {
+          const ls = b.lastSeen || '';
+          const t = parseDate(ls.length > 10 ? ls : ls + ' 00:00:00').getTime();
+          let gi = 0;
+          while (gi < clutches.length && t >= clutches[gi].windowStart) gi++;
+          gapBirds[gi].push(b);
+        }
 
         // Season context: a bird chipped as a chick during the listed season renders
         // as a chick (pale yellow) — we're looking at it during its chick time. The
         // context date is the day AFTER chipping so the same-day chipped-here (green)
         // styling never applies here. In later seasons the bird renders as an adult.
-        const seasonYear = parseInt(label);
-        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
-        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
         const seasonObsDate = (b: any) => {
           if (!b.chipped_as_adult && b.chip_date) {
             const cd = new Date(b.chip_date);
@@ -683,33 +788,77 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return undefined;
         };
 
+        const birdWithCount = (b: any) => (
+          <span key={b.pit_id.slice(-8)} className="bird-with-count">
+            <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+            <span className="scan-count">{b.scanCount}x</span>
+          </span>
+        );
+
+        const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+
         return (
           <div key={label} className="season-birds">
             <div className="muted">Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
-            <div className="bird-row">
-              {pair.length === 2 && (
-                <span className="breeding-pair">
-                  {pair.map(b => (
-                    <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                      <span className="scan-count">{b.scanCount}x</span>
-                    </span>
-                  ))}
-                  {chicks.map(b => (
-                    <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                      <span className="scan-count">{b.scanCount}x</span>
-                    </span>
-                  ))}
-                </span>
-              )}
-              {others.map(b => (
-                <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                  <span className="scan-count">{b.scanCount}x</span>
-                </span>
-              ))}
-            </div>
+            {/* One row per breeding window, newest on top. Family (pair + offspring at
+                final life stage) sits in the black box; window visitors sit to its
+                right. Outside-window birds interleave chronologically: above a window
+                = seen after it, below = seen before it. */}
+            {(() => {
+              const gapRow = (gi: number) => gapBirds[gi].length > 0 ? (
+                <div key={`gap${gi}`} className="bird-row">{gapBirds[gi].map(birdWithCount)}</div>
+              ) : null;
+              const clutchRow = (ci: number) => {
+                const { clutch, pair } = families[ci];
+                const pairBirds = pair ? [birdMap.get(pair.male), birdMap.get(pair.female)].filter(Boolean) : [];
+                const famChicks = sorted.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
+                // Offspring at FINAL life stage: egg that never hatched → red-✕ egg,
+                // chick never chipped → plain chick, chipped chick → PenguinMini.
+                const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
+                const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - famChicks.length);
+                // Visitors: scanned during this window but not in this family. A parent
+                // of the season's other clutch can legitimately appear here.
+                const visitors = sorted.filter(b => {
+                  const k = b.pit_id.slice(-8);
+                  if (!windowBirds[ci].has(k)) return false;
+                  if (pair && (k === pair.male || k === pair.female)) return false;
+                  if (chickFamily.has(k)) return false;
+                  return true;
+                });
+                return (
+                  <div key={`cl${ci}`} className="clutch-row">
+                    <div className="clutch-head muted">
+                      {clutches.length > 1 && <span className="clutch-label">{ordinal(ci + 1)} clutch</span>}
+                      <span>{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
+                    </div>
+                    {clutch.laidFailed && (
+                      <div className="laid-warning">
+                        {'⚠'} laid date could not be estimated — eggs already present at the first check. Check this season's earlier observations.
+                      </div>
+                    )}
+                    <div className="bird-row">
+                      <span className="breeding-pair">
+                        {pairBirds.length === 2 && pairBirds.map(birdWithCount)}
+                        {Array.from({ length: failedEggs }).map((_, i) => (
+                          <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
+                        ))}
+                        {Array.from({ length: plainChicks }).map((_, i) => (
+                          <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                        ))}
+                        {famChicks.map(birdWithCount)}
+                      </span>
+                      {visitors.map(birdWithCount)}
+                    </div>
+                  </div>
+                );
+              };
+              const rows: React.ReactNode[] = [gapRow(clutches.length)];
+              for (let ci = clutches.length - 1; ci >= 0; ci--) {
+                rows.push(clutchRow(ci));
+                rows.push(gapRow(ci));
+              }
+              return rows;
+            })()}
           </div>
         );
       })}
