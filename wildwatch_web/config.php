@@ -451,6 +451,7 @@ function buildDescentPng($ts, $mb, $descentStart, $end, $slope, $intercept, $zer
  */
 function setHeaders() {
     header('Content-Type: application/json');
+    header('Cache-Control: no-cache'); // API responses must never be served stale from browser cache
     header('Access-Control-Allow-Origin: ' . ALLOWED_ORIGIN);
     header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');

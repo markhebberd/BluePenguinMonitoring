@@ -1896,7 +1896,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [boxPenguins, setBoxPenguins] = useState<any[]>([]);
   useEffect(() => {
     if (!box) { setAllBoxObs([]); setBoxPenguins([]); return; }
-    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); })
       .catch(() => { setAllBoxObs([]); setBoxPenguins([]); });
