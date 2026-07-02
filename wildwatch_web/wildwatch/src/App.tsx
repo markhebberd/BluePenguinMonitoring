@@ -1267,7 +1267,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
                 {okEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(okEggs)}</span>}
                 {Array.from({ length: failedEggs }).map((_, i) => (
-                  <span key={`fe${i}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">\u2715</span></span>
+                  <span key={`fe${i}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
                 ))}
                 {plainChicks > 0 && <span>{'\uD83D\uDC23'.repeat(plainChicks)}</span>}
                 {chippedChicks.map((ck: any) => (
