@@ -5035,7 +5035,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-obs">
                 <h3 className="obs-section-head">Breeding overview</h3>
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
-                  onSeasonClick={(t: string) => { setHighlightObs(t); setScrollToObs(t); }} />
+                  onSeasonClick={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }} />
                 {(() => {
                   const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
                   const canEdit = userRole !== 'viewer';
