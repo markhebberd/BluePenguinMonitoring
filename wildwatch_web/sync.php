@@ -189,6 +189,20 @@ function handleDownload($pdo, $colonyId, $observer) {
  * If a box already has today's observation on the server, returns it as a conflict
  * instead of overwriting. Use ?action=confirm to force-replace conflicts.
  */
+// Normalise an incoming ISO-8601 datetime (e.g. "2026-07-03T10:30:00Z") to MySQL DATETIME
+// format. Missing / unparseable / out-of-range values (e.g. "0001-01-01...") fall back.
+function normalizeDateTime($val, $fallback) {
+    if (empty($val)) return $fallback;
+    try {
+        $dt = new DateTime($val);
+        $y = (int)$dt->format('Y');
+        if ($y < 1000 || $y > 9999) return $fallback;
+        return $dt->format('Y-m-d H:i:s');
+    } catch (Exception $e) {
+        return $fallback;
+    }
+}
+
 function handleUpload($pdo, $colonyId, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !isset($input['observations'])) {
@@ -241,7 +255,7 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $locationId = $pdo->lastInsertId();
             }
 
-            $obsTime = $obs['observation_time_utc'] ?? date('Y-m-d H:i:s');
+            $obsTime = normalizeDateTime($obs['observation_time_utc'] ?? null, date('Y-m-d H:i:s'));
 
             // Check if this box already has today's observation on the server
             if (!$forceReplace) {
@@ -339,7 +353,7 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $pitId = $scan['pit_id'] ?? '';
                 if (empty($pitId)) continue;
 
-                $scanTime = $scan['scan_time_utc'] ?? $obsTime;
+                $scanTime = normalizeDateTime($scan['scan_time_utc'] ?? null, $obsTime);
                 $lat = isset($scan['latitude']) && $scan['latitude'] != 0 ? $scan['latitude'] : null;
                 $lon = isset($scan['longitude']) && $scan['longitude'] != 0 ? $scan['longitude'] : null;
                 $acc = isset($scan['accuracy']) && $scan['accuracy'] > 0 ? $scan['accuracy'] : null;
