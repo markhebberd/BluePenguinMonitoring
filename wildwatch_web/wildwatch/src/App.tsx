@@ -644,16 +644,15 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
     }
   }
   if (best) return { male: best.male, female: best.female };
-  // No full pair — fall back to a single CONFIRMED parent (no partner to anchor a
-  // guess, so a lone parent must be truth-sexed). The other slot stays empty; the
-  // family box shows just that parent + the offspring.
+  // No full pair — fall back to the best-evidenced single bird in the window as a
+  // lone parent. Sex needn't be known (it's a guess either way); slot it by whatever
+  // sex signal exists, defaulting to the male slot. The family box shows just that
+  // bird + the offspring.
   let solo: { key: string; sex: string; n: number } | null = null;
   for (const c of cands) {
-    const s = sexOf(c.bird);
-    if (!s || !s.confirmed) continue;
-    if (!solo || c.n > solo.n) solo = { key: c.key, sex: s.sex, n: c.n };
+    if (!solo || c.n > solo.n) solo = { key: c.key, sex: sexOf(c.bird)?.sex || '', n: c.n };
   }
-  if (solo) return { male: solo.sex === 'M' ? solo.key : '', female: solo.sex === 'F' ? solo.key : '' };
+  if (solo) return { male: solo.sex === 'F' ? '' : solo.key, female: solo.sex === 'F' ? solo.key : '' };
   return null;
 }
 
