@@ -3031,6 +3031,11 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
               }
               // Normal row(s) — show each observation separately
               const { obs, chips } = byBox[box];
+              // A bird chipped here today may also appear in today's scans — the scan
+              // mini already renders it (with the green chipped-here treatment), so
+              // only show chip minis for birds not scanned in this box today.
+              const scannedPits = new Set(obs.flatMap((o: any) => (o.scans || []).map((s: any) => s.pit_id)));
+              const chipMinis = chips.filter((c: any) => !c.pit_id || !scannedPits.has(c.pit_id));
               // Chipping-only box (no observation today): show each chipped penguin as a green
               // mini labelled "Chipped in Box x". Boxes observed today show the chip mini inline
               // on their observation row instead (handled below), so they aren't repeated here.
@@ -3077,7 +3082,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                         <span key={`ns${k}`} className="scan no-scan">No scan</span>
                       ))}
-                      {oi === 0 && chips.map((c: any) => (
+                      {oi === 0 && chipMinis.map((c: any) => (
                         <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
                       ))}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
