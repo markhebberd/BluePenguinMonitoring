@@ -20,7 +20,7 @@ namespace PenguinMonitor
         private CancellationTokenSource? _cts;
         private bool _isConnected;
         private bool _shouldReconnect = true;
-        private string? _deviceAddress;
+        private List<string> _deviceAddresses = new();  // enabled scanners, tried in order
 
         private const int ConnectTimeoutMs = 10000;
         private const int InitialRetryMs = 2000;
@@ -32,6 +32,7 @@ namespace PenguinMonitor
         public bool IsConnected => _isConnected;
         public bool IsConnecting { get; private set; }
         public string? ConnectedDeviceName { get; private set; }
+        public string? ConnectedDeviceAddress { get; private set; }
 
         /// <summary>
         /// Returns all paired Bluetooth devices.
@@ -144,21 +145,30 @@ namespace PenguinMonitor
         /// <summary>
         /// Connect to a Bluetooth device by MAC address. Retries with exponential backoff.
         /// </summary>
-        public async Task ConnectAsync(string deviceAddress)
+        public async Task ConnectAsync(string deviceAddress) =>
+            await ConnectAsync(new List<string> { deviceAddress });
+
+        /// <summary>
+        /// Connect to the first reachable scanner, trying the given addresses in order.
+        /// Reconnects automatically on drop and keeps retrying the whole list with backoff.
+        /// </summary>
+        public async Task ConnectAsync(IReadOnlyList<string> deviceAddresses)
         {
             if (IsConnecting || _isConnected) return;
 
-            _deviceAddress = deviceAddress;
+            _deviceAddresses = (deviceAddresses ?? new List<string>())
+                .Where(a => !string.IsNullOrEmpty(a)).Distinct().ToList();
+            if (_deviceAddresses.Count == 0) { StatusChanged?.Invoke("No scanner selected"); return; }
+
             _shouldReconnect = true;
             _cts = new CancellationTokenSource();
-
             await ConnectLoop();
         }
 
         private async Task ConnectLoop()
         {
             IsConnecting = true;
-            var attempt = 0;
+            var pass = 0;
             var retryMs = InitialRetryMs;
 
             try
@@ -172,50 +182,59 @@ namespace PenguinMonitor
 
                 while (!_isConnected && _cts?.Token.IsCancellationRequested != true)
                 {
-                    attempt++;
-                    try
+                    pass++;
+                    if (pass > 1)
                     {
-                        if (attempt > 1)
+                        StatusChanged?.Invoke($"No scanner found — retry in {retryMs / 1000}s...");
+                        try { await Task.Delay(retryMs, _cts!.Token); } catch (OperationCanceledException) { break; }
+                    }
+
+                    // Try each enabled scanner in order; the first to connect wins.
+                    foreach (var addr in _deviceAddresses)
+                    {
+                        if (_cts?.Token.IsCancellationRequested == true) break;
+                        try
                         {
-                            StatusChanged?.Invoke($"Retry {attempt} in {retryMs / 1000}s...");
-                            await Task.Delay(retryMs, _cts!.Token);
+                            var device = adapter.GetRemoteDevice(addr);
+                            if (device == null) continue;
+
+                            ConnectedDeviceName = device.Name ?? addr;
+                            ConnectedDeviceAddress = addr;
+                            StatusChanged?.Invoke($"Connecting to {ConnectedDeviceName}...");
+
+                            adapter.CancelDiscovery();
+                            CleanupSocket();
+
+                            _socket = device.CreateRfcommSocketToServiceRecord(SppUuid);
+                            if (_socket == null) continue;
+
+                            var connectTask = Task.Run(() => _socket.Connect(), _cts!.Token);
+                            if (await Task.WhenAny(connectTask, Task.Delay(ConnectTimeoutMs, _cts.Token)) != connectTask)
+                                throw new TimeoutException("Connection timed out");
+                            await connectTask; // propagate exceptions
+
+                            if (!_socket.IsConnected) throw new Exception("Socket not connected");
+
+                            _inputStream = _socket.InputStream;
+                            _isConnected = true;
+                            retryMs = InitialRetryMs;
+                            StatusChanged?.Invoke($"{ConnectedDeviceName} connected");
+
+                            _ = Task.Run(ListenLoop, _cts.Token);
+                            return;
                         }
-
-                        var device = adapter.GetRemoteDevice(_deviceAddress);
-                        if (device == null) throw new Exception($"Device {_deviceAddress} not found");
-
-                        ConnectedDeviceName = device.Name ?? _deviceAddress;
-                        StatusChanged?.Invoke($"Connecting to {ConnectedDeviceName}...");
-
-                        adapter.CancelDiscovery();
-                        CleanupSocket();
-
-                        _socket = device.CreateRfcommSocketToServiceRecord(SppUuid);
-                        if (_socket == null) throw new Exception("Failed to create socket");
-
-                        var connectTask = Task.Run(() => _socket.Connect(), _cts!.Token);
-                        if (await Task.WhenAny(connectTask, Task.Delay(ConnectTimeoutMs, _cts.Token)) != connectTask)
-                            throw new TimeoutException("Connection timed out");
-                        await connectTask; // propagate exceptions
-
-                        if (!_socket.IsConnected) throw new Exception("Socket not connected");
-
-                        _inputStream = _socket.InputStream;
-                        _isConnected = true;
-                        retryMs = InitialRetryMs;
-                        StatusChanged?.Invoke($"{ConnectedDeviceName} connected");
-
-                        _ = Task.Run(ListenLoop, _cts.Token);
-                        return;
+                        catch (OperationCanceledException) { break; }
+                        catch (Exception ex)
+                        {
+                            StatusChanged?.Invoke($"{ConnectedDeviceName ?? addr}: {ex.Message}");
+                            CleanupSocket();
+                            // fall through to the next scanner in the list
+                        }
                     }
-                    catch (OperationCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        StatusChanged?.Invoke($"Attempt {attempt}: {ex.Message}");
-                        CleanupSocket();
-                        retryMs = Math.Min((int)(retryMs * 1.5), MaxRetryMs);
-                        if (attempt % 10 == 0) retryMs = InitialRetryMs;
-                    }
+
+                    // Nothing connected this pass — back off before trying the whole list again.
+                    retryMs = Math.Min((int)(retryMs * 1.5), MaxRetryMs);
+                    if (pass % 10 == 0) retryMs = InitialRetryMs;
                 }
             }
             catch (OperationCanceledException) { }
@@ -260,7 +279,7 @@ namespace PenguinMonitor
 
             // Auto-reconnect on disconnect
             _isConnected = false;
-            if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true && _deviceAddress != null)
+            if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true && _deviceAddresses.Count > 0)
             {
                 StatusChanged?.Invoke($"{ConnectedDeviceName ?? "Scanner"} disconnected — reconnecting...");
                 await Task.Delay(3000);
@@ -289,10 +308,11 @@ namespace PenguinMonitor
 
         public async Task RetryAsync()
         {
-            if (IsConnecting || string.IsNullOrEmpty(_deviceAddress)) return;
+            if (IsConnecting || _deviceAddresses.Count == 0) return;
+            var addresses = _deviceAddresses.ToList();
             Disconnect();
             await Task.Delay(500);
-            await ConnectAsync(_deviceAddress);
+            await ConnectAsync(addresses);
         }
 
         public void Dispose()

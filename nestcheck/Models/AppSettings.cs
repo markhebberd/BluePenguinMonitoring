@@ -77,6 +77,15 @@ namespace PenguinMonitor.Models
                 }
             }
         }
+
+        // Scanners connected to in the past. Enabled ones are tried in list order until one connects.
+        // (Mutating the list contents does not auto-save — call saveApplicationSettings after changes.)
+        private List<RememberedScanner> rememberedScanners = new();
+        public List<RememberedScanner> RememberedScanners
+        {
+            get => rememberedScanners;
+            set { rememberedScanners = value ?? new(); OnAnyPropertyChanged(); }
+        }
         private bool showMultiboxFilterCard;
         public bool ShowMultiboxFilterCard
         {
