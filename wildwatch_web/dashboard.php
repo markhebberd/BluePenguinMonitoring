@@ -56,13 +56,17 @@ function handleBox($pdo, $colonyId, $boxName) {
     }
     unset($obs);
 
-    // Batch fetch all scans for all observations in one query
+    // Batch fetch all scans for all observations in one query. Strip the viewing
+    // colony's prefix HERE, before the rows are attached to observations — a
+    // later by-value foreach over $scansByObs would only mutate copies.
+    $viewPrefix = getColonyPrefix($pdo, $colonyId);
     $scansByObs = [];
     if (!empty($obsIds)) {
         $ph = implode(',', array_fill(0, count($obsIds), '?'));
         $s = $pdo->prepare("SELECT ps.observation_id, ps.scan_id, ps.pit_id, pc.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code, pc.chip_date FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $s->execute(array_values($obsIds));
         foreach ($s->fetchAll() as $scan) {
+            if (isset($scan['peng_num'])) $scan['peng_num'] = displayPengNum($scan['peng_num'], $viewPrefix);
             $scansByObs[$scan['observation_id']][] = $scan;
         }
     }
@@ -73,13 +77,12 @@ function handleBox($pdo, $colonyId, $boxName) {
     $l = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $l->execute([$colonyId, $boxName]);
 
-    // Build allPenguins from already-fetched scans + chipped-here birds
-    $viewPrefix = getColonyPrefix($pdo, $colonyId);
+    // Build allPenguins from already-fetched scans (peng_num already stripped above)
+    // + chipped-here birds
     $allPenguins = [];
     foreach ($scansByObs as $scans) {
-        foreach ($scans as &$scan) {
-            if (isset($scan['peng_num'])) $scan['peng_num'] = displayPengNum($scan['peng_num'], $viewPrefix);
-            $pnum = $scan['peng_num'];
+        foreach ($scans as $scan) {
+            $pnum = $scan['peng_num'] ?? null;
             if (!$pnum) continue;
             if (!isset($allPenguins[$pnum])) {
                 $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$scan['pit_id'], 'sex'=>$scan['sex'],
