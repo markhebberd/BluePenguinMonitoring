@@ -5001,6 +5001,9 @@ namespace PenguinMonitor
                     {
                         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
                         var token = _appSettings.AuthToken;
+                        // New birds belong to the colony being worked — the server numbers
+                        // them within it (e.g. NI7) and stamps penguins.colony_id.
+                        var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
 
                         // 1. Create penguin record
                         var pengFields = new Dictionary<string, object>
@@ -5011,7 +5014,7 @@ namespace PenguinMonitor
                         if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
 
                         var pengReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins");
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins&colony_id={colonyId}");
                         pengReq.Headers.Add("Authorization", $"Bearer {token}");
                         pengReq.Content = new StringContent(
                             JsonConvert.SerializeObject(pengFields), System.Text.Encoding.UTF8, "application/json");
@@ -5044,7 +5047,7 @@ namespace PenguinMonitor
                             ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
                         };
                         var chipReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips");
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
                         chipReq.Headers.Add("Authorization", $"Bearer {token}");
                         chipReq.Content = new StringContent(
                             JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
@@ -5076,7 +5079,7 @@ namespace PenguinMonitor
                             bioFields["peng_num"] = pengNum;
                             bioFields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
                             var bioReq = new HttpRequestMessage(HttpMethod.Post,
-                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
                             bioReq.Headers.Add("Authorization", $"Bearer {token}");
                             bioReq.Content = new StringContent(
                                 JsonConvert.SerializeObject(bioFields), System.Text.Encoding.UTF8, "application/json");
@@ -5307,10 +5310,12 @@ namespace PenguinMonitor
                 _appSettings = DataStorageService.loadAppSettingsFromDir(internalPath);
                 _appSettings.PropertyChanged += (s, e) => DataStorageService.saveApplicationSettings(_appSettings);
 
-                // Initialize BoxTags API if configured
-                if (_appSettings.IsBoxTagsApiConfigured)
+                // Initialize BoxTags API if configured. Auth is the logged-in user's
+                // session token (read live via the provider), not the legacy API key.
+                if (!string.IsNullOrWhiteSpace(_appSettings.BoxTagsApiUrl))
                 {
-                    BoxTagService.InitializeApi(_appSettings.BoxTagsApiUrl, _appSettings.BoxTagsApiKey);
+                    BoxTagService.InitializeApi(_appSettings.BoxTagsApiUrl, () => _appSettings.AuthToken,
+                        () => _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1);
                 }
 
                 // Load box tags from local storage

@@ -151,11 +151,11 @@ namespace PenguinMonitor.Services
         /// <summary>
         /// Initialize the API service with credentials
         /// </summary>
-        public static void InitializeApi(string apiUrl, string apiKey)
+        public static void InitializeApi(string apiUrl, Func<string?> tokenProvider, Func<int> colonyProvider)
         {
-            if (!string.IsNullOrWhiteSpace(apiUrl) && !string.IsNullOrWhiteSpace(apiKey))
+            if (!string.IsNullOrWhiteSpace(apiUrl))
             {
-                _apiService = new BoxTagApiService(apiUrl, apiKey);
+                _apiService = new BoxTagApiService(apiUrl, tokenProvider, colonyProvider);
                 System.Diagnostics.Debug.WriteLine($"BoxTagService API initialized: {apiUrl}");
             }
         }
