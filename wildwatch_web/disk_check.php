@@ -124,7 +124,7 @@ try {
     $freeAfterDelete = getDiskFree();
     $totalSec = round(microtime(true) - $start, 2);
 
-    send(['type' => 'done', 'status' => 'OK', 'wrote_mb' => $fileSize, 'total_sec' => $totalSec, 'speed_mbs' => round($fileSize / $totalSec, 1), 'disk_free_before_delete' => $freeBeforeDelete, 'disk_free_after_delete' => $freeAfterDelete, 'server' => getServerStats($pdo)]);
+    send(['type' => 'done', 'status' => 'OK', 'wrote_mb' => $fileSize, 'total_sec' => $totalSec, 'speed_mbs' => $totalSec > 0 ? round($fileSize / $totalSec, 1) : 0, 'disk_free_before_delete' => $freeBeforeDelete, 'disk_free_after_delete' => $freeAfterDelete, 'server' => getServerStats($pdo)]);
 } catch (Exception $e) {
     if (file_exists($testFile)) @unlink($testFile);
     send(['type' => 'done', 'status' => 'FAIL', 'error' => $e->getMessage(), 'server' => getServerStats($pdo)]);
