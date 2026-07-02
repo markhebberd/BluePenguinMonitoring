@@ -577,7 +577,11 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
       }
     } else if (off === 0) {
       prevEmpty = t; awaitingEmpty = false;
-    } else if (!awaitingEmpty) {
+    } else if (!awaitingEmpty && ((o.eggs || 0) > 0 || clutches.length === 0)) {
+      // A breeding attempt begins at laying, so only eggs start a new clutch. Chicks
+      // appearing with no egg phase after a completed clutch is biologically impossible
+      // — it's stale/carry-forward data, not a real second brood — so it's ignored.
+      // Exception: the season's FIRST attempt may start on chicks (egg phase missed).
       // Laid estimate (C# midpoint): halfway between last empty check and discovery,
       // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
       let laid: number | null = null;
@@ -705,6 +709,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
   const seasons = Array.from(seasonBirds.entries())
     .sort((a, b) => b[0].localeCompare(a[0]));
 
+  // Each season is a collapsible section; the newest starts expanded.
+  const [expandedSeasons, setExpandedSeasons] = useState<Set<string>>(() => new Set(seasons.slice(0, 1).map(([l]) => l)));
+  const toggleSeason = (l: string) => setExpandedSeasons(s => {
+    const n = new Set(s); n.has(l) ? n.delete(l) : n.add(l); return n;
+  });
+
   if (seasons.every(([, m]) => m.size === 0)) return null;
 
   return (
@@ -772,11 +782,15 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           const m = slotCounts.get(k)!;
           m.set(slot, (m.get(slot) || 0) + n);
         };
+        // Family-box birds (parents/chicks) get a count PER clutch window, keyed
+        // `<ci>|<key>` — so a parent shared by both clutches shows its actual sightings
+        // in each window, not the season total repeated on every row.
+        const winCount = new Map<string, number>();
         for (const o of sObsChrono) {
           const t = parseDate(o.observation_time_utc).getTime();
-          let slot = '';
+          let slot = '', wci = -1;
           for (let ci = 0; ci < clutches.length; ci++) {
-            if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; break; }
+            if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; wci = ci; break; }
           }
           if (!slot) { let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++; slot = `g${gi}`; }
           const seen = new Set<string>();
@@ -784,7 +798,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
             const k = s.pit_id.slice(-8);
             if (seen.has(k)) continue; // one visit per observation
             seen.add(k);
-            if (parentKeys.has(k) || chickFamily.has(k)) continue;
+            if (parentKeys.has(k) || chickFamily.has(k)) {
+              if (wci >= 0) winCount.set(`${wci}|${k}`, (winCount.get(`${wci}|${k}`) || 0) + 1);
+              continue;
+            }
             bump(k, slot, 1);
           }
         }
@@ -815,24 +832,31 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return undefined;
         };
 
-        const birdWithCount = (b: any, count?: number) => (
-          <span key={b.pit_id.slice(-8)} className="bird-with-count">
-            <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-            <span className="scan-count">{count ?? b.scanCount}x</span>
-          </span>
-        );
+        const birdWithCount = (b: any, count?: number) => {
+          const n = count ?? b.scanCount;
+          return (
+            <span key={b.pit_id.slice(-8)} className="bird-with-count">
+              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+              {n > 0 && <span className="scan-count">{n}x</span>}
+            </span>
+          );
+        };
         const slotRow = (slot: string) => slotBirds(slot).map(x => birdWithCount(x.b, x.n));
 
         const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
 
+        const isExpanded = expandedSeasons.has(label);
+
         return (
           <div key={label} className="season-birds">
-            <div className="season-title">Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span></div>
+            <div className="season-title clickable" onClick={() => toggleSeason(label)}>
+              {isExpanded ? '▾' : '▸'} Season {label}/{String((seasonYear + 1) % 100).padStart(2, '0')}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+            </div>
             {/* One row per breeding window, newest on top. Family (date range + pair +
                 offspring at final life stage) sits in the black box; window visitors sit
                 to its right. Outside-window birds interleave chronologically: above a
                 window = seen after it, below = seen before it. */}
-            {(() => {
+            {isExpanded && (() => {
               const gapRow = (gi: number) => {
                 const gb = slotRow(`g${gi}`);
                 return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
@@ -852,14 +876,14 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
                     <div className="bird-row">
                       <span className="breeding-pair">
                         <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
-                        {pairBirds.map(b => birdWithCount(b))}
+                        {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
                           <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
-                        {famChicks.map(b => birdWithCount(b))}
+                        {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                       </span>
                       {slotRow(`w${ci}`)}
                     </div>
