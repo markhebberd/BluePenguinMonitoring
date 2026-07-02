@@ -2833,6 +2833,21 @@ namespace PenguinMonitor
                         return b;
                     }
 
+                    // Increase preference — move up so it's tried earlier
+                    var upBtn = chip("^", UIFactory.PRIMARY_BLUE);
+                    if (_appSettings.RememberedScanners.IndexOf(sc) <= 0) { upBtn.Enabled = false; upBtn.Alpha = 0.4f; }
+                    upBtn.Click += (s2, e2) =>
+                    {
+                        var i = _appSettings.RememberedScanners.IndexOf(sc);
+                        if (i <= 0) return;
+                        _appSettings.RememberedScanners.RemoveAt(i);
+                        _appSettings.RememberedScanners.Insert(i - 1, sc);
+                        DataStorageService.saveApplicationSettings(_appSettings);
+                        RestartBluetooth();
+                        RefreshRemembered();
+                    };
+                    row.AddView(upBtn);
+
                     var renameBtn = chip("Rename", UIFactory.PRIMARY_BLUE);
                     renameBtn.Click += (s2, e2) => ShowScannerNicknameDialog(sc, RefreshRemembered);
                     row.AddView(renameBtn);
