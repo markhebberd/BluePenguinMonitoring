@@ -484,12 +484,13 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.pit_id ? scan.pit_id.slice(-8) : '';
   const wasChippedAsChick = !scan.chipped_as_adult;
-  // currentStatus (bird-page header): a chick-chipped bird stays a chick (yellow) until it
-  // has been scanned as an adult (hasReturned). Once an adult it shows its sex colour
-  // (blue/pink) — or grey if unsexed — with the yellow "chipped as chick" inset.
+  // currentStatus (bird-page header): solid yellow only while the bird is actually
+  // chick-aged (<90 days since chipping). Beyond that it renders as an adult — sex
+  // colour if returned and sexed, grey "unproven" otherwise (including chick-chipped
+  // birds never scanned again, e.g. lost at sea) — with the yellow chick-origin inset.
   // Without currentStatus, life-stage is judged as at the given observation date.
   const stillChick = currentStatus
-    ? (wasChippedAsChick && !scan.hasReturned)
+    ? (wasChippedAsChick && !scan.hasReturned && isChickAtObsDate(scan.chip_date, scan.chipped_as_adult))
     : isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, observationDate);
   const cls = currentStatus
     ? (stillChick ? 'chick' : (sex === 'F' ? 'f' : sex === 'M' ? 'm' : ''))
@@ -497,12 +498,12 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const icon = currentStatus
     ? (stillChick ? '🐣' : (sex === 'F' ? '♀' : sex === 'M' ? '♂' : ''))
     : penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
-  const provenChickOrigin = wasChippedAsChick && !stillChick;
+  const chickOrigin = wasChippedAsChick && !stillChick;
   const chipCls = currentStatus
-    ? (provenChickOrigin && sex ? 'chipped-chick' : '')
+    ? (chickOrigin && sex ? 'chipped-chick' : '')
     : (wasChippedAsChick ? 'chipped-chick' : '');
   const grayCls = currentStatus
-    ? (provenChickOrigin && !sex ? 'unproven' : '')
+    ? (chickOrigin && !sex ? 'unproven' : '')
     : (wasChippedAsChick && !stillChick && !sex && !observationDate ? 'unproven' : '');
   const obsNzDate = observationDate ? toNzDateStr(observationDate) : '';
   const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
