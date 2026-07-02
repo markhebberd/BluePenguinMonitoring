@@ -4271,6 +4271,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   useEffect(() => {
     const onPopState = () => {
       const { box, bird, enter, admin: adm, reports, day } = parseUrl();
+      // Back/forward lands on a fresh view — drop cross-view scroll targets
+      setHighlightObs(null); setScrollToObs(null); setDayBox(null);
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
@@ -4410,17 +4412,23 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (selectedDay) {
       const ds = [...(stats?.observation_dates || [])].sort();
       const di = ds.indexOf(selectedDay);
-      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setSelectedDay(ds[di + 1]); }
-      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setSelectedDay(ds[di - 1]); }
+      // Day → day: the box-highlight came from a specific box's date link — it
+      // doesn't apply to a different day, so drop it.
+      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di + 1]); }
+      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di - 1]); }
       else if (e.key === 'Escape') { setSelectedDay(null); }
       return;
     }
     if (!selectedBox || sortedBoxIds.length === 0) return;
     const idx = sortedBoxIds.indexOf(selectedBox);
     if (idx < 0) return;
+    // Box → box: the date-scroll came from a day view link into the old box — it
+    // doesn't apply to a different box, so drop it.
     if (e.key === 'ArrowRight' && idx < sortedBoxIds.length - 1) {
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx + 1]);
     } else if (e.key === 'ArrowLeft' && idx > 0) {
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx - 1]);
     } else if (e.key === 'Escape') {
       setSelectedBox(null);
@@ -4520,7 +4528,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
           <div className="mobile-search-group">
             <label className="mobile-label">Box</label>
-            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
+            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
           </div>
           <div className="mobile-search-group">
             <label className="mobile-label">Date</label>
@@ -4643,7 +4651,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="colony-toolbar">
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
         <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
@@ -4659,16 +4667,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="colony-toolbar">
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
         <div className="bird-page">
           <div className="page-header">
-            <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
+            <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setHighlightObs(null); setScrollToObs(null); setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
           </div>
           {birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
-              onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
+              onBoxClick={(box: string) => { closeBird(); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
               onDayClick={goToDay} />
           ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
@@ -4686,7 +4694,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       {siteHeader}
       <div className="colony-toolbar">
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
@@ -4846,7 +4854,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-bird">
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'} onClose={() => setSelectedBird(null)}
-                  onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
+                  onBoxClick={(box: string) => { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
                   onDayClick={goToDay} />
               ) : <p className="muted">Loading bird...</p>}
