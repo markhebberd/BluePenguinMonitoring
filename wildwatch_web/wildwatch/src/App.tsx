@@ -937,13 +937,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     <div className="bird-row">
                       <span className="breeding-pair">
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                        {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
                           <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
-                        {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
                       </span>
                       {slotRow(`w${ci}`)}
