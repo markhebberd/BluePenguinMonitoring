@@ -757,16 +757,19 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
     }
   }
 
+  // Always surface the current season, even with no sightings yet, so the box shows
+  // a "Season 2026/27: 0 birds" header rather than silently omitting the season.
+  const currentLabel = getSeasonLabel();
+  if (!seasonBirds.has(currentLabel)) seasonBirds.set(currentLabel, new Map());
+
   const seasons = Array.from(seasonBirds.entries())
     .sort((a, b) => b[0].localeCompare(a[0]));
-
-  if (seasons.every(([, m]) => m.size === 0)) return null;
 
   return (
     <div className="all-birds">
       {seasons.map(([label, birdMap]) => {
         const birds = Array.from(birdMap.values());
-        if (birds.length === 0) return null;
+        if (birds.length === 0 && label !== currentLabel) return null;
 
         const seasonYear = parseInt(label);
         const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
@@ -5028,6 +5031,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {!false && boxDetail && (
           <div className="detail-split">
             <div className="detail-obs">
+                <h3 className="obs-section-head">Breeding overview</h3>
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
                   onSeasonClick={(t: string) => { setHighlightObs(t); setScrollToObs(t); }} />
                 {(() => {
@@ -5057,6 +5061,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                   );
                 })()}
+              <h3 className="obs-section-head">Observations</h3>
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
                 const thisLabel = getSeasonLabel();

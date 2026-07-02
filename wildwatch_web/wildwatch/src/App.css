@@ -333,6 +333,8 @@ h3.collapsible:hover { color:#1a5276; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
 .breeding-pair .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
+.obs-section-head { font-size:15px; color:#1a5276; font-weight:600; margin:16px 0 8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
+.obs-section-head:first-child { margin-top:0; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
 .season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
 .issue-badge { position:relative; font-size:10px; background:#FFF3E0; color:#E65100; border:1px solid #FFCC80; border-radius:4px; padding:1px 5px; cursor:help; }
