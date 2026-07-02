@@ -936,7 +936,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     {clutch.laidFailed && <div className="season-issues"><span className="issue-badge">{'⚠'} laid date could not be estimated</span></div>}
                     <div className="bird-row">
                       <span className="breeding-pair">
-                        <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
                           <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
@@ -945,6 +944,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
                         {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                        <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
                       </span>
                       {slotRow(`w${ci}`)}
                     </div>
