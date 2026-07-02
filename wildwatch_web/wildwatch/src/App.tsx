@@ -643,7 +643,18 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
       best = { male: a.sex === 'M' ? cands[i].key : cands[j].key, female: a.sex === 'F' ? cands[i].key : cands[j].key, score };
     }
   }
-  return best ? { male: best.male, female: best.female } : null;
+  if (best) return { male: best.male, female: best.female };
+  // No full pair — fall back to a single CONFIRMED parent (no partner to anchor a
+  // guess, so a lone parent must be truth-sexed). The other slot stays empty; the
+  // family box shows just that parent + the offspring.
+  let solo: { key: string; sex: string; n: number } | null = null;
+  for (const c of cands) {
+    const s = sexOf(c.bird);
+    if (!s || !s.confirmed) continue;
+    if (!solo || c.n > solo.n) solo = { key: c.key, sex: s.sex, n: c.n };
+  }
+  if (solo) return { male: solo.sex === 'M' ? solo.key : '', female: solo.sex === 'F' ? solo.key : '' };
+  return null;
 }
 
 const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
@@ -722,7 +733,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
         const clutches = segmentClutches(sObsChrono);
         const families = clutches.map(c => ({ clutch: c, pair: detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason) }));
         const parentKeys = new Set<string>();
-        for (const f of families) if (f.pair) { parentKeys.add(f.pair.male); parentKeys.add(f.pair.female); }
+        for (const f of families) if (f.pair) {
+          if (f.pair.male) parentKeys.add(f.pair.male);
+          if (f.pair.female) parentKeys.add(f.pair.female);
+        }
 
         // Assign each season chick to the clutch whose window holds its chip date;
         // chips land at the end of an attempt, so otherwise default to the season's
@@ -839,7 +853,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
                     <div className="bird-row">
                       <span className="breeding-pair">
                         <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
-                        {pairBirds.length === 2 && pairBirds.map(b => birdWithCount(b))}
+                        {pairBirds.map(b => birdWithCount(b))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
                           <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
                         ))}
