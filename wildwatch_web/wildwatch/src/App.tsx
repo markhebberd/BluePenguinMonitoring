@@ -662,18 +662,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
           return true;
         });
 
-        // For season context: a bird is a chick if chipped as chick during this season
-        const seasonYear = parseInt(label);
-        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
-        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
-        const seasonObsDate = (b: any) => {
-          if (!b.chipped_as_adult && b.chip_date) {
-            const cd = new Date(b.chip_date);
-            if (cd >= seasonStart && cd < seasonEnd) return b.chip_date; // chipped as chick this season → show as chick
-          }
-          return undefined;
-        };
-
+        // Season rows are a year summary, not a specific day — render birds by
+        // current knowledge (no observationDate): never-returned chick-chipped
+        // birds show grey "unproven" with the chick-origin tail, returned ones
+        // show their sex colour with the tail, current-season chicks stay yellow.
         return (
           <div key={label} className="season-birds">
             <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
@@ -682,13 +674,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
                 <span className="breeding-pair">
                   {pair.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
                   {chicks.map(b => (
                     <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
                       <span className="scan-count">{b.scanCount}x</span>
                     </span>
                   ))}
@@ -696,7 +688,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
               )}
               {others.map(b => (
                 <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} />
                   <span className="scan-count">{b.scanCount}x</span>
                 </span>
               ))}
