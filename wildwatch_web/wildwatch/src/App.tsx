@@ -949,9 +949,13 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const ref = useRef<HTMLInputElement|HTMLSelectElement>(null);
+  const focused = useRef(false);
 
   useEffect(() => { if (editing && ref.current) ref.current.focus(); }, [editing]);
-  useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+  // Inline fields write through to the parent draft on every change (below), which
+  // bumps `value`. Don't resync (and clobber the caret / an in-progress entry) while
+  // the field is focused — only when the value changes from outside.
+  useEffect(() => { if (!focused.current) setDraft(String(value ?? '')); }, [value]);
 
   const display = value !== null && value !== undefined && value !== '' ? String(value) : null;
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
@@ -992,16 +996,24 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
       return (
         <textarea ref={ref as any} className="ef-input ef-notes" value={draft} disabled={saving} rows={1}
           placeholder={placeholder}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+          onFocus={() => { focused.current = true; }}
+          onChange={e => { setDraft(e.target.value); onSave(e.target.value || null); }}
+          onBlur={() => { focused.current = false; }}
           onKeyDown={e => { if (e.key === 'Escape') cancel(); }} />
       );
     }
     return (
       <input ref={ref as any} className={`ef-input${narrow ? ' ef-narrow' : ''}`} type={type || 'text'} value={draft} disabled={saving}
         placeholder={placeholder} min={min}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+        onFocus={() => { focused.current = true; }}
+        onChange={e => {
+          const raw = e.target.value;
+          setDraft(raw);
+          let val: any = type === 'number' ? (raw === '' ? null : parseFloat(raw)) : (raw || null);
+          if (type === 'number' && val !== null && min !== undefined && (val as number) < min) val = min;
+          onSave(val);
+        }}
+        onBlur={() => { focused.current = false; setDraft(String(value ?? '')); }}
         onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); if (e.key === 'Escape') cancel(); }} />
     );
   }
