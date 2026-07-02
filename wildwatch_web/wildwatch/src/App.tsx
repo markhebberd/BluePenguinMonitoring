@@ -933,7 +933,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
                     {clutches.length > 1 && <div className="clutch-label muted">{ordinal(ci + 1)} clutch</div>}
-                    {clutch.laidFailed && <div className="laid-warning">{'⚠'} laid date could not be estimated</div>}
+                    {clutch.laidFailed && <div className="season-issues"><span className="issue-badge">{'⚠'} laid date could not be estimated</span></div>}
                     <div className="bird-row">
                       <span className="breeding-pair">
                         <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>

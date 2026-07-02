@@ -339,7 +339,6 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-row { margin:6px 0; }
 .clutch-label { font-size:11px; font-weight:600; margin-bottom:2px; }
 .clutch-dates { align-self:center; font-size:10px; color:#666; margin-right:2px; }
-.laid-warning { color:#F44336; font-size:11px; margin:2px 0 4px; }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
