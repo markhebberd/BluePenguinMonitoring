@@ -4235,7 +4235,7 @@ namespace PenguinMonitor
             _breedingChanceSpinner[0].SetSelection(breedingPercentageIndex, false);
             _breedingChanceSpinner[0].ItemSelected += (s, e) =>
             {
-                if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
+                if (!_suppressDataChanged && !_isBoxLocked) _dataChangedSinceUnlock = true;
                 string selectedItem = items[e.Position];
                 string status = _breedingChanceSpinner[0].SelectedItem.ToString();
             };
@@ -4243,8 +4243,9 @@ namespace PenguinMonitor
             _gateStatusSpinner.Add(_uiFactory.CreateSpinner(new string[] { "", "Gate up", "Regate" }));
             _gateStatusSpinner[0].ItemSelected += (s, e) =>
             {
-                // Ignore programmatic selection during page redraw (e.g. box navigation)
-                if (_suppressDataChanged) return;
+                // Ignore programmatic selection during redraw/navigation. The spinner is
+                // disabled while the box is locked, so any event while locked is programmatic.
+                if (_suppressDataChanged || _isBoxLocked) return;
                 _dataChangedSinceUnlock = true;
 
                 string status = _gateStatusSpinner[0].SelectedItem.ToString();
@@ -4512,7 +4513,7 @@ namespace PenguinMonitor
         }
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
-            if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
+            if (!_suppressDataChanged && !_isBoxLocked) _dataChangedSinceUnlock = true;
             CheckForHighOffspringCount();
             if ((int.TryParse(_eggsEditText?[0].Text ?? "0", out int eggs) && eggs > 0) || (int.TryParse(_chicksEditText?[0].Text ?? "0", out int chicks) && chicks > 0))
             {
