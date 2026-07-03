@@ -2504,12 +2504,12 @@ function MissedScansReport() {
       <p className="muted">Boxes where fewer adults were scanned than recorded present ({totalBoxes} box-days)</p>
       {days.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
         <table className="guess-rank-table">
-          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned</th><th>Missed</th></tr></thead>
+          <thead><tr><th>Box</th><th>Date</th><th>Adults</th><th>Scanned</th><th>Missed</th></tr></thead>
           <tbody>
-            {days.map((d: any) => d.boxes.map((r: any, i: number) => (
+            {days.map((d: any) => d.boxes.map((r: any) => (
               <tr key={`${d.date}|${r.box}`}>
-                <td>{i === 0 ? <a className="clickable" href={`/day/${d.date}`}>{d.date}</a> : ''}</td>
-                <td><a className="clickable" href={`/box/${r.box}`}>{r.box}</a></td>
+                <td><a className="clickable" href={`/box/${r.box}`}><strong>{r.box}</strong></a></td>
+                <td><a className="clickable" href={`/day/${d.date}`}>{d.date}</a></td>
                 <td>{r.adults}</td>
                 <td>{r.scanned}</td>
                 <td>{r.adults - r.scanned}</td>
