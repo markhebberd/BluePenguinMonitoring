@@ -413,8 +413,9 @@ namespace PenguinMonitor
         public void OnProviderEnabled(string provider) { } // required by ILocationListener
         private void InitializeBluetooth()
         {
-            var address = _appSettings.SelectedBluetoothDevice;
-            if (string.IsNullOrEmpty(address))
+            MigrateLegacyScanner();
+            var addresses = _appSettings.RememberedScanners.Where(s => s.Enabled).Select(s => s.Address).ToList();
+            if (addresses.Count == 0)
             {
                 UpdateStatusText("No scanner selected — choose one in Settings");
                 return;
@@ -422,8 +423,64 @@ namespace PenguinMonitor
             _bluetoothManager = new BluetoothManager();
             _bluetoothManager.StatusChanged += OnBluetoothStatusChanged;
             _bluetoothManager.EidDataReceived += OnEidDataReceived;
-            if (_isBluetoothEnabledCheckBox.Checked)
-                _ = _bluetoothManager.ConnectAsync(address);
+            if (_appSettings.IsBlueToothEnabled)
+                _ = _bluetoothManager.ConnectAsync(addresses);
+        }
+
+        // One-time move of the old single SelectedBluetoothDevice into the remembered-scanners list.
+        private void MigrateLegacyScanner()
+        {
+            if (_appSettings.RememberedScanners.Count == 0 && !string.IsNullOrEmpty(_appSettings.SelectedBluetoothDevice))
+            {
+                var addr = _appSettings.SelectedBluetoothDevice!;
+                var name = BluetoothManager.GetPairedDevices().FirstOrDefault(d => d.Address == addr).Name ?? addr;
+                _appSettings.RememberedScanners.Add(new RememberedScanner { Address = addr, Name = name, Enabled = true });
+                DataStorageService.saveApplicationSettings(_appSettings);
+            }
+        }
+
+        // Add (or re-enable) a scanner the user picked from discovery, then reconnect.
+        private void RememberScanner(string address, string name)
+        {
+            var existing = _appSettings.RememberedScanners.FirstOrDefault(s => s.Address == address);
+            if (existing == null)
+                _appSettings.RememberedScanners.Add(new RememberedScanner { Address = address, Name = name, Enabled = true });
+            else
+            {
+                existing.Enabled = true;
+                if (!string.IsNullOrWhiteSpace(name)) existing.Name = name;
+            }
+            _appSettings.SelectedBluetoothDevice = address; // keep legacy field pointing at the latest pick
+            DataStorageService.saveApplicationSettings(_appSettings);
+            RestartBluetooth();
+        }
+
+        // Restart the Bluetooth connection against the current enabled-scanner list.
+        private void RestartBluetooth()
+        {
+            _bluetoothManager?.Dispose();
+            _bluetoothManager = null;
+            InitializeBluetooth();
+        }
+
+        // Edit a remembered scanner's nickname (blank clears it → falls back to the device name).
+        private void ShowScannerNicknameDialog(RememberedScanner scanner, Action onDone)
+        {
+            var input = new EditText(this) { Text = scanner.Nickname };
+            input.Hint = string.IsNullOrWhiteSpace(scanner.Name) ? scanner.Address : scanner.Name;
+            input.SetSelectAllOnFocus(true);
+            new AlertDialog.Builder(this)
+                .SetTitle("Scanner nickname")
+                .SetMessage($"{scanner.Name} ({scanner.Address})")
+                .SetView(input)
+                .SetPositiveButton("Save", (s, e) =>
+                {
+                    scanner.Nickname = input.Text?.Trim() ?? "";
+                    DataStorageService.saveApplicationSettings(_appSettings);
+                    onDone();
+                })
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Show();
         }
         private void OnBluetoothStatusChanged(string status)
         {
@@ -725,7 +782,12 @@ namespace PenguinMonitor
             if (_bluetoothManager == null)
                 bt = "BT:off";
             else if (_bluetoothManager.IsConnected)
-                bt = "BT🔗";
+            {
+                var nick = _appSettings.RememberedScanners
+                    .FirstOrDefault(s => s.Address == _bluetoothManager.ConnectedDeviceAddress)?.DisplayName
+                    ?? _bluetoothManager.ConnectedDeviceName;
+                bt = string.IsNullOrWhiteSpace(nick) ? "BT🔗" : $"BT🔗 ({nick})";
+            }
             else if (_bluetoothManager.IsConnecting)
                 bt = "BT🔄";
             else
@@ -2403,9 +2465,9 @@ namespace PenguinMonitor
             {
                 if (_isBluetoothEnabledCheckBox.Checked)
                 {
+                    _appSettings.IsBlueToothEnabled = true;   // must be set before InitializeBluetooth (it gates connect on this)
                     InitializeBluetooth();
                     InitializeGPS();
-                    _appSettings.IsBlueToothEnabled = true;
                 }
                 else
                 {
@@ -2503,8 +2565,17 @@ namespace PenguinMonitor
             };
             dailyLabelLayout.AddView(setLabelButton);
 
-            var dailyLabelWarningCheckBox = new CheckBox(this) { Text = "⚠", Checked = _appSettings.ShowDailyLabelWarning };
-            dailyLabelWarningCheckBox.SetTextColor(UIFactory.DANGER_RED);
+            // Warning icon to the LEFT of the checkbox
+            var dailyLabelWarningIcon = new TextView(this) { Text = "⚠", TextSize = 16 };
+            dailyLabelWarningIcon.SetTextColor(UIFactory.DANGER_RED);
+            dailyLabelWarningIcon.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var warnIconParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            warnIconParams.Gravity = GravityFlags.CenterVertical;
+            warnIconParams.SetMargins(8, 0, 2, 0);
+            dailyLabelWarningIcon.LayoutParameters = warnIconParams;
+            dailyLabelLayout.AddView(dailyLabelWarningIcon);
+
+            var dailyLabelWarningCheckBox = new CheckBox(this) { Checked = _appSettings.ShowDailyLabelWarning };
             dailyLabelWarningCheckBox.SetPadding(0, 0, 0, 0);
             dailyLabelWarningCheckBox.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             dailyLabelWarningCheckBox.CheckedChange += (s, e) =>
@@ -2707,19 +2778,108 @@ namespace PenguinMonitor
             // 3. Bluetooth enable + Scan BT are added together as a row below
 
             // Scanner device picker
-            // Scanner selection
+            // Scanner selection — remembered scanners (enable / nickname / delete) + discovery
             var scannerSection = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             scannerSection.SetPadding(8, 0, 8, 8);
 
-            var currentScanner = _appSettings.SelectedBluetoothDevice;
-            var pairedName = BluetoothManager.GetPairedDevices().FirstOrDefault(d => d.Address == currentScanner).Name;
-            var scannerStatus = new TextView(this) { TextSize = 14 };
-            scannerStatus.SetTextColor(Color.Black);
-            scannerStatus.Text = currentScanner != null ? $"Scanner: {pairedName ?? currentScanner}" : "No scanner selected";
-
             IDisposable? discoveryHandle = null;
             var scanButton = _uiFactory.CreateStyledButton("Scan BT", UIFactory.PRIMARY_BLUE);
+            var rememberedContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             var deviceListLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+
+            // Rebuild the list of remembered scanners
+            void RefreshRemembered()
+            {
+                rememberedContainer.RemoveAllViews();
+                var scanners = _appSettings.RememberedScanners;
+                if (scanners.Count == 0)
+                {
+                    var none = new TextView(this) { Text = "No scanners remembered — tap Scan BT to add one", TextSize = 13 };
+                    none.SetTextColor(UIFactory.TEXT_SECONDARY);
+                    rememberedContainer.AddView(none);
+                    return;
+                }
+                if (scanners.Count(s => s.Enabled) > 1)
+                {
+                    var hint = new TextView(this) { Text = "Enabled scanners are tried top-to-bottom until one connects.", TextSize = 12 };
+                    hint.SetTextColor(UIFactory.TEXT_SECONDARY);
+                    rememberedContainer.AddView(hint);
+                }
+                foreach (var scanner in scanners.ToList())
+                {
+                    var sc = scanner;
+                    var row = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+                    row.SetGravity(GravityFlags.CenterVertical);
+                    var rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                    rowParams.SetMargins(0, 4, 0, 4);
+                    row.LayoutParameters = rowParams;
+
+                    var cb = new CheckBox(this) { Checked = sc.Enabled };
+                    cb.SetTextColor(Color.Black);
+                    cb.CheckedChange += (s2, e2) =>
+                    {
+                        if (sc.Enabled == e2.IsChecked) return;
+                        sc.Enabled = e2.IsChecked;
+                        DataStorageService.saveApplicationSettings(_appSettings);
+                        RestartBluetooth();
+                    };
+                    row.AddView(cb);
+
+                    var nameTv = new TextView(this) { Text = sc.DisplayName, TextSize = 14 };
+                    nameTv.SetTextColor(sc.Enabled ? Color.Black : UIFactory.TEXT_SECONDARY);
+                    nameTv.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                    row.AddView(nameTv);
+
+                    Button chip(string text, Color bg)
+                    {
+                        var b = new Button(this) { Text = text, TextSize = 12 };
+                        b.SetAllCaps(false);
+                        b.SetTextColor(Color.White);
+                        b.SetPadding(16, 6, 16, 6);
+                        b.Background = _uiFactory.CreateRoundedBackground(bg, 8);
+                        var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                        p.SetMargins(4, 0, 0, 0);
+                        b.LayoutParameters = p;
+                        return b;
+                    }
+
+                    // Increase preference — move up so it's tried earlier (wide tap target)
+                    var upBtn = chip("^", UIFactory.PRIMARY_BLUE);
+                    upBtn.SetPadding(96, 6, 96, 6);   // ~5x wider than a normal chip
+                    if (_appSettings.RememberedScanners.IndexOf(sc) <= 0) { upBtn.Enabled = false; upBtn.Alpha = 0.4f; }
+                    upBtn.Click += (s2, e2) =>
+                    {
+                        var i = _appSettings.RememberedScanners.IndexOf(sc);
+                        if (i <= 0) return;
+                        _appSettings.RememberedScanners.RemoveAt(i);
+                        _appSettings.RememberedScanners.Insert(i - 1, sc);
+                        DataStorageService.saveApplicationSettings(_appSettings);
+                        RestartBluetooth();
+                        RefreshRemembered();
+                    };
+                    row.AddView(upBtn);
+
+                    var renameBtn = chip("Rename", UIFactory.PRIMARY_BLUE);
+                    renameBtn.Click += (s2, e2) => ShowScannerNicknameDialog(sc, RefreshRemembered);
+                    row.AddView(renameBtn);
+
+                    var delBtn = chip("Delete", UIFactory.DANGER_RED);
+                    delBtn.Click += (s2, e2) => ShowConfirmationDialog("Delete scanner",
+                        $"Remove {sc.DisplayName} from remembered scanners?",
+                        ("Delete", () =>
+                        {
+                            _appSettings.RememberedScanners.Remove(sc);
+                            DataStorageService.saveApplicationSettings(_appSettings);
+                            RestartBluetooth();
+                            RefreshRemembered();
+                        }),
+                        ("Cancel", () => { }));
+                    row.AddView(delBtn);
+
+                    rememberedContainer.AddView(row);
+                }
+            }
+            RefreshRemembered();
 
             scanButton.Click += (s, e) =>
             {
@@ -2731,12 +2891,11 @@ namespace PenguinMonitor
                     if (missing.Length > 0)
                     {
                         RequestPermissions(missing, 1);
-                        Toast.MakeText(this, "Allow Bluetooth, then tap 'Scan for scanners' again", ToastLength.Long)?.Show();
+                        Toast.MakeText(this, "Allow Bluetooth, then tap 'Scan BT' again", ToastLength.Long)?.Show();
                         return;
                     }
                 }
 
-                scannerStatus.Visibility = Android.Views.ViewStates.Visible;
                 deviceListLayout.Visibility = Android.Views.ViewStates.Visible;
                 discoveryHandle?.Dispose();
                 deviceListLayout.RemoveAllViews();
@@ -2754,16 +2913,13 @@ namespace PenguinMonitor
                         btn.Click += (_, _) =>
                         {
                             discoveryHandle?.Dispose();
-                            _appSettings.SelectedBluetoothDevice = address;
-                            scannerStatus.Text = $"Scanner: {name}";
                             deviceListLayout.RemoveAllViews();
+                            deviceListLayout.Visibility = Android.Views.ViewStates.Gone;
                             scanButton.Text = "Scan BT";
                             scanButton.Enabled = true;
-                            if (_isBluetoothEnabledCheckBox.Checked)
-                            {
-                                _bluetoothManager?.Dispose();
-                                InitializeBluetooth();
-                            }
+                            RememberScanner(address, name);   // adds/enables + reconnects
+                            RefreshRemembered();
+                            Toast.MakeText(this, $"Added {name}", ToastLength.Short)?.Show();
                         };
                         var btnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
                         btnParams.SetMargins(0, 4, 0, 4);
@@ -2774,13 +2930,12 @@ namespace PenguinMonitor
                 {
                     RunOnUiThread(() =>
                     {
-                        scanButton.Text = "Scan for scanners";
+                        scanButton.Text = "Scan BT";
                         scanButton.Enabled = true;
                     });
                 });
             };
 
-            scannerStatus.Visibility = Android.Views.ViewStates.Gone;
             deviceListLayout.Visibility = Android.Views.ViewStates.Gone;
 
             // "Enable BT & GPS" checkbox with "Scan BT" to its right (checkbox text keeps full size — it wraps rather than shrinks)
@@ -2795,7 +2950,7 @@ namespace PenguinMonitor
             btRow.AddView(scanButton);
             _settingsCard.AddView(btRow);
 
-            scannerSection.AddView(scannerStatus);
+            scannerSection.AddView(rememberedContainer);
             scannerSection.AddView(deviceListLayout);
             _settingsCard.AddView(scannerSection);
 
@@ -5015,6 +5170,9 @@ namespace PenguinMonitor
                     {
                         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
                         var token = _appSettings.AuthToken;
+                        // New birds belong to the colony being worked — the server numbers
+                        // them within it (e.g. NI7) and stamps penguins.colony_id.
+                        var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
 
                         // 1. Create penguin record
                         var pengFields = new Dictionary<string, object>
@@ -5025,7 +5183,7 @@ namespace PenguinMonitor
                         if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
 
                         var pengReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins");
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins&colony_id={colonyId}");
                         pengReq.Headers.Add("Authorization", $"Bearer {token}");
                         pengReq.Content = new StringContent(
                             JsonConvert.SerializeObject(pengFields), System.Text.Encoding.UTF8, "application/json");
@@ -5058,7 +5216,7 @@ namespace PenguinMonitor
                             ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
                         };
                         var chipReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips");
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
                         chipReq.Headers.Add("Authorization", $"Bearer {token}");
                         chipReq.Content = new StringContent(
                             JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
@@ -5090,7 +5248,7 @@ namespace PenguinMonitor
                             bioFields["peng_num"] = pengNum;
                             bioFields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
                             var bioReq = new HttpRequestMessage(HttpMethod.Post,
-                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data");
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
                             bioReq.Headers.Add("Authorization", $"Bearer {token}");
                             bioReq.Content = new StringContent(
                                 JsonConvert.SerializeObject(bioFields), System.Text.Encoding.UTF8, "application/json");
@@ -5321,10 +5479,12 @@ namespace PenguinMonitor
                 _appSettings = DataStorageService.loadAppSettingsFromDir(internalPath);
                 _appSettings.PropertyChanged += (s, e) => DataStorageService.saveApplicationSettings(_appSettings);
 
-                // Initialize BoxTags API if configured
-                if (_appSettings.IsBoxTagsApiConfigured)
+                // Initialize BoxTags API if configured. Auth is the logged-in user's
+                // session token (read live via the provider), not the legacy API key.
+                if (!string.IsNullOrWhiteSpace(_appSettings.BoxTagsApiUrl))
                 {
-                    BoxTagService.InitializeApi(_appSettings.BoxTagsApiUrl, _appSettings.BoxTagsApiKey);
+                    BoxTagService.InitializeApi(_appSettings.BoxTagsApiUrl, () => _appSettings.AuthToken,
+                        () => _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1);
                 }
 
                 // Load box tags from local storage

@@ -3,6 +3,7 @@ using PenguinMonitor.Models;
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -15,17 +16,40 @@ namespace PenguinMonitor.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiUrl;
-        private readonly string _apiKey;
+        private readonly Func<string?> _tokenProvider;
+        private readonly Func<int> _colonyProvider;
 
-        public BoxTagApiService(string apiUrl, string apiKey)
+        public BoxTagApiService(string apiUrl, Func<string?> tokenProvider, Func<int> colonyProvider)
         {
             _apiUrl = apiUrl.TrimEnd('/');
-            _apiKey = apiKey;
+            _tokenProvider = tokenProvider;
+            _colonyProvider = colonyProvider;
             _httpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _apiKey);
+        }
+
+        // Every request carries the colony the user is currently viewing (read live so a
+        // colony switch is picked up); the server checks the token has access to it.
+        private string Url(string? extraQuery = null)
+        {
+            var q = $"colony_id={_colonyProvider()}";
+            if (!string.IsNullOrEmpty(extraQuery)) q += "&" + extraQuery;
+            return $"{_apiUrl}?{q}";
+        }
+
+        // Box tags are authenticated with the logged-in user's session token (read
+        // dynamically so login/refresh is always picked up). Reads accept it via
+        // requireReadAuth + per-colony view; writes need requireAuth + colony edit.
+        private HttpRequestMessage Request(HttpMethod method, string url, HttpContent? content = null)
+        {
+            var req = new HttpRequestMessage(method, url);
+            var token = _tokenProvider();
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (content != null) req.Content = content;
+            return req;
         }
 
         /// <summary>
@@ -36,7 +60,7 @@ namespace PenguinMonitor.Services
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var response = await _httpClient.GetAsync(_apiUrl);
+                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url()));
                 var httpTime = sw.ElapsedMilliseconds;
                 response.EnsureSuccessStatusCode();
 
@@ -66,7 +90,7 @@ namespace PenguinMonitor.Services
         {
             try
             {
-                var response = await _httpClient.GetAsync($"{_apiUrl}?box_id={Uri.EscapeDataString(boxId)}");
+                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url($"box_id={Uri.EscapeDataString(boxId)}")));
 
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
@@ -97,7 +121,7 @@ namespace PenguinMonitor.Services
                 var json = JsonConvert.SerializeObject(boxTag);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync(_apiUrl, content);
+                var response = await _httpClient.SendAsync(Request(HttpMethod.Post, Url(), content));
                 response.EnsureSuccessStatusCode();
 
                 return true;
@@ -116,8 +140,7 @@ namespace PenguinMonitor.Services
         {
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Delete, $"{_apiUrl}?box_id={Uri.EscapeDataString(boxId)}");
-                var response = await _httpClient.SendAsync(request);
+                var response = await _httpClient.SendAsync(Request(HttpMethod.Delete, Url($"box_id={Uri.EscapeDataString(boxId)}")));
 
                 // 404 is acceptable - tag already doesn't exist
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -142,7 +165,7 @@ namespace PenguinMonitor.Services
         {
             try
             {
-                var response = await _httpClient.GetAsync(_apiUrl);
+                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url()));
                 return response.IsSuccessStatusCode;
             }
             catch

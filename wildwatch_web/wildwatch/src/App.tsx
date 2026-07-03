@@ -350,6 +350,12 @@ function isChickAtObsDate(chipDate?: string|null, chippedAsAdult?: number|null, 
   return ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
 }
 
+/** One day after chipping — renders a chick-chipped bird in its chick-time context
+ *  (pale yellow) without triggering the same-day chipped-here (green) styling. */
+function chickContextDate(chipDate: string): string {
+  return new Date(new Date(chipDate).getTime() + 86400000).toISOString().slice(0, 10);
+}
+
 /** Sort scans: M first, F second, chicks/unknown last */
 function scanSortMFC(a: any, b: any): number {
   const order = (s: any) => {
@@ -484,12 +490,13 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
   const chip = scan.pit_id ? scan.pit_id.slice(-8) : '';
   const wasChippedAsChick = !scan.chipped_as_adult;
-  // currentStatus (bird-page header): a chick-chipped bird stays a chick (yellow) until it
-  // has been scanned as an adult (hasReturned). Once an adult it shows its sex colour
-  // (blue/pink) — or grey if unsexed — with the yellow "chipped as chick" inset.
+  // currentStatus (bird-page header): solid yellow only while the bird is actually
+  // chick-aged (<90 days since chipping). Beyond that it renders as an adult — sex
+  // colour if returned and sexed, grey "unproven" otherwise (including chick-chipped
+  // birds never scanned again, e.g. lost at sea) — with the yellow chick-origin inset.
   // Without currentStatus, life-stage is judged as at the given observation date.
   const stillChick = currentStatus
-    ? (wasChippedAsChick && !scan.hasReturned)
+    ? (wasChippedAsChick && !scan.hasReturned && isChickAtObsDate(scan.chip_date, scan.chipped_as_adult))
     : isChickAtObsDate(scan.chip_date, scan.chipped_as_adult, observationDate);
   const cls = currentStatus
     ? (stillChick ? 'chick' : (sex === 'F' ? 'f' : sex === 'M' ? 'm' : ''))
@@ -497,12 +504,12 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const icon = currentStatus
     ? (stillChick ? '🐣' : (sex === 'F' ? '♀' : sex === 'M' ? '♂' : ''))
     : penguinSexIcon(sex, scan.chip_date, scan.chipped_as_adult, observationDate);
-  const provenChickOrigin = wasChippedAsChick && !stillChick;
+  const chickOrigin = wasChippedAsChick && !stillChick;
   const chipCls = currentStatus
-    ? (provenChickOrigin && sex ? 'chipped-chick' : '')
+    ? (chickOrigin && sex ? 'chipped-chick' : '')
     : (wasChippedAsChick ? 'chipped-chick' : '');
   const grayCls = currentStatus
-    ? (provenChickOrigin && !sex ? 'unproven' : '')
+    ? (chickOrigin && !sex ? 'unproven' : '')
     : (wasChippedAsChick && !stillChick && !sex && !observationDate ? 'unproven' : '');
   const obsNzDate = observationDate ? toNzDateStr(observationDate) : '';
   const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
@@ -533,60 +540,210 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[] }) {
-  // Group birds by season, track co-sightings during breeding window
-  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; igCount: number; scanCount: number }>>();
-  const seasonPairs = new Map<string, Map<string, number>>();
+/** One breeding attempt in a season. A clutch starts when eggs/chicks appear after
+ *  an empty check, and its window ends at ABN, egg removal / offspring absence
+ *  (implies death), or fledge (laid + 87d) — whichever comes first. A later egg
+ *  appearance after an empty check is a SECOND clutch with its own family. */
+interface Clutch {
+  laid: number | null;      // estimated laid time; null when un-estimable
+  laidFailed: boolean;      // eggs already present at first check — data needs fixing
+  start: number;            // first obs with offspring present (egg appearance)
+  startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
+  end: number | null;       // obs that ended the attempt; null = still running
+  windowStart: number;      // breeding window: egg appearance …
+  windowEnd: number;        // … fledge (laid + 87d) or earlier failure
+  guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
+  maxEggs: number;
+  maxChicks: number;
+}
 
-  // First pass: estimate laid date per season using C# algorithm
-  const seasonLaidDate = new Map<string, number>();
+function segmentClutches(sObs: Observation[]): Clutch[] {
+  const clutches: Clutch[] = [];
+  let current: Clutch | null = null;
+  // After an ABN close the doomed eggs may linger in later checks — require an
+  // empty check before a new clutch can start.
+  let awaitingEmpty = false;
+  let prevEmpty: number | null = null;
+  for (const o of sObs) {
+    const t = parseDate(o.observation_time_utc).getTime();
+    const off = (o.eggs || 0) + (o.chicks || 0);
+    const abn = o.breeding_status === 'ABN';
+    if (current) {
+      if (off === 0) {
+        current.end = t; current = null; prevEmpty = t; awaitingEmpty = false;
+      } else {
+        current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
+        current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
+        if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+      }
+    } else if (off === 0) {
+      prevEmpty = t; awaitingEmpty = false;
+    } else if (!awaitingEmpty && ((o.eggs || 0) > 0 || clutches.length === 0)) {
+      // A breeding attempt begins at laying, so only eggs start a new clutch. Chicks
+      // appearing with no egg phase after a completed clutch is biologically impossible
+      // — it's stale/carry-forward data, not a real second brood — so it's ignored.
+      // Exception: the season's FIRST attempt may start on chicks (egg phase missed).
+      // Laid estimate (C# midpoint): halfway between last empty check and discovery,
+      // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
+      let laid: number | null = null;
+      if (prevEmpty !== null && !abn) {
+        const found = (o.eggs || 0) > 1 ? t - 2 * DAY : t;
+        laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
+      }
+      current = { laid, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, end: null,
+        windowStart: 0, windowEnd: 0, guardEnd: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
+      clutches.push(current);
+      if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+    }
+  }
+  for (const c of clutches) {
+    const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
+    c.windowStart = c.start;
+    c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
+    c.windowEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.fledge * DAY);
+  }
+  return clutches;
+}
+
+/** Detect the breeding pair for one clutch. Any bird scanned inside the clutch window
+ *  is a candidate — a single sighting is better than nothing — but the scoring means a
+ *  once-seen bird only wins a slot when no better-evidenced bird exists. A valid pair
+ *  is one M + one F where at least one sex is confirmed — the other may come from
+ *  majority biometric sex guesses (M+F, M+UF, F+UM; never UM+UF). Pairs actually
+ *  scanned together in the same observation outrank pairs that merely share the
+ *  window; ties break on combined sighting counts. */
+function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, any>, excluded: (b: any) => boolean): { male: string; female: string } | null {
+  const counts = new Map<string, number>();
+  const co = new Map<string, number>();
+  for (const o of sObs) {
+    const t = parseDate(o.observation_time_utc).getTime();
+    // Parents attend the nest from egg appearance to the end of guard; after that
+    // (post-guard) both feed at sea, so later scans are no evidence of parenthood.
+    if (t < c.windowStart || t > c.guardEnd) continue;
+    const present = Array.from(new Set(o.scans.map((s: Scan) => s.pit_id.slice(-8))));
+    for (const k of present) counts.set(k, (counts.get(k) || 0) + 1);
+    for (let i = 0; i < present.length; i++) for (let j = i + 1; j < present.length; j++) {
+      const key = [present[i], present[j]].sort().join('|');
+      co.set(key, (co.get(key) || 0) + 1);
+    }
+  }
+  const sexOf = (b: any): { sex: string; confirmed: boolean } | null => {
+    const s = (b.sex || '').toUpperCase();
+    if (s === 'M' || s === 'F') return { sex: s, confirmed: true };
+    const g = observedSexGuess(b.peng_num);
+    if (g.m > g.f) return { sex: 'M', confirmed: false };
+    if (g.f > g.m) return { sex: 'F', confirmed: false };
+    return null;
+  };
+  const cands = Array.from(counts.entries())
+    .map(([key, n]) => ({ key, n, bird: birdMap.get(key) }))
+    .filter(x => x.bird && !excluded(x.bird));
+  let best: { male: string; female: string; score: number } | null = null;
+  for (let i = 0; i < cands.length; i++) for (let j = i + 1; j < cands.length; j++) {
+    const a = sexOf(cands[i].bird), b = sexOf(cands[j].bird);
+    if (!a || !b || a.sex === b.sex || (!a.confirmed && !b.confirmed)) continue;
+    const coN = co.get([cands[i].key, cands[j].key].sort().join('|')) || 0;
+    const score = coN * 1000 + cands[i].n + cands[j].n;
+    if (!best || score > best.score) {
+      best = { male: a.sex === 'M' ? cands[i].key : cands[j].key, female: a.sex === 'F' ? cands[i].key : cands[j].key, score };
+    }
+  }
+  if (best) return { male: best.male, female: best.female };
+  // No full pair — fall back to the best-evidenced single bird in the window as a
+  // lone parent. Sex needn't be known (it's a guess either way); slot it by whatever
+  // sex signal exists, defaulting to the male slot. The family box shows just that
+  // bird + the offspring.
+  let solo: { key: string; sex: string; n: number } | null = null;
+  for (const c of cands) {
+    if (!solo || c.n > solo.n) solo = { key: c.key, sex: sexOf(c.bird)?.sex || '', n: c.n };
+  }
+  if (solo) return { male: solo.sex === 'F' ? '' : solo.key, female: solo.sex === 'F' ? solo.key : '' };
+  return null;
+}
+
+const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
+/** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
+const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
+
+/** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
+ *  observations). All dates are NZ days. Returns human-readable detail lines so the
+ *  season summary can list what's wrong. */
+interface DataIssue { day: string; text: string }
+function seasonDataIssues(obs: Observation[]) {
+  const byDay = new Map<string, Observation[]>();
+  for (const o of obs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)!.push(o);
+  }
+  // Duplicate observations: 2+ non-deleted observations for this box on the same day
+  const dupObs: DataIssue[] = [];
+  for (const [day, list] of byDay) if (list.length > 1) dupObs.push({ day, text: `${day} — ${list.length} observations` });
+  // Duplicate scans: within one observation, the same pit scanned 2+ times, or one
+  // penguin scanned via 2+ different chips
+  const dupScans: DataIssue[] = [];
+  for (const o of obs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    const pitCounts = new Map<string, number>();
+    const pitPeng = new Map<string, string | null>();
+    const pengPits = new Map<string, Set<string>>();
+    for (const s of o.scans) {
+      pitCounts.set(s.pit_id, (pitCounts.get(s.pit_id) || 0) + 1);
+      pitPeng.set(s.pit_id, s.peng_num);
+      if (s.peng_num) {
+        if (!pengPits.has(s.peng_num)) pengPits.set(s.peng_num, new Set());
+        pengPits.get(s.peng_num)!.add(s.pit_id);
+      }
+    }
+    for (const [pit, n] of pitCounts) if (n > 1) {
+      const peng = pitPeng.get(pit);
+      dupScans.push({ day, text: `${day} — ${peng ? `#${peng}` : pit.slice(-8)} ×${n}` });
+    }
+    for (const [peng, pits] of pengPits) if (pits.size > 1) dupScans.push({ day, text: `${day} — #${peng} (${pits.size} chips)` });
+  }
+  // Same-gender conflicts: 2+ distinct penguins of the same sex on the same day
+  const conflicts: DataIssue[] = [];
+  for (const [day, list] of byDay) {
+    const bySex = new Map<string, Set<string>>();
+    for (const o of list) for (const s of o.scans) {
+      const sex = (s.sex || '').toUpperCase();
+      if ((sex === 'M' || sex === 'F') && s.peng_num) {
+        if (!bySex.has(sex)) bySex.set(sex, new Set());
+        bySex.get(sex)!.add(s.peng_num);
+      }
+    }
+    for (const [sex, pengs] of bySex) if (pengs.size > 1) {
+      conflicts.push({ day, text: `${day} — ${pengs.size} ${sex} (${Array.from(pengs).map(p => `#${p}`).join(', ')})` });
+    }
+  }
+  return { dupObs, dupScans, conflicts };
+}
+
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
+  // Group birds by season
+  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; scanCount: number }>>();
   const seasonObs = new Map<string, Observation[]>();
   for (const obs of observations) {
     const label = getSeasonLabel(parseDate(obs.observation_time_utc));
     if (!seasonObs.has(label)) seasonObs.set(label, []);
     seasonObs.get(label)!.push(obs);
   }
-  for (const [label, obs] of seasonObs) {
-    const laid = estimateLaidDate(obs);
-    if (laid) seasonLaidDate.set(label, laid);
-  }
 
   for (const obs of observations) {
-    const obsDate = parseDate(obs.observation_time_utc);
-    const label = getSeasonLabel(obsDate);
+    const label = getSeasonLabel(parseDate(obs.observation_time_utc));
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
-    if (!seasonPairs.has(label)) seasonPairs.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
-    const pairMap = seasonPairs.get(label)!;
-
-    // Breeding window: 1 week before probable laid date to fledge (laid + 87 days)
-    const laidDate = seasonLaidDate.get(label);
-    const obsTime = obsDate.getTime();
-    const inBreedingWindow = laidDate && obsTime >= (laidDate - 7 * DAY) && obsTime <= (laidDate + BREEDING_OFFSETS.fledge * DAY);
-
     for (const scan of obs.scans) {
       const key = scan.pit_id.slice(-8);
       const existing = birdMap.get(key);
       if (!existing) {
-        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, igCount: inBreedingWindow ? 1 : 0, scanCount: 1 });
+        birdMap.set(key, { ...scan, lastSeen: obs.observation_time_utc, scanCount: 1 });
       } else {
         existing.scanCount++;
-        if (inBreedingWindow) existing.igCount++;
         if (obs.observation_time_utc > existing.lastSeen) {
           existing.lastSeen = obs.observation_time_utc;
           existing.sex = scan.sex;
           existing.life_stage = scan.life_stage;
-        }
-      }
-    }
-
-    // Track individual M and F sightings during breeding window
-    if (inBreedingWindow) {
-      for (const scan of obs.scans) {
-        const sex = (scan.sex || '').toUpperCase();
-        if (sex === 'M' || sex === 'F') {
-          const key = sex + '|' + scan.pit_id.slice(-8);
-          pairMap.set(key, (pairMap.get(key) || 0) + 1);
         }
       }
     }
@@ -602,104 +759,240 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox }: { obse
     const birdMap = seasonBirds.get(label)!;
     const key = p.pit_id.slice(-8);
     if (!birdMap.has(key)) {
-      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, igCount: 0, scanCount: p.scan_count || 1 });
+      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, scanCount: p.scan_count || 1 });
     }
   }
 
+  // Always surface the current season, even with no sightings yet, so the box shows
+  // a "Season 2026/27: 0 birds" header rather than silently omitting the season.
+  const currentLabel = getSeasonLabel();
+  if (!seasonBirds.has(currentLabel)) seasonBirds.set(currentLabel, new Map());
+
   const seasons = Array.from(seasonBirds.entries())
     .sort((a, b) => b[0].localeCompare(a[0]));
-
-  if (seasons.every(([, m]) => m.size === 0)) return null;
 
   return (
     <div className="all-birds">
       {seasons.map(([label, birdMap]) => {
         const birds = Array.from(birdMap.values());
-        if (birds.length === 0) return null;
+        if (birds.length === 0 && label !== currentLabel) return null;
 
-        // Find breeding pair: most-seen M and most-seen F during breeding window
-        const pairMap = seasonPairs.get(label) || new Map();
-        let breedingMale = '';
-        let breedingFemale = '';
-        let maxMale = 0;
-        let maxFemale = 0;
-        for (const [key, count] of pairMap.entries()) {
-          const [sex, pit8] = key.split('|');
-          if (sex === 'M' && count > maxMale) { maxMale = count; breedingMale = pit8; }
-          if (sex === 'F' && count > maxFemale) { maxFemale = count; breedingFemale = pit8; }
+        const seasonYear = parseInt(label);
+        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
+        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+        // A bird counts as this season's chick only if chipped as a chick DURING this
+        // season — a returning adult that was chick-chipped in an earlier season is a
+        // visitor to the box, not this season's offspring.
+        const chippedThisSeason = (b: any) => {
+          if (b.chipped_as_adult || !b.chip_date) return false;
+          const cd = new Date(b.chip_date);
+          return cd >= seasonStart && cd < seasonEnd;
+        };
+
+        // One family per clutch: segment the season into breeding attempts, then
+        // detect each attempt's pair. This season's chicks can never be parents.
+        const sObsChrono = (seasonObs.get(label) || []).slice()
+          .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+        const clutches = segmentClutches(sObsChrono);
+        const families = clutches.map(c => ({ clutch: c, pair: detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason) }));
+        const parentKeys = new Set<string>();
+        for (const f of families) if (f.pair) {
+          if (f.pair.male) parentKeys.add(f.pair.male);
+          if (f.pair.female) parentKeys.add(f.pair.female);
         }
 
-        // Sort: breeding M (0), breeding F (1), other M (2), other F (3), unsexed (4)
-        // Within same group, sort by scan count descending
+        // Assign each season chick to the clutch whose window holds its chip date;
+        // chips land at the end of an attempt, so otherwise default to the season's
+        // last detected family.
+        const familyIdxs = families.map((f, i) => f.pair ? i : -1).filter(i => i >= 0);
+        const chickFamily = new Map<string, number>();
+        for (const b of birds) {
+          const k = b.pit_id.slice(-8);
+          if (!chippedThisSeason(b) || parentKeys.has(k)) continue;
+          const ct = new Date(b.chip_date!).getTime();
+          let fi = families.findIndex(f => f.pair && ct >= f.clutch.windowStart && ct <= f.clutch.windowEnd);
+          if (fi < 0 && familyIdxs.length > 0) fi = familyIdxs[familyIdxs.length - 1];
+          if (fi >= 0) chickFamily.set(k, fi);
+        }
+
+        // Sort birds: M, F, unsexed; within a group by scan count descending
         const sorted = birds.sort((a, b) => {
-          const aKey = a.pit_id.slice(-8);
-          const bKey = b.pit_id.slice(-8);
           const aSex = (a.sex || '').toUpperCase();
           const bSex = (b.sex || '').toUpperCase();
-
-          const aOrder = aKey === breedingMale ? 0 : aKey === breedingFemale ? 1 : aSex === 'M' ? 2 : aSex === 'F' ? 3 : 4;
-          const bOrder = bKey === breedingMale ? 0 : bKey === breedingFemale ? 1 : bSex === 'M' ? 2 : bSex === 'F' ? 3 : 4;
+          const aOrder = aSex === 'M' ? 0 : aSex === 'F' ? 1 : 2;
+          const bOrder = bSex === 'M' ? 0 : bSex === 'F' ? 1 : 2;
           if (aOrder !== bOrder) return aOrder - bOrder;
           return b.scanCount - a.scanCount;
         });
 
-        const pair = breedingMale && breedingFemale ? sorted.filter(b => {
+        // Every non-family sighting is placed in a slot by WHEN it happened: inside a
+        // breeding window (`w<ci>`, shown as a visitor beside that family box) or in a
+        // gap between/around windows (`g<gi>`, gi = index of the next window, so g0 is
+        // before the first and g<n> is after the last). A bird seen across several
+        // slots appears in each, its per-slot counts summing to its season visits.
+        const slotCounts = new Map<string, Map<string, number>>();
+        const bump = (k: string, slot: string, n: number) => {
+          if (!slotCounts.has(k)) slotCounts.set(k, new Map());
+          const m = slotCounts.get(k)!;
+          m.set(slot, (m.get(slot) || 0) + n);
+        };
+        // Family-box birds (parents/chicks) get a count PER clutch window, keyed
+        // `<ci>|<key>` — so a parent shared by both clutches shows its actual sightings
+        // in each window, not the season total repeated on every row.
+        const winCount = new Map<string, number>();
+        for (const o of sObsChrono) {
+          const t = parseDate(o.observation_time_utc).getTime();
+          let slot = '', wci = -1;
+          for (let ci = 0; ci < clutches.length; ci++) {
+            if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; wci = ci; break; }
+          }
+          if (!slot) { let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++; slot = `g${gi}`; }
+          const seen = new Set<string>();
+          for (const s of o.scans) {
+            const k = s.pit_id.slice(-8);
+            if (seen.has(k)) continue; // one visit per observation
+            seen.add(k);
+            if (parentKeys.has(k) || chickFamily.has(k)) {
+              if (wci >= 0) winCount.set(`${wci}|${k}`, (winCount.get(`${wci}|${k}`) || 0) + 1);
+              continue;
+            }
+            bump(k, slot, 1);
+          }
+        }
+        // Birds chipped here but never scanned have no observation to slot — place them
+        // by chip date (their lastSeen) in the matching gap.
+        for (const b of sorted) {
           const k = b.pit_id.slice(-8);
-          return k === breedingMale || k === breedingFemale;
-        }) : [];
-        const hasPair = pair.length === 2;
-        // Chicks go inside breeding pair border only if pair exists
-        const chicks = hasPair ? sorted.filter(b => {
-          const k = b.pit_id.slice(-8);
-          if (k === breedingMale || k === breedingFemale) return false;
-          return !b.chipped_as_adult && b.chip_date;
-        }) : [];
-        const others = sorted.filter(b => {
-          const k = b.pit_id.slice(-8);
-          if (k === breedingMale || k === breedingFemale) return false;
-          if (hasPair && !b.chipped_as_adult && b.chip_date) return false;
-          return true;
-        });
+          if (parentKeys.has(k) || chickFamily.has(k) || slotCounts.has(k)) continue;
+          const ls = b.lastSeen || '';
+          const t = parseDate(ls.length > 10 ? ls : ls + ' 00:00:00').getTime();
+          let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++;
+          bump(k, `g${gi}`, Math.max(1, b.scanCount || 0));
+        }
+        // Birds (in sorted order) with a sighting in a given slot, with that slot's count
+        const slotBirds = (slot: string) => sorted
+          .map(b => ({ b, n: slotCounts.get(b.pit_id.slice(-8))?.get(slot) || 0 }))
+          .filter(x => x.n > 0);
 
-        // For season context: a bird is a chick if chipped as chick during this season
-        const seasonYear = parseInt(label);
-        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
-        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+        // Season context: a bird chipped as a chick during the listed season renders
+        // as a chick (pale yellow) — we're looking at it during its chick time. The
+        // context date is the day AFTER chipping so the same-day chipped-here (green)
+        // styling never applies here. In later seasons the bird renders as an adult.
         const seasonObsDate = (b: any) => {
           if (!b.chipped_as_adult && b.chip_date) {
             const cd = new Date(b.chip_date);
-            if (cd >= seasonStart && cd < seasonEnd) return b.chip_date; // chipped as chick this season → show as chick
+            if (cd >= seasonStart && cd < seasonEnd) return chickContextDate(b.chip_date);
           }
           return undefined;
         };
 
+        const birdWithCount = (b: any, count?: number) => {
+          const n = count ?? b.scanCount;
+          return (
+            <span key={b.pit_id.slice(-8)} className="bird-with-count">
+              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+              {n > 0 && <span className="scan-count">{n}x</span>}
+            </span>
+          );
+        };
+        const slotRow = (slot: string) => slotBirds(slot).map(x => birdWithCount(x.b, x.n));
+
+        const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+
+        // Newest observation in this season — the scroll/expand target for the matching
+        // season section in the observation list lower on the page.
+        const latestObs = (seasonObs.get(label) || []).reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
+        const issues = seasonDataIssues(seasonObs.get(label) || []);
+        const issueBadges = [
+          { key: 'dupobs', label: 'duplicate observation', detail: issues.dupObs },
+          { key: 'conflict', label: 'same-sex conflict', detail: issues.conflicts },
+          { key: 'dupscan', label: 'duplicate scan', detail: issues.dupScans },
+        ].filter(b => b.detail.length > 0);
+        // NZ day → newest observation that day, so an issue row can scroll to it.
+        const dayToObsTime = new Map<string, string>();
+        for (const o of (seasonObs.get(label) || [])) {
+          const day = toNzDateStr(o.observation_time_utc);
+          const prev = dayToObsTime.get(day);
+          if (!prev || o.observation_time_utc > prev) dayToObsTime.set(day, o.observation_time_utc);
+        }
+
         return (
           <div key={label} className="season-birds">
-            <div className="muted">{label}: {birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
-            <div className="bird-row">
-              {pair.length === 2 && (
-                <span className="breeding-pair">
-                  {pair.map(b => (
-                    <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                      <span className="scan-count">{b.scanCount}x</span>
-                    </span>
-                  ))}
-                  {chicks.map(b => (
-                    <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                      <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                      <span className="scan-count">{b.scanCount}x</span>
-                    </span>
-                  ))}
-                </span>
-              )}
-              {others.map(b => (
-                <span key={b.pit_id.slice(-8)} className="bird-with-count">
-                  <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-                  <span className="scan-count">{b.scanCount}x</span>
-                </span>
-              ))}
+            <div className="season-title">
+              <span className={latestObs ? 'clickable' : undefined} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
+                Season {seasonRange(label)}: <span className="muted">{birds.length} bird{birds.length !== 1 ? 's' : ''}</span>
+              </span>
             </div>
+            {issueBadges.length > 0 && (
+              <div className="season-issues">
+                {issueBadges.map(b => (
+                  <span key={b.key} className="issue-badge">
+                    ⚠ {b.detail.length} {b.label}{b.detail.length !== 1 ? 's' : ''}
+                    <span className="issue-tip">
+                      {b.detail.map((d, i) => {
+                        const t = dayToObsTime.get(d.day);
+                        return (
+                          <a key={i} className={`issue-row${t ? ' clickable' : ''}`} onClick={t ? () => onSeasonClick?.(t) : undefined}>{d.text}</a>
+                        );
+                      })}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* One row per breeding window, newest on top. Family (date range + pair +
+                offspring at final life stage) sits in the black box; window visitors sit
+                to its right. Outside-window birds interleave chronologically: above a
+                window = seen after it, below = seen before it. */}
+            {(() => {
+              const gapRow = (gi: number) => {
+                const gb = slotRow(`g${gi}`);
+                return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
+              };
+              const clutchRow = (ci: number) => {
+                const { clutch, pair } = families[ci];
+                const pairBirds = pair ? [birdMap.get(pair.male), birdMap.get(pair.female)].filter(Boolean) : [];
+                const famChicks = sorted.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
+                // Offspring at FINAL life stage: egg that never hatched → red-✕ egg,
+                // chick never chipped → plain chick, chipped chick → PenguinMini.
+                const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
+                const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - famChicks.length);
+                return (
+                  <div key={`cl${ci}`} className="clutch-row">
+                    {clutches.length > 1 && <div className="clutch-label muted">{ordinal(ci + 1)} clutch</div>}
+                    {clutch.laidFailed && (
+                      <div className="season-issues">
+                        <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
+                          title="Go to where the egg/chick was first detected"
+                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>
+                          {'⚠'} laid date could not be estimated
+                        </span>
+                      </div>
+                    )}
+                    <div className="bird-row">
+                      <span className="breeding-pair">
+                        {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                        {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                        {Array.from({ length: failedEggs }).map((_, i) => (
+                          <span key={`fe${i}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
+                        ))}
+                        {Array.from({ length: plainChicks }).map((_, i) => (
+                          <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                        ))}
+                        <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
+                      </span>
+                      {slotRow(`w${ci}`)}
+                    </div>
+                  </div>
+                );
+              };
+              const rows: React.ReactNode[] = [gapRow(clutches.length)];
+              for (let ci = clutches.length - 1; ci >= 0; ci--) {
+                rows.push(clutchRow(ci));
+                rows.push(gapRow(ci));
+              }
+              return rows;
+            })()}
           </div>
         );
       })}
@@ -949,9 +1242,13 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const ref = useRef<HTMLInputElement|HTMLSelectElement>(null);
+  const focused = useRef(false);
 
   useEffect(() => { if (editing && ref.current) ref.current.focus(); }, [editing]);
-  useEffect(() => { setDraft(String(value ?? '')); }, [value]);
+  // Inline fields write through to the parent draft on every change (below), which
+  // bumps `value`. Don't resync (and clobber the caret / an in-progress entry) while
+  // the field is focused — only when the value changes from outside.
+  useEffect(() => { if (!focused.current) setDraft(String(value ?? '')); }, [value]);
 
   const display = value !== null && value !== undefined && value !== '' ? String(value) : null;
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
@@ -992,16 +1289,24 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
       return (
         <textarea ref={ref as any} className="ef-input ef-notes" value={draft} disabled={saving} rows={1}
           placeholder={placeholder}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+          onFocus={() => { focused.current = true; }}
+          onChange={e => { setDraft(e.target.value); onSave(e.target.value || null); }}
+          onBlur={() => { focused.current = false; }}
           onKeyDown={e => { if (e.key === 'Escape') cancel(); }} />
       );
     }
     return (
       <input ref={ref as any} className={`ef-input${narrow ? ' ef-narrow' : ''}`} type={type || 'text'} value={draft} disabled={saving}
         placeholder={placeholder} min={min}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={() => { if (String(value ?? '') !== draft) save(); }}
+        onFocus={() => { focused.current = true; }}
+        onChange={e => {
+          const raw = e.target.value;
+          setDraft(raw);
+          let val: any = type === 'number' ? (raw === '' ? null : parseFloat(raw)) : (raw || null);
+          if (type === 'number' && val !== null && min !== undefined && (val as number) < min) val = min;
+          onSave(val);
+        }}
+        onBlur={() => { focused.current = false; setDraft(String(value ?? '')); }}
         onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); if (e.key === 'Escape') cancel(); }} />
     );
   }
@@ -1077,6 +1382,29 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A chipping event shown as a sighting card: green left border (vs blue for
+ *  observations), date + bird mini + "Chipped by X" — no adult/egg/chick counts,
+ *  since a chipping isn't an observation and those values are unknown. */
+function ChipCard({ date, chipBy, scan, box, onBoxClick, onBirdClick, onDayClick }: {
+  date: string; chipBy?: string | null; scan: any; box?: string;
+  onBoxClick?: (box: string) => void; onBirdClick: (num: string) => void; onDayClick?: (day: string) => void;
+}) {
+  return (
+    <div className="obs-card chip-card">
+      <div className="obs-top">
+        <span><b><DateLink date={date} onDayClick={onDayClick} /></b></span>
+        {box && onBoxClick && <a className="bird-chip clickable" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>}
+      </div>
+      <div className="obs-nums">
+        {/* Pass the chip day itself so the mini gets the green chipped-here styling —
+            this card IS the chipping event. */}
+        <PenguinMini scan={scan} onClick={() => onBirdClick(scan.peng_num)} observationDate={date} />
+        <span className="muted">Chipped by {chipBy || '?'}</span>
+      </div>
     </div>
   );
 }
@@ -1206,18 +1534,39 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {breedingStats.length > 0 && (
         <div className="bird-section">
           <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history</h3>
-          {expandedSections.breeding && breedingStats.map((bs: any) => (
+          {expandedSections.breeding && breedingStats.map((bs: any) => {
+            // Eggs that never became chicks are struck through with a red \u2715;
+            // chicks chipped in this nest get a green ring + hover detail.
+            const eggsShown = Math.min(bs.max_eggs, 4);
+            const failedEggs = Math.min(Math.max(0, bs.max_eggs - bs.max_chicks), eggsShown);
+            const okEggs = eggsShown - failedEggs;
+            const chippedChicks: any[] = bs.chipped_chicks || [];
+            const plainChicks = Math.max(0, Math.min(bs.max_chicks, 4) - chippedChicks.length);
+            return (
             <div key={bs.season} className="obs-card">
               <b>{bs.season}</b>
               <div className="obs-nums">
                 <span>{bs.scans} scan{bs.scans!==1?'s':''}</span>
                 <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
-                {bs.max_eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(bs.max_eggs,4))}</span>}
-                {bs.max_chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(bs.max_chicks,4))}</span>}
+                {okEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(okEggs)}</span>}
+                {Array.from({ length: failedEggs }).map((_, i) => (
+                  <span key={`fe${i}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
+                ))}
+                {plainChicks > 0 && <span>{'\uD83D\uDC23'.repeat(plainChicks)}</span>}
+                {chippedChicks.map((ck: any) => (
+                  <span key={ck.peng_num} className="chick-chipped-marker" onClick={() => onBirdClick(ck.peng_num)}>
+                    {'\uD83D\uDC23'}
+                    <span className="chick-tip">
+                      <PenguinMini scan={ck} onClick={() => onBirdClick(ck.peng_num)} />
+                      <span className="muted">scanned {ck.scan_count} time{ck.scan_count !== 1 ? 's' : ''}{ck.seasons_scanned.length > 0 ? ` in season ${ck.seasons_scanned.join(', ')}` : ''}</span>
+                    </span>
+                  </span>
+                ))}
                 {bs.statuses.map((s:string) => <span key={s} className={`badge ${DARK_TEXT_STATUSES.has(s)?'bordered':''}`} style={{background:STATUS_COLORS[s]||'#ccc',color:DARK_TEXT_STATUSES.has(s)?'#333':'#fff'}}>{s}</span>)}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1250,7 +1599,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {/* Sighting history */}
       {sightings.length > 0 && <div className="bird-section">
         <h3 className="collapsible" onClick={() => toggleSection('sightings')}>{expandedSections.sightings ? '▾' : '▸'} Sighting history ({sightings.length})</h3>
-        {expandedSections.sightings && sightings.map((s: any, i: number) => (
+        {expandedSections.sightings && sightings.map((s: any, i: number) => s.source === 'chip' ? (
+          <ChipCard key={i} date={s.date} box={s.box} onBoxClick={onBoxClick} onDayClick={onDayClick} onBirdClick={onBirdClick}
+            chipBy={(chips.find((c: any) => c.chip_date === s.date && c.chip_box === s.box) || {}).chip_by}
+            scan={{ peng_num: p.peng_num, pit_id: (chips.find((c: any) => c.chip_date === s.date && c.chip_box === s.box) || activeChip)?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code }} />
+        ) : (
           <div key={i} className="obs-card">
             <div className="obs-top">
               <b><DateLink date={s.date} onDayClick={onDayClick} /></b>
@@ -1844,12 +2197,13 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
   // Load all observations for this box (for status bar + season list)
   const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
+  const [boxPenguins, setBoxPenguins] = useState<any[]>([]);
   useEffect(() => {
-    if (!box) { setAllBoxObs([]); return; }
-    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    if (!box) { setAllBoxObs([]); setBoxPenguins([]); return; }
+    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => setAllBoxObs(d.observations || []))
-      .catch(() => setAllBoxObs([]));
+      .then(d => { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); })
+      .catch(() => { setAllBoxObs([]); setBoxPenguins([]); });
   }, [box, saving]);
 
   const seasonStart = `${season}-04-01`;
@@ -1857,6 +2211,21 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
   );
+
+  // Chippings in this box+season, unless the bird is already visible as a scan in
+  // one of the box's observations on the chip day (same rule as the box view).
+  const entryScannedByDay = new Map<string, Set<string>>();
+  for (const o of allBoxObs) {
+    const day = toNzDateStr(o.observation_time_utc);
+    if (!entryScannedByDay.has(day)) entryScannedByDay.set(day, new Set());
+    for (const s of ((o as any).scans || [])) if (s.pit_id) entryScannedByDay.get(day)!.add(s.pit_id);
+  }
+  const entryChips = boxPenguins
+    .filter((p: any) => p.is_chipped_here && p.chip_date && p.chip_date >= seasonStart && p.chip_date <= seasonEnd)
+    .filter((p: any) => !entryScannedByDay.get(p.chip_date)?.has(p.pit_id))
+    .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
+  const entryRows = [...existingObs.map((o: any) => o), ...entryChips]
+    .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
 
   return (
     <div className="entry-page">
@@ -1949,11 +2318,17 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         )}
       </div>
 
-      {/* Existing observations for this box+season */}
-      {box && existingObs.length > 0 && (
+      {/* Existing observations + chippings for this box+season */}
+      {box && entryRows.length > 0 && (
         <div className="entry-existing">
-          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
-          {existingObs.map((o: any, i: number) => (
+          <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
+          {entryRows.map((o: any, i: number) => o._chip ? (
+            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
+              <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
+              <PenguinMini scan={o} onClick={() => {}} observationDate={o.chip_date} navigateDirectly />
+              <span className="muted">Chipped by {o.chip_by || '?'}</span>
+            </div>
+          ) : (
             <div key={i} className="entry-existing-row">
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
@@ -3026,6 +3401,11 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
               }
               // Normal row(s) — show each observation separately
               const { obs, chips } = byBox[box];
+              // A bird chipped here today may also appear in today's scans — the scan
+              // mini already renders it (with the green chipped-here treatment), so
+              // only show chip minis for birds not scanned in this box today.
+              const scannedPits = new Set(obs.flatMap((o: any) => (o.scans || []).map((s: any) => s.pit_id)));
+              const chipMinis = chips.filter((c: any) => !c.pit_id || !scannedPits.has(c.pit_id));
               // Chipping-only box (no observation today): show each chipped penguin as a green
               // mini labelled "Chipped in Box x". Boxes observed today show the chip mini inline
               // on their observation row instead (handled below), so they aren't repeated here.
@@ -3072,7 +3452,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                         <span key={`ns${k}`} className="scan no-scan">No scan</span>
                       ))}
-                      {oi === 0 && chips.map((c: any) => (
+                      {oi === 0 && chipMinis.map((c: any) => (
                         <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
                       ))}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
@@ -3368,8 +3748,10 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   }, [scrollToObs, highlightObs]);
   return (
     <div>
-      <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{label} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
-      {expanded && observations.map((o: any, i: number) => <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
+      <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{seasonRange(label)} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
+      {expanded && observations.map((o: any, i: number) => o._chip
+        ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} chipBy={o.chip_by} scan={o} onBirdClick={onBirdClick} onDayClick={onDayClick} />
+        : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
 }
@@ -4193,6 +4575,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   useEffect(() => {
     const onPopState = () => {
       const { box, bird, enter, admin: adm, reports, day } = parseUrl();
+      // Back/forward lands on a fresh view — drop cross-view scroll targets
+      setHighlightObs(null); setScrollToObs(null); setDayBox(null);
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
@@ -4332,17 +4716,23 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (selectedDay) {
       const ds = [...(stats?.observation_dates || [])].sort();
       const di = ds.indexOf(selectedDay);
-      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setSelectedDay(ds[di + 1]); }
-      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setSelectedDay(ds[di - 1]); }
+      // Day → day: the box-highlight came from a specific box's date link — it
+      // doesn't apply to a different day, so drop it.
+      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di + 1]); }
+      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di - 1]); }
       else if (e.key === 'Escape') { setSelectedDay(null); }
       return;
     }
     if (!selectedBox || sortedBoxIds.length === 0) return;
     const idx = sortedBoxIds.indexOf(selectedBox);
     if (idx < 0) return;
+    // Box → box: the date-scroll came from a day view link into the old box — it
+    // doesn't apply to a different box, so drop it.
     if (e.key === 'ArrowRight' && idx < sortedBoxIds.length - 1) {
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx + 1]);
     } else if (e.key === 'ArrowLeft' && idx > 0) {
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx - 1]);
     } else if (e.key === 'Escape') {
       setSelectedBox(null);
@@ -4442,7 +4832,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
           <div className="mobile-search-group">
             <label className="mobile-label">Box</label>
-            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
+            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
           </div>
           <div className="mobile-search-group">
             <label className="mobile-label">Date</label>
@@ -4565,7 +4955,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="colony-toolbar">
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
         <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
@@ -4581,16 +4971,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="colony-toolbar">
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         </div>
         <div className="bird-page">
           <div className="page-header">
-            <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
+            <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setHighlightObs(null); setScrollToObs(null); setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
           </div>
           {birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
-              onBoxClick={(box: string) => { closeBird(); setSelectedBox(box); }}
+              onBoxClick={(box: string) => { closeBird(); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
               onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
               onDayClick={goToDay} />
           ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
@@ -4608,7 +4998,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       {siteHeader}
       <div className="colony-toolbar">
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
@@ -4657,7 +5047,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {!false && boxDetail && (
           <div className="detail-split">
             <div className="detail-obs">
-                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins} />
+                <h3 className="obs-section-head">Breeding overview</h3>
+                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
+                  onSeasonClick={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }} />
                 {(() => {
                   const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
                   const canEdit = userRole !== 'viewer';
@@ -4667,13 +5059,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     <div className="muted">Chipped in this box: {chipped.length}</div>
                     <div className="bird-row">
                       {chipped.map((c: any) => {
-                        // Show each bird by its current status (chick until it returns as an
-                        // adult, then its sex), not relative to any observation/chip date —
-                        // hasReturned is computed client-side, so merge it in from allPenguins.
+                        // Show each bird as at its chipping time: chick-chipped → pale
+                        // yellow, adult-chipped → sex colour. Context is the day AFTER
+                        // chipping so the chipped-here (green) day styling never applies.
+                        // hasReturned (size-code U suffix) is computed client-side, so
+                        // merge it in from allPenguins.
                         const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
                         return (
                         <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} currentStatus />
+                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
                           <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
                         </span>
                         );
@@ -4683,11 +5077,30 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                   );
                 })()}
+              <h3 className="obs-section-head">Observations</h3>
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
                 const thisLabel = getSeasonLabel();
-                const thisSeason = boxDetail.observations.filter((o: any) => o.observation_time_utc >= thisSeasonStart);
-                const prevObs = boxDetail.observations.filter((o: any) => o.observation_time_utc < thisSeasonStart);
+
+                // Chippings in this box with no matching scan in one of the box's
+                // observations on the chip day become their own sighting card —
+                // otherwise a chipping without an observation is invisible here.
+                const scannedPitsByDay = new Map<string, Set<string>>();
+                for (const o of boxDetail.observations) {
+                  const day = toNzDateStr(o.observation_time_utc);
+                  if (!scannedPitsByDay.has(day)) scannedPitsByDay.set(day, new Set());
+                  for (const s of (o.scans || [])) if (s.pit_id) scannedPitsByDay.get(day)!.add(s.pit_id);
+                }
+                const chipEvents = (boxDetail.all_penguins || [])
+                  .filter((p: any) => p.is_chipped_here && p.chip_date)
+                  .filter((p: any) => !scannedPitsByDay.get(p.chip_date)?.has(p.pit_id))
+                  .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
+
+                const byTimeDesc = (a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc);
+                const thisSeason = [...boxDetail.observations, ...chipEvents]
+                  .filter((o: any) => o.observation_time_utc >= thisSeasonStart).sort(byTimeDesc);
+                const prevObs = [...boxDetail.observations, ...chipEvents]
+                  .filter((o: any) => o.observation_time_utc < thisSeasonStart).sort(byTimeDesc);
 
                 // Group previous observations by season
                 const prevSeasons = new Map<string, Observation[]>();
@@ -4707,7 +5120,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   : thisSeason;
 
                 return (<>
-                  <h3 className="season-heading">{thisLabel} ({thisSeason.length})
+                  <h3 className="season-heading">{seasonRange(thisLabel)} ({thisSeason.length})
                     {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
                       if (!showDeleted && deletedObs.length === 0) {
                         const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -4733,6 +5146,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       </div>
                       {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
+                  ) : obs._chip ? (
+                    <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} chipBy={obs.chip_by} scan={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} />
                   ) : (
                     <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
@@ -4746,7 +5161,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-bird">
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'} onClose={() => setSelectedBird(null)}
-                  onBoxClick={(box: string) => { setSelectedBird(null); setSelectedBox(box); }}
+                  onBoxClick={(box: string) => { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
                   onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
                   onDayClick={goToDay} />
               ) : <p className="muted">Loading bird...</p>}

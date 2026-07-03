@@ -33,6 +33,10 @@ sudo chown -R wildwatch:wildwatch "$REL/penguin-api"
 echo "[4/5] flip + smoke test"
 PREV=$(readlink -f "$BASE/current" || true)
 ln -sfn "$REL" "$BASE/current"
+# php-fpm's realpath cache can keep serving files from the OLD release after the
+# symlink flip, mixing releases (fatal when function signatures changed). Reload
+# clears opcache/realpath so the smoke test below exercises the new code.
+sudo systemctl reload php8.4-fpm
 spa=$(curl -s -o /dev/null -w '%{http_code}' --resolve wildwatch.co.nz:443:127.0.0.1 https://wildwatch.co.nz/ || echo 000)
 api=$(curl -s -o /dev/null -w '%{http_code}' --resolve wildwatch.co.nz:443:127.0.0.1 https://wildwatch.co.nz/api/snapshot.php || echo 000)
 if [ "$spa" != "200" ] || [ "$api" != "401" ]; then

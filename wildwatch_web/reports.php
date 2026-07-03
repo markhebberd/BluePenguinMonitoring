@@ -10,11 +10,11 @@ $report = $_GET['report'] ?? '';
 
 switch ($report) {
     case 'egg_arrival': eggArrival($pdo, $colonyId); break;
-    case 'chick_sex': chickSex($pdo); break;
-    case 'chick_return': chickReturn($pdo); break;
+    case 'chick_sex': chickSex($pdo, $colonyId); break;
+    case 'chick_return': chickReturn($pdo, $colonyId); break;
     case 'distinct_adults': distinctAdults($pdo, $colonyId); break;
     case 'peak_adults': peakAdults($pdo, $colonyId); break;
-    case 'chick_sex_both_returned': chickSexBothReturned($pdo); break;
+    case 'chick_sex_both_returned': chickSexBothReturned($pdo, $colonyId); break;
     default: echo json_encode(['error' => 'Unknown report']); break;
 }
 
@@ -77,9 +77,9 @@ function eggArrival($pdo, $colonyId) {
     echo json_encode($result);
 }
 
-function chickSex($pdo) {
+function chickSex($pdo, $colonyId) {
     // All penguins chipped as chicks, with their size code and current sex
-    $stmt = $pdo->query("
+    $stmt = $pdo->prepare("
         SELECT p.peng_num, p.sex, p.chick_size_code,
             pc.chip_date, pc.chip_box,
             (SELECT COUNT(*) FROM penguin_scans ps2
@@ -88,9 +88,12 @@ function chickSex($pdo) {
         FROM penguins p
         JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1
         WHERE p.chipped_as_adult = 0
+        AND p.colony_id = ?
         AND p.chick_size_code IN ('LC', 'BC', 'SC')
     ");
+    $stmt->execute([$colonyId]);
     $rows = $stmt->fetchAll();
+    stripPengPrefix($rows, getColonyPrefix($pdo, $colonyId));
 
     $groups = ['LC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0,'returned'=>0],
                'BC' => ['M'=>0,'F'=>0,'U'=>0,'total'=>0,'returned'=>0],
@@ -108,10 +111,10 @@ function chickSex($pdo) {
     echo json_encode($groups);
 }
 
-function chickReturn($pdo) {
+function chickReturn($pdo, $colonyId) {
     // For each chick size, how many were chipped vs returned in a later season
     // First, find the chip season for each bird, then find first scan in a LATER season
-    $stmt = $pdo->query("
+    $stmt = $pdo->prepare("
         SELECT p.peng_num, p.chick_size_code, pc.chip_date,
             CASE WHEN MONTH(pc.chip_date) >= 4 THEN YEAR(pc.chip_date) ELSE YEAR(pc.chip_date) - 1 END as chip_season_year,
             (SELECT MIN(DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')))
@@ -127,9 +130,12 @@ function chickReturn($pdo) {
         FROM penguins p
         JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1
         WHERE p.chipped_as_adult = 0
+        AND p.colony_id = ?
         AND p.chick_size_code IN ('LC', 'BC', 'SC')
     ");
+    $stmt->execute([$colonyId]);
     $rows = $stmt->fetchAll();
+    stripPengPrefix($rows, getColonyPrefix($pdo, $colonyId));
 
     // Exclude chicks from the previous and current seasons (haven't had a chance to return)
     $now = new DateTime('now', new DateTimeZone('Pacific/Auckland'));
@@ -289,10 +295,10 @@ function peakAdults($pdo, $colonyId) {
     echo json_encode($result);
 }
 
-function chickSexBothReturned($pdo) {
+function chickSexBothReturned($pdo, $colonyId) {
     // Find nests where both BC and LC were chipped and both returned in a later season
     // Pair chicks by chip_box + chip_season, require one LC and one BC, both with a return scan
-    $stmt = $pdo->query("
+    $stmt = $pdo->prepare("
         SELECT p.peng_num, p.sex, p.chick_size_code, pc.chip_box,
             CASE WHEN MONTH(pc.chip_date) >= 4 THEN YEAR(pc.chip_date) ELSE YEAR(pc.chip_date) - 1 END as chip_season_year,
             (SELECT MIN(DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')))
@@ -308,9 +314,12 @@ function chickSexBothReturned($pdo) {
         FROM penguins p
         JOIN penguin_chips pc ON p.peng_num = pc.peng_num AND pc.is_active = 1
         WHERE p.chipped_as_adult = 0
+        AND p.colony_id = ?
         AND p.chick_size_code IN ('LC', 'BC')
     ");
+    $stmt->execute([$colonyId]);
     $rows = $stmt->fetchAll();
+    stripPengPrefix($rows, getColonyPrefix($pdo, $colonyId));
 
     // Group by nest (chip_box + chip_season)
     $nests = [];

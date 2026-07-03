@@ -8,6 +8,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 requireReadAuth();
 
 $pdo = getDbConnection();
+$colonyId = (int)($_GET['colony_id'] ?? 1);
+$viewPrefix = getColonyPrefix($pdo, $colonyId);
 
 // Count-only endpoint for validation
 if (isset($_GET['count'])) {
@@ -25,7 +27,8 @@ if ($chipId) {
     $penguin = $stmt->fetch();
 
     if ($penguin) {
-        $penguin['chips'] = getChips($pdo, $penguin['peng_num']);
+        $penguin['chips'] = getChips($pdo, $penguin['peng_num']); // full peng_num for the FK lookup
+        $penguin['peng_num'] = displayPengNum($penguin['peng_num'], $viewPrefix);
         echo json_encode($penguin);
     } else {
         http_response_code(404);
@@ -64,7 +67,7 @@ $sql = "SELECT
 
 $stmt = $pdo->query($sql);
 $penguins = $stmt->fetchAll();
-stripPengPrefix($penguins);
+stripPengPrefix($penguins, $viewPrefix);
 
 echo json_encode($penguins);
 

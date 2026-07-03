@@ -156,6 +156,15 @@ namespace PenguinMonitor.Services
             public List<SyncConflict>? Conflicts { get; set; }
         }
 
+        // Observation time for upload. If the observation has no valid timestamp
+        // (e.g. a chick added with no scan to seed one), default to now.
+        private static string ObsTimeUtc(BoxObservation o)
+        {
+            var t = o.WhenDataCollectedUtc;
+            if (t == default || t.Year < 2000) t = DateTime.UtcNow;
+            return t.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        }
+
         // ===== Main Sync: Upload pending, download fresh state =====
 
         internal async Task<SyncResult> SyncWithServer(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null, Action<int, string>? onLineProgress = null, Func<bool>? isCancelled = null)
@@ -223,7 +232,7 @@ namespace PenguinMonitor.Services
                     }
                     pendingBoxes.Add(new {
                         box_name = pending.BoxName,
-                        observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        observation_time_utc = ObsTimeUtc(pending),
                         adults = pending.Adults,
                         eggs = pending.Eggs,
                         chicks = pending.Chicks,
@@ -498,7 +507,7 @@ namespace PenguinMonitor.Services
                 uploads.Add(new {
                     box_name = pending.BoxName,
                     observation_id = pending.ObservationId,
-                    observation_time_utc = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    observation_time_utc = ObsTimeUtc(pending),
                     adults = pending.Adults, eggs = pending.Eggs, chicks = pending.Chicks,
                     breeding_status = pending.BreedingStatus, gate_status = pending.GateStatus,
                     notes = pending.Notes, scans = scans,
@@ -563,7 +572,7 @@ namespace PenguinMonitor.Services
                 var obsPayload = new Dictionary<string, object?>
                 {
                     ["box_name"] = pending.BoxName,
-                    ["observation_time_utc"] = pending.WhenDataCollectedUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    ["observation_time_utc"] = ObsTimeUtc(pending),
                     ["adults"] = pending.Adults, ["eggs"] = pending.Eggs, ["chicks"] = pending.Chicks,
                     ["breeding_status"] = pending.BreedingStatus, ["gate_status"] = pending.GateStatus,
                     ["notes"] = pending.Notes, ["scans"] = scans,

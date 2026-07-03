@@ -35,19 +35,19 @@ export async function fetchBoxDetail(name: string) {
 }
 
 export async function fetchAllPenguins() {
-  return (await fetch(`/api/penguins.php?_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/penguins.php?${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBirdQuick(pengNum: string) {
-  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&quick=1&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&quick=1&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function fetchBirdDetail(pengNum: string) {
-  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/bird.php?num=${encodeURIComponent(pengNum)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 
 export async function updateRecord(token: string, table: string, id: number | string, fields: Record<string, any>, reason?: string) {
-  const r = await fetch(`/api/crud.php?action=update&table=${table}&id=${id}`, {
+  const r = await fetch(`/api/crud.php?action=update&table=${table}&id=${id}&${colonyQS()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify({ ...fields, ...(reason ? { _reason: reason } : {}) })
@@ -58,7 +58,7 @@ export async function updateRecord(token: string, table: string, id: number | st
 }
 
 export async function createRecord(token: string, table: string, fields: Record<string, any>) {
-  const r = await fetch(`/api/crud.php?action=create&table=${table}`, {
+  const r = await fetch(`/api/crud.php?action=create&table=${table}&${colonyQS()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify(fields)
@@ -69,7 +69,7 @@ export async function createRecord(token: string, table: string, fields: Record<
 }
 
 export async function deleteRecord(token: string, table: string, id: number, reason?: string) {
-  const r = await fetch(`/api/crud.php?action=delete&table=${table}&id=${id}`, {
+  const r = await fetch(`/api/crud.php?action=delete&table=${table}&id=${id}&${colonyQS()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: reason ? JSON.stringify({ _reason: reason }) : undefined
@@ -87,6 +87,6 @@ export async function fetchHistory(token: string, table: string, id: number) {
 }
 
 export async function fetchDay(date: string) {
-  return (await fetch(`/api/day.php?date=${date}&_=${Date.now()}`, { headers: authHeaders() })).json();
+  return (await fetch(`/api/day.php?date=${date}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
 }
 

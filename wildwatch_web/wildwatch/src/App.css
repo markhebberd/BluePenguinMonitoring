@@ -158,17 +158,25 @@ header h1:hover { opacity:.8; }
 .box-tag-id { font-size:11px; color:#999; font-weight:400; font-family:monospace; margin-left:8px; }
 .muted { font-size:12px; color:#888; margin-bottom:8px; }
 .small { font-size:10px; }
-.season-heading { font-size:14px; color:#1a5276; margin:12px 0 8px; }
+.season-heading { font-size:12px; font-weight:700; color:#1a5276; margin:12px 0 8px; }
 .deleted-indicator { font-size:11px; color:#999; font-weight:400; cursor:pointer; }
 .deleted-indicator:hover { color:#F44336; }
 .deleted-obs { opacity:0.5; border-left:3px solid #F44336 !important; }
 .season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
 .season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
-.season-divider span { font-size:13px; color:#888; white-space:nowrap; }
+.season-divider span { font-size:12px; font-weight:700; color:#1a5276; white-space:nowrap; }
 .obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
 .obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
+.obs-card.chip-card { border-left-color:#4CAF50; } /* chipping event, not an observation */
+/* Breeding history: egg that never became a chick */
+.egg-failed { position:relative; display:inline-block; }
+.egg-failed .egg-x { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#F44336; font-weight:900; font-size:15px; text-shadow:0 0 2px #fff, 0 0 2px #fff; pointer-events:none; }
+/* Breeding history: chick chipped in this nest — green ring + hover detail */
+.chick-chipped-marker { position:relative; display:inline-flex; align-items:center; justify-content:center; border:2px solid #4CAF50; border-radius:50%; padding:1px 2px; cursor:pointer; line-height:1; }
+.chick-chipped-marker .chick-tip { display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); flex-direction:column; align-items:center; gap:4px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:6px 8px; box-shadow:0 4px 12px rgba(0,0,0,.18); white-space:nowrap; font-size:11px; z-index:600; }
+.chick-chipped-marker:hover .chick-tip { display:flex; }
 .obs-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
 .obs-top-right { display:flex; gap:6px; align-items:center; }
 .obs-top b { font-size:12px; }
@@ -202,12 +210,12 @@ header h1:hover { opacity:.8; }
 .scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF 85%, #FDD835 85%); }
 .scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 85%, #FDD835 85%); }
 .scan.unproven { background: linear-gradient(to right, #E0E0E0 85%, #FDD835 85%); }
-.scan.chipped-here { background:#C8E6C9; border-color:#81C784; }
+.scan.chipped-here { background:#C8E6C9; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
-.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); border-color:#81C784; }
-.scan.no-scan { background:#E8F5E9; border-color:#A5D6A7; color:#000; display:inline-block; min-width:84px; text-align:center; }
-.add-noscan-btn { background:#E8F5E9; color:#2E7D32; border:1px solid #A5D6A7; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
-.add-noscan-btn:hover { background:#C8E6C9; }
+.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); }
+.scan.no-scan { background:#E0E0E0; color:#000; display:inline-block; min-width:84px; text-align:center; }
+.add-noscan-btn { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
+.add-noscan-btn:hover { background:#d5d5d5; }
 .age-info { font-size:8px; color:#666; margin-left:3px; }
 .chip-info { font-size:7px; color:#999; margin-left:2px; font-style:italic; }
 
@@ -323,6 +331,22 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
+/* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
+.breeding-pair .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
+.obs-section-head { font-size:15px; color:#1a5276; font-weight:600; margin:16px 0 8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
+.obs-section-head:first-child { margin-top:0; }
+.season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
+.season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
+.issue-badge { position:relative; font-size:10px; background:#FFF3E0; color:#E65100; border:1px solid #FFCC80; border-radius:4px; padding:1px 5px; cursor:help; }
+.issue-badge.clickable { cursor:pointer; }
+.issue-badge.clickable:hover { filter:brightness(.95); }
+.issue-tip { display:none; position:absolute; top:100%; left:0; flex-direction:column; gap:1px; background:#fff; border:1px solid #FFCC80; border-radius:6px; padding:5px 6px; box-shadow:0 4px 12px rgba(0,0,0,.18); white-space:nowrap; z-index:600; min-width:max-content; }
+.issue-badge:hover .issue-tip { display:flex; }
+.issue-row { font-size:11px; color:#333; padding:2px 4px; border-radius:3px; }
+.issue-row.clickable:hover { background:#FFF3E0; }
+.clutch-row { margin:6px 0; }
+.clutch-label { font-size:11px; font-weight:600; margin-bottom:2px; }
+.clutch-dates { align-self:center; font-size:10px; color:#666; margin-right:2px; }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
@@ -402,6 +426,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .entry-existing h3 { font-size:14px; color:#1a5276; margin-bottom:8px; }
 .entry-existing-row { display:flex; gap:8px; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid #f0f0f0; }
 .entry-existing-row:last-child { border-bottom:none; }
+.entry-chip-row { border-left:3px solid #4CAF50; padding-left:6px; } /* chipping event, not an observation */
 .entry-warn-note { font-size:12px; color:#F44336; margin-top:6px; font-style:italic; }
 .entry-form h3 { font-size:14px; color:#1a5276; margin-bottom:12px; }
 .entry-save { width:100%; padding:10px; background:#1a5276; color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer; margin-top:8px; }
