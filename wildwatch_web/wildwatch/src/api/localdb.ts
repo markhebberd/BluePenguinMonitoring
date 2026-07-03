@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 5; // Bump to force all clients to full re-sync (v5: only PT strips its prefix; NI birds always show NI-prefixed)
+const CACHE_VERSION = 6; // Bump to force all clients to full re-sync (v6: chipped-here matched by location_id, not box name, so same-named foreign boxes don't leak)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 type StoreNames = typeof STORES[number];
 
@@ -594,9 +594,12 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
       seenPenguins.get(scan.peng_num)!.scan_count++;
     }
   }
-  // Birds chipped here
+  // Birds chipped here. Match by location_id (unique across colonies) so a foreign
+  // bird chipped in another colony's box of the SAME NAME (e.g. PT's "1" vs NI's "1")
+  // doesn't leak in — chips are loaded globally to support visitor scans. Fall back to
+  // the box name only for the rare legacy chip with no location_id.
   for (const chip of c.chips) {
-    if (chip.chip_box === boxName) {
+    if (chip.location_id ? chip.location_id === location.location_id : chip.chip_box === boxName) {
       const peng = c.pengByNum.get(chip.peng_num);
       if (!seenPenguins.has(chip.peng_num)) {
         seenPenguins.set(chip.peng_num, {
@@ -735,10 +738,14 @@ function queryBirdDetailInner(pengNum: string): any {
     const seasonYear = parseInt(bs.season);
     const seasonFrom = `${seasonYear}-04-01`, seasonTo = `${seasonYear + 1}-04-01`;
     const seen = new Set<string>();
+    // Colony-safe box match: the location_ids of this bird's boxes in the viewing
+    // colony (locByName is colony-scoped), so a foreign chip in a same-named box in
+    // another colony can't match.
+    const boxLocIds = new Set((bs.boxes as string[]).map((bn: string) => c.locByName.get(bn)?.location_id).filter(Boolean));
     bs.chipped_chicks = [];
     for (const chip of c.chips) {
       if (!chip.chip_box || !chip.chip_date || chip.peng_num === pengNum) continue;
-      if (!bs.boxes.includes(chip.chip_box)) continue;
+      if (chip.location_id ? !boxLocIds.has(chip.location_id) : !bs.boxes.includes(chip.chip_box)) continue;
       if (chip.chip_date < seasonFrom || chip.chip_date >= seasonTo) continue;
       if (seen.has(chip.peng_num)) continue;
       const peng = c.pengByNum.get(chip.peng_num);
