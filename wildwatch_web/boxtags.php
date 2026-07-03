@@ -133,15 +133,13 @@ function handleDelete($pdo, $colonyId) {
     $old->execute([$colonyId, $boxId]);
     $oldRow = $old->fetch();
 
-    $stmt = $pdo->prepare("UPDATE observation_locations SET pit_id = NULL, scan_time_utc = NULL, latitude = NULL, longitude = NULL, accuracy = NULL WHERE colony_id = ? AND location_name = ?");
+    // Clear the tag only — keep the stored location (lat/long/accuracy)
+    $stmt = $pdo->prepare("UPDATE observation_locations SET pit_id = NULL WHERE colony_id = ? AND location_name = ?");
     $stmt->execute([$colonyId, $boxId]);
 
     if ($stmt->rowCount() > 0) {
         auditBoxTag($pdo, 'DELETE', $boxId, [
             'pit_id' => ['old' => $oldRow['pit_id'] ?? null, 'new' => null],
-            'scan_time_utc' => ['old' => $oldRow['scan_time_utc'] ?? null, 'new' => null],
-            'latitude' => ['old' => $oldRow['latitude'] ?? null, 'new' => null],
-            'longitude' => ['old' => $oldRow['longitude'] ?? null, 'new' => null],
             'source' => 'boxtags_api',
         ]);
         echo json_encode(['success' => true, 'message' => 'Box tag cleared', 'box_id' => $boxId]);

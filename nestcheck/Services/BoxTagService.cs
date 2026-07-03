@@ -100,6 +100,35 @@ namespace PenguinMonitor.Services
         }
 
         /// <summary>
+        /// Remove the tag number from a box without replacing it, keeping the stored location.
+        /// Clears pit_id locally and on the server.
+        /// </summary>
+        public static void ClearBoxTagNumber(Dictionary<string, BoxTag> boxTags, string boxId, string filesDir)
+        {
+            if (boxTags.TryGetValue(boxId, out var tag))
+            {
+                tag.TagNumber = "";
+                SaveBoxTags(boxTags, filesDir);
+
+                if (_apiService != null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _apiService.DeleteBoxTagAsync(boxId);
+                            System.Diagnostics.Debug.WriteLine($"BoxTagService.ClearBoxTagNumber: Cleared {boxId} tag on remote");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"BoxTagService.ClearBoxTagNumber: Remote clear failed: {ex.Message}");
+                        }
+                    });
+                }
+            }
+        }
+
+        /// <summary>
         /// Remove a box tag
         /// </summary>
         public static void RemoveBoxTag(Dictionary<string, BoxTag> boxTags, string boxId, string filesDir)

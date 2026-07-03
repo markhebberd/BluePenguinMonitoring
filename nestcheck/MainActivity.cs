@@ -137,6 +137,7 @@ namespace PenguinMonitor
         private LinearLayout? _tagModeContentLayout;
         private TextView? _tagModeInstructionText;
         private LinearLayout? _tagModeTodayCard;
+        private Button? _tagModeRemoveTagButton;
 
         private List<LinearLayout?> _scannedIdsLayout;
         private EditText? _manualScanEditText;
@@ -602,6 +603,13 @@ namespace PenguinMonitor
             if (selectedPage != UIFactory.selectedPage.BoxDataSingle)
                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
 
+            // Auto-expand the box card if it's collapsed so the scan is visible
+            if (_singleBoxDataContentLayout != null && _singleBoxDataContentLayout.Visibility != ViewStates.Visible)
+            {
+                _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                ScrollToTop();
+            }
+
             AddScannedId(eidData, 0);
             _dataChangedSinceUnlock = true;
             DrawPageLayouts();
@@ -625,6 +633,10 @@ namespace PenguinMonitor
                 if (!boxData.ScannedIds.Any(s => s.BirdId == scan.BirdId))
                 {
                     boxData.ScannedIds.Add(scan);
+                    // Each flushed scan is a bird present — bump the adult or chick count
+                    var (_, _, isChick, _) = LookupPenguinLabel(scan.BirdId);
+                    if (isChick) boxData.Chicks++;
+                    else boxData.Adults++;
                     added++;
                 }
             }
@@ -655,6 +667,7 @@ namespace PenguinMonitor
             SetDialogActive(false);
             _dataChangedSinceUnlock = true;
             DrawPageLayouts();
+            ScrollToTop();
 
             // Show new bird dialog for unknown scans (deferred to avoid dialog collision)
             if (unknownScans.Count > 0)
@@ -1823,22 +1836,26 @@ namespace PenguinMonitor
 
             OverviewHeaderCard.AddView(headerTitle);
 
-            // Adult count mismatch warning — right under header
+            // Per-box scan/count mismatch warnings — right under header
             {
                 var todayBoxes2 = new Dictionary<string, BoxObservation>(_colonyState.TodayBoxes);
                 var nzToday2 = NzToday;
                 foreach (var obs2 in _colonyState.PendingObservations)
                     if (!string.IsNullOrEmpty(obs2.BoxName) && ToNzTime(obs2.WhenDataCollectedUtc).Date == nzToday2)
                         todayBoxes2[obs2.BoxName] = obs2;
-                var scanned2 = todayBoxes2.Values.Sum(b => b.ScannedIds.Count(s => !s.BirdId.StartsWith("NOSCAN_")));
-                var noScans2 = todayBoxes2.Values.Sum(b => b.ScannedIds.Count(s => s.BirdId.StartsWith("NOSCAN_")));
-                var adults2 = todayBoxes2.Values.Sum(b => b.Adults);
-                var mismatch2 = adults2 - scanned2 - noScans2;
-                if (mismatch2 != 0)
+                var mismatchLines = new List<string>();
+                foreach (var bn in _boxNamesAndIndexes.Keys)
+                {
+                    if (!todayBoxes2.TryGetValue(bn, out var boxObs2)) continue;
+                    var problem = GetBoxScanMismatch(boxObs2);
+                    if (problem != null)
+                        mismatchLines.Add($"⚠ Box {bn}: {problem}");
+                }
+                if (mismatchLines.Count > 0)
                 {
                     var mismatchWarn = new TextView(this)
                     {
-                        Text = $"⚠ Adult mismatch: {adults2} adults - {scanned2} scanned - {noScans2} no-scan = {mismatch2}",
+                        Text = string.Join("\n", mismatchLines),
                         TextSize = 13
                     };
                     mismatchWarn.SetTextColor(UIFactory.DANGER_RED);
@@ -2191,6 +2208,12 @@ namespace PenguinMonitor
             if (hasNoScan && !selected)
             {
                 ((Android.Graphics.Drawables.GradientDrawable)boxOverviewCard.Background).SetColor(SCAN_CHIPPED_TODAY_BG);
+            }
+
+            // Pale red background for boxes whose scans don't match the recorded counts (overrides green)
+            if (currentExists && !selected && thisBoxData != null && GetBoxScanMismatch(thisBoxData) != null)
+            {
+                ((Android.Graphics.Drawables.GradientDrawable)boxOverviewCard.Background).SetColor(BOX_MISMATCH_BG);
             }
 
             var title = new TextView(this)
@@ -3208,6 +3231,8 @@ namespace PenguinMonitor
                                 _tagModeInstructionText.Text = $"{tagDetails}\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag.";
                                 _tagModeInstructionText.SetTextColor(UIFactory.PRIMARY_BLUE);
                             }
+                            if (_tagModeRemoveTagButton != null)
+                                _tagModeRemoveTagButton.Visibility = (!_isBoxLocked && hasTag) ? ViewStates.Visible : ViewStates.Gone;
                         }
                     }
 
@@ -3441,6 +3466,28 @@ namespace PenguinMonitor
 
             return adults == 0 && eggs == 0 && chicks == 0  && noGate && noNotes;
         }
+        /// <summary>
+        /// Per-box scan/count validation. Returns a description of the problem, or null if the box passes.
+        /// Fails when adult scans + no-scans != recorded adults, or chick scans > recorded chicks.
+        /// </summary>
+        private string? GetBoxScanMismatch(BoxObservation box)
+        {
+            int noScans = 0, adultScans = 0, chickScans = 0;
+            foreach (var s in box.ScannedIds)
+            {
+                if (s.BirdId.StartsWith("NOSCAN_")) { noScans++; continue; }
+                var (_, _, isChick, _) = LookupPenguinLabel(s.BirdId);
+                if (isChick) chickScans++;
+                else adultScans++;
+            }
+            var problems = new List<string>();
+            if (adultScans + noScans != box.Adults)
+                problems.Add($"{box.Adults} adult{(box.Adults != 1 ? "s" : "")} but {adultScans} scanned + {noScans} no-scan");
+            if (chickScans > box.Chicks)
+                problems.Add($"{chickScans} chick scans > {box.Chicks} chick{(box.Chicks != 1 ? "s" : "")}");
+            return problems.Count > 0 ? string.Join("; ", problems) : null;
+        }
+
         private (string label, string sex, bool isChick, PenguinData? pd) LookupPenguinLabel(string birdId)
         {
             var cleanId = new string(birdId.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
@@ -3549,6 +3596,7 @@ namespace PenguinMonitor
         private static readonly Color SCAN_UNKNOWN_BG = Color.ParseColor("#F0F0F0");
         private static readonly Color SCAN_CHICK_BG = Color.ParseColor("#FFF9C4");
         private static readonly Color SCAN_CHIPPED_TODAY_BG = Color.ParseColor("#C8E6C9");
+        private static readonly Color BOX_MISMATCH_BG = Color.ParseColor("#FFCDD2");
         private static readonly Color SCAN_MALE_TEXT = Color.ParseColor("#1565C0");
         private static readonly Color SCAN_FEMALE_TEXT = Color.ParseColor("#C62828");
 
@@ -4085,6 +4133,34 @@ namespace PenguinMonitor
             _tagModeInstructionText = new TextView(this) { TextSize = 14 };
             _tagModeInstructionText.SetPadding(0, 8, 0, 8);
             _tagModeContentLayout.AddView(_tagModeInstructionText);
+
+            // Remove tag button — visible when the box is unlocked and has a tag assigned
+            _tagModeRemoveTagButton = _uiFactory.CreateStyledButton("Remove tag", UIFactory.DANGER_RED);
+            var removeTagParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            removeTagParams.SetMargins(0, 8, 0, 8);
+            _tagModeRemoveTagButton.LayoutParameters = removeTagParams;
+            _tagModeRemoveTagButton.Visibility = ViewStates.Gone;
+            _tagModeRemoveTagButton.Click += (s, e) =>
+            {
+                var hasTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) && !string.IsNullOrEmpty(tagInfo.TagNumber);
+                if (!hasTag) return;
+                new AlertDialog.Builder(this)
+                    .SetTitle($"Remove tag from Box {_currentBoxName}?")
+                    .SetMessage($"Tag {tagInfo!.TagNumber} will be removed. The stored location is kept.")
+                    .SetPositiveButton("Remove", (s2, e2) =>
+                    {
+                        var internalPath = this.FilesDir?.AbsolutePath;
+                        if (!string.IsNullOrEmpty(internalPath))
+                        {
+                            BoxTagService.ClearBoxTagNumber(_boxTags, _currentBoxName, internalPath);
+                            Toast.MakeText(this, $"🗑 Tag removed from Box {_currentBoxName}", ToastLength.Short)?.Show();
+                            DrawPageLayouts();
+                        }
+                    })
+                    .SetNegativeButton("Cancel", (s2, e2) => { })
+                    .Show();
+            };
+            _tagModeContentLayout.AddView(_tagModeRemoveTagButton);
 
             _singleBoxDataOuterLayout.AddView(_tagModeContentLayout);
 
@@ -5720,7 +5796,8 @@ namespace PenguinMonitor
                                     var internalPath = this.FilesDir?.AbsolutePath;
                                     if (!string.IsNullOrEmpty(internalPath))
                                     {
-                                        BoxTagService.RemoveBoxTag(_boxTags, assignedBoxId, internalPath);
+                                        // Clear the tag from the old box (server included), keeping its location
+                                        BoxTagService.ClearBoxTagNumber(_boxTags, assignedBoxId, internalPath);
                                         var moveLoc = _bestUnlockLocation ?? _currentLocation;
                                         BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
                                             moveLoc?.Latitude ?? 0, moveLoc?.Longitude ?? 0,
@@ -5795,7 +5872,7 @@ namespace PenguinMonitor
                             selectedPage = UIFactory.selectedPage.BoxDataSingle;
                             if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                             if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
-                            else { DrawPageLayouts(); Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show(); }
+                            else { DrawPageLayouts(); ScrollToTop(); Toast.MakeText(this, $"🔓 Box {_currentBoxName} unlocked", ToastLength.Short)?.Show(); }
                         }
                         else
                         {
@@ -5809,7 +5886,7 @@ namespace PenguinMonitor
                                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
                                 if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                                 if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
-                                else { DrawPageLayouts(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
+                                else { DrawPageLayouts(); ScrollToTop(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
                             }
                             else
                             {
@@ -5850,6 +5927,7 @@ namespace PenguinMonitor
             else
             {
                 DrawPageLayouts();
+                ScrollToTop();
                 Toast.MakeText(this, $"📍 Box {boxName}", ToastLength.Short)?.Show();
             }
         }
