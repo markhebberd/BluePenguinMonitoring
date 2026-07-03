@@ -970,6 +970,43 @@ export function computeMissedScans(): any[] {
       || a.box.localeCompare(b.box, undefined, { numeric: true }));
 }
 
+/** Observations whose recorded adult count doesn't match the adults actually accounted
+ *  for — scanned adult minis + "no scan" minis — a likely data-entry error. Newest first. */
+export function computeAdultCountMismatches(): { total: number; rows: any[] } {
+  if (!mem) return { total: 0, rows: [] };
+  const c = mem;
+
+  // Distinct adult scans per observation (same adult rule as the missed-scans report).
+  const adultPitsByObs: Record<string, Set<string>> = {};
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    if (!chip) continue;
+    const peng = c.pengByNum.get(chip.peng_num);
+    if (!peng) continue;
+    const nzDate = utcToNzDate(obs.observation_time_utc);
+    const isAdult = peng.chipped_as_adult || (chip.chip_date && dayDiff(nzDate, chip.chip_date) > 90);
+    if (!isAdult) continue;
+    (adultPitsByObs[s.observation_id] ||= new Set()).add(s.pit_id);
+  }
+
+  const rows: any[] = [];
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const box = c.locById.get(o.location_id)?.location_name;
+    if (!box) continue;
+    const adults = o.adults || 0;
+    const noScan = o.no_scan || 0;
+    const adultScans = adultPitsByObs[o.observation_id]?.size || 0;
+    if (adults === adultScans + noScan) continue;
+    rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan });
+  }
+  rows.sort((a, b) => b.time.localeCompare(a.time));
+  return { total: rows.length, rows: rows.slice(0, 10) };
+}
+
 /** Chick return rates by size, with return-age points. */
 export function computeChickReturn(): any {
   if (!mem) return { by_season: {}, totals: {}, points: [] };

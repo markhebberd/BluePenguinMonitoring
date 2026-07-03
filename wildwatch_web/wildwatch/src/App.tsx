@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -2671,6 +2671,31 @@ function MissedScansReport() {
   );
 }
 
+function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: string) => void }) {
+  const { total, rows } = useAdultCountMismatches();
+  return (
+    <div className="report-card">
+      <h3>Adult count vs scans mismatch</h3>
+      <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers — a likely entry error. Newest first{total > rows.length ? `, showing ${rows.length} of ${total}` : ` (${total})`}.</p>
+      {rows.length === 0 ? <p className="muted">No mismatches found</p> : (
+        <table className="guess-rank-table">
+          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th></tr></thead>
+          <tbody>
+            {rows.map((r: any, i: number) => (
+              <tr key={i} className="clickable" onClick={() => onOpen(r.box, r.time)} title="Go to this observation">
+                <td>{r.date}</td>
+                <td><strong>{r.box}</strong></td>
+                <td>{r.adults}</td>
+                <td>{r.adultScans + r.noScan} <span className="muted">({r.adultScans} scanned + {r.noScan} no-scan)</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function UnsexedByGuessesReport() {
   const allPenguins = useAllPenguins();
   const rows = useMemo(() => (allPenguins || [])
@@ -5112,6 +5137,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
+          <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
