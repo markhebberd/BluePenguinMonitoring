@@ -1,4 +1,5 @@
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { useEffect } from 'react';
 import L from 'leaflet';
 import type { BoxTag } from '../types';
 import 'leaflet/dist/leaflet.css';
@@ -19,6 +20,17 @@ interface ColonyMapProps {
   boxTags: Record<string, BoxTag>;
   selectedBox: string | null;
   onBoxSelect: (boxId: string) => void;
+}
+
+/** MapContainer's `center` prop only applies on mount, so it won't follow a colony
+ *  switch. Recenter imperatively when the computed center changes (i.e. a new colony),
+ *  keeping the current zoom. Same colony → same average → no-op, so panning isn't yanked back. */
+function RecenterOnColony({ lat, lon }: { lat: number; lon: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView([lat, lon]);
+  }, [lat, lon]);
+  return null;
 }
 
 export function ColonyMap({ boxTags, selectedBox, onBoxSelect }: ColonyMapProps) {
@@ -56,6 +68,7 @@ export function ColonyMap({ boxTags, selectedBox, onBoxSelect }: ColonyMapProps)
   return (
     <div className="map-container">
       <MapContainer center={[avgLat, avgLon]} zoom={17} style={{ height: '100%', width: '100%' }}>
+        <RecenterOnColony lat={avgLat} lon={avgLon} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
