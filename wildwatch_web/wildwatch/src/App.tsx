@@ -1659,12 +1659,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 </div>
                 {e.role === 'parent' ? (
                   <div className="family-box">
-                    <span className="muted">with</span>
-                    {e.partner
-                      ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
-                      : <span className="muted">partner not identified</span>}
+                    <div className="family-head">
+                      <span className="muted">with</span>
+                      {e.partner
+                        ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
+                        : <span className="muted">partner not identified</span>}
+                      {dateRange}
+                    </div>
                     {(e.fam.chicks.length > 0 || e.fam.failedEggs > 0 || e.fam.plainChicks > 0) && (
-                      <span className="offspring-group">
+                      <div className="offspring-group">
                         {e.fam.chicks.map((ck: any) => (
                           <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                         ))}
@@ -1674,27 +1677,26 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                         {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
                           <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
                         ))}
-                      </span>
+                      </div>
                     )}
-                    {dateRange}
                   </div>
                 ) : (
                   <div className="family-box">
-                    <span className="muted">parents</span>
-                    {e.parents.length > 0
-                      ? e.parents.map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
-                      : <span className="muted">not identified</span>}
+                    <div className="family-head">
+                      <span className="muted">parents</span>
+                      {e.parents.length > 0
+                        ? e.parents.map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                        : <span className="muted">not identified</span>}
+                      {dateRange}
+                    </div>
                     {e.siblings.length > 0 && (
-                      <>
+                      <div className="offspring-group">
                         <span className="muted">siblings</span>
-                        <span className="offspring-group">
-                          {e.siblings.map((sb: any) => (
-                            <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
-                          ))}
-                        </span>
-                      </>
+                        {e.siblings.map((sb: any) => (
+                          <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
+                        ))}
+                      </div>
                     )}
-                    {dateRange}
                   </div>
                 )}
               </div>
@@ -2498,6 +2500,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} />
           {parsedDate && <span className="date-preview"><DateLink date={parsedDate} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
           {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
+          {parsedDate && box && allBoxObs.some((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate) && (
+            <span className="date-preview date-dup">⚠ Box {box} already has an observation on this date</span>
+          )}
         </div>
 
         {/* Previously seen in this box - sorted M by count, F by count */}
