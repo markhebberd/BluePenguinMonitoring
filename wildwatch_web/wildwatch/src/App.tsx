@@ -1642,43 +1642,58 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           detection (computeBoxFamilies) the box breeding overview uses. */}
       {pengFamilies.length > 0 && (
         <div className="bird-section">
-          <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding family ({pengFamilies.length})</h3>
+          <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history ({pengFamilies.length})</h3>
           {expandedSections.breeding && pengFamilies.map((e, i) => {
             const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
+            const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+            const c = e.fam.clutch;
+            const dateRange = (
+              <span className="clutch-dates clickable" title="Go to where the eggs/chicks first appeared"
+                onClick={() => onSightingClick(e.box, c.startObsTime)}>{fmtMs(c.windowStart)} \u2013 {fmtMs(c.windowEnd)}</span>
+            );
             return (
               <div key={i} className="obs-card">
                 <div className="obs-top">
                   <b>{seasonRange(e.season)}</b>
                   <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
-                  <span className="muted">{e.role === 'parent' ? 'bred here' : 'hatched here'}</span>
                 </div>
                 {e.role === 'parent' ? (
-                  <div className="obs-nums">
-                    <span className="muted">with</span>
+                  <div className="family-box">
                     {e.partner
                       ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
                       : <span className="muted">partner not identified</span>}
-                    {(e.fam.chicks.length > 0 || e.fam.failedEggs > 0 || e.fam.plainChicks > 0) && <span className="muted">{'\u2192'}</span>}
-                    {e.fam.chicks.map((ck: any) => (
-                      <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
-                    ))}
-                    {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
-                      <span key={`fe${j}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
-                    ))}
-                    {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
-                      <span key={`pc${j}`} title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
-                    ))}
+                    {(e.fam.chicks.length > 0 || e.fam.failedEggs > 0 || e.fam.plainChicks > 0) && (
+                      <span className="offspring-group">
+                        {e.fam.chicks.map((ck: any) => (
+                          <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
+                        ))}
+                        {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
+                          <span key={`fe${j}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
+                        ))}
+                        {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
+                          <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
+                        ))}
+                      </span>
+                    )}
+                    {dateRange}
                   </div>
                 ) : (
-                  <div className="obs-nums">
+                  <div className="family-box">
                     <span className="muted">parents</span>
                     {e.parents.length > 0
                       ? e.parents.map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
                       : <span className="muted">not identified</span>}
-                    {e.siblings.length > 0 && <span className="muted">siblings</span>}
-                    {e.siblings.map((sb: any) => (
-                      <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
-                    ))}
+                    {e.siblings.length > 0 && (
+                      <>
+                        <span className="muted">siblings</span>
+                        <span className="offspring-group">
+                          {e.siblings.map((sb: any) => (
+                            <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
+                          ))}
+                        </span>
+                      </>
+                    )}
+                    {dateRange}
                   </div>
                 )}
               </div>
