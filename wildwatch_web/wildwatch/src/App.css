@@ -111,11 +111,16 @@ header h1:hover { opacity:.8; }
 .detail-area { flex:1; display:flex; flex-direction:column; height:100%; min-width:0; overflow:hidden; }
 .detail-full { padding:12px 16px; flex-shrink:0; }
 .detail-split { display:flex; flex:1; align-items:stretch; min-height:0; overflow:hidden; }
-.detail-obs { flex:1; min-width:0; overflow-y:auto; padding:0 16px 16px; }
-/* Breeding overview and Observations sit side by side when there's room (e.g. no peng
-   panel open, which widens this area) and stack once the columns no longer fit. */
-.obs-columns { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:flex-start; }
-.obs-col { flex:1 1 400px; min-width:0; }
+.detail-obs { flex:1; min-width:0; overflow:hidden; padding:0 16px 16px; container-type:inline-size; }
+/* Breeding overview and Observations stack and scroll together when narrow; once there's
+   room (e.g. no peng panel open, which widens this area) they sit side by side and each
+   column scrolls independently. The container query keys off this area's own width. */
+.obs-columns { display:flex; flex-direction:column; gap:16px; height:100%; overflow-y:auto; }
+.obs-col { min-width:0; }
+@container (min-width:820px) {
+  .obs-columns { flex-direction:row; gap:24px; align-items:stretch; overflow:visible; }
+  .obs-col { flex:1 1 0; min-height:0; overflow-y:auto; }
+}
 .detail-bird { width:auto; min-width:300px; max-width:480px; flex-shrink:0; overflow-y:auto; height:100%; border-left:1px solid #ddd; padding:0 12px 12px; background:#fafafa; }
 /* Only the title row (bird mini + action buttons) sizes the panel; everything below
    fills that width and wraps rather than widening it. width:0 makes a child contribute
@@ -477,6 +482,8 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
   .detail-area { height:auto; overflow:visible; }
   .detail-split { flex-direction:column; min-height:0; overflow:visible; }
   .detail-obs { overflow:visible; }
+  .obs-columns { flex-direction:column; height:auto; overflow:visible; }
+  .obs-col { overflow:visible; }
   .detail-bird { display:none; }
   .detail-full { padding:8px; }
   .entry-split { flex-direction:column; }
