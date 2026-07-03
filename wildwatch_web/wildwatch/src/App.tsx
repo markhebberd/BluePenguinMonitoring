@@ -959,7 +959,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - famChicks.length);
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
-                    {clutches.length > 1 && <div className="clutch-label muted">{ordinal(ci + 1)} clutch</div>}
+                    {clutches.length > 1 && (
+                      <div className={`clutch-label muted${clutch.startObsTime ? ' clickable' : ''}`}
+                        title="Go to where the egg/chick was first detected"
+                        onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>
+                        {ordinal(ci + 1)} clutch
+                      </div>
+                    )}
                     {clutch.laidFailed && (
                       <div className="season-issues">
                         <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
@@ -979,7 +985,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
-                        <span className="clutch-dates">{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
+                        <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
+                          title="Go to where the egg/chick was first detected"
+                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
                       </span>
                       {slotRow(`w${ci}`)}
                     </div>
