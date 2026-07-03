@@ -1998,7 +1998,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
   };
 
   return (
-    <div className="login-page">
+    <div className="login-page login-bg">
       <div className="login-card">
         <h1>Wildwatch</h1>
         <p className="login-sub">Penguin Colony Monitoring</p>
