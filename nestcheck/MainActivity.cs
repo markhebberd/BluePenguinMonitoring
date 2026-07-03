@@ -55,6 +55,8 @@ namespace PenguinMonitor
         private LocationManager? _locationManager;
         private Location? _currentLocation;
         private float _gpsAccuracy = -1;
+        // Best (most accurate) fix recorded while a box is unlocked in Edit Box Tags mode
+        private Location? _bestUnlockLocation;
 
         // Held scans — penguin chips scanned while no box is unlocked
         private readonly List<ScanRecord> _heldScans = new();
@@ -397,6 +399,13 @@ namespace PenguinMonitor
                 _currentLocation = location;
                 _gpsAccuracy = location.Accuracy;
                 UpdateStatusText();
+            }
+
+            // In Edit Box Tags mode, keep the most accurate fix seen while the box is unlocked
+            if (_appSettings != null && _appSettings.EditBoxTagsMode && !_isBoxLocked
+                && (_bestUnlockLocation == null || location.Accuracy < _bestUnlockLocation.Accuracy))
+            {
+                _bestUnlockLocation = location;
             }
         }
         public void OnStatusChanged(string? provider, Availability status, Bundle? extras) { } // required by ILocationListener
@@ -2512,6 +2521,7 @@ namespace PenguinMonitor
             editBoxTagsButton.Click += (s, e) =>
             {
                 _appSettings.EditBoxTagsMode = !_appSettings.EditBoxTagsMode;
+                _bestUnlockLocation = null;
                 editBoxTagsButton.Text = _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags";
                 editBoxTagsButton.Background = _uiFactory.CreateRoundedBackground(
                     _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.SUCCESS_GREEN, 8);
@@ -3650,15 +3660,19 @@ namespace PenguinMonitor
                     // Unlock — enter edit mode
                     _dataChangedSinceUnlock = false;
                     _highOffspringCountConfirmed = false;
+                    if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
                     if (!_appSettings.EditBoxTagsMode)
                         _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                     DrawPageLayouts();
                 }
                 else
                 {
-                    // In tag mode or historical view, just lock without saving
+                    // In tag mode or historical view, just lock without saving box data
                     if (_appSettings.EditBoxTagsMode || _isHistoricalView)
                     {
+                        // Tag mode: persist the best GPS fix recorded during this unlock session
+                        if (_appSettings.EditBoxTagsMode && !_isHistoricalView)
+                            SaveBestTagModeLocation();
                         _dataChangedSinceUnlock = false;
                         DrawPageLayouts();
                         return;
@@ -5481,6 +5495,50 @@ namespace PenguinMonitor
             }
         }
 
+        // Called when a box is locked in Edit Box Tags mode: saves the most accurate GPS fix
+        // recorded between unlock and lock. Works with or without a tag assigned to the box.
+        // If the box already has a stored location, asks before replacing it.
+        private void SaveBestTagModeLocation()
+        {
+            var loc = _bestUnlockLocation ?? _currentLocation;
+            _bestUnlockLocation = null;
+            if (loc == null || string.IsNullOrEmpty(_currentBoxName)) return;
+
+            var internalPath = this.FilesDir?.AbsolutePath;
+            if (string.IsNullOrEmpty(internalPath)) return;
+
+            var boxName = _currentBoxName;
+            // Preserve the existing tag number if one is assigned; empty means location-only
+            var existing = _boxTags.TryGetValue(boxName, out var bt) ? bt : null;
+            var existingTag = existing?.TagNumber ?? "";
+
+            void Save()
+            {
+                BoxTagService.AssignBoxTag(_boxTags, boxName, existingTag,
+                    loc.Latitude, loc.Longitude, loc.Accuracy, internalPath, _appSettings.ObserverId);
+                Toast.MakeText(this, $"📍 Location saved for Box {boxName} (±{loc.Accuracy:F0}m)", ToastLength.Short)?.Show();
+            }
+
+            bool hasStoredLocation = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
+            if (!hasStoredLocation)
+            {
+                Save();
+                return;
+            }
+
+            var dist = new float[1];
+            Location.DistanceBetween(existing!.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
+            var oldAcc = existing.Accuracy >= 0 ? $"±{existing.Accuracy:F0}m" : "unknown accuracy";
+            new AlertDialog.Builder(this)
+                .SetTitle($"Replace location for Box {boxName}?")
+                .SetMessage($"Stored: {existing.Latitude:F6}, {existing.Longitude:F6} ({oldAcc})\n" +
+                            $"New: {loc.Latitude:F6}, {loc.Longitude:F6} (±{loc.Accuracy:F0}m)\n\n" +
+                            $"New position is {dist[0]:F0}m from the stored one.")
+                .SetPositiveButton("Replace", (s, e) => Save())
+                .SetNegativeButton("Keep existing", (s, e) => { })
+                .Show();
+        }
+
         private void HandleBoxTagScan(string cleanTagId)
         {
             RunOnUiThread(() =>
@@ -5505,9 +5563,10 @@ namespace PenguinMonitor
                                     if (!string.IsNullOrEmpty(internalPath))
                                     {
                                         BoxTagService.RemoveBoxTag(_boxTags, assignedBoxId, internalPath);
+                                        var moveLoc = _bestUnlockLocation ?? _currentLocation;
                                         BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
-                                            _currentLocation?.Latitude ?? 0, _currentLocation?.Longitude ?? 0,
-                                            _currentLocation?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
+                                            moveLoc?.Latitude ?? 0, moveLoc?.Longitude ?? 0,
+                                            moveLoc?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
                                         Toast.MakeText(this, $"📌 Tag moved from Box {assignedBoxId} to Box {_currentBoxName}", ToastLength.Short)?.Show();
                                         DrawPageLayouts();
                                     }
@@ -5520,9 +5579,10 @@ namespace PenguinMonitor
                         var internalPath = this.FilesDir?.AbsolutePath;
                         if (!string.IsNullOrEmpty(internalPath))
                         {
+                            var assignLoc = _bestUnlockLocation ?? _currentLocation;
                             BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
-                                _currentLocation?.Latitude ?? 0, _currentLocation?.Longitude ?? 0,
-                                _currentLocation?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
+                                assignLoc?.Latitude ?? 0, assignLoc?.Longitude ?? 0,
+                                assignLoc?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
                             Toast.MakeText(this, $"📌 Box tag assigned to Box {_currentBoxName}", ToastLength.Short)?.Show();
                             DrawPageLayouts();
                         }
@@ -5573,6 +5633,7 @@ namespace PenguinMonitor
                         {
                             // Same box - just unlock
                             _isBoxLocked = false;
+                            if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
                             selectedPage = UIFactory.selectedPage.BoxDataSingle;
                             if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                             if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
@@ -5586,6 +5647,7 @@ namespace PenguinMonitor
                                 _currentBoxIndex = _boxNamesAndIndexes[assignedBoxId];
                                 _currentBoxName = assignedBoxId;
                                 _isBoxLocked = false;
+                                if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
                                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
                                 if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                                 if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();

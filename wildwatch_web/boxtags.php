@@ -53,14 +53,14 @@ function handleGet($pdo, $colonyId) {
         $stmt = $pdo->prepare("SELECT * FROM observation_locations WHERE colony_id = ? AND location_name = ?");
         $stmt->execute([$colonyId, $boxId]);
         $row = $stmt->fetch();
-        if ($row && $row['pit_id']) {
+        if ($row && ($row['pit_id'] || $row['latitude'] !== null)) {
             echo json_encode(['success' => true, 'data' => formatBoxTag($row)]);
         } else {
             http_response_code(404);
             echo json_encode(['success' => false, 'error' => 'Box tag not found']);
         }
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM observation_locations WHERE colony_id = ? AND pit_id IS NOT NULL ORDER BY location_name + 0, location_name");
+        $stmt = $pdo->prepare("SELECT * FROM observation_locations WHERE colony_id = ? AND (pit_id IS NOT NULL OR latitude IS NOT NULL) ORDER BY location_name + 0, location_name");
         $stmt->execute([$colonyId]);
         $data = [];
         foreach ($stmt->fetchAll() as $row) {
@@ -83,7 +83,8 @@ function handlePost($pdo, $colonyId) {
 
     $boxId = $input['BoxID'] ?? $input['box_id'] ?? null;
     $tagNumber = $input['TagNumber'] ?? $input['tag_number'] ?? null;
-    if (!$boxId || !$tagNumber) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'BoxID and TagNumber are required']); return; }
+    if ($tagNumber === '') $tagNumber = null;
+    if (!$boxId) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'BoxID is required']); return; }
 
     $scanTime = date('Y-m-d H:i:s', strtotime($input['ScanTimeUTC'] ?? $input['scan_time_utc'] ?? 'now'));
     $latitude = $input['Latitude'] ?? $input['latitude'] ?? null;
@@ -99,18 +100,26 @@ function handlePost($pdo, $colonyId) {
     // Ensure location exists
     $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $boxId]);
 
-    // Update pit_id, scan time, and GPS
-    $pdo->prepare("UPDATE observation_locations SET pit_id = ?, scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
-        ->execute([$tagNumber, $scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
-
-    auditBoxTag($pdo, 'UPDATE', $boxId, [
-        'pit_id' => ['old' => $oldRow['pit_id'] ?? null, 'new' => $tagNumber],
+    $audit = [
         'scan_time_utc' => ['old' => $oldRow['scan_time_utc'] ?? null, 'new' => $scanTime],
         'latitude' => ['old' => $oldRow['latitude'] ?? null, 'new' => $latitude],
         'longitude' => ['old' => $oldRow['longitude'] ?? null, 'new' => $longitude],
         'observer_id' => $observerId,
         'source' => 'nestcheck_app',
-    ]);
+    ];
+
+    if ($tagNumber !== null) {
+        // Update pit_id, scan time, and GPS
+        $pdo->prepare("UPDATE observation_locations SET pit_id = ?, scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
+            ->execute([$tagNumber, $scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
+        $audit['pit_id'] = ['old' => $oldRow['pit_id'] ?? null, 'new' => $tagNumber];
+    } else {
+        // Location-only update — preserve any existing pit_id
+        $pdo->prepare("UPDATE observation_locations SET scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
+            ->execute([$scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
+    }
+
+    auditBoxTag($pdo, 'UPDATE', $boxId, $audit);
 
     echo json_encode(['success' => true, 'message' => 'Box tag saved', 'box_id' => $boxId]);
 }
@@ -145,7 +154,7 @@ function handleDelete($pdo, $colonyId) {
 function formatBoxTag($row) {
     return [
         'BoxID' => $row['location_name'],
-        'TagNumber' => $row['pit_id'],
+        'TagNumber' => $row['pit_id'] ?? '',
         'ScanTimeUTC' => $row['scan_time_utc'] ? date('c', strtotime($row['scan_time_utc'])) : date('c'),
         'Latitude' => $row['latitude'] !== null ? (float)$row['latitude'] : 0,
         'Longitude' => $row['longitude'] !== null ? (float)$row['longitude'] : 0,
