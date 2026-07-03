@@ -2013,6 +2013,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
           <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Register' : 'Log in'}</button>
         </form>
       </div>
+      <p className="login-credit">Photo: Marty Melville</p>
     </div>
   );
 }

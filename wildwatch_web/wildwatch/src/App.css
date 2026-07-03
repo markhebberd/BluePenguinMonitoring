@@ -360,6 +360,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .login-page { height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1a5276,#2e86c1); position:fixed; top:0; left:0; width:100%; z-index:1000; }
 /* The site loading image sits behind the login form (same background as the splash) */
 .login-page.login-bg { background:url('/loading-bg.webp') center/cover no-repeat; }
+.login-credit { position:absolute; bottom:16px; right:16px; margin:0; font-size:14px; color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.6); }
 .login-card { background:#fff; padding:40px; border-radius:16px; width:340px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,.2); text-align:center; }
 .login-card h1 { font-size:28px; color:#1a5276; margin-bottom:4px; }
 .login-sub { color:#888; font-size:14px; margin-bottom:24px; }
