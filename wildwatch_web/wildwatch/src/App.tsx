@@ -1649,7 +1649,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             const c = e.fam.clutch;
             const dateRange = (
               <span className="clutch-dates clickable" title="Go to where the eggs/chicks first appeared"
-                onClick={() => onSightingClick(e.box, c.startObsTime)}>{fmtMs(c.windowStart)} \u2013 {fmtMs(c.windowEnd)}</span>
+                onClick={() => onSightingClick(e.box, c.startObsTime)}>{fmtMs(c.windowStart)} - {fmtMs(c.windowEnd)}</span>
             );
             return (
               <div key={i} className="obs-card">
@@ -1659,6 +1659,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 </div>
                 {e.role === 'parent' ? (
                   <div className="family-box">
+                    <span className="muted">with</span>
                     {e.partner
                       ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
                       : <span className="muted">partner not identified</span>}
