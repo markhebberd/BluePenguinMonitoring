@@ -2455,6 +2455,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {(o.scans || []).map((s: any, j: number) => (
                 <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} navigateDirectly />
               ))}
+              {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
+                <span key={`ns${k}`} className="scan no-scan">No scan</span>
+              ))}
               {o.monitor_filename?.startsWith('web-entry') && o.observation_id && (
                 <button className="remove-scan" style={{marginLeft:'auto'}} onClick={async () => {
                   const reason = prompt(`Delete observation from ${formatDate(o.observation_time_utc)}?\n\nReason (optional):`);
