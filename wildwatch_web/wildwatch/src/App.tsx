@@ -1498,10 +1498,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           <PenguinMini scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, hasReturned: p.hasReturned}} onClick={() => {}} currentStatus />
         </span>
         <span className="bird-title-actions">
-          {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
-          {editing && <><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></>}
+          <span className="bird-action-stack">
+            {canEdit && !editing && <button className="edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+            {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
+            {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
+          </span>
           {onClose && <button className="day-bird-close" onClick={onClose} title="Close" aria-label="Close">×</button>}
-          {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
         </span>
       </div>
 

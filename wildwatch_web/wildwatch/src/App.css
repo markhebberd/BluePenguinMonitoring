@@ -449,6 +449,8 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .day-bird-dock { position:relative; flex:0 0 400px; width:400px; max-width:45vw; background:#fff; border-left:1px solid #ddd; box-shadow:-4px 0 12px rgba(0,0,0,.06); overflow-y:auto; padding:12px 12px 12px; }
 .day-bird-dock .bird-title-row { justify-content:flex-start; }
 .day-bird-dock .bird-title-actions, .detail-bird .bird-title-actions { flex-direction:row; align-items:center; min-width:0; }
+/* Edit stacked over History, sitting left of the × close button on the far right. */
+.bird-action-stack { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .day-bird-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#999; padding:0 4px; }
 .day-bird-close:hover { color:#333; }
 @media (max-width:700px) { .day-bird-dock { flex-basis:100%; width:100%; max-width:100%; border-left:none; } .day-page-docked .day-main { display:none; } }
