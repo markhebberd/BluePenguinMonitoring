@@ -1251,12 +1251,16 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   const [saved, setSaved] = useState(false);
   const ref = useRef<HTMLInputElement|HTMLSelectElement>(null);
   const focused = useRef(false);
+  // The last value we committed via onSave. Guards against a single edit firing onSave
+  // more than once — native date pickers emit several blur events, and each blur would
+  // otherwise re-run onSave (and its reason prompt). Kept in sync with the prop.
+  const lastSaved = useRef(String(value ?? ''));
 
   useEffect(() => { if (editing && ref.current) ref.current.focus(); }, [editing]);
   // Inline fields write through to the parent draft on every change (below), which
   // bumps `value`. Don't resync (and clobber the caret / an in-progress entry) while
   // the field is focused — only when the value changes from outside.
-  useEffect(() => { if (!focused.current) setDraft(String(value ?? '')); }, [value]);
+  useEffect(() => { if (!focused.current) { setDraft(String(value ?? '')); lastSaved.current = String(value ?? ''); } }, [value]);
 
   const display = value !== null && value !== undefined && value !== '' ? String(value) : null;
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
@@ -1278,11 +1282,18 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   if (!canEdit) return <span className="ef-value">{display ?? <span className="muted">{placeholder || '-'}</span>}</span>;
 
   const save = async () => {
-    setSaving(true);
+    if (saving) return;
     let val = type === 'number' ? (draft === '' ? null : parseFloat(draft)) : (draft || null);
     if (type === 'number' && val !== null && min !== undefined && (val as number) < min) val = min;
+    const valStr = String(val ?? '');
+    // Nothing actually changed since the last commit — close without re-saving (and
+    // without re-prompting for a reason). This is what collapses a date field's repeat
+    // blur events into a single save.
+    if (valStr === lastSaved.current) { setEditing(false); return; }
+    lastSaved.current = valStr; // set before awaiting so a concurrent blur is a no-op
+    setSaving(true);
     await onSave(val);
-    setDraft(String(val ?? '')); // resync display to the (possibly clamped) saved value
+    setDraft(valStr); // resync display to the (possibly clamped) saved value
     setSaving(false);
     setEditing(false);
     flash();
