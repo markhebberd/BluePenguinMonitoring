@@ -677,6 +677,7 @@ function queryBirdDetailInner(pengNum: string): any {
       sightingMap.set(key, {
         peng_num: pengNum, date, box, source: 'scan',
         adults: obs.adults || 0, eggs: obs.eggs || 0, chicks: obs.chicks || 0,
+        no_scan: obs.no_scan || 0,
         breeding_status: obs.breeding_status, notes: obs.notes, seen_with: coScans,
       });
     }
@@ -710,11 +711,23 @@ function queryBirdDetailInner(pengNum: string): any {
       const others = s.seen_with.filter((o: any) => o.peng_num !== sw.peng_num);
       partnerMap.get(sw.peng_num)!.sightings.push({
         box: s.box, date: s.date, adults: s.adults, eggs: s.eggs, chicks: s.chicks,
-        breeding_status: s.breeding_status, notes: s.notes, also_seen: others,
+        no_scan: s.no_scan || 0, breeding_status: s.breeding_status, notes: s.notes, also_seen: others,
       });
     }
   }
   const partners = Array.from(partnerMap.values()).sort((a, b) => b.sightings.length - a.sightings.length);
+
+  // Synthetic "no scan" partner: every sighting where unscanned adults were present,
+  // grouped as a single stand-in bird (the observer knows what it means).
+  const noScanSightings = sightings
+    .filter((s: any) => s.source === 'scan' && (s.no_scan || 0) > 0)
+    .map((s: any) => ({
+      box: s.box, date: s.date, adults: s.adults, eggs: s.eggs, chicks: s.chicks,
+      no_scan: s.no_scan, breeding_status: s.breeding_status, notes: s.notes, also_seen: s.seen_with,
+    }));
+  if (noScanSightings.length > 0) {
+    partners.push({ peng_num: null, pit_id: null, sex: null, is_no_scan: true, sightings: noScanSightings });
+  }
 
   // Breeding stats
   const bsMap = new Map<string, any>();

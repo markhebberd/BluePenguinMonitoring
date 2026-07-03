@@ -378,6 +378,12 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .partner-sightings { padding-left:8px; }
 .partner-row { display:flex; gap:10px; align-items:center; font-size:12px; padding:2px 0; }
+/* Shared sightings split by season, with breeding-window groups in a black box */
+.partner-season { margin-bottom:4px; }
+.partner-season-label { font-size:10px; font-weight:600; color:#1a5276; margin:4px 0 2px; }
+.partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
+.partner-window-head { display:flex; justify-content:flex-end; }
+.partner-window-dates { font-size:10px; color:#666; }
 
 /* Login */
 .login-page { height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1a5276,#2e86c1); position:fixed; top:0; left:0; width:100%; z-index:1000; }

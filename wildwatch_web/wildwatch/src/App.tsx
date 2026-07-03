@@ -1500,7 +1500,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   // over every box this bird was seen/chipped in, then keep the clutches where this bird
   // was a parent (→ partner + offspring) or a chick (→ parents + siblings). Recomputed
   // from `data`, which changes identity whenever the cache updates.
-  const pengFamilies = useMemo(() => {
+  const { pengFamilies, boxWindows } = useMemo(() => {
     const myPits = new Set<string>(chips.map((c: any) => (c.pit_id || '').slice(-8)).filter(Boolean));
     const boxNames = new Set<string>();
     for (const s of sightings) if (s.box) boxNames.add(s.box);
@@ -1508,10 +1508,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     const isMine = (b: any) => myPits.has((b.pit_id || '').slice(-8));
     type Entry = { season: string; seasonYear: number; box: string; role: 'parent' | 'chick'; fam: BoxFamily; partner?: any; parents: any[]; siblings: any[] };
     const entries: Entry[] = [];
+    // Per box: every clutch's breeding window, so a shared sighting can be flagged as
+    // falling inside a breeding window (and get the black-box treatment).
+    const boxWindows = new Map<string, { windowStart: number; windowEnd: number }[]>();
     for (const box of boxNames) {
       const bd = queryBoxDetailSync(box);
       if (!bd?.observations?.length) continue;
+      const wins: { windowStart: number; windowEnd: number }[] = [];
       for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const c of sd.clutches) wins.push({ windowStart: c.windowStart, windowEnd: c.windowEnd });
         for (const fam of sd.families) {
           const asParent = (fam.male && myPits.has(fam.male)) || (fam.female && myPits.has(fam.female));
           const asChick = fam.chicks.some(isMine);
@@ -1524,10 +1529,16 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           }
         }
       }
+      boxWindows.set(box, wins);
     }
     entries.sort((a, b) => b.seasonYear - a.seasonYear || a.box.localeCompare(b.box));
-    return entries;
+    return { pengFamilies: entries, boxWindows };
   }, [data]);
+  // The breeding window (if any) containing a shared sighting, plus its NZ date range.
+  const windowFor = (box: string, dateStr: string) => {
+    const t = parseDate(dateStr).getTime();
+    return (boxWindows.get(box) || []).find(w => t >= w.windowStart && t <= w.windowEnd) || null;
+  };
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1719,9 +1730,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
                     <DateLink date={sg.date} onDayClick={() => onSightingClick(b, sg.date)} />
-                    {(sg.seen_with || []).length > 0 && <span className="muted">with</span>}
+                    {((sg.seen_with || []).length > 0 || (sg.no_scan || 0) > 0) && <span className="muted">with</span>}
                     {(sg.seen_with || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
+                    ))}
+                    {Array.from({ length: sg.no_scan || 0 }).map((_, k) => (
+                      <span key={`ns${k}`} className="scan no-scan">No scan</span>
                     ))}
                     {(() => { const ds = displayStatus(sg.breeding_status, sg.eggs, sg.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
                   </div>
@@ -1732,6 +1746,73 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           );
         })}
       </div>}
+
+      {/* Shared sightings — split by season; sightings inside a breeding window sit in a
+          black box tagged with the window dates. "No scan" birds group as one stand-in. */}
+      {partners.length > 0 && (
+        <div className="bird-section">
+          <h3 className="collapsible" onClick={() => toggleSection('partners')}>{expandedSections.partners ? '▾' : '▸'} Shared sightings ({partners.length})</h3>
+          {expandedSections.partners && <p className="muted">Birds seen in the same box at the same time &middot; "No scan" = unscanned birds present</p>}
+          {expandedSections.partners && partners.map((pt: any, pi: number) => {
+            const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+            const partnerRow = (s: any, i: number) => (
+              <a key={i} className="partner-row clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>
+                <DateLink date={s.date} onDayClick={onDayClick} />
+                <span className="bird-chip">Box {s.box}</span>
+                {s.eggs > 0 && <span>{'🥚'.repeat(Math.min(s.eggs, 4))}</span>}
+                {s.chicks > 0 && <span>{'🐣'.repeat(Math.min(s.chicks, 4))}</span>}
+                {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                {(s.also_seen || []).map((sw: any) => (
+                  <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
+                ))}
+              </a>
+            );
+            const bySeason = new Map<string, any[]>();
+            for (const s of pt.sightings) {
+              const label = getSeasonLabel(parseDate(s.date));
+              if (!bySeason.has(label)) bySeason.set(label, []);
+              bySeason.get(label)!.push(s);
+            }
+            const seasonList = Array.from(bySeason.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+            return (
+              <div key={pi} className="partner-card">
+                <div className="partner-head">
+                  <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''} with</span>
+                  {pt.is_no_scan
+                    ? <span className="scan no-scan">No scan</span>
+                    : <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />}
+                </div>
+                {seasonList.map(([label, seasonSightings]) => {
+                  const windowGroups = new Map<string, { win: any; rows: any[] }>();
+                  const loose: any[] = [];
+                  for (const s of seasonSightings) {
+                    const win = windowFor(s.box, s.date);
+                    if (win) {
+                      const gkey = `${s.box}|${win.windowStart}`;
+                      if (!windowGroups.has(gkey)) windowGroups.set(gkey, { win, rows: [] });
+                      windowGroups.get(gkey)!.rows.push(s);
+                    } else loose.push(s);
+                  }
+                  const groups = Array.from(windowGroups.values()).sort((a, b) => b.win.windowStart - a.win.windowStart);
+                  return (
+                    <div key={label} className="partner-season">
+                      <div className="partner-season-label">{seasonRange(label)}</div>
+                      {groups.map((g, gi) => (
+                        <div key={`w${gi}`} className="partner-window-box">
+                          <div className="partner-window-head"><span className="partner-window-dates">{fmtMs(g.win.windowStart)} &ndash; {fmtMs(g.win.windowEnd)}</span></div>
+                          <div className="partner-sightings">{g.rows.map(partnerRow)}</div>
+                        </div>
+                      ))}
+                      {loose.length > 0 && <div className="partner-sightings">{loose.map(partnerRow)}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
 
       {/* Sighting history */}
       {sightings.length > 0 && <div className="bird-section">
@@ -1752,46 +1833,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
               {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
-              {(s.seen_with || []).length > 0 && <span className="muted">with</span>}
+              {((s.seen_with || []).length > 0 || (s.no_scan || 0) > 0) && <span className="muted">with</span>}
               {(s.seen_with || []).map((sw: any) => (
                 <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
+              ))}
+              {Array.from({ length: s.no_scan || 0 }).map((_, k) => (
+                <span key={`ns${k}`} className="scan no-scan">No scan</span>
               ))}
             </div>
             {s.notes && <div className="obs-notes">{s.notes}</div>}
           </div>
         ))}
       </div>}
-
-
-      {/* Shared sightings */}
-      {partners.length > 0 && (
-        <div className="bird-section">
-          <h3 className="collapsible" onClick={() => toggleSection('partners')}>{expandedSections.partners ? '▾' : '▸'} Shared sightings ({partners.length})</h3>
-          {expandedSections.partners && <p className="muted">Birds scanned in the same box at the same time</p>}
-          {expandedSections.partners && partners.map((pt: any) => (
-            <div key={pt.peng_num} className="partner-card">
-              <div className="partner-head">
-                <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''} with</span>
-                <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />
-              </div>
-              <div className="partner-sightings">
-                {pt.sightings.map((s: any, i: number) => (
-                  <a key={i} className="partner-row clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>
-                    <DateLink date={s.date} onDayClick={onDayClick} />
-                    <span className="bird-chip">Box {s.box}</span>
-                    {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 4))}</span>}
-                    {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 4))}</span>}
-                    {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
-                    {(s.also_seen || []).map((sw: any) => (
-                      <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
-                    ))}
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
