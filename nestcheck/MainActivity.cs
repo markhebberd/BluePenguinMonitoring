@@ -434,7 +434,7 @@ namespace PenguinMonitor
             if (_appSettings.RememberedScanners.Count == 0 && !string.IsNullOrEmpty(_appSettings.SelectedBluetoothDevice))
             {
                 var addr = _appSettings.SelectedBluetoothDevice!;
-                var name = BluetoothManager.GetPairedDevices().FirstOrDefault(d => d.Address == addr).Name ?? addr;
+                var name = (BluetoothManager.GetPairedDevices().FirstOrDefault(d => d.Address == addr).Name ?? addr).Trim();
                 _appSettings.RememberedScanners.Add(new RememberedScanner { Address = addr, Name = name, Enabled = true });
                 DataStorageService.saveApplicationSettings(_appSettings);
             }
@@ -443,6 +443,7 @@ namespace PenguinMonitor
         // Add (or re-enable) a scanner the user picked from discovery, then reconnect.
         private void RememberScanner(string address, string name)
         {
+            name = name?.Trim() ?? "";
             var existing = _appSettings.RememberedScanners.FirstOrDefault(s => s.Address == address);
             if (existing == null)
                 _appSettings.RememberedScanners.Add(new RememberedScanner { Address = address, Name = name, Enabled = true });
@@ -2573,10 +2574,25 @@ namespace PenguinMonitor
                         .SetMessage($"{totalMismatched} of your observations today have a different label.\n\nUpdate them all to \"{newLabel}\"?")
                         .SetPositiveButton("Update all", (s2, e2) =>
                         {
-                            foreach (var obs in mismatchedObs) { obs.MonitorFilename = newLabel; obs.IsPendingUpload = true; obs.PendingUploadSinceUtc ??= DateTime.UtcNow; }
+                            foreach (var obs in mismatchedObs)
+                            {
+                                // Server-side observations aren't in the upload queue — copy them into
+                                // PendingObservations so the label change actually uploads.
+                                var obsNzDate = ToNzTime(obs.WhenDataCollectedUtc).Date;
+                                var existingPending = _colonyState.PendingObservations.FirstOrDefault(p =>
+                                    p.BoxName == obs.BoxName && ToNzTime(p.WhenDataCollectedUtc).Date == obsNzDate);
+                                if (existingPending != null) continue; // handled via mismatchedPending
+                                obs.MonitorFilename = newLabel;
+                                obs.IsPendingUpload = true;
+                                obs.PendingUploadSinceUtc ??= DateTime.UtcNow;
+                                if (obs.ObservationId.HasValue)
+                                    obs.ConfirmedAgainstObsId = obs.ObservationId.Value; // replace on server, don't duplicate
+                                _colonyState.SaveBoxObservation(obs.BoxName, obs);
+                            }
                             foreach (var obs in mismatchedPending) { obs.MonitorFilename = newLabel; obs.IsPendingUpload = true; obs.PendingUploadSinceUtc ??= DateTime.UtcNow; }
                             applyLabel();
                             DrawPageLayouts();
+                            TryBackgroundUpload();
                         })
                         .SetNegativeButton("Just set label", (s2, e2) => applyLabel())
                         .Show();

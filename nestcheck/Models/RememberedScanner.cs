@@ -12,10 +12,10 @@ namespace PenguinMonitor.Models
         public string Nickname { get; set; } = "";     // user-editable friendly name
         public bool Enabled { get; set; } = true;      // included in auto-connect when true
 
-        /// <summary>Nickname if set, else the device name, else the address.</summary>
+        /// <summary>Nickname if set, else the device name, else the address. Always trimmed.</summary>
         public string DisplayName =>
-            !string.IsNullOrWhiteSpace(Nickname) ? Nickname
+            (!string.IsNullOrWhiteSpace(Nickname) ? Nickname
             : !string.IsNullOrWhiteSpace(Name) ? Name
-            : Address;
+            : Address).Trim();
     }
 }
