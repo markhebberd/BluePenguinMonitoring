@@ -2496,25 +2496,28 @@ const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#
  *  worth confirming. Tie-break by female-leaning count then peng_num. */
 function MissedScansReport() {
   const days = useMissedScans();
-  const totalBoxes = days.reduce((s: number, d: any) => s + d.boxes.length, 0);
+  const rows = useMemo(() =>
+    days.flatMap((d: any) => d.boxes.map((r: any) => ({ ...r, date: d.date })))
+      .sort((a: any, b: any) => a.box.localeCompare(b.box, undefined, { numeric: true }) || b.date.localeCompare(a.date)),
+  [days]);
 
   return (
     <div className="report-card">
       <h3>Missed adult scans — last 30 days</h3>
-      <p className="muted">Boxes where fewer adults were scanned than recorded present ({totalBoxes} box-days)</p>
-      {days.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
+      <p className="muted">Boxes where fewer adults were scanned than recorded present ({rows.length} box-days)</p>
+      {rows.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
         <table className="guess-rank-table">
           <thead><tr><th>Box</th><th>Date</th><th>Adults</th><th>Scanned</th><th>Missed</th></tr></thead>
           <tbody>
-            {days.map((d: any) => d.boxes.map((r: any) => (
-              <tr key={`${d.date}|${r.box}`}>
-                <td><a className="clickable" href={`/box/${r.box}`}><strong>{r.box}</strong></a></td>
-                <td><a className="clickable" href={`/day/${d.date}`}>{d.date}</a></td>
+            {rows.map((r: any, i: number) => (
+              <tr key={`${r.date}|${r.box}`}>
+                <td>{(i === 0 || rows[i - 1].box !== r.box) ? <a className="clickable" href={`/box/${r.box}`}><strong>{r.box}</strong></a> : ''}</td>
+                <td><a className="clickable" href={`/day/${r.date}`}>{r.date}</a></td>
                 <td>{r.adults}</td>
                 <td>{r.scanned}</td>
                 <td>{r.adults - r.scanned}</td>
               </tr>
-            )))}
+            ))}
           </tbody>
         </table>
       )}
