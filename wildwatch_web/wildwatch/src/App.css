@@ -382,8 +382,9 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .partner-season { margin-bottom:4px; }
 .partner-season-label { font-size:10px; font-weight:600; color:#1a5276; margin:4px 0 2px; }
 .partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
-.partner-window-head { display:flex; justify-content:flex-end; }
-.partner-window-dates { font-size:10px; color:#666; }
+.partner-window-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.partner-window-offspring { display:inline-flex; gap:3px; align-items:center; flex-wrap:wrap; }
+.partner-window-dates { font-size:10px; color:#666; white-space:nowrap; }
 
 /* Login */
 .login-page { height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1a5276,#2e86c1); position:fixed; top:0; left:0; width:100%; z-index:1000; }

@@ -1510,14 +1510,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     const entries: Entry[] = [];
     // Per box: every clutch's breeding window, so a shared sighting can be flagged as
     // falling inside a breeding window (and get the black-box treatment).
-    const boxWindows = new Map<string, { windowStart: number; windowEnd: number }[]>();
+    const boxWindows = new Map<string, { windowStart: number; windowEnd: number; startObsTime: string; fam: BoxFamily }[]>();
     for (const box of boxNames) {
       const bd = queryBoxDetailSync(box);
       if (!bd?.observations?.length) continue;
-      const wins: { windowStart: number; windowEnd: number }[] = [];
+      const wins: { windowStart: number; windowEnd: number; startObsTime: string; fam: BoxFamily }[] = [];
       for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
-        for (const c of sd.clutches) wins.push({ windowStart: c.windowStart, windowEnd: c.windowEnd });
         for (const fam of sd.families) {
+          const c = fam.clutch;
+          wins.push({ windowStart: c.windowStart, windowEnd: c.windowEnd, startObsTime: c.startObsTime, fam });
           const asParent = (fam.male && myPits.has(fam.male)) || (fam.female && myPits.has(fam.female));
           const asChick = fam.chicks.some(isMine);
           if (asParent) {
@@ -1797,12 +1798,35 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   return (
                     <div key={label} className="partner-season">
                       <div className="partner-season-label">{seasonRange(label)}</div>
-                      {groups.map((g, gi) => (
+                      {groups.map((g, gi) => {
+                        const fam = g.win.fam;
+                        return (
                         <div key={`w${gi}`} className="partner-window-box">
-                          <div className="partner-window-head"><span className="partner-window-dates">{fmtMs(g.win.windowStart)} &ndash; {fmtMs(g.win.windowEnd)}</span></div>
+                          <div className="partner-window-head">
+                            {/* Offspring at their final life stage: chipped chick →
+                                PenguinMini, chick never chipped → 🐣, egg that never
+                                hatched → red-✕ egg. */}
+                            <span className="partner-window-offspring">
+                              {fam.chicks.map((ck: any) => (
+                                <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={ck.chip_date ? chickContextDate(ck.chip_date) : undefined} />
+                              ))}
+                              {Array.from({ length: fam.plainChicks }).map((_, j) => (
+                                <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                              ))}
+                              {Array.from({ length: fam.failedEggs }).map((_, j) => (
+                                <span key={`fe${j}`} className="offspring-final egg-failed" title="Egg did not become a chick">{'🥚'}<span className="egg-x">{'✕'}</span></span>
+                              ))}
+                            </span>
+                            <a className="partner-window-dates clickable" href={`/box/${g.rows[0].box}`}
+                              title="Go to the nest at the start of the breeding window"
+                              onClick={ev => navClick(ev, () => onSightingClick(g.rows[0].box, g.win.startObsTime))}>
+                              {fmtMs(g.win.windowStart)} &ndash; {fmtMs(g.win.windowEnd)}
+                            </a>
+                          </div>
                           <div className="partner-sightings">{g.rows.map(partnerRow)}</div>
                         </div>
-                      ))}
+                        );
+                      })}
                       {loose.length > 0 && <div className="partner-sightings">{loose.map(partnerRow)}</div>}
                     </div>
                   );
