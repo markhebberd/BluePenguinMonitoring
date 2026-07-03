@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -726,16 +726,43 @@ function seasonDataIssues(obs: Observation[]) {
   return { dupObs, dupScans, conflicts };
 }
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
-  // Group birds by season
-  const seasonBirds = new Map<string, Map<string, Scan & { lastSeen: string; scanCount: number }>>();
-  const seasonObs = new Map<string, Observation[]>();
+interface BoxFamily {
+  clutch: Clutch;
+  male: string;      // pit8 of the male parent, '' if none detected
+  female: string;    // pit8 of the female parent, '' if none detected
+  parents: any[];    // parent bird objects (0-2)
+  chicks: any[];     // this-season chicks chipped in the nest (bird objects)
+  failedEggs: number;   // eggs that never became a chick (final stage), capped at 4
+  plainChicks: number;  // chicks never chipped in the nest (final stage), capped at 4
+}
+interface BoxSeasonData {
+  label: string;
+  seasonYear: number;
+  seasonStart: Date;
+  seasonEnd: Date;
+  seasonObs: Observation[];   // chronological
+  birds: any[];               // sorted M/F/unsexed, scan-count desc
+  birdMap: Map<string, any>;  // pit8 -> bird
+  clutches: Clutch[];
+  families: BoxFamily[];      // one per clutch; parents empty when no pair detected
+  parentKeys: Set<string>;
+  chickFamily: Map<string, number>; // chick pit8 -> family index
+  isCurrent: boolean;
+}
+
+/** THE shared breeding-family detection for one box's observations: group by season,
+ *  segment each season into clutches, detect each clutch's pair, assign this-season
+ *  chicks, and tally offspring at their final life stage. Both the box breeding
+ *  overview and the bird panel's family view consume this, so the detection algorithm
+ *  lives in exactly one place — change it here and both views update. */
+function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[]): BoxSeasonData[] {
+  const seasonBirds = new Map<string, Map<string, any>>();
+  const seasonObsMap = new Map<string, Observation[]>();
   for (const obs of observations) {
     const label = getSeasonLabel(parseDate(obs.observation_time_utc));
-    if (!seasonObs.has(label)) seasonObs.set(label, []);
-    seasonObs.get(label)!.push(obs);
+    if (!seasonObsMap.has(label)) seasonObsMap.set(label, []);
+    seasonObsMap.get(label)!.push(obs);
   }
-
   for (const obs of observations) {
     const label = getSeasonLabel(parseDate(obs.observation_time_utc));
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
@@ -755,82 +782,87 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
       }
     }
   }
-
-  // Merge allPenguinsInBox — only add birds chipped HERE to the chipping season
-  // Birds chipped elsewhere will already appear from their scan data in the correct season
+  // Merge allPenguinsInBox — only add birds chipped HERE to the chipping season.
+  // Birds chipped elsewhere already appear from their scan data in the correct season.
   for (const p of (allPenguinsInBox || [])) {
     if (!p.chip_date || !p.pit_id || !p.is_chipped_here) continue;
-    const chipDate = parseDate(p.chip_date);
-    const label = getSeasonLabel(chipDate);
+    const label = getSeasonLabel(parseDate(p.chip_date));
     if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
     const birdMap = seasonBirds.get(label)!;
     const key = p.pit_id.slice(-8);
-    if (!birdMap.has(key)) {
-      birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, scanCount: p.scan_count || 1 });
-    }
+    if (!birdMap.has(key)) birdMap.set(key, { ...p, lastSeen: p.last_seen || p.chip_date, scanCount: p.scan_count || 1 });
   }
-
-  // Always surface the current season, even with no sightings yet, so the box shows
-  // a "Season 2026/27: 0 birds" header rather than silently omitting the season.
+  // Always surface the current season, even with no sightings yet.
   const currentLabel = getSeasonLabel();
   if (!seasonBirds.has(currentLabel)) seasonBirds.set(currentLabel, new Map());
 
-  const seasons = Array.from(seasonBirds.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]));
+  const seasons = Array.from(seasonBirds.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const result: BoxSeasonData[] = [];
+  for (const [label, birdMap] of seasons) {
+    const seasonYear = parseInt(label);
+    const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
+    const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
+    // A bird counts as this season's chick only if chipped as a chick DURING this
+    // season — a returning adult chick-chipped in an earlier season is a visitor.
+    const chippedThisSeason = (b: any) => {
+      if (b.chipped_as_adult || !b.chip_date) return false;
+      const cd = new Date(b.chip_date);
+      return cd >= seasonStart && cd < seasonEnd;
+    };
+    const sObsChrono = (seasonObsMap.get(label) || []).slice()
+      .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+    const clutches = segmentClutches(sObsChrono);
+    const pairs = clutches.map(c => detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason));
+    const parentKeys = new Set<string>();
+    for (const pair of pairs) if (pair) { if (pair.male) parentKeys.add(pair.male); if (pair.female) parentKeys.add(pair.female); }
+
+    // Assign each season chick to the clutch whose window holds its chip date; chips
+    // land at the end of an attempt, so otherwise default to the last detected family.
+    const familyIdxs = pairs.map((p, i) => p ? i : -1).filter(i => i >= 0);
+    const chickFamily = new Map<string, number>();
+    for (const b of birdMap.values()) {
+      const k = b.pit_id.slice(-8);
+      if (!chippedThisSeason(b) || parentKeys.has(k)) continue;
+      const ct = new Date(b.chip_date!).getTime();
+      let fi = clutches.findIndex((c, i) => pairs[i] && ct >= c.windowStart && ct <= c.windowEnd);
+      if (fi < 0 && familyIdxs.length > 0) fi = familyIdxs[familyIdxs.length - 1];
+      if (fi >= 0) chickFamily.set(k, fi);
+    }
+
+    // Sort birds: M, F, unsexed; within a group by scan count descending
+    const birds = Array.from(birdMap.values()).sort((a, b) => {
+      const aSex = (a.sex || '').toUpperCase();
+      const bSex = (b.sex || '').toUpperCase();
+      const aOrder = aSex === 'M' ? 0 : aSex === 'F' ? 1 : 2;
+      const bOrder = bSex === 'M' ? 0 : bSex === 'F' ? 1 : 2;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return b.scanCount - a.scanCount;
+    });
+
+    const families: BoxFamily[] = clutches.map((clutch, ci) => {
+      const pair = pairs[ci];
+      const male = pair?.male || '', female = pair?.female || '';
+      const parents = pair ? [birdMap.get(male), birdMap.get(female)].filter(Boolean) : [];
+      const chicks = birds.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
+      // Offspring at FINAL life stage: egg that never hatched, chick never chipped.
+      const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
+      const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - chicks.length);
+      return { clutch, male, female, parents, chicks, failedEggs, plainChicks };
+    });
+
+    result.push({ label, seasonYear, seasonStart, seasonEnd, seasonObs: sObsChrono, birds, birdMap, clutches, families, parentKeys, chickFamily, isCurrent: label === currentLabel });
+  }
+  return result;
+}
+
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
+  const seasonData = computeBoxFamilies(observations, allPenguinsInBox);
 
   return (
     <div className="all-birds">
-      {seasons.map(([label, birdMap]) => {
-        const birds = Array.from(birdMap.values());
-        if (birds.length === 0 && label !== currentLabel) return null;
-
-        const seasonYear = parseInt(label);
-        const seasonStart = new Date(seasonYear, 3, 1); // Apr 1
-        const seasonEnd = new Date(seasonYear + 1, 3, 1); // next Apr 1
-        // A bird counts as this season's chick only if chipped as a chick DURING this
-        // season — a returning adult that was chick-chipped in an earlier season is a
-        // visitor to the box, not this season's offspring.
-        const chippedThisSeason = (b: any) => {
-          if (b.chipped_as_adult || !b.chip_date) return false;
-          const cd = new Date(b.chip_date);
-          return cd >= seasonStart && cd < seasonEnd;
-        };
-
-        // One family per clutch: segment the season into breeding attempts, then
-        // detect each attempt's pair. This season's chicks can never be parents.
-        const sObsChrono = (seasonObs.get(label) || []).slice()
-          .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
-        const clutches = segmentClutches(sObsChrono);
-        const families = clutches.map(c => ({ clutch: c, pair: detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason) }));
-        const parentKeys = new Set<string>();
-        for (const f of families) if (f.pair) {
-          if (f.pair.male) parentKeys.add(f.pair.male);
-          if (f.pair.female) parentKeys.add(f.pair.female);
-        }
-
-        // Assign each season chick to the clutch whose window holds its chip date;
-        // chips land at the end of an attempt, so otherwise default to the season's
-        // last detected family.
-        const familyIdxs = families.map((f, i) => f.pair ? i : -1).filter(i => i >= 0);
-        const chickFamily = new Map<string, number>();
-        for (const b of birds) {
-          const k = b.pit_id.slice(-8);
-          if (!chippedThisSeason(b) || parentKeys.has(k)) continue;
-          const ct = new Date(b.chip_date!).getTime();
-          let fi = families.findIndex(f => f.pair && ct >= f.clutch.windowStart && ct <= f.clutch.windowEnd);
-          if (fi < 0 && familyIdxs.length > 0) fi = familyIdxs[familyIdxs.length - 1];
-          if (fi >= 0) chickFamily.set(k, fi);
-        }
-
-        // Sort birds: M, F, unsexed; within a group by scan count descending
-        const sorted = birds.sort((a, b) => {
-          const aSex = (a.sex || '').toUpperCase();
-          const bSex = (b.sex || '').toUpperCase();
-          const aOrder = aSex === 'M' ? 0 : aSex === 'F' ? 1 : 2;
-          const bOrder = bSex === 'M' ? 0 : bSex === 'F' ? 1 : 2;
-          if (aOrder !== bOrder) return aOrder - bOrder;
-          return b.scanCount - a.scanCount;
-        });
+      {seasonData.map(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
+        if (birds.length === 0 && !isCurrent) return null;
+        const sorted = birds;
 
         // Every non-family sighting is placed in a slot by WHEN it happened: inside a
         // breeding window (`w<ci>`, shown as a visitor beside that family box) or in a
@@ -908,8 +940,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
 
         // Newest observation in this season — the scroll/expand target for the matching
         // season section in the observation list lower on the page.
-        const latestObs = (seasonObs.get(label) || []).reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
-        const issues = seasonDataIssues(seasonObs.get(label) || []);
+        const latestObs = sObsChrono.reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
+        const issues = seasonDataIssues(sObsChrono);
         const issueBadges = [
           { key: 'dupobs', label: 'duplicate observation', detail: issues.dupObs },
           { key: 'conflict', label: 'same-sex conflict', detail: issues.conflicts },
@@ -917,7 +949,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         ].filter(b => b.detail.length > 0);
         // NZ day → newest observation that day, so an issue row can scroll to it.
         const dayToObsTime = new Map<string, string>();
-        for (const o of (seasonObs.get(label) || [])) {
+        for (const o of sObsChrono) {
           const day = toNzDateStr(o.observation_time_utc);
           const prev = dayToObsTime.get(day);
           if (!prev || o.observation_time_utc > prev) dayToObsTime.set(day, o.observation_time_utc);
@@ -957,13 +989,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
               };
               const clutchRow = (ci: number) => {
-                const { clutch, pair } = families[ci];
-                const pairBirds = pair ? [birdMap.get(pair.male), birdMap.get(pair.female)].filter(Boolean) : [];
-                const famChicks = sorted.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
-                // Offspring at FINAL life stage: egg that never hatched → red-✕ egg,
-                // chick never chipped → plain chick, chipped chick → PenguinMini.
-                const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
-                const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - famChicks.length);
+                const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks } = families[ci];
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
                     {clutches.length > 1 && (
@@ -1462,12 +1488,44 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
   const partners: any[] = data.partners || [];
-  const breedingStats: any[] = data.breeding_stats || [];
 
   const chips: any[] = p.chips || [];
   const activeChip = chips.find((c: any) => c.is_active == 1) || chips[0];
 
   const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
+
+  // Peng-centric breeding family: run the SAME nest family detection (computeBoxFamilies)
+  // over every box this bird was seen/chipped in, then keep the clutches where this bird
+  // was a parent (→ partner + offspring) or a chick (→ parents + siblings). Recomputed
+  // from `data`, which changes identity whenever the cache updates.
+  const pengFamilies = useMemo(() => {
+    const myPits = new Set<string>(chips.map((c: any) => (c.pit_id || '').slice(-8)).filter(Boolean));
+    const boxNames = new Set<string>();
+    for (const s of sightings) if (s.box) boxNames.add(s.box);
+    for (const c of chips) if (c.chip_box) boxNames.add(c.chip_box);
+    const isMine = (b: any) => myPits.has((b.pit_id || '').slice(-8));
+    type Entry = { season: string; seasonYear: number; box: string; role: 'parent' | 'chick'; fam: BoxFamily; partner?: any; parents: any[]; siblings: any[] };
+    const entries: Entry[] = [];
+    for (const box of boxNames) {
+      const bd = queryBoxDetailSync(box);
+      if (!bd?.observations?.length) continue;
+      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const fam of sd.families) {
+          const asParent = (fam.male && myPits.has(fam.male)) || (fam.female && myPits.has(fam.female));
+          const asChick = fam.chicks.some(isMine);
+          if (asParent) {
+            entries.push({ season: sd.label, seasonYear: sd.seasonYear, box, role: 'parent', fam,
+              partner: fam.parents.find(b => !isMine(b)), parents: fam.parents, siblings: [] });
+          } else if (asChick) {
+            entries.push({ season: sd.label, seasonYear: sd.seasonYear, box, role: 'chick', fam,
+              parents: fam.parents, siblings: fam.chicks.filter(b => !isMine(b)) });
+          }
+        }
+      }
+    }
+    entries.sort((a, b) => b.seasonYear - a.seasonYear || a.box.localeCompare(b.box));
+    return entries;
+  }, [data]);
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1580,41 +1638,50 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {/* Sightings loading indicator */}
       {sightings.length === 0 && <p className="muted">Loading sighting history...</p>}
 
-      {/* Breeding history by season */}
-      {breedingStats.length > 0 && (
+      {/* Breeding family — this bird's role in each detected nest family, from the same
+          detection (computeBoxFamilies) the box breeding overview uses. */}
+      {pengFamilies.length > 0 && (
         <div className="bird-section">
-          <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history</h3>
-          {expandedSections.breeding && breedingStats.map((bs: any) => {
-            // Eggs that never became chicks are struck through with a red \u2715;
-            // chicks chipped in this nest get a green ring + hover detail.
-            const eggsShown = Math.min(bs.max_eggs, 4);
-            const failedEggs = Math.min(Math.max(0, bs.max_eggs - bs.max_chicks), eggsShown);
-            const okEggs = eggsShown - failedEggs;
-            const chippedChicks: any[] = bs.chipped_chicks || [];
-            const plainChicks = Math.max(0, Math.min(bs.max_chicks, 4) - chippedChicks.length);
+          <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding family ({pengFamilies.length})</h3>
+          {expandedSections.breeding && pengFamilies.map((e, i) => {
+            const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
             return (
-            <div key={bs.season} className="obs-card">
-              <b>{bs.season}</b>
-              <div className="obs-nums">
-                <span>{bs.scans} scan{bs.scans!==1?'s':''}</span>
-                <span>Box{bs.boxes.length>1?'es':''}: {bs.boxes.join(', ')}</span>
-                {okEggs > 0 && <span>{'\uD83E\uDD5A'.repeat(okEggs)}</span>}
-                {Array.from({ length: failedEggs }).map((_, i) => (
-                  <span key={`fe${i}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
-                ))}
-                {plainChicks > 0 && <span>{'\uD83D\uDC23'.repeat(plainChicks)}</span>}
-                {chippedChicks.map((ck: any) => (
-                  <span key={ck.peng_num} className="chick-chipped-marker" onClick={() => onBirdClick(ck.peng_num)}>
-                    {'\uD83D\uDC23'}
-                    <span className="chick-tip">
-                      <PenguinMini scan={ck} onClick={() => onBirdClick(ck.peng_num)} />
-                      <span className="muted">scanned {ck.scan_count} time{ck.scan_count !== 1 ? 's' : ''}{ck.seasons_scanned.length > 0 ? ` in season ${ck.seasons_scanned.join(', ')}` : ''}</span>
-                    </span>
-                  </span>
-                ))}
-                {bs.statuses.map((s:string) => <span key={s} className={`badge ${DARK_TEXT_STATUSES.has(s)?'bordered':''}`} style={{background:STATUS_COLORS[s]||'#ccc',color:DARK_TEXT_STATUSES.has(s)?'#333':'#fff'}}>{s}</span>)}
+              <div key={i} className="obs-card">
+                <div className="obs-top">
+                  <b>{seasonRange(e.season)}</b>
+                  <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
+                  <span className="muted">{e.role === 'parent' ? 'bred here' : 'hatched here'}</span>
+                </div>
+                {e.role === 'parent' ? (
+                  <div className="obs-nums">
+                    <span className="muted">with</span>
+                    {e.partner
+                      ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
+                      : <span className="muted">partner not identified</span>}
+                    {(e.fam.chicks.length > 0 || e.fam.failedEggs > 0 || e.fam.plainChicks > 0) && <span className="muted">{'\u2192'}</span>}
+                    {e.fam.chicks.map((ck: any) => (
+                      <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
+                    ))}
+                    {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
+                      <span key={`fe${j}`} className="egg-failed" title="Egg did not become a chick">{'\uD83E\uDD5A'}<span className="egg-x">{'\u2715'}</span></span>
+                    ))}
+                    {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
+                      <span key={`pc${j}`} title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="obs-nums">
+                    <span className="muted">parents</span>
+                    {e.parents.length > 0
+                      ? e.parents.map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                      : <span className="muted">not identified</span>}
+                    {e.siblings.length > 0 && <span className="muted">siblings</span>}
+                    {e.siblings.map((sb: any) => (
+                      <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
             );
           })}
         </div>
@@ -2150,11 +2217,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         .sort()[0];
       if (firstEggDate && parsedDate >= firstEggDate) {
         if (!confirm(`RED ALERT: ${short} has not been seen in this box before and eggs appeared on ${firstEggDate}. This observation is dated ${parsedDate}. Are you sure?`)) return;
-      } else if (seenBirds.size >= 2) {
-        if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this box (${seenBirds.size} already seen). Are you sure?`)) return;
+      } else if (scannedBirds.length >= 2) {
+        if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this observation (${scannedBirds.length} already added). Are you sure?`)) return;
       }
-    } else if (isNew && seenBirds.size >= 2) {
-      if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this box (${seenBirds.size} already seen). Are you sure?`)) return;
+    } else if (isNew && scannedBirds.length >= 2) {
+      if (!confirm(`WARNING: ${short} is a 3rd+ penguin in this observation (${scannedBirds.length} already added). Are you sure?`)) return;
     }
 
     setScannedBirds([...scannedBirds, short]);
@@ -5135,7 +5202,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-obs">
               <div className="obs-columns">
                 <div className="obs-col obs-col-overview">
-                <h3 className="obs-section-head">Breeding overview</h3>
+                <h3 className="obs-section-head">Breeding history</h3>
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
                   onSeasonClick={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }} />
                 {(() => {
