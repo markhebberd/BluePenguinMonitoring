@@ -563,7 +563,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     if ($boxName) { $chipWhere[] = 'pc.chip_box = ?'; $chipParams[] = $boxName; }
     if (!empty($chipWhere)) {
         $chipStmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code,
-            pc.chip_date, pc.chip_box, pc.chip_by
+            pc.chip_date, pc.chip_box, pc.chip_by, pc.rechip_by
             FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num
             WHERE " . implode(' AND ', $chipWhere) . " ORDER BY pc.chip_date");
         $chipStmt->execute($chipParams);
@@ -591,10 +591,13 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
                 if (!$alreadyScanned) {
                     $key = $pnum . '|' . $c['chip_date'] . '|' . $c['chip_box'];
                     if (!isset($sightings[$key])) {
+                        $chipper = $c['chip_by'] ? 'Chipped by ' . $c['chip_by']
+                            : ($c['rechip_by'] ? 'Rechipped by ' . $c['rechip_by'] : 'Chipped by ?');
                         $sightings[$key] = [
-                            'peng_num' => $pnum, 'date' => $c['chip_date'], 'box' => $c['chip_box'],
+                            'peng_num' => $pnum, 'pit_id' => $c['pit_id'], 'date' => $c['chip_date'], 'box' => $c['chip_box'],
                             'source' => 'chip', 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
-                            'breeding_status' => null, 'notes' => 'Chipped by ' . ($c['chip_by'] ?? ''),
+                            'breeding_status' => null, 'notes' => $chipper,
+                            'chip_by' => $c['chip_by'], 'rechip_by' => $c['rechip_by'],
                             'seen_with' => [],
                         ];
                     }
