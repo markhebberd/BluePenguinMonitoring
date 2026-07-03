@@ -1718,7 +1718,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {boxSightings.map((sg: any, i: number) => (
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
-                    <DateLink date={sg.date} onDayClick={onDayClick} />
+                    <DateLink date={sg.date} onDayClick={() => onSightingClick(b, sg.date)} />
                     {(sg.seen_with || []).length > 0 && <span className="muted">with</span>}
                     {(sg.seen_with || []).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
@@ -1743,8 +1743,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         ) : (
           <div key={i} className="obs-card">
             <div className="obs-top">
-              <b><DateLink date={s.date} onDayClick={onDayClick} /></b>
-              <a className="bird-chip clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onBoxClick(s.box))}>Box {s.box}</a>
+              <b><DateLink date={s.date} onDayClick={() => onSightingClick(s.box, s.date)} /></b>
+              <a className="bird-chip clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>Box {s.box}</a>
             </div>
             <div className="obs-nums">
               {s.adults === 0 && s.eggs === 0 && s.chicks === 0 && <span className="muted">Empty</span>}
@@ -5158,8 +5158,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
           {birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
-              onBoxClick={(box: string) => { closeBird(); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
-              onSightingClick={(box: string, date: string) => { closeBird(); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
+              onBoxClick={(box: string) => { setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
+              onSightingClick={(box: string, date: string) => { setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); }}
               onDayClick={goToDay} />
           ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
           : <p className="muted">Bird not found</p>}
@@ -5346,8 +5346,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-bird">
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'} onClose={() => setSelectedBird(null)}
-                  onBoxClick={(box: string) => { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
-                  onSightingClick={(box: string, date: string) => { setSelectedBird(null); setSelectedBox(box); setHighlightObs(date); setScrollToObs(date); }}
+                  onBoxClick={(box: string) => { setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
+                  onSightingClick={(box: string, date: string) => { setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); }}
                   onDayClick={goToDay} />
               ) : <p className="muted">Loading bird...</p>}
             </div>
