@@ -1407,25 +1407,47 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
 
 /** A chipping event shown as a sighting card: green left border (vs blue for
  *  observations), date + bird mini + "Chipped by X" — no adult/egg/chick counts,
- *  since a chipping isn't an observation and those values are unknown. */
-function ChipCard({ date, chipBy, scan, box, onBoxClick, onBirdClick, onDayClick }: {
-  date: string; chipBy?: string | null; scan: any; box?: string;
+ *  since a chipping isn't an observation and those values are unknown. Multiple birds
+ *  chipped in the same box on the same day share one card (one row per bird). */
+function ChipCard({ date, birds, chipBy, scan, box, onBoxClick, onBirdClick, onDayClick }: {
+  date: string; birds?: any[]; chipBy?: string | null; scan?: any; box?: string;
   onBoxClick?: (box: string) => void; onBirdClick: (num: string) => void; onDayClick?: (day: string) => void;
 }) {
+  const list = (birds && birds.length) ? birds : [{ ...scan, chip_by: chipBy }];
   return (
     <div className="obs-card chip-card">
       <div className="obs-top">
         <span><b><DateLink date={date} onDayClick={onDayClick} /></b></span>
         {box && onBoxClick && <a className="bird-chip clickable" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}>Box {box}</a>}
       </div>
-      <div className="obs-nums">
-        {/* Pass the chip day itself so the mini gets the green chipped-here styling —
-            this card IS the chipping event. */}
-        <PenguinMini scan={scan} onClick={() => onBirdClick(scan.peng_num)} observationDate={date} />
-        <span className="muted">Chipped by {chipBy || '?'}</span>
-      </div>
+      {/* Pass the chip day itself so each mini gets the green chipped-here styling —
+          this card IS the chipping event. */}
+      {list.map((b: any) => (
+        <div className="obs-nums" key={b.pit_id}>
+          <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num)} observationDate={date} />
+          <span className="muted">Chipped by {b.chip_by || '?'}</span>
+        </div>
+      ))}
     </div>
   );
+}
+
+/** Collapse adjacent same-day chipping events into a single card carrying every bird
+ *  chipped that day (each render site here is scoped to one box, so same chip_date ⇒
+ *  same box). Input must already be time-sorted; chip events sit at `<day> 00:00:00`
+ *  so same-day ones are contiguous. */
+function mergeSameDayChips(items: any[]): any[] {
+  const out: any[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!it._chip) { out.push(it); continue; }
+    const chipBirds = [it];
+    while (i + 1 < items.length && items[i + 1]._chip && items[i + 1].chip_date === it.chip_date) {
+      chipBirds.push(items[++i]);
+    }
+    out.push({ ...it, _chipBirds: chipBirds });
+  }
+  return out;
 }
 
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
@@ -3802,8 +3824,8 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   return (
     <div>
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{seasonRange(label)} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
-      {expanded && observations.map((o: any, i: number) => o._chip
-        ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} chipBy={o.chip_by} scan={o} onBirdClick={onBirdClick} onDayClick={onDayClick} />
+      {expanded && mergeSameDayChips(observations).map((o: any, i: number) => o._chip
+        ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} birds={o._chipBirds} onBirdClick={onBirdClick} onDayClick={onDayClick} />
         : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
@@ -5185,7 +5207,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                     }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
                   </h3>
                   {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
-                  {mergedObs.map((obs: any, i: number) => obs._deleted ? (
+                  {mergeSameDayChips(mergedObs).map((obs: any, i: number) => obs._deleted ? (
                     <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
                       <div className="obs-top">
                         <span><s><DateLink date={obs.observation_time_utc} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} /></s></span>
@@ -5201,7 +5223,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                       {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
                     </div>
                   ) : obs._chip ? (
-                    <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} chipBy={obs.chip_by} scan={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} />
+                    <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} birds={obs._chipBirds} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} />
                   ) : (
                     <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
                   ))}
