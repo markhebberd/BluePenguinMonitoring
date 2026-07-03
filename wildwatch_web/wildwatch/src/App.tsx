@@ -2496,6 +2496,18 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
           </button>
         </div>
+        {crossSeasonDates.length > 0 && (
+          <div style={{marginBottom:'6px', paddingBottom:'6px', borderBottom:'1px dashed #ffb74d'}}>
+            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From season {String(season - 1).slice(-2)}'s table, but dated in this season:</div>
+            <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
+              {crossSeasonDates.map(m => (
+                <span key={`prev${m.date_number}`} title={`Season ${String(season - 1).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
+                  <b>{m.date_number}</b> = {formatDate(m.actual_date)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         {dateMappings.length > 0 ? (
           <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
             {dateMappings.map(m => (
@@ -2506,18 +2518,6 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           </div>
         ) : (
           <p style={{fontSize:'12px', color:'#888', margin:0}}>No date mappings. Click "Edit dates" to define: 1 = 26/7/25, 2 = 3/8/25...</p>
-        )}
-        {crossSeasonDates.length > 0 && (
-          <div style={{marginTop:'6px', paddingTop:'6px', borderTop:'1px dashed #ffb74d'}}>
-            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From season {String(season - 1).slice(-2)}'s table, but dated in this season:</div>
-            <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
-              {crossSeasonDates.map(m => (
-                <span key={`prev${m.date_number}`} title={`Season ${String(season - 1).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
-                  <b>{m.date_number}</b> = {formatDate(m.actual_date)}
-                </span>
-              ))}
-            </div>
-          </div>
         )}
         {showDateEditor && (
           <div style={{marginTop:'8px', padding:'8px', background:'#f8f9fa', borderRadius:'6px', border:'1px solid #ddd'}}>
@@ -2639,11 +2639,16 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
         <div className="entry-row">
           <label>Search by ID</label>
-          <PenguinSearch penguins={allPenguins} search={birdSearch} onSearchChange={setBirdSearch} onBirdClick={(num) => {
-            const bird = allPenguins.find((p: any) => p.peng_num === num || p.pit_id === num);
-            if (bird) addBird(bird.pit_id.slice(-8));
-            setBirdSearch('');
-          }} />
+          <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+            <div style={{flex:1, minWidth:0}}>
+              <PenguinSearch penguins={allPenguins} search={birdSearch} onSearchChange={setBirdSearch} onBirdClick={(num) => {
+                const bird = allPenguins.find((p: any) => p.peng_num === num || p.pit_id === num);
+                if (bird) addBird(bird.pit_id.slice(-8));
+                setBirdSearch('');
+              }} />
+            </div>
+            <button type="button" className="add-noscan-btn" onClick={() => { setNoScan(n => n + 1); setAdults(a => a + 1); }}>+ No scan</button>
+          </div>
         </div>
 
         <div className="entry-row">
@@ -2663,7 +2668,6 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                 <button className="remove-scan" onClick={() => { setNoScan(n => n - 1); setAdults(a => Math.max(0, a - 1)); }}>&times;</button>
               </span>
             ))}
-            <button type="button" className="add-noscan-btn" onClick={() => { setNoScan(n => n + 1); setAdults(a => a + 1); }}>+ No scan</button>
           </div>
         </div>
 
