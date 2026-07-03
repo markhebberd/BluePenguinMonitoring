@@ -74,7 +74,9 @@ if ($action === 'season_fm_dates') {
     $seasonInput = $_GET['season'] ?? '';
     $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
     if (!$season) { echo json_encode(['error' => 'season required']); exit; }
-    if (!$canWrite) { http_response_code(403); echo json_encode(['error'=>'Write access required']); exit; }
+    // $canWrite isn't computed until the CRUD section below, so check the role here.
+    $fmRole = $observer['role'] ?? 'viewer';
+    if ($fmRole !== 'admin' && $fmRole !== 'editor') { http_response_code(403); echo json_encode(['error'=>'Write access required']); exit; }
 
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !is_array($input)) { http_response_code(400); echo json_encode(['error'=>'JSON array required']); exit; }
