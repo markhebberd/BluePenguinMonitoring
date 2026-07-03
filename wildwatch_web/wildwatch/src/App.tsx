@@ -3646,6 +3646,19 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   const dayPageRef = useRef<HTMLDivElement>(null);
   const [calHidden, setCalHidden] = useState(false);
 
+  // When the peng detail dock is open, the collapsed "show calendar" button sits to the
+  // LEFT of it (at the dock's left edge) rather than over it. The dock is variable width,
+  // so measure it and offset the fixed button by that width.
+  const docked = !!(sideBird && sideBirdData?.penguin);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [calRight, setCalRight] = useState(16);
+  useLayoutEffect(() => {
+    const update = () => setCalRight(docked && dockRef.current ? dockRef.current.offsetWidth + 16 : 16);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [docked, sideBirdData]);
+
   // When arriving from a box's date link, centre that box's row up-front (before paint,
   // so it doesn't jerk into place after the user has started scrolling) and highlight it.
   useLayoutEffect(() => {
@@ -3668,7 +3681,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
         </div>
       )}
       {calHidden && !peekCalendar && (
-        <button onClick={() => setCalHidden(false)} className="cal-toggle cal-toggle-collapsed" title="Show calendar">
+        <button onClick={() => setCalHidden(false)} className="cal-toggle cal-toggle-collapsed" style={{ right: calRight }} title="Show calendar">
           <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="1,1 5,5 9,1" />
           </svg>
@@ -3839,7 +3852,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       </div>
 
       {sideBird && sideBirdData?.penguin && (
-        <div className="day-bird-dock">
+        <div className="day-bird-dock" ref={dockRef}>
           <BirdPage data={sideBirdData} onBirdClick={handleBirdClick}
             onBoxClick={(box: string) => onBoxClick(box)}
             onSightingClick={(box: string, d: string) => onBoxClick(box, d)}
