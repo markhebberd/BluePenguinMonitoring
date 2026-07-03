@@ -306,7 +306,18 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   );
 }
 
-function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observations: Observation[]; onHighlight?: (date: string | null) => void; onScrollTo?: (date: string) => void }) {
+/** Colour key for the breeding status bars (No, Unlikely, Potential, …). */
+function StatusLegend() {
+  return (
+    <div className="status-bar-legend">
+      {Object.entries(STATUS_NAMES).map(([k, v]) => (
+        <span key={k}><i style={{ background: STATUS_COLORS[k] }} />{v}</span>
+      ))}
+    </div>
+  );
+}
+
+function BreedingStatusBar({ observations, onHighlight, onScrollTo, hideLegend }: { observations: Observation[]; onHighlight?: (date: string | null) => void; onScrollTo?: (date: string) => void; hideLegend?: boolean }) {
   const now = new Date();
   const currentSeasonStart = getSeasonStart(now);
   void now; // currentSeasonEnd no longer needed - full year bar with todayCutoff
@@ -334,11 +345,7 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo }: { observat
       {hasPrevData && (
         <SeasonBar observations={observations} seasonStart={prevSeasonStart} seasonEnd={prevSeasonEnd} label={prevLabel} onHighlight={onHighlight} onScrollTo={onScrollTo} />
       )}
-      <div className="status-bar-legend">
-        {Object.entries(STATUS_NAMES).map(([k, v]) => (
-          <span key={k}><i style={{ background: STATUS_COLORS[k] }} />{v}</span>
-        ))}
-      </div>
+      {!hideLegend && <StatusLegend />}
     </div>
   );
 }
@@ -890,7 +897,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const n = count ?? b.scanCount;
           return (
             <span key={b.pit_id.slice(-8)} className="bird-with-count">
-              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
+              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b) ?? b.lastSeen} />
               {n > 0 && <span className="scan-count">{n}x</span>}
             </span>
           );
@@ -1677,7 +1684,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           {expandedSections.partners && partners.map((pt: any) => (
             <div key={pt.peng_num} className="partner-card">
               <div className="partner-head">
-                <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} />
+                <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />
                 <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''}</span>
               </div>
               <div className="partner-sightings">
@@ -5106,18 +5113,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {/* Header + status bar full width */}
           <div className="detail-full">
             <div className="page-header">
-              <h2>Box {selectedBox}</h2>
-              <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
-            </div>
-            {false ? <p className="muted">Loading...</p> : boxDetail ? (
-              <>
-                {boxDetail.location && (
+              <div className="box-header-left">
+                <h2>Box {selectedBox}</h2>
+                {boxDetail?.location && (
                   <div className="persistent-notes">
                     <EditableField value={boxDetail.location.persistent_notes || ''} onSave={(val) => updateRecord(token, 'observation_locations', boxDetail.location!.location_id, {persistent_notes: val})} placeholder="Box notes (persistent)" canEdit={userRole !== 'viewer'} />
                   </div>
                 )}
-                <BreedingStatusBar observations={boxDetail.observations} onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
-              </>
+                {boxDetail && <StatusLegend />}
+              </div>
+              <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
+            </div>
+            {false ? <p className="muted">Loading...</p> : boxDetail ? (
+              <BreedingStatusBar observations={boxDetail.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
             ) : null}
           </div>
 
