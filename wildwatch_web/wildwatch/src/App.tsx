@@ -5133,6 +5133,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {!false && boxDetail && (
           <div className="detail-split">
             <div className="detail-obs">
+              <div className="obs-columns">
+                <div className="obs-col obs-col-overview">
                 <h3 className="obs-section-head">Breeding overview</h3>
                 <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
                   onSeasonClick={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }} />
@@ -5163,6 +5165,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   </div>
                   );
                 })()}
+                </div>
+                <div className="obs-col obs-col-observations">
               <h3 className="obs-section-head">Observations</h3>
               {(() => {
                 const thisSeasonStart = getSeasonStart().toISOString();
@@ -5242,6 +5246,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                   ))}
                 </>);
               })()}
+                </div>
+              </div>
             </div>
             {selectedBird && (
             <div className="detail-bird">
