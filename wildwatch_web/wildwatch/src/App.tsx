@@ -897,7 +897,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const n = count ?? b.scanCount;
           return (
             <span key={b.pit_id.slice(-8)} className="bird-with-count">
-              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b) ?? b.lastSeen} />
+              <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
               {n > 0 && <span className="scan-count">{n}x</span>}
             </span>
           );
