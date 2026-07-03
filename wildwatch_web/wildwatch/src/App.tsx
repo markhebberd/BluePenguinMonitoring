@@ -2246,6 +2246,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [notes, setNotes] = useState('');
   const [birdSearch, setBirdSearch] = useState('');
   const [dateMappings, setDateMappings] = useState<{date_number:number; actual_date:string}[]>([]);
+  const [prevSeasonMappings, setPrevSeasonMappings] = useState<{date_number:number; actual_date:string}[]>([]);
   const [showDateEditor, setShowDateEditor] = useState(false);
   const [dateEditorText, setDateEditorText] = useState('');
   const [scannedBirds, setScannedBirds] = useState<string[]>([]);
@@ -2258,8 +2259,14 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     if (season < 2020) return;
     fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => setDateMappings(d))
+      .then(d => setDateMappings(Array.isArray(d) ? d : []))
       .catch(() => setDateMappings([]));
+    // The previous season's date table often runs on into this season's calendar range
+    // (observers keep numbering past 1 Apr); surface those trailing dates here too.
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season - 1}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setPrevSeasonMappings(Array.isArray(d) ? d : []))
+      .catch(() => setPrevSeasonMappings([]));
   }, [season]);
 
   useEffect(() => {
@@ -2423,6 +2430,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
   const seasonStart = `${season}-04-01`;
   const seasonEnd = `${season + 1}-03-31`;
+  // Previous-season date-table entries whose actual date lands inside this season's window.
+  const crossSeasonDates = prevSeasonMappings.filter(m => m.actual_date >= seasonStart && m.actual_date <= seasonEnd);
+  const toDmy = (d: string) => `${parseInt(d.slice(8, 10))}/${parseInt(d.slice(5, 7))}/${d.slice(2, 4)}`;
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
   );
@@ -2496,6 +2506,18 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           </div>
         ) : (
           <p style={{fontSize:'12px', color:'#888', margin:0}}>No date mappings. Click "Edit dates" to define: 1 = 26/7/25, 2 = 3/8/25...</p>
+        )}
+        {crossSeasonDates.length > 0 && (
+          <div style={{marginTop:'6px', paddingTop:'6px', borderTop:'1px dashed #ffb74d'}}>
+            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From season {String(season - 1).slice(-2)}'s table, but dated in this season:</div>
+            <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
+              {crossSeasonDates.map(m => (
+                <span key={`prev${m.date_number}`} title={`Season ${String(season - 1).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
+                  <b>{m.date_number}</b> = {formatDate(m.actual_date)}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
         {showDateEditor && (
           <div style={{marginTop:'8px', padding:'8px', background:'#f8f9fa', borderRadius:'6px', border:'1px solid #ddd'}}>
