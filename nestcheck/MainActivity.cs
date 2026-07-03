@@ -4151,9 +4151,9 @@ namespace PenguinMonitor
             _gateStatusSpinner.Add(_uiFactory.CreateSpinner(new string[] { "", "Gate up", "Regate" }));
             _gateStatusSpinner[0].ItemSelected += (s, e) =>
             {
-                if (!_suppressDataChanged) _dataChangedSinceUnlock = true;
-                // Only save if viewing current data (not historical)
-                if (false /* no historical view */) return;
+                // Ignore programmatic selection during page redraw (e.g. box navigation)
+                if (_suppressDataChanged) return;
+                _dataChangedSinceUnlock = true;
 
                 string status = _gateStatusSpinner[0].SelectedItem.ToString();
                 if (status.Equals("Gate up") || status.Equals("Regate"))
