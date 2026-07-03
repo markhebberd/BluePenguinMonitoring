@@ -300,7 +300,9 @@ h3.collapsible:hover { color:#1a5276; }
 .cal-toggle { width:20px; height:20px; border-radius:50%; border:2px solid #ccc; background:#fff; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; flex-shrink:0; z-index:501; }
 .cal-toggle:hover { background:#e3f2fd; color:#1a5276; border-color:#90caf9; }
 .cal-toggle svg { width:10px; height:10px; }
-.cal-toggle-collapsed { position:fixed; top:44px; right:16px; border-color:#ccc; background:rgba(255,255,255,.9); }
+/* Sit astride the seam between the blue site header and the white toolbar (header is
+   44px tall; a 20px button centred on the seam starts at 34px). */
+.cal-toggle-collapsed { position:fixed; top:34px; right:16px; border-color:#ccc; background:rgba(255,255,255,.9); }
 
 /* Daily view */
 .day-page { margin:0 auto; padding:0; display:flex; flex-direction:row; overflow:hidden; height:calc(100dvh - 88px); }

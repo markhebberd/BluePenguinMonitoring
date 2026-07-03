@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -2773,6 +2773,56 @@ function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: stri
   );
 }
 
+function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
+  const v = useDbVersion();
+  const rows = useMemo(() => {
+    // Tally distinct chipped chicks per detected parent across every box (same nest-family
+    // detection the box overview / bird panel use).
+    const byParent = new Map<string, { bird: any; chicks: Set<string> }>();
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const fam of sd.families) {
+          const chickNums = fam.chicks.map((ck: any) => ck.peng_num).filter(Boolean);
+          if (chickNums.length === 0) continue;
+          for (const parent of fam.parents) {
+            if (!parent.peng_num) continue;
+            let e = byParent.get(parent.peng_num);
+            if (!e) { e = { bird: parent, chicks: new Set() }; byParent.set(parent.peng_num, e); }
+            for (const n of chickNums) e.chicks.add(n);
+          }
+        }
+      }
+    }
+    return Array.from(byParent.values())
+      .map(e => ({ bird: e.bird, count: e.chicks.size }))
+      .sort((a, b) => b.count - a.count || (parseInt(a.bird.peng_num) || 0) - (parseInt(b.bird.peng_num) || 0))
+      .slice(0, 10);
+  }, [v]);
+
+  return (
+    <div className="report-card">
+      <h3>Most chipped chicks raised</h3>
+      <p className="muted">Penguins ranked by distinct chipped chicks from nests where they were a detected parent (top 10)</p>
+      {rows.length === 0 ? <p className="muted">No data available</p> : (
+        <table className="guess-rank-table">
+          <thead><tr><th>#</th><th>Penguin</th><th>Chipped chicks</th></tr></thead>
+          <tbody>
+            {rows.map((r: any, i: number) => (
+              <tr key={r.bird.peng_num}>
+                <td>{i + 1}</td>
+                <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
+                <td><strong>{r.count}</strong></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function UnsexedByGuessesReport() {
   const allPenguins = useAllPenguins();
   const rows = useMemo(() => (allPenguins || [])
@@ -3520,7 +3570,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[] }) {
+function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins, peekCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
@@ -3581,7 +3631,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   return (
     <div className={`day-page${sideBird && sideBirdData?.penguin ? ' day-page-docked' : ''}`} ref={dayPageRef}>
       <div className="day-main">
-      {!calHidden && (
+      {(!calHidden || peekCalendar) && (
         <div style={{position:'relative'}}>
           <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
           <button onClick={() => setCalHidden(true)} className="cal-toggle" style={{position:'absolute', bottom:-10, right:16}} title="Hide calendar">
@@ -3591,7 +3641,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
           </button>
         </div>
       )}
-      {calHidden && (
+      {calHidden && !peekCalendar && (
         <button onClick={() => setCalHidden(false)} className="cal-toggle cal-toggle-collapsed" title="Show calendar">
           <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="1,1 5,5 9,1" />
@@ -5215,6 +5265,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="reports-page">
           <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
+          <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
@@ -5240,7 +5291,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
         {passwordDialog}
       </div>
     );
