@@ -2495,27 +2495,29 @@ const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#
 /** Unsexed penguins ranked by how many biometric sex guesses they have — surfaces birds
  *  worth confirming. Tie-break by female-leaning count then peng_num. */
 function MissedScansReport() {
-  const days = useMissedScans();
-  const rows = useMemo(() =>
-    days.flatMap((d: any) => d.boxes.map((r: any) => ({ ...r, date: d.date })))
-      .sort((a: any, b: any) => a.box.localeCompare(b.box, undefined, { numeric: true }) || b.date.localeCompare(a.date)),
-  [days]);
+  const boxes = useMissedScans();
 
   return (
     <div className="report-card">
-      <h3>Missed adult scans — last 30 days</h3>
-      <p className="muted">Boxes where fewer adults were scanned than recorded present ({rows.length} box-days)</p>
-      {rows.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
+      <h3>Possible unchipped penguins — last 30 days</h3>
+      <p className="muted">Boxes where adults were recorded present but fewer were scanned, ranked by how often it happened ({boxes.length} boxes)</p>
+      {boxes.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
         <table className="guess-rank-table">
-          <thead><tr><th>Box</th><th>Date</th><th>Adults</th><th>Scanned</th><th>Missed</th></tr></thead>
+          <thead><tr><th>Box</th><th>Missed</th><th>Days</th></tr></thead>
           <tbody>
-            {rows.map((r: any, i: number) => (
-              <tr key={`${r.date}|${r.box}`}>
-                <td>{(i === 0 || rows[i - 1].box !== r.box) ? <a className="clickable" href={`/box/${r.box}`}><strong>{r.box}</strong></a> : ''}</td>
-                <td><a className="clickable" href={`/day/${r.date}`}>{r.date}</a></td>
-                <td>{r.adults}</td>
-                <td>{r.scanned}</td>
-                <td>{r.adults - r.scanned}</td>
+            {boxes.map((b: any) => (
+              <tr key={b.box}>
+                <td><a className="clickable" href={`/box/${b.box}`}><strong>{b.box}</strong></a></td>
+                <td>{b.missed.length} of {b.observedDays} visit{b.observedDays === 1 ? '' : 's'}</td>
+                <td>
+                  {b.missed.map((m: any, i: number) => (
+                    <Fragment key={m.date}>
+                      {i > 0 && ', '}
+                      <a className="clickable" href={`/day/${m.date}`}>{m.date.slice(5)}</a>
+                      <span className="muted"> ({m.scanned}/{m.adults})</span>
+                    </Fragment>
+                  ))}
+                </td>
               </tr>
             ))}
           </tbody>

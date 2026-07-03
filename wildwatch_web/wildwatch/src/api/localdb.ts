@@ -947,15 +947,20 @@ export function computeMissedScans(): any[] {
     e.scanned = Math.max(e.scanned, scanned);
   }
 
-  const byDate: Record<string, any[]> = {};
+  // Per box: how often was it seen with adults, and how often did scans fall short.
+  // Boxes that repeatedly miss are the strongest unchipped-penguin candidates.
+  const byBox: Record<string, { box: string; observedDays: number; missed: any[] }> = {};
   for (const r of Object.values(byKey)) {
-    if (r.scanned >= r.adults) continue;
-    (byDate[r.date] ||= []).push(r);
+    const e = (byBox[r.box] ||= { box: r.box, observedDays: 0, missed: [] });
+    e.observedDays++;
+    if (r.scanned < r.adults) e.missed.push({ date: r.date, adults: r.adults, scanned: r.scanned });
   }
-  return Object.keys(byDate).sort().reverse().map(date => ({
-    date,
-    boxes: byDate[date].sort((a, b) => a.box.localeCompare(b.box, undefined, { numeric: true })),
-  }));
+  return Object.values(byBox)
+    .filter(b => b.missed.length > 0)
+    .map(b => ({ ...b, missed: b.missed.sort((a: any, x: any) => x.date.localeCompare(a.date)) }))
+    .sort((a, b) => b.missed.length - a.missed.length
+      || (b.missed.length / b.observedDays) - (a.missed.length / a.observedDays)
+      || a.box.localeCompare(b.box, undefined, { numeric: true }));
 }
 
 /** Chick return rates by size, with return-age points. */
