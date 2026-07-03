@@ -907,6 +907,57 @@ export function computePeakAdults(): any[] {
   }));
 }
 
+/** Last 30 days: boxes where fewer adults were scanned than recorded present.
+ *  Per NZ day per box, adults = max recorded across the day's observations,
+ *  scanned = max distinct adult scans in any single observation that day. */
+export function computeMissedScans(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const cutoff = utcToNzDate(new Date(Date.now() - 30 * 86400000).toISOString());
+
+  // Distinct adult scans per observation (same adult rule as distinct-adults report)
+  const scansByObs: Record<string, Set<string>> = {};
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const nzDate = utcToNzDate(obs.observation_time_utc);
+    if (nzDate < cutoff) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    if (!chip) continue;
+    const peng = c.pengByNum.get(chip.peng_num);
+    if (!peng) continue;
+    const isAdult = peng.chipped_as_adult || (chip.chip_date && dayDiff(nzDate, chip.chip_date) > 90);
+    if (!isAdult) continue;
+    (scansByObs[s.observation_id] ||= new Set()).add(s.pit_id);
+  }
+
+  const byKey: Record<string, { date: string; box: string; adults: number; scanned: number }> = {};
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const date = utcToNzDate(o.observation_time_utc);
+    if (date < cutoff) continue;
+    const box = c.locById.get(o.location_id)?.location_name;
+    if (!box) continue;
+    const adults = o.adults || 0;
+    if (adults === 0) continue;
+    const scanned = scansByObs[o.observation_id]?.size || 0;
+    const e = (byKey[`${date}|${box}`] ||= { date, box, adults: 0, scanned: 0 });
+    e.adults = Math.max(e.adults, adults);
+    e.scanned = Math.max(e.scanned, scanned);
+  }
+
+  const byDate: Record<string, any[]> = {};
+  for (const r of Object.values(byKey)) {
+    if (r.scanned >= r.adults) continue;
+    (byDate[r.date] ||= []).push(r);
+  }
+  return Object.keys(byDate).sort().reverse().map(date => ({
+    date,
+    boxes: byDate[date].sort((a, b) => a.box.localeCompare(b.box, undefined, { numeric: true })),
+  }));
+}
+
 /** Chick return rates by size, with return-age points. */
 export function computeChickReturn(): any {
   if (!mem) return { by_season: {}, totals: {}, points: [] };

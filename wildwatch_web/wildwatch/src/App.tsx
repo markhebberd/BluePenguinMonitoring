@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -2494,6 +2494,34 @@ const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#
 
 /** Unsexed penguins ranked by how many biometric sex guesses they have — surfaces birds
  *  worth confirming. Tie-break by female-leaning count then peng_num. */
+function MissedScansReport() {
+  const days = useMissedScans();
+  const totalBoxes = days.reduce((s: number, d: any) => s + d.boxes.length, 0);
+
+  return (
+    <div className="report-card">
+      <h3>Missed adult scans — last 30 days</h3>
+      <p className="muted">Boxes where fewer adults were scanned than recorded present ({totalBoxes} box-days)</p>
+      {days.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
+        <table className="guess-rank-table">
+          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned</th><th>Missed</th></tr></thead>
+          <tbody>
+            {days.map((d: any) => d.boxes.map((r: any, i: number) => (
+              <tr key={`${d.date}|${r.box}`}>
+                <td>{i === 0 ? <a className="clickable" href={`/day/${d.date}`}>{d.date}</a> : ''}</td>
+                <td><a className="clickable" href={`/box/${r.box}`}>{r.box}</a></td>
+                <td>{r.adults}</td>
+                <td>{r.scanned}</td>
+                <td>{r.adults - r.scanned}</td>
+              </tr>
+            )))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function UnsexedByGuessesReport() {
   const allPenguins = useAllPenguins();
   const rows = useMemo(() => (allPenguins || [])
@@ -4935,6 +4963,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
+          <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
           <PeakAdultsChart />

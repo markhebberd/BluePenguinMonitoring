@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -35,6 +35,10 @@ export function useDistinctAdults(): any[] {
 
 export function usePeakAdults(): any[] {
   return useSyncExternalStore(subscribe, () => cached('peakAdults', computePeakAdults));
+}
+
+export function useMissedScans(): any[] {
+  return useSyncExternalStore(subscribe, () => cached('missedScans', computeMissedScans));
 }
 
 export function useChickReturn(): any {
