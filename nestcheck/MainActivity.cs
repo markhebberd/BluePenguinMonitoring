@@ -3150,7 +3150,7 @@ namespace PenguinMonitor
                     if (_singleBoxDataContentLayout != null && tagMode)
                         _singleBoxDataContentLayout.Visibility = ViewStates.Gone;
                     if (_multiBoxViewCard != null)
-                        _multiBoxViewCard.Visibility = tagMode ? ViewStates.Gone : _multiBoxViewCard.Visibility;
+                        _multiBoxViewCard.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
                     if (_settingsCard != null)
                         _settingsCard.Visibility = tagMode ? ViewStates.Gone : _settingsCard.Visibility;
                     if (_breedingDatesCard != null)
@@ -3220,9 +3220,9 @@ namespace PenguinMonitor
                         // Keep the fold/unfold icon in sync with the actual content state
                         bool contentExpanded = _singleBoxDataContentLayout != null && _singleBoxDataContentLayout.Visibility == ViewStates.Visible;
                         _expandButton.SetImageResource(contentExpanded ? Resource.Drawable.fold : Resource.Drawable.unfold);
-                        // Nav buttons are visible whenever the box is expanded (and always in tag mode for box navigation)
+                        // Nav buttons are always visible, even when the box card is collapsed
                         if (_boxNavigationButtonsLayout != null)
-                            _boxNavigationButtonsLayout.Visibility = (tagMode || contentExpanded) ? ViewStates.Visible : ViewStates.Gone;
+                            _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
                         if (_discardButton != null)
                             _discardButton.Visibility = !_isBoxLocked && !tagMode ? ViewStates.Visible : ViewStates.Gone;
                     }
@@ -3796,13 +3796,11 @@ namespace PenguinMonitor
                 if (_singleBoxDataContentLayout.Visibility == ViewStates.Gone)
                 {
                     _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
-                    _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
                     expandSingleBoxImageButton.SetImageResource(Resource.Drawable.fold);
                 }
                 else
                 {
                     _singleBoxDataContentLayout.Visibility = ViewStates.Gone;
-                    _boxNavigationButtonsLayout.Visibility = ViewStates.Gone;
                     expandSingleBoxImageButton.SetImageResource(Resource.Drawable.unfold);
                 }
             };
