@@ -14,13 +14,16 @@ define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain
 // ============ Colony penguin number prefix ============
 // Penguins are numbered per-colony with a 2-4 letter prefix (e.g. PT319, NI1); the
 // prefixed value is the DB primary key, and penguins.colony_id records the home
-// colony. For display, only the VIEWING colony's prefix is stripped — birds at their
-// home colony show bare numbers ("319"), visitors keep theirs ("NI7" seen at PT).
-// This keeps a visiting PT706 distinguishable from a local NI706.
+// colony. Bare numbers are the PT (Tarakohe) standard: only PT's prefix is stripped
+// for display when viewing PT ("PT319" → "319"). All other colonies keep their
+// prefix even at home (NI birds always show "NI1"), so a bare number always means
+// a PT bird and NI706 never collides with PT's 706.
+const BARE_NUMBER_PREFIXES = ['PT'];
 
-/** Strip the viewing colony's prefix for display ("PT319" viewed from PT → "319";
- *  foreign-colony birds keep their prefix so they stay unambiguous). */
+/** Strip the viewing colony's prefix for display, but only for colonies whose local
+ *  standard is bare numbers (PT). Everything else keeps its prefix. */
 function displayPengNum(string $pengNum, string $viewPrefix): string {
+    if (!in_array($viewPrefix, BARE_NUMBER_PREFIXES, true)) return $pengNum;
     $len = strlen($viewPrefix);
     if ($len > 0 && strncmp($pengNum, $viewPrefix, $len) === 0 && ctype_digit(substr($pengNum, $len))) {
         return substr($pengNum, $len);
