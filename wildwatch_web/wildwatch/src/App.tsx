@@ -1120,8 +1120,10 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     setDraftScans(draftScans.filter(s => scanKey(s) !== scanKey(scan)));
     setField(f, Math.max(0, (draft[f] || 0) - 1));
   };
-  const draftAddNoScan = () => { if (draft) setField('no_scan', (draft.no_scan || 0) + 1); };
-  const draftRemoveNoScan = () => { if (draft) setField('no_scan', Math.max(0, (draft.no_scan || 0) - 1)); };
+  // A "no scan" is an adult that was present but couldn't be scanned, so it counts
+  // toward the adult total — add/remove it in step with the adult count.
+  const draftAddNoScan = () => { if (draft) { setField('no_scan', (draft.no_scan || 0) + 1); setField('adults', (draft.adults || 0) + 1); } };
+  const draftRemoveNoScan = () => { if (draft && (draft.no_scan || 0) > 0) { setField('no_scan', (draft.no_scan || 0) - 1); setField('adults', Math.max(0, (draft.adults || 0) - 1)); } };
 
   // Commit the whole draft on Done: one observations update for changed fields, plus
   // create/delete for added/removed scans. Nothing was written before this point.
