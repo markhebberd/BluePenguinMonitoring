@@ -4259,7 +4259,12 @@ export function EmbeddedPanel() {
   useEffect(() => {
     (window as any).wwShow = (kind: 'box'|'bird', id: string) => {
       if (!id) return;
-      navTo({ kind: kind === 'box' ? 'box' : 'bird', id: String(id) });
+      // Host is opening a fresh panel — start a new history session so ◀ only
+      // appears once the user has navigated within the panel.
+      const v = { kind: kind === 'box' ? 'box' : 'bird', id: String(id) } as const;
+      histRef.current = { stack: [v], idx: 0 };
+      setHighlightObs(null); setScrollToObs(null); setView(v);
+      updateNavTitle();
     };
     (window as any).wwSetColony = (n: number) => {
       const c = parseInt(String(n), 10);
