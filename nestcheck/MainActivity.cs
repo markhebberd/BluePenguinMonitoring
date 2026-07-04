@@ -3690,7 +3690,7 @@ namespace PenguinMonitor
             foreach (var s in obs.ScannedIds)
             {
                 var badgeBirdId = s.BirdId;
-                var badge = CreateScanBadge(badgeBirdId, () => ShowBirdDialog(badgeBirdId, isTodayScan: false), textSize: 10);
+                var badge = CreateScanBadge(badgeBirdId, () => ShowBirdPanel(badgeBirdId), textSize: 10);
                 badge.LayoutParameters = flowParams;
                 scansRow.AddView(badge);
             }
@@ -4784,16 +4784,8 @@ namespace PenguinMonitor
             scanLayout.SetPadding(12, 8, 12, 8);
             scanLayout.SetGravity(GravityFlags.CenterVertical);
 
-            // pengMiniView badge — tap opens the bird on the website
-            var badge = CreateScanBadge(scan.BirdId, () =>
-            {
-                var pn = penguinData?.PengNum ?? "";
-                if (!string.IsNullOrEmpty(pn))
-                    StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
-                        Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pn}")));
-                else
-                    Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
-            }, textSize: 14);
+            // pengMiniView badge — tap shows the bird panel in a modal (no prompt)
+            var badge = CreateScanBadge(scan.BirdId, () => ShowBirdPanel(scan.BirdId, penguinData?.PengNum), textSize: 14);
             scanLayout.AddView(badge);
 
             // Time (with a 🆕 marker for birds chipped today)
@@ -4872,63 +4864,60 @@ namespace PenguinMonitor
 
             return scanLayout;
         }
-        private void ShowBirdDialog(string birdId, bool isTodayScan = true)
+        // Opens the read-only Wildwatch bird panel in a modal WebView. The panel is fetched
+        // live and scoped to this one bird (/bird/<peng>?embed=1 -> /api/bird-detail.php),
+        // reusing the exact web rendering so it can never drift from the website. Tapping a
+        // bird mini-view goes straight here — no prompt. The session token is injected as
+        // window.__WW_TOKEN__ before page scripts run, so it never appears in the URL.
+        private void ShowBirdPanel(string birdId, string? pengNumHint = null)
         {
-            PenguinData? pd = null;
-            _remotePenguinData?.TryGetValue(birdId, out pd);
-            var shortId = birdId.Length > 8 ? birdId.Substring(birdId.Length - 8) : birdId;
-            var pengNum = pd?.PengNum ?? "";
-            var title = !string.IsNullOrEmpty(pengNum) ? $"#{pengNum} {shortId}" : shortId;
-            if (pd != null)
+            var pengNum = pengNumHint ?? "";
+            if (string.IsNullOrEmpty(pengNum))
             {
-                var sex = pd.Sex == "M" ? " ♂" : pd.Sex == "F" ? " ♀" : "";
-                title += sex;
+                PenguinData? pd = null;
+                _remotePenguinData?.TryGetValue(birdId, out pd);
+                pengNum = pd?.PengNum ?? "";
+            }
+            if (string.IsNullOrEmpty(pengNum))
+            {
+                Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
+                return;
             }
 
-            var container = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            container.SetPadding(16, 16, 16, 16);
+            var colonyId = (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
+            var token = _appSettings?.AuthToken ?? "";
 
-            var bioButton = _uiFactory.CreateStyledButton("Enter biometric data", isTodayScan ? UIFactory.PRIMARY_BLUE : Color.LightGray);
-            var bioParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            bioParams.SetMargins(8, 8, 8, 8);
-            bioButton.LayoutParameters = bioParams;
-            bioButton.Enabled = isTodayScan;
-            if (!isTodayScan) bioButton.Alpha = 0.5f;
-            container.AddView(bioButton);
-
-            if (!isTodayScan)
-            {
-                var warningText = new TextView(this) { Text = "Only for today's scans", TextSize = 12 };
-                warningText.SetTextColor(UIFactory.DANGER_RED);
-                warningText.Gravity = GravityFlags.Center;
-                var warningParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                warningParams.SetMargins(8, 0, 8, 8);
-                warningText.LayoutParameters = warningParams;
-                container.AddView(warningText);
-            }
-
-            var webButton = _uiFactory.CreateStyledButton("Open on website", UIFactory.SUCCESS_GREEN);
-            webButton.LayoutParameters = bioParams;
-            container.AddView(webButton);
+            var webView = new Android.Webkit.WebView(this);
+            webView.Settings.JavaScriptEnabled = true;
+            webView.Settings.DomStorageEnabled = true; // the embed uses localStorage for the token
+            webView.SetWebViewClient(new BirdPanelWebViewClient(token));
+            var url = $"https://wildwatch.co.nz/bird/{Android.Net.Uri.Encode(pengNum)}?embed=1&colony_id={colonyId}";
+            webView.LoadUrl(url);
 
             var dialog = new AlertDialog.Builder(this)
-                .SetTitle(title)
-                .SetView(container)
-                .SetNegativeButton("Cancel", (s, e) => { })
+                .SetView(webView)
+                .SetNegativeButton("Close", (s, e) => { })
                 .Create();
-
-            bioButton.Click += (s, e) => { if (isTodayScan) { dialog.Dismiss(); ShowBiometricForm(birdId, pd, pengNum); } };
-            webButton.Click += (s, e) =>
-            {
-                dialog.Dismiss();
-                if (!string.IsNullOrEmpty(pengNum))
-                    StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
-                        Android.Net.Uri.Parse($"https://wildwatch.co.nz/bird/{pengNum}")));
-                else
-                    Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
-            };
-
             dialog.Show();
+            dialog.Window?.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+        }
+
+        // Injects the session token as a JS global before the embed's own scripts execute,
+        // so its fetch to /api/bird-detail.php is authenticated without the token ever going
+        // into the URL (and thus never into a server log or history entry).
+        private class BirdPanelWebViewClient : Android.Webkit.WebViewClient
+        {
+            private readonly string _injectJs;
+            public BirdPanelWebViewClient(string token)
+            {
+                // Session tokens are hex (bin2hex from auth.php), so no escaping is needed.
+                _injectJs = "window.__WW_TOKEN__='" + (token ?? "") + "';";
+            }
+            public override void OnPageStarted(Android.Webkit.WebView? view, string? url, Android.Graphics.Bitmap? favicon)
+            {
+                base.OnPageStarted(view, url, favicon);
+                view?.EvaluateJavascript(_injectJs, null);
+            }
         }
 
         // Observed sex-guess scale stored in penguin_biometric_data.observed_sex (wildwatch codes PM/MM/U/MF/PF).
