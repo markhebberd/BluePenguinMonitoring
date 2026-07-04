@@ -4229,23 +4229,55 @@ export function EmbeddedPanel() {
   }, [colonyId, token]);
 
   // Navigation is instant — the whole colony is in mem, so no fetch per bird/box.
-  const goBird = (num: string) => { if (num) { setHighlightObs(null); setScrollToObs(null); setView({ kind: 'bird', id: num }); } };
-  const goBox = (box: string) => { if (box) { setHighlightObs(null); setScrollToObs(null); setView({ kind: 'box', id: box }); } };
+  // A view-history stack backs the host app's ◀/▶ buttons (window.wwBack/wwForward).
+  const histRef = useRef<{ stack: { kind: 'box'|'bird'; id: string }[]; idx: number }>(
+    { stack: initialId ? [{ kind: initialKind, id: initialId }] : [], idx: initialId ? 0 : -1 });
+  // The host app watches document.title (WebChromeClient.onReceivedTitle) to
+  // show/hide its ◀/▶ buttons — there's no other JS→native channel here.
+  const updateNavTitle = () => {
+    const h = histRef.current;
+    document.title = `wwnav:${h.idx > 0 ? 1 : 0}:${h.idx < h.stack.length - 1 ? 1 : 0}`;
+  };
+  const navTo = (v: { kind: 'box'|'bird'; id: string }) => {
+    const h = histRef.current;
+    h.stack = h.stack.slice(0, h.idx + 1);
+    h.stack.push(v);
+    h.idx = h.stack.length - 1;
+    setHighlightObs(null); setScrollToObs(null); setView(v);
+    updateNavTitle();
+  };
+  const goBird = (num: string) => { if (num) navTo({ kind: 'bird', id: num }); };
+  const goBox = (box: string) => { if (box) navTo({ kind: 'box', id: box }); };
   const scrollObs = (t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); };
+
+  // Tell the host app when the colony sync has finished (it watches document.title) —
+  // drives the "Web view" line in nestcheck's sync modal.
+  useEffect(() => { if (status === 'ready') document.title = `wwready:${Date.now()}`; }, [status]);
 
   // JS bridge for a persistent host WebView: render a new bird/box or switch colony
   // without a page reload (see EMBED-FULLSYNC-PLAN.md Phase 2).
   useEffect(() => {
     (window as any).wwShow = (kind: 'box'|'bird', id: string) => {
       if (!id) return;
-      setHighlightObs(null); setScrollToObs(null);
-      setView({ kind: kind === 'box' ? 'box' : 'bird', id: String(id) });
+      navTo({ kind: kind === 'box' ? 'box' : 'bird', id: String(id) });
     };
     (window as any).wwSetColony = (n: number) => {
       const c = parseInt(String(n), 10);
       if (c > 0) setEmbedColony(c);
     };
-    return () => { delete (window as any).wwShow; delete (window as any).wwSetColony; };
+    const step = (dir: number) => {
+      const h = histRef.current;
+      const i = h.idx + dir;
+      if (i < 0 || i >= h.stack.length) return false;
+      h.idx = i;
+      setHighlightObs(null); setScrollToObs(null); setView(h.stack[i]);
+      updateNavTitle();
+      return true;
+    };
+    (window as any).wwBack = () => step(-1);
+    (window as any).wwForward = () => step(1);
+    updateNavTitle();
+    return () => { delete (window as any).wwShow; delete (window as any).wwSetColony; delete (window as any).wwBack; delete (window as any).wwForward; };
   }, []);
 
   if (status === 'error') return <div className="embed-state embed-error">Couldn't load colony data<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
