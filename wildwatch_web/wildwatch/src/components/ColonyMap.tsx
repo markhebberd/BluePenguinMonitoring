@@ -22,14 +22,17 @@ interface ColonyMapProps {
   onBoxSelect: (boxId: string) => void;
 }
 
-/** MapContainer's `center` prop only applies on mount, so it won't follow a colony
- *  switch. Recenter imperatively when the computed center changes (i.e. a new colony),
- *  keeping the current zoom. Same colony → same average → no-op, so panning isn't yanked back. */
-function RecenterOnColony({ lat, lon }: { lat: number; lon: number }) {
+/** Fit the map to every box in the colony, so outliers (e.g. a box a few hundred
+ *  metres from the cluster) are always framed rather than left off-screen. Refits only
+ *  when the marker envelope changes (colony switch or a box moves), so a user's manual
+ *  pan/zoom within the same colony isn't yanked back. No maxZoom cap — a tight cluster
+ *  is allowed to zoom right in. */
+function FitToBounds({ positions, dep }: { positions: [number, number][]; dep: string }) {
   const map = useMap();
   useEffect(() => {
-    map.setView([lat, lon]);
-  }, [lat, lon]);
+    if (positions.length === 1) { map.setView(positions[0], 19); return; }
+    map.fitBounds(L.latLngBounds(positions), { padding: [40, 40] });
+  }, [dep]);
   return null;
 }
 
@@ -40,9 +43,14 @@ export function ColonyMap({ boxTags, selectedBox, onBoxSelect }: ColonyMapProps)
 
   if (entries.length === 0) return <div className="map-empty">No GPS data available</div>;
 
-  // Calculate center from all points
-  const avgLat = entries.reduce((sum, [, t]) => sum + t.Latitude, 0) / entries.length;
-  const avgLon = entries.reduce((sum, [, t]) => sum + t.Longitude, 0) / entries.length;
+  const positions = entries.map(([, t]) => [t.Latitude, t.Longitude] as [number, number]);
+  // Initial center (fallback before FitToBounds runs on first paint).
+  const avgLat = positions.reduce((s, p) => s + p[0], 0) / positions.length;
+  const avgLon = positions.reduce((s, p) => s + p[1], 0) / positions.length;
+  // Envelope signature — refit when the spread changes (colony switch or a box moves).
+  const lats = positions.map(p => p[0]);
+  const lons = positions.map(p => p[1]);
+  const boundsKey = `${Math.min(...lats).toFixed(5)},${Math.min(...lons).toFixed(5)},${Math.max(...lats).toFixed(5)},${Math.max(...lons).toFixed(5)}`;
 
   const makeIcon = (boxId: string, isSelected: boolean) => L.divIcon({
     className: '',
@@ -68,7 +76,7 @@ export function ColonyMap({ boxTags, selectedBox, onBoxSelect }: ColonyMapProps)
   return (
     <div className="map-container">
       <MapContainer center={[avgLat, avgLon]} zoom={17} style={{ height: '100%', width: '100%' }}>
-        <RecenterOnColony lat={avgLat} lon={avgLon} />
+        <FitToBounds positions={positions} dep={boundsKey} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
