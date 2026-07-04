@@ -1175,7 +1175,7 @@ namespace PenguinMonitor
             }
 
             // Show sync dialog — transitions from progress to results
-            var progressMessages = new[] { "📦 Boxes...", "🐧 Penguins...", "📍 Tags..." };
+            var progressMessages = new[] { "📦 Boxes...", "🐧 Penguins...", "📍 Tags...", "🌐 Web view..." };
             var cancelled = false;
             AlertDialog? syncDialog = null;
 
@@ -1188,6 +1188,13 @@ namespace PenguinMonitor
                     .SetCancelable(false)
                     .Create();
                 syncDialog?.Show();
+
+                // Manual sync also clears + re-syncs the embed web view's cached colony data.
+                RefreshEmbedWebView(status =>
+                {
+                    progressMessages[3] = $"🌐 {status}";
+                    RunOnUiThread(() => syncDialog?.SetMessage(string.Join("\n", progressMessages)));
+                });
             }
 
             _ = Task.Run(async () =>
@@ -4881,6 +4888,45 @@ namespace PenguinMonitor
         // render via the JS bridge (window.wwShow) — no page load, no network, works offline.
         private Android.Webkit.WebView? _embedWebView;
         private int _embedColonyId;
+        // ◀/▶ visibility for the open embed dialog — driven by the embed app, which reports
+        // its view-history state through document.title ("wwnav:<back>:<fwd>").
+        private bool _embedCanBack, _embedCanFwd;
+        private Android.Widget.Button? _embedBackBtn, _embedFwdBtn;
+        // One-shot callback fired when the embed signals it has finished a colony sync
+        // (document.title = "wwready:...") — used by the sync modal's web-cache line.
+        private Action? _onEmbedReady;
+
+        // Manual Sync: wipe the embed's web storage (IndexedDB colony cache + HTTP cache)
+        // and reboot it so its data is freshly pulled. Must run on the UI thread.
+        private void RefreshEmbedWebView(Action<string> onStatus)
+        {
+            try
+            {
+                _embedWebView?.ClearCache(true);
+                Android.Webkit.WebStorage.Instance?.DeleteAllData();
+                if (string.IsNullOrEmpty(_appSettings?.AuthToken)) { onStatus("Web view: cleared"); return; }
+                var colonyId = CurrentColonyIdOrDefault();
+                var webView = GetOrCreateEmbedWebView();
+                _embedColonyId = colonyId;
+                _onEmbedReady = () => onStatus("Web view ✓");
+                webView.LoadUrl($"https://wildwatch.co.nz/box/_?embed=1&colony_id={colonyId}");
+                onStatus("Web view: re-syncing...");
+            }
+            catch { onStatus("Web view ✗"); }
+        }
+
+        private void UpdateEmbedNavButtons()
+        {
+            if (_embedBackBtn != null) _embedBackBtn.Visibility = _embedCanBack ? ViewStates.Visible : ViewStates.Invisible;
+            if (_embedFwdBtn != null) _embedFwdBtn.Visibility = _embedCanFwd ? ViewStates.Visible : ViewStates.Invisible;
+        }
+
+        private class EmbedChromeClient : Android.Webkit.WebChromeClient
+        {
+            private readonly Action<string?> _onTitle;
+            public EmbedChromeClient(Action<string?> onTitle) { _onTitle = onTitle; }
+            public override void OnReceivedTitle(Android.Webkit.WebView? view, string? title) => _onTitle(title);
+        }
 
         private int CurrentColonyIdOrDefault() =>
             (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
@@ -4895,6 +4941,23 @@ namespace PenguinMonitor
                 webView.Settings.JavaScriptEnabled = true;
                 webView.Settings.DomStorageEnabled = true; // the embed uses localStorage + IndexedDB
                 webView.SetWebViewClient(new EmbedWebViewClient(_appSettings?.AuthToken ?? ""));
+                webView.SetWebChromeClient(new EmbedChromeClient(title =>
+                {
+                    if (title == null) return;
+                    if (title.StartsWith("wwnav:"))
+                    {
+                        var parts = title.Split(':');
+                        _embedCanBack = parts.Length > 1 && parts[1] == "1";
+                        _embedCanFwd = parts.Length > 2 && parts[2] == "1";
+                        RunOnUiThread(UpdateEmbedNavButtons);
+                    }
+                    else if (title.StartsWith("wwready"))
+                    {
+                        var cb = _onEmbedReady;
+                        _onEmbedReady = null;
+                        cb?.Invoke();
+                    }
+                }));
                 _embedWebView = webView;
             }
             return _embedWebView;
@@ -4951,12 +5014,25 @@ namespace PenguinMonitor
 
             var dialog = new AlertDialog.Builder(this)
                 .SetView(webView)
+                .SetNeutralButton("◀", (s, e) => { })
                 .SetNegativeButton("Close", (s, e) => { })
+                .SetPositiveButton("▶", (s, e) => { })
                 .Create();
             // Detach on dismiss so the warm WebView can be re-hosted by the next dialog.
-            dialog.DismissEvent += (s, e) => (webView.Parent as ViewGroup)?.RemoveView(webView);
+            dialog.DismissEvent += (s, e) =>
+            {
+                (webView.Parent as ViewGroup)?.RemoveView(webView);
+                _embedBackBtn = _embedFwdBtn = null;
+            };
             dialog.Show();
             dialog.Window?.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+            // Re-wiring Click replaces the auto-dismiss listener, so ◀/▶ keep the dialog open;
+            // they step through the embed's view history via the JS bridge.
+            _embedBackBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Neutral);
+            if (_embedBackBtn != null) _embedBackBtn.Click += (s, e) => webView.EvaluateJavascript("window.wwBack&&window.wwBack()", null);
+            _embedFwdBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Positive);
+            if (_embedFwdBtn != null) _embedFwdBtn.Click += (s, e) => webView.EvaluateJavascript("window.wwForward&&window.wwForward()", null);
+            UpdateEmbedNavButtons();
         }
 
         private class JsResultCallback : Java.Lang.Object, Android.Webkit.IValueCallback
