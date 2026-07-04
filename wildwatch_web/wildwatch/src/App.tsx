@@ -459,19 +459,23 @@ function computeDateStats(date: string) {
   const excluded = getFmExcluded();
   const requiredBoxes = allLocs.filter(l => !excusedBoxes.has(l.location_name) && !excluded.has(l.location_name.toUpperCase())).map(l => l.location_name);
   const isFullMonitor = requiredBoxes.length > 0 && requiredBoxes.every(b => boxes.has(b));
-  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, totalLocations: allLocs.length };
+  const missingBoxes = requiredBoxes.filter(b => !boxes.has(b)).sort((a, b) => { const na = parseInt(a), nb = parseInt(b); return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b); });
+  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, missingBoxes, totalLocations: allLocs.length };
 }
 
 function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
   const multiObs = stats.obs > stats.boxes;
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const reg = date ? registeredFmDates.get(date.length > 10 ? toNzDateStr(date) : date) : undefined;
+  // For a missed FM date, name the missing boxes when only a few, else just the count.
+  const missing: string[] = stats.missingBoxes || [];
+  const missedSuffix = missing.length > 0 && missing.length < 4 ? ` — missed "${missing.join(', ')}"` : ` — missed (${missing.length})`;
   return (<>
     {showDate && date && <b className="date-stats-date">{formatDate(date)}</b>}
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
-    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : ' — missed'}</span>}
+    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : missedSuffix}</span>}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}

@@ -54,6 +54,12 @@ function parseFmExcluded(raw?: string | null): Set<string> {
 // A box whose most recent breeding_status is one of these is excused from Full Monitor:
 // DCM (dead/collapsed/missing) or IGN (deliberately ignored) — while it holds that status.
 const FM_EXCUSED_STATUSES = new Set(['DCM', 'IGN']);
+
+/** Sort box/location names numerically where possible ("2" before "140"), else lexically. */
+function compareBoxNames(a: string, b: string): number {
+  const na = parseInt(a), nb = parseInt(b);
+  return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+}
 type StoreNames = typeof STORES[number];
 
 // ============ Store subscriptions ============
@@ -147,7 +153,8 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   // Required = all locations not excluded/excused (DCM or IGN). FM = all required boxes observed.
   const missingBoxes = c.locations.filter(l => !excluded.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !excusedBoxes.has(l.location_name));
   const isFullMonitor = missingBoxes.length === 0 && boxes.size > 0;
-  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, totalLocations: c.locations.length };
+  const missingNames = missingBoxes.map(l => l.location_name).sort(compareBoxNames);
+  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, missingBoxes: missingNames, totalLocations: c.locations.length };
 }
 
 function buildDateStats(c: MemCache): void {
