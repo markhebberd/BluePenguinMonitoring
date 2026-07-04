@@ -435,7 +435,9 @@ function useDateTooltip() {
   return { tip, show, hide };
 }
 
-const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any> }>({ show: () => {}, hide: () => {}, statsCache: new Map() });
+// registeredFmDates: NZ date (YYYY-MM-DD) -> the season + date-number it was registered as
+// in the enter-date workflow. Used, alongside a computed full monitor, to flag FM dates green.
+const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any>; registeredFmDates: Map<string, { season: number; number: number }> }>({ show: () => {}, hide: () => {}, statsCache: new Map(), registeredFmDates: new Map() });
 
 function computeDateStats(date: string) {
   const day = queryDay(date);
@@ -460,11 +462,14 @@ function computeDateStats(date: string) {
 
 function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
   const multiObs = stats.obs > stats.boxes;
+  const { registeredFmDates } = useContext(DateTooltipCtx);
+  const reg = date ? registeredFmDates.get(date.length > 10 ? toNzDateStr(date) : date) : undefined;
   return (<>
     {showDate && date && <b className="date-stats-date">{formatDate(date)}</b>}
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
+    {reg && <span style={{color:'#2e7d32'}}> · <b>FM date {reg.number}</b> ({seasonRange(String(reg.season))})</span>}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}
@@ -491,8 +496,11 @@ function DateTooltipPortal({ tip, statsCache }: { tip: { date: string; x: number
 
 function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: string) => void }) {
   const day = date.length > 10 ? toNzDateStr(date) : date;
-  const { show, hide } = useContext(DateTooltipCtx);
-  return <a className="date-link" href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
+  const { show, hide, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
+  // Green when the day was a full monitor (computed, same as the calendar) or was
+  // registered as an FM date for its season in the enter-date workflow.
+  const isFm = statsCache.get(day)?.isFullMonitor || registeredFmDates.has(day);
+  return <a className={`date-link${isFm ? ' fm-date' : ''}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}</a>;
 }
 
@@ -5622,8 +5630,22 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Date stats are precomputed in localdb on sync — just read the cache
   const dateStatsCache = useDateStats();
 
+  // FM dates registered in the enter-date workflow (all seasons), keyed by NZ date.
+  const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number }>>(new Map());
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/crud.php?action=all_fm_dates', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(rows => {
+        const m = new Map<string, { season: number; number: number }>();
+        if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number) });
+        setRegisteredFmDates(m);
+      })
+      .catch(() => {});
+  }, [token]);
+
   const dateTip = useDateTooltip();
-  const dateTipCtx = useMemo(() => ({ ...dateTip, statsCache: dateStatsCache }), [dateTip, dateStatsCache]);
+  const dateTipCtx = useMemo(() => ({ ...dateTip, statsCache: dateStatsCache, registeredFmDates }), [dateTip, dateStatsCache, registeredFmDates]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
   const [menuSide, setMenuSide] = useState<'left'|'right'>(() => (localStorage.getItem('ww_menu_side') as 'left'|'right') || 'right');

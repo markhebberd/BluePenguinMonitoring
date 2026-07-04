@@ -279,6 +279,8 @@ h3.collapsible:hover { color:#1a5276; }
 /* Date links */
 .date-link { color:inherit; cursor:pointer; text-decoration:none; }
 .date-link:hover { color:#1a5276; }
+.date-link.fm-date { color:#2e7d32; font-weight:600; }
+.date-link.fm-date:hover { color:#1b5e20; }
 
 /* Reports */
 .reports-page { max-width:1000px; margin:0 auto; padding:20px; }

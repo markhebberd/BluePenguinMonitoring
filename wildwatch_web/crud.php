@@ -52,6 +52,13 @@ if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     exit;
 }
 
+// All registered FM dates across every season — lets the app flag FM dates app-wide
+if ($action === 'all_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $stmt = $pdo->query("SELECT season_year, date_number, actual_date FROM date_mappings ORDER BY actual_date");
+    echo json_encode($stmt->fetchAll());
+    exit;
+}
+
 if ($action === 'change_password') { handleChangePassword($pdo, $observer); exit; }
 
 $table = $_GET['table'] ?? '';
