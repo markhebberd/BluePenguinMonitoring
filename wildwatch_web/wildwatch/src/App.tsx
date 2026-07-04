@@ -672,17 +672,6 @@ const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3r
 /** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
-/** Rough age from a chip date to today, e.g. "3y 2m" / "5m". The initial chip date is
- *  the bird's age reference (chick chipping is near hatch). */
-function ageFromDate(dateStr: string): string {
-  const start = new Date(dateStr.length > 10 ? dateStr : dateStr + 'T00:00:00');
-  const now = new Date();
-  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-  if (now.getDate() < start.getDate()) months--;
-  if (months < 0) months = 0;
-  const y = Math.floor(months / 12), m = months % 12;
-  return y > 0 ? `${y}y ${m}m` : `${m}m`;
-}
 
 /** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
  *  observations). All dates are NZ days. Returns human-readable detail lines so the
@@ -1616,7 +1605,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 already read off the mini above. Everything shows again under Edit. */}
             {editing && <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} /></td></tr>}
             {editing && <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>}
-            {chips[0]?.chip_date && <tr><td className="muted">Age</td><td>{ageFromDate(chips[0].chip_date)}{p.chipped_as_adult ? <span className="muted"> (since chipping)</span> : null}</td></tr>}
             {!editing && activeChip?.pit_id && (
               <tr><td className="muted">Chip ID</td><td>
                 <span style={{fontFamily:'monospace'}}>{activeChip.pit_id.slice(-8)}</span>
@@ -1627,6 +1615,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
             {chips.map((c: any, i: number) => {
+              // Rechips (any chip past the first) only show under Edit — the collapsed
+              // summary lists just the initial chip.
+              if (i > 0 && !editing) return null;
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();
               return (<Fragment key={`chip${i}`}>
