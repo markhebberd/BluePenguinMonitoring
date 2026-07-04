@@ -1054,7 +1054,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
-                          <span key={`fe${i}`} className="offspring-final" title="Egg did not become a chick">{'🥚'}</span>
+                          <span key={`fe${i}`} className="offspring-final" title="Egg did not hatch">{'🥚'}</span>
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
@@ -1859,7 +1859,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                         ))}
                         {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
-                          <span key={`fe${j}`} className="offspring-final" title="Egg did not become a chick">{'\uD83E\uDD5A'}</span>
+                          <span key={`fe${j}`} className="offspring-final" title="Egg did not hatch">{'\uD83E\uDD5A'}</span>
                         ))}
                         {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
                           <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
@@ -1987,7 +1987,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                               ))}
                               {Array.from({ length: fam.failedEggs }).map((_, j) => (
-                                <span key={`fe${j}`} className="offspring-final" title="Egg did not become a chick">{'🥚'}</span>
+                                <span key={`fe${j}`} className="offspring-final" title="Egg did not hatch">{'🥚'}</span>
                               ))}
                             </span>
                             <a className="partner-window-dates clickable" href={`/box/${g.rows[0].box}`}
