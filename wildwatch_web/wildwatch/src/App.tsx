@@ -2366,7 +2366,12 @@ function parseSeasonDate(input: string, _seasonYear: number): string | null {
 }
 
 function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPenguins: any[]; onBack: () => void }) {
-  const [season, setSeason] = useState(getSeasonStart().getFullYear());
+  // Remember the selected season across nav-away/back (page unmounts when leaving /enter)
+  const [season, setSeason] = useState(() => {
+    const saved = parseInt(sessionStorage.getItem('ww_entry_season') || '', 10);
+    return Number.isFinite(saved) ? saved : getSeasonStart().getFullYear();
+  });
+  useEffect(() => { sessionStorage.setItem('ww_entry_season', String(season)); }, [season]);
   const [box, setBox] = useState('');
   const [dateInput, setDateInput] = useState('');
   const [parsedDate, setParsedDate] = useState<string|null>(null);
