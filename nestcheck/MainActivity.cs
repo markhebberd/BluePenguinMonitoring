@@ -2683,7 +2683,7 @@ namespace PenguinMonitor
                     var request = new HttpRequestMessage(HttpMethod.Get, $"{DataStorageService.WILDWATCH_BASE_URL}/colonies.php");
                     if (_appSettings.IsAuthenticated)
                         request.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                    var response = await new HttpClient { Timeout = TimeSpan.FromSeconds(10) }.SendAsync(request);
+                    var response = await Http.CreateClient(TimeSpan.FromSeconds(10)).SendAsync(request);
                     var json = await response.Content.ReadAsStringAsync();
                     var allColonies = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json) ?? new();
 
@@ -5336,7 +5336,7 @@ namespace PenguinMonitor
                 {
                     try
                     {
-                        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                        var client = Http.CreateClient(TimeSpan.FromSeconds(15));
                         var token = _appSettings.AuthToken;
                         // New birds belong to the colony being worked — the server numbers
                         // them within it (e.g. NI7) and stamps penguins.colony_id.

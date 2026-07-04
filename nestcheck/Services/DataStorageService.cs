@@ -19,7 +19,7 @@ namespace PenguinMonitor.Services
         internal const string BOX_NOTES_FILENAME = "boxNotes.json";
         internal const string BREEDING_DATES_FILENAME = "predictedDates.json";
 
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        private static readonly HttpClient _httpClient = Http.CreateClient(TimeSpan.FromSeconds(15));
         private const int RETRY_MAX_SECONDS = 30;
         private const int RETRY_DELAY_MS = 5000;
 

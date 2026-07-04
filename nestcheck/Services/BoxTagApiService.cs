@@ -24,10 +24,7 @@ namespace PenguinMonitor.Services
             _apiUrl = apiUrl.TrimEnd('/');
             _tokenProvider = tokenProvider;
             _colonyProvider = colonyProvider;
-            _httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(30)
-            };
+            _httpClient = Http.CreateClient(TimeSpan.FromSeconds(30));
         }
 
         // Every request carries the colony the user is currently viewing (read live so a
