@@ -56,10 +56,14 @@ function estimateLaidDate(observations: Observation[]): number | null {
 }
 
 function displayStatus(status: string|null, eggs: number, chicks: number): string|null {
-  if (status === 'BR') {
+  const s = (status || '').trim();
+  // Eggs/chicks in the box mean incubation/guard has started, whatever pre-breeding
+  // assessment (NO/UNL/POT/CON/BR/blank) was last recorded. Explicit stage or alert
+  // statuses (I, G, PG, MOULT, ABN, DCM) always display as stored.
+  if (['BR', 'CON', 'POT', 'UNL', 'NO', ''].includes(s)) {
     if (chicks > 0) return 'G';
     if (eggs > 0) return 'I';
-    return 'NO';
+    if (s === 'BR') return 'NO';
   }
   return status;
 }
