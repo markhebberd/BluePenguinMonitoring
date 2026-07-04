@@ -470,7 +470,7 @@ function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boole
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
-    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#c62828'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : ' — missed'}</span>}
+    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : ' — missed'}</span>}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}
