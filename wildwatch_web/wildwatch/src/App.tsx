@@ -4533,6 +4533,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [tableData, setTableData] = useState<any>(null);
   const [tableCount, setTableCount] = useState<number>(0);
   const [page, setPage] = useState(0);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'ASC' | 'DESC'>('ASC');
   const [browseErr, setBrowseErr] = useState('');
   const [browseLoading, setBrowseLoading] = useState(false);
 
@@ -4552,17 +4554,29 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     } catch (e: any) { setBrowseErr(e.message); }
   };
 
-  const openTable = async (table: string, toPage = 0) => {
-    setSelTable(table); setPage(toPage); setBrowseErr(''); setBrowseLoading(true);
+  // Fetch one page. Sorting/paging re-query server-side (ORDER BY is applied to the
+  // whole table, not just the loaded page). recount only on a fresh table selection.
+  const loadPage = async (table: string, toPage: number, sCol: string | null, sDir: 'ASC' | 'DESC', recount: boolean) => {
+    setSelTable(table); setPage(toPage); setSortCol(sCol); setSortDir(sDir);
+    setBrowseErr(''); setBrowseLoading(true);
     try {
-      if (toPage === 0) {
+      if (recount) {
         const c = await execSql(`SELECT COUNT(*) AS n FROM ${qId(table)}`);
         setTableCount(Number(c.rows[0]?.n ?? 0));
       }
-      const d = await execSql(`SELECT * FROM ${qId(table)} LIMIT ${PAGE} OFFSET ${toPage * PAGE}`);
+      const orderBy = sCol ? ` ORDER BY ${qId(sCol)} ${sDir}` : '';
+      const d = await execSql(`SELECT * FROM ${qId(table)}${orderBy} LIMIT ${PAGE} OFFSET ${toPage * PAGE}`);
       setTableData(d);
     } catch (e: any) { setBrowseErr(e.message); setTableData(null); }
     setBrowseLoading(false);
+  };
+
+  const openTable = (table: string) => loadPage(table, 0, null, 'ASC', true);        // fresh selection: reset sort
+  const gotoPage = (p: number) => { if (selTable) loadPage(selTable, p, sortCol, sortDir, false); };
+  const sortBy = (col: string) => {
+    if (!selTable) return;
+    const dir: 'ASC' | 'DESC' = sortCol === col && sortDir === 'ASC' ? 'DESC' : 'ASC';
+    loadPage(selTable, 0, col, dir, false);                                          // re-sort from page 0
   };
 
   useEffect(() => { if (canSql && tables === null) loadTables(); }, [canSql]);
@@ -4588,12 +4602,17 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     navigator.clipboard.writeText(lines.join('\n'));
   };
 
-  // Shared read-only results grid (used by both the browser and the console).
-  const resultGrid = (res: any) => (
+  // Shared read-only results grid. Pass `sort` (browser only) to make headers clickable —
+  // sorting re-queries the whole table server-side rather than sorting the current page.
+  const resultGrid = (res: any, sort?: { col: string | null; dir: 'ASC' | 'DESC'; onSort: (c: string) => void }) => (
     <div style={{ overflow: 'auto', maxHeight: 460, border: '1px solid #ddd' }}>
       <table style={{ fontSize: 12, fontFamily: 'monospace', borderCollapse: 'collapse' }}>
         <thead><tr>{res.columns.map((c: string) => (
-          <th key={c} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{c}</th>
+          <th key={c} onClick={sort ? () => sort.onSort(c) : undefined}
+            title={sort ? 'Sort by this column' : undefined}
+            style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap', cursor: sort ? 'pointer' : 'default', userSelect: 'none' }}>
+            {c}{sort && sort.col === c ? (sort.dir === 'ASC' ? ' ▲' : ' ▼') : ''}
+          </th>
         ))}</tr></thead>
         <tbody>
           {res.rows.map((row: any, i: number) => (
@@ -4702,17 +4721,17 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                   <span className="muted" style={{ fontSize: 12 }}>{tableCount.toLocaleString()} row{tableCount === 1 ? '' : 's'}</span>
                   {tableCount > PAGE && (
                     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                      <button className="action-btn" disabled={page === 0 || browseLoading} onClick={() => openTable(selTable, page - 1)}>‹ Prev</button>
+                      <button className="action-btn" disabled={page === 0 || browseLoading} onClick={() => gotoPage(page - 1)}>‹ Prev</button>
                       <span className="muted" style={{ fontSize: 12 }}>
                         {(page * PAGE + 1).toLocaleString()}–{Math.min((page + 1) * PAGE, tableCount).toLocaleString()}
                       </span>
-                      <button className="action-btn" disabled={(page + 1) * PAGE >= tableCount || browseLoading} onClick={() => openTable(selTable, page + 1)}>Next ›</button>
+                      <button className="action-btn" disabled={(page + 1) * PAGE >= tableCount || browseLoading} onClick={() => gotoPage(page + 1)}>Next ›</button>
                     </span>
                   )}
                   {tableData && tableData.rowCount > 0 && <button className="action-btn" onClick={() => copyCsv(tableData)}>Copy CSV</button>}
                 </div>
                 {browseLoading ? <p className="muted">Loading…</p>
-                  : tableData && tableData.columns.length > 0 ? resultGrid(tableData)
+                  : tableData && tableData.columns.length > 0 ? resultGrid(tableData, { col: sortCol, dir: sortDir, onSort: sortBy })
                   : <p className="muted">Empty table.</p>}
               </>
             )}
