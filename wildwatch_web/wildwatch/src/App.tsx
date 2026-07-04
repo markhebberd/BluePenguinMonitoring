@@ -2499,11 +2499,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     if (!box || !parsedDate) { setMessage('Box and valid date required'); return; }
     // Never save a duplicate — one observation per box per date
     const dup = allBoxObs.find((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate);
-    if (dup) {
-      setMessage(`Not saved — Box ${box} already has an observation on ${formatDate(parsedDate)}`);
-      setDupObs({ box, time: dup.observation_time_utc });
-      return;
-    }
+    if (dup) { setDupObs({ box, time: dup.observation_time_utc }); return; }
     setSaving(true); setMessage(''); setDupObs(null);
 
     try {
@@ -2869,11 +2865,17 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
         </div>
 
-        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') || message.startsWith('Not saved') ? 'login-error' : 'entry-success'}>
+        {dupObs && createPortal(
+          <div className="dup-modal-backdrop" onClick={() => setDupObs(null)}>
+            <div className="dup-modal" onClick={e => e.stopPropagation()}>
+              <h3>Data not saved</h3>
+              <p>Duplicate found — Box {dupObs.box} already has an observation on {formatDate(dupObs.time)}.</p>
+              <a className="day-box-link" href={`/?box=${encodeURIComponent(dupObs.box)}&obs=${encodeURIComponent(dupObs.time)}`}>view existing observation →</a>
+              <button className="entry-save" style={{marginTop:12}} onClick={() => setDupObs(null)}>OK</button>
+            </div>
+          </div>, document.body)}
+        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') ? 'login-error' : 'entry-success'}>
           {message}
-          {dupObs && message.startsWith('Not saved') && (
-            <a className="day-box-link" style={{marginLeft:8, whiteSpace:'nowrap'}} href={`/?box=${encodeURIComponent(dupObs.box)}&obs=${encodeURIComponent(dupObs.time)}`}>view existing observation →</a>
-          )}
           {lastSavedObsId && !message.startsWith('Error') && !message.startsWith('Failed') && (
             <button style={{marginLeft:8, padding:'2px 10px', fontSize:'12px', background:'#F44336', color:'#fff', border:'none', borderRadius:'4px', cursor:'pointer'}} onClick={async () => {
               await deleteRecord(token, 'observations', lastSavedObsId, 'Undo - entry made in error');

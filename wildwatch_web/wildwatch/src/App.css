@@ -626,3 +626,9 @@ select.ef-input.ef-placeholder { color:#888; }
 .done-btn:hover { background:#2e86c1 !important; }
 .edit-btns { display:flex; gap:4px; margin-left:auto; }
 .persistent-notes { font-size:13px; color:#666; font-style:italic; margin:4px 0; }
+
+/* Duplicate-observation failure popup (entry page) */
+.dup-modal-backdrop { position:fixed; inset:0; z-index:800; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; }
+.dup-modal { background:#fff; border-radius:8px; padding:20px 24px; max-width:360px; box-shadow:0 8px 30px rgba(0,0,0,0.35); text-align:center; }
+.dup-modal h3 { margin:0 0 8px; color:#c0392b; }
+.dup-modal p { margin:0 0 10px; font-size:14px; color:#333; }
