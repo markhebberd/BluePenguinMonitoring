@@ -3838,6 +3838,10 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
   const sideBirdData = useBirdDetail(sideBird);
+  // Stable identity so DayCalendar's centre-on-mount effect (keyed on `dates`) doesn't
+  // re-fire on unrelated re-renders — e.g. a date tooltip appearing — and yank the
+  // calendar's horizontal scroll to the current month.
+  const sorted = useMemo(() => [...dates].sort(), [dates]);
 
   useEffect(() => {
     if (externalBird) setSideBird(externalBird);
@@ -3858,7 +3862,6 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
 
-  const sorted = [...dates].sort();
 
   // Group observations and chippings by box
   const byBox: Record<string, { obs: any[]; chips: any[] }> = {};
