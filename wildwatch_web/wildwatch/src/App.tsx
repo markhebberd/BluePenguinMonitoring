@@ -3878,7 +3878,23 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   );
 }
 
-function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; day?: string } {
+function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; day?: string; obs?: string } {
+  // Query-param form (current): box and bird are independent so a bird panel can
+  // stay open across box changes and survive refresh/back — e.g. /?box=12&bird=PM1234.
+  // obs (observation time) is a click-only anchor that deep-links to one observation.
+  const q = new URLSearchParams(window.location.search);
+  if (Array.from(q.keys()).length > 0) {
+    return {
+      box: q.get('box') || undefined,
+      bird: q.get('bird') || undefined,
+      day: q.get('day') || undefined,
+      obs: q.get('obs') || undefined,
+      enter: q.has('enter'),
+      admin: q.has('admin'),
+      reports: q.has('reports'),
+    };
+  }
+  // Legacy path form — old bookmarks and cmd+click on path-style hrefs still resolve.
   const path = window.location.pathname;
   const boxMatch = path.match(/^\/box\/(.+)/);
   const birdMatch = path.match(/^\/bird\/(.+)/);
@@ -4921,6 +4937,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // birdData from useBirdDetail hook
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
+  // Click-only deep-link anchor for a single observation. Unlike highlight/scroll (which
+  // are hover-driven and transient) this persists into the URL as ?obs=, scoped to its box.
+  const [obsAnchor, setObsAnchor] = useState<{box:string;time:string}|null>(initial.box && initial.obs ? { box: initial.box, time: initial.obs } : null);
   const [dayBox, setDayBox] = useState<string|null>(null); // box to centre+highlight in day view
   const allPenguins = useAllPenguins();
   const [penguinSearch, setPenguinSearch] = useState('');
@@ -4939,26 +4958,37 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [loadProgress, setLoadProgress] = useState('');
   const [loadPct, setLoadPct] = useState<number|null>(null);
 
-  // Sync state to URL
+  // Sync state to URL. Admin/reports/enter/day are standalone full-screen modes, so
+  // they own the URL exclusively. box + bird compose — both are serialized together so
+  // an open bird panel is preserved across box changes, refresh, and back/forward.
   useEffect(() => {
     let path = '/';
-    if (showAdmin) path = '/admin';
-    else if (showReports) path = '/reports';
-    else if (showEntry) path = '/enter';
-    else if (selectedDay) path = `/day/${selectedDay}`;
-    else if (selectedBox) path = `/box/${selectedBox}`;
-    else if (selectedBird) path = `/bird/${selectedBird}`;
-    if (window.location.pathname !== path) {
+    if (showAdmin) path = '/?admin=1';
+    else if (showReports) path = '/?reports=1';
+    else if (showEntry) path = '/?enter=1';
+    else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}`;
+    else {
+      const q = new URLSearchParams();
+      if (selectedBox) q.set('box', selectedBox);
+      if (selectedBird) q.set('bird', selectedBird);
+      // Only carry the obs anchor while its own box is showing — never leak it onto another box.
+      if (selectedBox && obsAnchor && obsAnchor.box === selectedBox) q.set('obs', obsAnchor.time);
+      const s = q.toString();
+      path = s ? `/?${s}` : '/';
+    }
+    if (window.location.pathname + window.location.search !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay, obsAnchor]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, enter, admin: adm, reports, day } = parseUrl();
-      // Back/forward lands on a fresh view — drop cross-view scroll targets
+      const { box, bird, obs, enter, admin: adm, reports, day } = parseUrl();
+      // Back/forward lands on a fresh view — drop cross-view scroll targets. The obs anchor
+      // is restored below; the box-load effect re-scrolls to it once the box data is ready.
       setHighlightObs(null); setScrollToObs(null); setDayBox(null);
+      setObsAnchor(box && obs ? { box, time: obs } : null);
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
       setShowEntry(enter || false);
@@ -5060,12 +5090,29 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const boxDetail = useBoxDetail(loading ? null : selectedBox);
 
-  // On box change, keep the penguin panel collapsed until a penguin is clicked
-  // (don't auto-open a bird).
+  // Leaving box view drops the transient highlight. Box + bird otherwise coexist (the
+  // panel rides along across box changes); "fresh" box navigation that should reset the
+  // panel clears the bird explicitly at its call site (openBox, grid/map/arrows, search).
   useEffect(() => {
-    if (!selectedBox) { setHighlightObs(null); return; }
-    setSelectedBird(null);
+    if (!selectedBox) setHighlightObs(null);
   }, [selectedBox]);
+
+  // A box's obs anchor only makes sense for that box — drop a stale anchor when the box changes.
+  useEffect(() => {
+    if (obsAnchor && obsAnchor.box !== selectedBox) setObsAnchor(null);
+  }, [selectedBox, obsAnchor]);
+
+  // Deep-link / back-forward restore: once the anchored box's data is loaded, scroll to and
+  // highlight the observation. Guarded so a background data refresh doesn't re-scroll.
+  const lastRestoredObs = useRef<string|null>(null);
+  useEffect(() => {
+    if (!selectedBox || !boxDetail || !obsAnchor || obsAnchor.box !== selectedBox) return;
+    const key = `${selectedBox}|${obsAnchor.time}`;
+    if (lastRestoredObs.current === key) return;
+    lastRestoredObs.current = key;
+    setHighlightObs(obsAnchor.time);
+    setScrollToObs(obsAnchor.time);
+  }, [boxDetail, selectedBox, obsAnchor]);
 
   const birdData = useBirdDetail(loading ? null : selectedBird);
 
@@ -5079,6 +5126,24 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const closeBird = () => {
     setSelectedBird(null);
+  };
+
+  // Navigate to a box from inside the bird panel. Desktop keeps the bird panel open
+  // (it rides along in the split view); narrow screens can't show both, so we land on
+  // the box and dismiss the bird. `date`, when given, highlights that observation.
+  const goToBoxFromBird = (box: string, date?: string) => {
+    setHighlightObs(null); setScrollToObs(null);
+    if (window.innerWidth < 900) { setSelectedBird(null); setPreviousBox(null); }
+    setObsAnchor(date ? { box, time: date } : null);
+    setSelectedBox(box);
+    if (date) setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10);
+  };
+
+  // Fresh box navigation (grid, map, arrows): reset the panel — show just the box.
+  const openBox = (box: string) => {
+    setSelectedBird(null);
+    setPreviousBox(null);
+    setSelectedBox(box);
   };
 
   // All box IDs from observations (not just RFID-tagged ones)
@@ -5111,10 +5176,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     // Box → box: the date-scroll came from a day view link into the old box — it
     // doesn't apply to a different box, so drop it.
     if (e.key === 'ArrowRight' && idx < sortedBoxIds.length - 1) {
-      setHighlightObs(null); setScrollToObs(null);
+      setHighlightObs(null); setScrollToObs(null); setSelectedBird(null);
       setSelectedBox(sortedBoxIds[idx + 1]);
     } else if (e.key === 'ArrowLeft' && idx > 0) {
-      setHighlightObs(null); setScrollToObs(null);
+      setHighlightObs(null); setScrollToObs(null); setSelectedBird(null);
       setSelectedBox(sortedBoxIds[idx - 1]);
     } else if (e.key === 'Escape') {
       setSelectedBox(null);
@@ -5317,7 +5382,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
-          <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
+          <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setObsAnchor({ box, time }); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
@@ -5344,7 +5409,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
         {passwordDialog}
       </div>
     );
@@ -5367,8 +5432,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
           {birdData?.penguin ? (
             <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'}
-              onBoxClick={(box: string) => { setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
-              onSightingClick={(box: string, date: string) => { setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); }}
+              onBoxClick={(box: string) => goToBoxFromBird(box)}
+              onSightingClick={(box: string, date: string) => goToBoxFromBird(box, date)}
               onDayClick={goToDay} />
           ) : false ? (() => { const p = allPenguins.find((p: any) => p.peng_num === selectedBird || p.pit_id === selectedBird); return p ? <div style={{padding:'1em'}}><PenguinMini scan={p} onClick={() => {}} /><p className="muted">Loading bird data...</p></div> : <p className="muted">Loading bird data...</p>; })()
           : <p className="muted">Bird not found</p>}
@@ -5397,7 +5462,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       {!selectedBox && (
         <>
           <div className="top-row">
-            <ColonyMap boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} />
+            <ColonyMap boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} />
             <StatsPanel boxTags={boxTags} selectedBox={selectedBox} stats={stats} />
           </div>
         </>
@@ -5406,7 +5471,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className={selectedBox ? 'split-view' : ''}>
         {/* Box grid - always visible */}
         <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
-          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={setSelectedBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
+          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
         </div>
 
         {/* Box detail */}
@@ -5427,7 +5492,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
             </div>
             {false ? <p className="muted">Loading...</p> : boxDetail ? (
-              <BreedingStatusBar observations={boxDetail.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={(d) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
+              <BreedingStatusBar observations={boxDetail.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={(d) => { if (selectedBox) setObsAnchor({ box: selectedBox, time: d }); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
             ) : null}
           </div>
 
@@ -5555,8 +5620,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="detail-bird">
               {birdData?.penguin ? (
                 <BirdPage data={birdData} onBirdClick={openBird} token={token} canEdit={userRole !== 'viewer'} onClose={() => setSelectedBird(null)}
-                  onBoxClick={(box: string) => { setHighlightObs(null); setScrollToObs(null); setSelectedBox(box); }}
-                  onSightingClick={(box: string, date: string) => { setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); }}
+                  onBoxClick={(box: string) => goToBoxFromBird(box)}
+                  onSightingClick={(box: string, date: string) => goToBoxFromBird(box, date)}
                   onDayClick={goToDay} />
               ) : <p className="muted">Loading bird...</p>}
             </div>
