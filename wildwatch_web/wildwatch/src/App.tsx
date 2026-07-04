@@ -2613,7 +2613,21 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           </div>
           <div className="entry-field">
             <label>Box</label>
-            <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="e.g. 34" />
+            <div style={{display:'flex', gap:4, alignItems:'center'}}>
+              {(() => {
+                const boxNames = queryAllLocations().map((l: any) => String(l.location_name));
+                const stepBox = (dir: number) => {
+                  if (!boxNames.length) return;
+                  const i = boxNames.indexOf(box.trim());
+                  setBox(boxNames[i < 0 ? 0 : Math.min(boxNames.length - 1, Math.max(0, i + dir))]);
+                };
+                return <>
+                  <button className="entry-box-nav" title="Previous box" onClick={() => stepBox(-1)}>‹</button>
+                  <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="34" style={{width:'56px'}} />
+                  <button className="entry-box-nav" title="Next box" onClick={() => stepBox(1)}>›</button>
+                </>;
+              })()}
+            </div>
           </div>
         </div>
       </div>
