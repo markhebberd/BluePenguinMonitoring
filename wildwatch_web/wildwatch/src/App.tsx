@@ -5221,7 +5221,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   };
 
   const goToDay = (day: string, box?: string) => {
-    setSelectedBox(null); setSelectedBird(null);
+    // Day view is an overlay: keep the box + bird panel underneath so dismissing the day
+    // (Escape / back / returning to the box) restores exactly where you were.
     setShowAdmin(false); setShowReports(false); setShowEntry(false);
     setDayBox(box ?? null);
     setSelectedDay(day);
@@ -5413,7 +5414,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
+        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
         {passwordDialog}
       </div>
     );
