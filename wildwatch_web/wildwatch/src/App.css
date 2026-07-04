@@ -505,6 +505,9 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .day-bird-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#999; padding:0 4px; }
 .day-bird-close:hover { color:#333; }
 @media (max-width:700px) { .day-bird-dock { flex-basis:100%; width:100%; min-width:0; max-width:100%; border-left:none; } .day-page-docked .day-main { display:none; } }
+/* Entry-page variant: fixed to the right edge, full viewport height (entry page scrolls normally) */
+.entry-bird-dock { position:fixed; top:0; right:0; bottom:0; z-index:600; width:min(480px, 90vw); max-width:none; }
+@media (max-width:700px) { .entry-bird-dock { width:100vw; } }
 
 .date-tooltip { position:fixed; z-index:1000; background:#fff; border:1px solid #ddd; border-radius:6px; padding:8px 12px; box-shadow:0 4px 12px rgba(0,0,0,.15); font-size:12px; line-height:1.5; pointer-events:none; min-width:160px; max-width:280px; }
 

@@ -2396,6 +2396,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [lastSavedObsId, setLastSavedObsId] = useState<number|null>(null);
   // Set when a save was blocked by an existing observation on the same date — renders a link to it
   const [dupObs, setDupObs] = useState<{box:string; time:string}|null>(null);
+  // Right-side full-height bird dock — opened by clicking a PenguinMini in the existing rows
+  const [sideBird, setSideBird] = useState<string|null>(null);
+  const sideBirdData = useBirdDetail(sideBird);
 
   // Load date mappings for season
   useEffect(() => {
@@ -2728,7 +2731,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           {entryRows.map((o: any, i: number) => o._chip ? (
             <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
               <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
-              <PenguinMini scan={o} onClick={() => {}} observationDate={o.chip_date} navigateDirectly />
+              <PenguinMini scan={o} onClick={() => o.peng_num && setSideBird(o.peng_num)} observationDate={o.chip_date} />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
             </div>
           ) : (
@@ -2738,7 +2741,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
               {(o.scans || []).map((s: any, j: number) => (
-                <PenguinMini key={j} scan={s} onClick={() => {}} observationDate={o.observation_time_utc} navigateDirectly />
+                <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setSideBird(s.peng_num)} observationDate={o.observation_time_utc} />
               ))}
               {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                 <span key={`ns${k}`} className="scan no-scan">No scan</span>
@@ -2914,6 +2917,17 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       </div>
       </div>
       </div>
+
+      {sideBird && sideBirdData?.penguin && (
+        <div className="day-bird-dock entry-bird-dock">
+          <BirdPage data={sideBirdData} onBirdClick={(num: string) => setSideBird(num)}
+            onBoxClick={(b: string) => { setBoxInput(b); setBox(b); }}
+            onSightingClick={(b: string) => { setBoxInput(b); setBox(b); }}
+            onDayClick={(d: string) => { window.location.href = `/?day=${encodeURIComponent(d)}${box ? `&box=${encodeURIComponent(box)}` : ''}`; }}
+            onClose={() => setSideBird(null)}
+            token={token} canEdit={false} />
+        </div>
+      )}
 
       {/* Date editor is now inline above */}
     </div>
