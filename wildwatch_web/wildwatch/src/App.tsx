@@ -2625,13 +2625,19 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {(() => {
                 // mem.locations has no defined order (no ORDER BY + incremental sync appends),
                 // so natural-sort for sane ‹ › stepping (1, 2, … 99, 100, 103)
-                const boxNames = queryAllLocations().map((l: any) => String(l.location_name))
-                  .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }));
+                const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+                const boxNames = [...new Set(queryAllLocations().map((l: any) => String(l.location_name).trim()))].sort(cmp);
                 const commitBox = (name: string) => { setBoxInput(name); setBox(name); };
                 const stepBox = (dir: number) => {
                   if (!boxNames.length) return;
-                  const i = boxNames.indexOf(box.trim());
-                  commitBox(boxNames[i < 0 ? 0 : Math.min(boxNames.length - 1, Math.max(0, i + dir))]);
+                  const cur = box.trim();
+                  let i = boxNames.indexOf(cur);
+                  if (i < 0) {
+                    // Current box not in the local list (empty/stale cache) — step from where it would sort
+                    const at = boxNames.findIndex(n => cmp(cur, n) < 0);
+                    i = (at < 0 ? boxNames.length : at) - (dir > 0 ? 1 : 0);
+                  }
+                  commitBox(boxNames[Math.min(boxNames.length - 1, Math.max(0, i + dir))]);
                 };
                 return <>
                   <button className="entry-box-nav" title="Previous box" onClick={() => stepBox(-1)}>‹</button>
