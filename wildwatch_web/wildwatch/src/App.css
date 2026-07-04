@@ -347,6 +347,8 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-table td { padding:4px 8px 4px 0; vertical-align:top; }
 .bird-table td:first-child { white-space:nowrap; width:70px; color:#999; }
 .bird-notes { font-style:italic; color:#666; font-size:13px; margin-top:4px; }
+.copy-pit-btn { font-size:10px; padding:1px 8px; border:1px solid #90caf9; background:#e3f2fd; color:#1a5276; border-radius:4px; cursor:pointer; }
+.copy-pit-btn:hover { background:#bbdefb; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
 .breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }

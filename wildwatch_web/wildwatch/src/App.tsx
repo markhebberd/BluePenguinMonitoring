@@ -672,6 +672,18 @@ const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3r
 /** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
+/** Rough age from a chip date to today, e.g. "3y 2m" / "5m". The initial chip date is
+ *  the bird's age reference (chick chipping is near hatch). */
+function ageFromDate(dateStr: string): string {
+  const start = new Date(dateStr.length > 10 ? dateStr : dateStr + 'T00:00:00');
+  const now = new Date();
+  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months--;
+  if (months < 0) months = 0;
+  const y = Math.floor(months / 12), m = months % 12;
+  return y > 0 ? `${y}y ${m}m` : `${m}m`;
+}
+
 /** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
  *  observations). All dates are NZ days. Returns human-readable detail lines so the
  *  season summary can list what's wrong. */
@@ -1544,6 +1556,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showBio, setShowBio] = useState(false);
+  const [copiedPit, setCopiedPit] = useState(false);
+  const copyPit = (v: string) => { navigator.clipboard?.writeText(v); setCopiedPit(true); setTimeout(() => setCopiedPit(false), 1500); };
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const toggleSection = (key: string) => setExpandedSections(s => ({...s, [key]: !s[key]}));
   useEffect(() => {
@@ -1598,23 +1612,31 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       <div className="bird-section">
         <table className="bird-table">
           <tbody>
-            <tr><td className="muted">Sex</td><td>{!editing ? (p.sex || <span className="muted">-</span>) : <EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} />}</td></tr>
-            <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>
-            <tr><td className="muted">Initial Chip Date</td><td>{chips.length > 0 && chips[0].chip_date ? <DateLink date={chips[0].chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>}</td></tr>
-            <tr><td className="muted">Chick Size Code</td><td>{!editing ? (p.chick_size_code || <span className="muted">-</span>) : <EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} />}</td></tr>
+            {/* Summary view is trimmed — sex / chipped-as-chick / chick-size / pit id all
+                already read off the mini above. Everything shows again under Edit. */}
+            {editing && <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} /></td></tr>}
+            {editing && <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>}
+            {chips[0]?.chip_date && <tr><td className="muted">Age</td><td>{ageFromDate(chips[0].chip_date)}{p.chipped_as_adult ? <span className="muted"> (since chipping)</span> : null}</td></tr>}
+            {!editing && activeChip?.pit_id && (
+              <tr><td className="muted">Chip ID</td><td>
+                <span style={{fontFamily:'monospace'}}>{activeChip.pit_id.slice(-8)}</span>
+                {' '}<button type="button" className="copy-pit-btn" onClick={() => copyPit(activeChip.pit_id.slice(-8))}>{copiedPit ? 'Copied' : 'Copy'}</button>
+              </td></tr>
+            )}
+            {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
             <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
             {chips.map((c: any, i: number) => {
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();
               return (<Fragment key={`chip${i}`}>
-              <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
+              {editing && <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>}
               <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>{!editing ? (c.chip_date ? <DateLink date={c.chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>) : <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} />}</td></tr>
               <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td>{!editing ? (c.chip_box ? <a className="clickable" href={`/box/${c.chip_box}`} onClick={e => navClick(e, () => onBoxClick(c.chip_box))}>{c.chip_box}</a> : <span className="muted">-</span>) : <EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} />}</td></tr>
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
             </Fragment>);
             })}
-            <tr><td className="muted">Dead</td><td>{!editing ? (Number(p.is_dead) ? 'Dead' : <span className="muted">-</span>) : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>
+            {(editing || Number(p.is_dead)) && <tr><td className="muted">Dead</td><td>{!editing ? 'Dead' : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>}
             {(() => {
               if (biometrics.length === 0) return null;
               // Build summary
