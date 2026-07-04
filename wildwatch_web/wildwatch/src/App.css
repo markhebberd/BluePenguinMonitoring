@@ -8,6 +8,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .day-overlay { position:fixed; inset:0; z-index:650; overflow-y:auto; -webkit-overflow-scrolling:touch; background:#f5f7fa; }
 /* Embedded bird panel (?embed=1) — chrome-less, fills the host WebView modal. */
 .embed-bird { max-width:640px; margin:0 auto; padding:10px 12px 24px; }
+.embed-box { max-width:760px; margin:0 auto; padding:10px 12px 24px; }
+/* In the modal the box panel flows naturally (no fixed-height desktop split), at any width. */
+.embed-box .detail-split { display:block; overflow:visible; }
+.embed-box .detail-obs { overflow:visible; padding:0; container-type:normal; }
+.embed-box .obs-columns { flex-direction:column; height:auto; overflow:visible; }
+.embed-box .obs-col { overflow:visible; }
 .embed-state { padding:40px 16px; text-align:center; color:#666; font-size:15px; }
 .embed-error { color:#b00020; }
 

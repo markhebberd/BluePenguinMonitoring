@@ -1486,6 +1486,115 @@ function mergeSameDayChips(items: any[]): any[] {
   return out;
 }
 
+/**
+ * Box detail body: "Breeding history" + "Observations". Extracted from the inline box view so
+ * the full app and the embed (?embed=1 -> nestcheck box modal) render it from one place and
+ * can't drift. Edit affordances (add-penguin, deleted toggle) are gated on canEdit / callbacks.
+ */
+function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlightObs, scrollToObs, onScrollToObs, token, canEdit, onDataChange, showDeleted, deletedObs, onToggleDeleted, onAddPenguin }: {
+  data: any; boxName: string; allPenguins: any[];
+  onBirdClick: (tag: string) => void; onDayClick: (day: string) => void;
+  highlightObs: string | null; scrollToObs: string | null; onScrollToObs: (date: string) => void;
+  token?: string; canEdit?: boolean; onDataChange?: () => void;
+  showDeleted?: boolean; deletedObs?: any[]; onToggleDeleted?: () => void; onAddPenguin?: (box: string) => void;
+}) {
+  return (
+    <div className="detail-obs">
+      <div className="obs-columns">
+        <div className="obs-col obs-col-overview">
+          <h3 className="obs-section-head">Breeding history</h3>
+          <AllScannedBirds observations={data.observations} onBirdClick={onBirdClick} allPenguinsInBox={data.all_penguins}
+            onSeasonClick={(t: string) => onScrollToObs(t)} />
+          {(() => {
+            const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
+            if (chipped.length === 0 && !canEdit) return null;
+            return (
+              <div className="chipped-here">
+                <div className="muted">Chipped in this box: {chipped.length}</div>
+                <div className="bird-row">
+                  {chipped.map((c: any) => {
+                    // hasReturned (size-code U suffix) is computed client-side, so merge it in from allPenguins.
+                    const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
+                    return (
+                    <span key={c.pit_id} className="bird-with-count">
+                      <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => onBirdClick(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
+                      <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
+                    </span>
+                    );
+                  })}
+                  {canEdit && onAddPenguin && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => onAddPenguin(boxName)}>+ 🐧</button>}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+        <div className="obs-col obs-col-observations">
+          <h3 className="obs-section-head">Observations</h3>
+          {(() => {
+            const thisSeasonStart = getSeasonStart().toISOString();
+            const thisLabel = getSeasonLabel();
+            // Chippings with no matching scan on the chip day become their own sighting card.
+            const scannedPitsByDay = new Map<string, Set<string>>();
+            for (const o of data.observations) {
+              const day = toNzDateStr(o.observation_time_utc);
+              if (!scannedPitsByDay.has(day)) scannedPitsByDay.set(day, new Set());
+              for (const s of (o.scans || [])) if (s.pit_id) scannedPitsByDay.get(day)!.add(s.pit_id);
+            }
+            const chipEvents = (data.all_penguins || [])
+              .filter((p: any) => p.is_chipped_here && p.chip_date)
+              .filter((p: any) => !scannedPitsByDay.get(p.chip_date)?.has(p.pit_id))
+              .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
+            const byTimeDesc = (a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc);
+            const thisSeason = [...data.observations, ...chipEvents].filter((o: any) => o.observation_time_utc >= thisSeasonStart).sort(byTimeDesc);
+            const prevObs = [...data.observations, ...chipEvents].filter((o: any) => o.observation_time_utc < thisSeasonStart).sort(byTimeDesc);
+            const prevSeasons = new Map<string, Observation[]>();
+            for (const obs of prevObs) {
+              const label = getSeasonLabel(parseDate(obs.observation_time_utc));
+              if (!prevSeasons.has(label)) prevSeasons.set(label, []);
+              prevSeasons.get(label)!.push(obs);
+            }
+            const sortedPrev = Array.from(prevSeasons.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+            const deletedCount = (data as any)?.deleted_count || 0;
+            const mergedObs = showDeleted && (deletedObs?.length || 0) > 0
+              ? [...thisSeason.map((o: any) => ({...o, _deleted: false})), ...(deletedObs || []).map((o: any) => ({...o, _deleted: true}))]
+                .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
+              : thisSeason;
+            return (<>
+              <h3 className="season-heading">{seasonRange(thisLabel)} ({thisSeason.length})
+                {deletedCount > 0 && onToggleDeleted && <span className="deleted-indicator clickable" onClick={onToggleDeleted}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
+              </h3>
+              {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
+              {mergeSameDayChips(mergedObs).map((obs: any, i: number) => obs._deleted ? (
+                <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
+                  <div className="obs-top">
+                    <span><s><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></s></span>
+                    <span className="muted">deleted {obs.deleted_at ? formatDate(obs.deleted_at) : ''} by {obs.deleted_by_name || '?'}{obs.delete_reason ? ` — ${obs.delete_reason}` : ''}</span>
+                  </div>
+                  <div className="obs-nums">
+                    {obs.adults === 0 && obs.eggs === 0 && obs.chicks === 0 && <span className="muted">Empty</span>}
+                    {obs.adults > 0 && <span>{'🐧'.repeat(Math.min(obs.adults, 6))}</span>}
+                    {obs.eggs > 0 && <span>{'🥚'.repeat(Math.min(obs.eggs, 6))}</span>}
+                    {obs.chicks > 0 && <span>{'🐣'.repeat(Math.min(obs.chicks, 6))}</span>}
+                    {obs.breeding_status && <span className="badge bordered" style={{background:'#E0E0E0', color:'#333'}}>{obs.breeding_status}</span>}
+                  </div>
+                  {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
+                </div>
+              ) : obs._chip ? (
+                <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} birds={obs._chipBirds} onBirdClick={onBirdClick} onDayClick={onDayClick} />
+              ) : (
+                <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
+              ))}
+              {sortedPrev.map(([label, obs]) => (
+                <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
+              ))}
+            </>);
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
@@ -3913,58 +4022,80 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
 }
 
 /**
- * Chrome-less bird panel for embedding (e.g. the nestcheck WebView modal). Renders ONLY the
- * BirdPage, fed by a live, scoped fetch of /api/bird-detail.php (no full colony sync). Because
- * it loads that payload into the same `mem` and reuses the same BirdPage / computeBoxFamilies,
- * it is identical to the panel wildwatch shows — see bird-detail.php / snapshot_columns.php.
+ * Chrome-less panel for embedding (e.g. the nestcheck WebView modal). Renders ONLY the bird
+ * OR box panel, fed by a live, scoped fetch (/api/bird-detail.php or /api/box-detail.php) —
+ * no full colony sync. It loads that payload into the same `mem` and reuses the same
+ * BirdPage / BoxPanel / computeBoxFamilies, so it's identical to what wildwatch shows —
+ * see bird-detail.php / box-detail.php / snapshot_columns.php.
  *
- * URL: /bird/<peng>?embed=1&colony_id=<n>   Token: window.__WW_TOKEN__ (injected by the host),
- * falling back to ?token= or the web app's stored token for browser testing.
+ * URL: /bird/<peng>?embed=1&colony_id=<n>  or  /box/<name>?embed=1&colony_id=<n>
+ * Token: window.__WW_TOKEN__ (injected by the host), or ?token=, or the stored web token.
+ * Bird/box links inside the panel re-fetch and navigate within the embed.
  */
-export function EmbeddedBirdPanel() {
+export function EmbeddedPanel() {
   const params = new URLSearchParams(window.location.search);
-  const pathPeng = window.location.pathname.match(/\/bird\/([^/?#]+)/)?.[1];
-  const initialPeng = decodeURIComponent(pathPeng || params.get('peng') || params.get('peng_num') || '');
+  const initialKind: 'box'|'bird' = /\/box\//.test(window.location.pathname) ? 'box' : 'bird';
+  const initialId = decodeURIComponent(
+    window.location.pathname.match(/\/(?:box|bird)\/([^/?#]+)/)?.[1]
+    || params.get('peng') || params.get('peng_num') || params.get('box') || '');
   const colonyId = parseInt(params.get('colony_id') || '1', 10) || 1;
   const token = (window as any).__WW_TOKEN__ || params.get('token') || localStorage.getItem('ww_token') || '';
 
-  const [peng, setPeng] = useState(initialPeng);
+  const [view, setView] = useState<{ kind: 'box'|'bird'; id: string }>({ kind: initialKind, id: initialId });
   const [status, setStatus] = useState<'loading'|'ready'|'error'>('loading');
   const [errMsg, setErrMsg] = useState('');
-  const birdData = useBirdDetail(status === 'ready' ? peng : null);
+  const [highlightObs, setHighlightObs] = useState<string|null>(null);
+  const [scrollToObs, setScrollToObs] = useState<string|null>(null);
+
+  const birdData = useBirdDetail(status === 'ready' && view.kind === 'bird' ? view.id : null);
+  const boxData = useBoxDetail(status === 'ready' && view.kind === 'box' ? view.id : null);
+  const allPenguins = useAllPenguins();
 
   // Make the host token available to the existing fetch helpers (fetchHistory etc.).
   useEffect(() => { if (token) localStorage.setItem('ww_token', token); }, [token]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!peng) { setStatus('error'); setErrMsg('No bird specified'); return; }
+    if (!view.id) { setStatus('error'); setErrMsg('Nothing specified'); return; }
     setColonyId(colonyId);
-    setStatus('loading');
-    fetch(`/api/bird-detail.php?peng_num=${encodeURIComponent(peng)}&colony_id=${colonyId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    setStatus('loading'); setHighlightObs(null); setScrollToObs(null);
+    const url = view.kind === 'box'
+      ? `/api/box-detail.php?box=${encodeURIComponent(view.id)}&colony_id=${colonyId}`
+      : `/api/bird-detail.php?peng_num=${encodeURIComponent(view.id)}&colony_id=${colonyId}`;
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(data => { if (cancelled) return; if (data?.error) throw new Error(data.error); loadBirdDetailIntoMem(data); setStatus('ready'); })
       .catch(e => { if (cancelled) return; setStatus('error'); setErrMsg(String(e?.message || e)); });
     return () => { cancelled = true; };
-  }, [peng, colonyId, token]);
+  }, [view, colonyId, token]);
 
-  if (status === 'error') return <div className="embed-state embed-error">Couldn't load bird {peng}<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
-  if (status !== 'ready' || !birdData) return <div className="embed-state">Loading bird {peng}…</div>;
-  if (!birdData.penguin) return <div className="embed-state embed-error">Bird {peng} not found</div>;
+  const goBird = (num: string) => { if (num && !(view.kind === 'bird' && view.id === num)) { setStatus('loading'); setView({ kind: 'bird', id: num }); } };
+  const goBox = (box: string) => { if (box && !(view.kind === 'box' && view.id === box)) { setStatus('loading'); setView({ kind: 'box', id: box }); } };
+  const scrollObs = (t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); };
 
+  if (status === 'error') return <div className="embed-state embed-error">Couldn't load {view.kind} {view.id}<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
+  if (status !== 'ready') return <div className="embed-state">Loading {view.kind} {view.id}…</div>;
+
+  if (view.kind === 'box') {
+    if (!boxData?.location) return <div className="embed-state embed-error">Box {view.id} not found</div>;
+    return (
+      <div className="embed-box">
+        <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><StatusLegend /></div></div>
+        <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
+        <div className="detail-split">
+          <BoxPanel data={boxData} boxName={view.id} allPenguins={allPenguins}
+            onBirdClick={goBird} onDayClick={() => {}}
+            highlightObs={highlightObs} scrollToObs={scrollToObs} onScrollToObs={scrollObs}
+            token={token} canEdit={false} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!birdData?.penguin) return <div className="embed-state embed-error">Bird {view.id} not found</div>;
   return (
     <div className="embed-bird">
-      <BirdPage
-        data={birdData}
-        onBirdClick={(num: string) => { if (num && num !== peng) { setStatus('loading'); setPeng(num); } }}
-        onBoxClick={() => {}}
-        onSightingClick={() => {}}
-        onDayClick={undefined}
-        token={token}
-        canEdit={false}
-      />
+      <BirdPage data={birdData} onBirdClick={goBird} onBoxClick={goBox} onSightingClick={(box: string) => goBox(box)} onDayClick={undefined} token={token} canEdit={false} />
     </div>
   );
 }
@@ -5576,123 +5707,30 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {/* Split: observations+birds left, penguin detail right */}
           {!false && boxDetail && (
           <div className="detail-split">
-            <div className="detail-obs">
-              <div className="obs-columns">
-                <div className="obs-col obs-col-overview">
-                <h3 className="obs-section-head">Breeding history</h3>
-                <AllScannedBirds observations={boxDetail.observations} onBirdClick={openBird} allPenguinsInBox={boxDetail.all_penguins}
-                  onSeasonClick={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }} />
-                {(() => {
-                  const chipped = (boxDetail.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
-                  const canEdit = userRole !== 'viewer';
-                  if (chipped.length === 0 && !canEdit) return null;
-                  return (
-                  <div className="chipped-here">
-                    <div className="muted">Chipped in this box: {chipped.length}</div>
-                    <div className="bird-row">
-                      {chipped.map((c: any) => {
-                        // Show each bird as at its chipping time: chick-chipped → pale
-                        // yellow, adult-chipped → sex colour. Context is the day AFTER
-                        // chipping so the chipped-here (green) day styling never applies.
-                        // hasReturned (size-code U suffix) is computed client-side, so
-                        // merge it in from allPenguins.
-                        const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
-                        return (
-                        <span key={c.pit_id} className="bird-with-count">
-                          <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => openBird(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
-                          <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
-                        </span>
-                        );
-                      })}
-                      {canEdit && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => setAddPenguinBox(selectedBox)}>+ 🐧</button>}
-                    </div>
-                  </div>
-                  );
-                })()}
-                </div>
-                <div className="obs-col obs-col-observations">
-              <h3 className="obs-section-head">Observations</h3>
-              {(() => {
-                const thisSeasonStart = getSeasonStart().toISOString();
-                const thisLabel = getSeasonLabel();
-
-                // Chippings in this box with no matching scan in one of the box's
-                // observations on the chip day become their own sighting card —
-                // otherwise a chipping without an observation is invisible here.
-                const scannedPitsByDay = new Map<string, Set<string>>();
-                for (const o of boxDetail.observations) {
-                  const day = toNzDateStr(o.observation_time_utc);
-                  if (!scannedPitsByDay.has(day)) scannedPitsByDay.set(day, new Set());
-                  for (const s of (o.scans || [])) if (s.pit_id) scannedPitsByDay.get(day)!.add(s.pit_id);
+            <BoxPanel
+              data={boxDetail}
+              boxName={selectedBox}
+              allPenguins={allPenguins}
+              onBirdClick={openBird}
+              onDayClick={(day: string) => goToDay(day, selectedBox || undefined)}
+              highlightObs={highlightObs}
+              scrollToObs={scrollToObs}
+              onScrollToObs={(t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); }}
+              token={token}
+              canEdit={userRole !== 'viewer'}
+              onDataChange={refreshStats}
+              showDeleted={showDeleted}
+              deletedObs={deletedObs}
+              onToggleDeleted={async () => {
+                if (!showDeleted && deletedObs.length === 0) {
+                  const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                  const d = await r.json();
+                  setDeletedObs(d.deleted || []);
                 }
-                const chipEvents = (boxDetail.all_penguins || [])
-                  .filter((p: any) => p.is_chipped_here && p.chip_date)
-                  .filter((p: any) => !scannedPitsByDay.get(p.chip_date)?.has(p.pit_id))
-                  .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
-
-                const byTimeDesc = (a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc);
-                const thisSeason = [...boxDetail.observations, ...chipEvents]
-                  .filter((o: any) => o.observation_time_utc >= thisSeasonStart).sort(byTimeDesc);
-                const prevObs = [...boxDetail.observations, ...chipEvents]
-                  .filter((o: any) => o.observation_time_utc < thisSeasonStart).sort(byTimeDesc);
-
-                // Group previous observations by season
-                const prevSeasons = new Map<string, Observation[]>();
-                for (const obs of prevObs) {
-                  const label = getSeasonLabel(parseDate(obs.observation_time_utc));
-                  if (!prevSeasons.has(label)) prevSeasons.set(label, []);
-                  prevSeasons.get(label)!.push(obs);
-                }
-                const sortedPrev = Array.from(prevSeasons.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-
-                const deletedCount = (boxDetail as any)?.deleted_count || 0;
-
-                // Merge deleted into date-sorted list when showing
-                const mergedObs = showDeleted && deletedObs.length > 0
-                  ? [...thisSeason.map((o: any) => ({...o, _deleted: false})), ...deletedObs.map((o: any) => ({...o, _deleted: true}))]
-                    .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
-                  : thisSeason;
-
-                return (<>
-                  <h3 className="season-heading">{seasonRange(thisLabel)} ({thisSeason.length})
-                    {deletedCount > 0 && <span className="deleted-indicator clickable" onClick={async () => {
-                      if (!showDeleted && deletedObs.length === 0) {
-                        const r = await fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(selectedBox!)}&include_deleted=1&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } });
-                        const d = await r.json();
-                        setDeletedObs(d.deleted || []);
-                      }
-                      setShowDeleted(!showDeleted);
-                    }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
-                  </h3>
-                  {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
-                  {mergeSameDayChips(mergedObs).map((obs: any, i: number) => obs._deleted ? (
-                    <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
-                      <div className="obs-top">
-                        <span><s><DateLink date={obs.observation_time_utc} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} /></s></span>
-                        <span className="muted">deleted {obs.deleted_at ? formatDate(obs.deleted_at) : ''} by {obs.deleted_by_name || '?'}{obs.delete_reason ? ` — ${obs.delete_reason}` : ''}</span>
-                      </div>
-                      <div className="obs-nums">
-                        {obs.adults === 0 && obs.eggs === 0 && obs.chicks === 0 && <span className="muted">Empty</span>}
-                        {obs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(obs.adults, 6))}</span>}
-                        {obs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(obs.eggs, 6))}</span>}
-                        {obs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(obs.chicks, 6))}</span>}
-                        {obs.breeding_status && <span className="badge bordered" style={{background:'#E0E0E0', color:'#333'}}>{obs.breeding_status}</span>}
-                      </div>
-                      {obs.notes && <div className="obs-notes"><s>{obs.notes}</s></div>}
-                    </div>
-                  ) : obs._chip ? (
-                    <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} birds={obs._chipBirds} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} />
-                  ) : (
-                    <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
-                  ))}
-                  {sortedPrev.map(([label, obs]) => (
-                    <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={openBird} onDayClick={(day: string) => goToDay(day, selectedBox || undefined)} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} onDataChange={refreshStats} />
-                  ))}
-                </>);
-              })()}
-                </div>
-              </div>
-            </div>
+                setShowDeleted(!showDeleted);
+              }}
+              onAddPenguin={(box: string) => setAddPenguinBox(box)}
+            />
             {selectedBird && (
             <div className="detail-bird">
               {birdData?.penguin ? (
