@@ -233,6 +233,28 @@ if ($action === 'update_user') {
     exit;
 }
 
+if ($action === 'create_user') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = trim($input['observer_name'] ?? '');
+    $email = trim($input['email'] ?? '');
+    $role = $input['role'] ?? 'viewer';
+    $password = (string)($input['password'] ?? '');
+    if ($name === '' || $password === '') { http_response_code(400); echo json_encode(['error'=>'Name and password are required']); exit; }
+    if (strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
+    if (!in_array($role, ['viewer', 'editor', 'admin'], true)) { http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit; }
+    $dup = $pdo->prepare("SELECT observer_id FROM observers WHERE observer_name = ?");
+    $dup->execute([$name]);
+    if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>"A user named \"$name\" already exists"]); exit; }
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+    $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash, role) VALUES (?, ?, ?, ?)")
+        ->execute([$name, $email !== '' ? $email : null, $hash, $role]);
+    $id = (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'CREATE', ?, ?)")
+        ->execute([$id, $observer['observer_id'], json_encode(['observer_name'=>$name, 'email'=>$email, 'role'=>$role])]);
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s')]);
+    exit;
+}
+
 // Preview or delete observations from a specific date
 if ($action === 'preview_date' || $action === 'delete_date') {
     $body = json_decode(file_get_contents('php://input'), true) ?? [];

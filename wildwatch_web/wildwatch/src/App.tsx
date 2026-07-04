@@ -4658,6 +4658,27 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
   };
 
+  const [newUser, setNewUser] = useState({ observer_name: '', email: '', role: 'viewer', password: '' });
+  const [addUserErr, setAddUserErr] = useState('');
+  const [addingUser, setAddingUser] = useState(false);
+  const createUser = async () => {
+    setAddUserErr('');
+    if (!newUser.observer_name.trim() || !newUser.password) { setAddUserErr('Name and password are required'); return; }
+    if (newUser.password.length < 6) { setAddUserErr('Password must be at least 6 characters'); return; }
+    setAddingUser(true);
+    try {
+      const r = await fetch('/api/admin.php?action=create_user', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(newUser),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setUsers([...users, d]);
+      setNewUser({ observer_name: '', email: '', role: 'viewer', password: '' });
+    } catch (e: any) { setAddUserErr(e.message || 'Failed to add user'); }
+    setAddingUser(false);
+  };
+
 
 
   return (
@@ -4789,6 +4810,19 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             </tbody>
           </table>
         )}
+        <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <input type="text" placeholder="Name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
+          <input type="email" placeholder="Email (optional)" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} style={{ padding: '5px 8px' }} />
+          <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} style={{ padding: '5px 8px' }}>
+            <option value="viewer">Viewer</option>
+            <option value="editor">Editor</option>
+            <option value="admin">Admin</option>
+          </select>
+          <input type="password" placeholder="Password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px' }} />
+          <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : 'Add user'}</button>
+          {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
+        </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admin users also need colony access granted (per-colony permissions) before they can see anything.</p>
       </div>
 
       <div className="admin-section">
