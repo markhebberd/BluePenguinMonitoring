@@ -2585,9 +2585,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
 
       setMessage(`Saved: Box ${box}, ${formatDate(parsedDate)}, ${scannedBirds.length} birds`);
       setLastSavedObsId(obsData.id);
-      // Reset form
+      // Reset form (keep the date so the next observation can reuse it)
       setAdults(0); setEggs(0); setChicks(0); setNoScan(0); setGateStatus(''); setBreedingStatus('');
-      setNotes(''); setScannedBirds([]); setDateInput('');
+      setNotes(''); setScannedBirds([]);
     } catch (e: any) {
       setMessage('Error: ' + e.message);
     }
