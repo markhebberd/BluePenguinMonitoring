@@ -4073,8 +4073,11 @@ export function EmbeddedPanel() {
       } catch (e) {
         if (!cancelled && !primed) { setStatus('error'); setErrMsg(String((e as any)?.message || e)); }
       }
+      // Same 30s change-poll as the full app (events.php watermark -> triggerSync). The
+      // store-version bump re-renders any open panel; no extra onChanged work needed.
+      if (!cancelled) startPolling(() => {});
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; stopPolling(); };
   }, [colonyId, token]);
 
   // Navigation is instant — the whole colony is in mem, so no fetch per bird/box.
