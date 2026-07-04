@@ -3855,16 +3855,22 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   }, [externalBird]);
 
   const handleBirdClick = (num: string) => setSideBird(num);
-  const [showCarryForward, setShowCarryForward] = useState(false);
-  const [hideDcm, setHideDcm] = useState(false);
+  // Day-view filters persist across days/sessions so a chosen view sticks as you navigate.
+  const readChangedFields = (): string[] => { try { const a = JSON.parse(localStorage.getItem('ww_day_changed') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+  const [showCarryForward, setShowCarryForward] = useState(() => localStorage.getItem('ww_day_showall') === '1');
+  const [hideDcm, setHideDcm] = useState(() => localStorage.getItem('ww_day_hidedcm') === '1');
   // "Only changed" filter: show boxes whose observation differs from the previous one (before this day)
-  const [changedExpanded, setChangedExpanded] = useState(false);
-  const [changedFields, setChangedFields] = useState<Set<string>>(new Set());
+  const [changedFields, setChangedFields] = useState<Set<string>>(() => new Set(readChangedFields()));
+  // Expand the Changed section on load when any changed filter is already active.
+  const [changedExpanded, setChangedExpanded] = useState(() => readChangedFields().length > 0);
   const toggleChangedField = (f: string) => setChangedFields(prev => {
     const next = new Set(prev);
     if (next.has(f)) next.delete(f); else next.add(f);
     return next;
   });
+  useEffect(() => { localStorage.setItem('ww_day_showall', showCarryForward ? '1' : '0'); }, [showCarryForward]);
+  useEffect(() => { localStorage.setItem('ww_day_hidedcm', hideDcm ? '1' : '0'); }, [hideDcm]);
+  useEffect(() => { localStorage.setItem('ww_day_changed', JSON.stringify([...changedFields])); }, [changedFields]);
 
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
@@ -4002,8 +4008,9 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                   .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
                 const cfDs = displayStatus(cf.breeding_status, cf.eggs, cf.chicks);
                 return (
-                  <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}>
-                    <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box))}><b>Box {box}</b></a>
+                  <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}
+                    onClick={() => onBoxClick(box, cf.observation_time_utc)} style={{cursor:'pointer'}}>
+                    <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, cf.observation_time_utc))}><b>Box {box}</b></a>
                     {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
                     {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
                     {cf.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(cf.chicks, 4))}</span>}
