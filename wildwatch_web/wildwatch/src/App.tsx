@@ -4509,8 +4509,65 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  // Read-only SQL console (restricted to a single operator; enforced server-side too).
+  // Read-only DB browser + SQL console (restricted to a single operator; enforced server-side too).
   const canSql = localStorage.getItem('ww_email') === 'mark@wildwatch.co.nz';
+  const PAGE = 100;
+  const qId = (name: string) => '`' + String(name).replace(/`/g, '``') + '`';   // backtick-quote an identifier
+
+  // Low-level: run one read-only statement, return the result JSON or throw.
+  const execSql = async (sql: string) => {
+    const r = await fetch('/api/admin.php?action=sql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ sql }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    return d;
+  };
+
+  // --- Schema tree state ---
+  const [tables, setTables] = useState<string[] | null>(null);
+  const [expandedCols, setExpandedCols] = useState<Record<string, any[]>>({});   // table -> columns (SHOW COLUMNS rows)
+  const [selTable, setSelTable] = useState<string | null>(null);
+  const [tableData, setTableData] = useState<any>(null);
+  const [tableCount, setTableCount] = useState<number>(0);
+  const [page, setPage] = useState(0);
+  const [browseErr, setBrowseErr] = useState('');
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  const loadTables = async () => {
+    setBrowseErr('');
+    try {
+      const d = await execSql("SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name");
+      setTables(d.rows.map((r: any) => r.t ?? r.TABLE_NAME ?? Object.values(r)[0]));
+    } catch (e: any) { setBrowseErr(e.message); setTables([]); }
+  };
+
+  const toggleCols = async (table: string) => {
+    if (expandedCols[table]) { const { [table]: _, ...rest } = expandedCols; setExpandedCols(rest); return; }
+    try {
+      const d = await execSql(`SHOW COLUMNS FROM ${qId(table)}`);
+      setExpandedCols(prev => ({ ...prev, [table]: d.rows }));
+    } catch (e: any) { setBrowseErr(e.message); }
+  };
+
+  const openTable = async (table: string, toPage = 0) => {
+    setSelTable(table); setPage(toPage); setBrowseErr(''); setBrowseLoading(true);
+    try {
+      if (toPage === 0) {
+        const c = await execSql(`SELECT COUNT(*) AS n FROM ${qId(table)}`);
+        setTableCount(Number(c.rows[0]?.n ?? 0));
+      }
+      const d = await execSql(`SELECT * FROM ${qId(table)} LIMIT ${PAGE} OFFSET ${toPage * PAGE}`);
+      setTableData(d);
+    } catch (e: any) { setBrowseErr(e.message); setTableData(null); }
+    setBrowseLoading(false);
+  };
+
+  useEffect(() => { if (canSql && tables === null) loadTables(); }, [canSql]);
+
+  // --- Free-form SQL console state ---
   const [sqlText, setSqlText] = useState('');
   const [sqlResult, setSqlResult] = useState<any>(null);
   const [sqlError, setSqlError] = useState('');
@@ -4519,16 +4576,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const runSql = async () => {
     if (!sqlText.trim() || sqlRunning) return;
     setSqlRunning(true); setSqlError('');
-    try {
-      const r = await fetch('/api/admin.php?action=sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ sql: sqlText }),
-      });
-      const d = await r.json();
-      if (d.error) { setSqlError(d.error); setSqlResult(null); }
-      else setSqlResult(d);
-    } catch (e: any) { setSqlError(e.message); setSqlResult(null); }
+    try { setSqlResult(await execSql(sqlText)); }
+    catch (e: any) { setSqlError(e.message); setSqlResult(null); }
     setSqlRunning(false);
   };
 
@@ -4538,6 +4587,26 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     const lines = [res.columns.join(','), ...res.rows.map((row: any) => res.columns.map((c: string) => esc(row[c])).join(','))];
     navigator.clipboard.writeText(lines.join('\n'));
   };
+
+  // Shared read-only results grid (used by both the browser and the console).
+  const resultGrid = (res: any) => (
+    <div style={{ overflow: 'auto', maxHeight: 460, border: '1px solid #ddd' }}>
+      <table style={{ fontSize: 12, fontFamily: 'monospace', borderCollapse: 'collapse' }}>
+        <thead><tr>{res.columns.map((c: string) => (
+          <th key={c} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{c}</th>
+        ))}</tr></thead>
+        <tbody>
+          {res.rows.map((row: any, i: number) => (
+            <tr key={i}>{res.columns.map((c: string) => (
+              <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis' }} title={row[c] === null ? 'NULL' : String(row[c])}>
+                {row[c] === null ? <span className="muted">NULL</span> : String(row[c])}
+              </td>
+            ))}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   const loadRecentChanges = async () => {
     setChangesLoading(true);
@@ -4598,53 +4667,84 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       {canSql && (
       <div className="admin-section">
-        <h3>SQL console <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
-        <textarea
-          value={sqlText}
-          onChange={e => setSqlText(e.target.value)}
-          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runSql(); } }}
-          placeholder="SELECT * FROM penguins LIMIT 20"
-          spellCheck={false}
-          style={{ width: '100%', minHeight: 90, fontFamily: 'monospace', fontSize: 13, padding: 8, boxSizing: 'border-box' }}
-        />
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-          <button className="action-btn" disabled={sqlRunning} onClick={runSql}>{sqlRunning ? 'Running…' : 'Run (⌘/Ctrl+Enter)'}</button>
-          <select value="" onChange={e => { if (e.target.value) setSqlText(e.target.value); }} style={{ maxWidth: 220 }}>
-            <option value="">Starter queries…</option>
-            <option value="SELECT observer_id, observer_name, email, role FROM observers ORDER BY observer_id">Observers</option>
-            <option value="SELECT colony_id, colony_name, colony_prefix FROM colonies ORDER BY colony_id">Colonies</option>
-            <option value="SELECT DATE(CONVERT_TZ(observation_time_utc,'+00:00','+12:00')) d, COUNT(*) n FROM observations WHERE is_deleted=FALSE GROUP BY d ORDER BY d DESC LIMIT 30">Observations per day</option>
-            <option value="SELECT table_name, action, COUNT(*) n FROM audit_log GROUP BY table_name, action ORDER BY n DESC">Audit summary</option>
-          </select>
-          {sqlResult && !sqlError && (
-            <>
-              <span className="muted" style={{ fontSize: 12 }}>
-                {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'}{sqlResult.truncated ? ' (capped at 1000)' : ''} · {sqlResult.ms} ms
-              </span>
-              {sqlResult.rowCount > 0 && <button className="action-btn" onClick={() => copyCsv(sqlResult)}>Copy CSV</button>}
-            </>
-          )}
-        </div>
-        {sqlError && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, marginTop: 8, whiteSpace: 'pre-wrap' }}>{sqlError}</p>}
-        {sqlResult && !sqlError && sqlResult.columns.length > 0 && (
-          <div style={{ overflow: 'auto', marginTop: 8, maxHeight: 420, border: '1px solid #ddd' }}>
-            <table style={{ fontSize: 12, fontFamily: 'monospace', borderCollapse: 'collapse' }}>
-              <thead><tr>{sqlResult.columns.map((c: string) => (
-                <th key={c} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{c}</th>
-              ))}</tr></thead>
-              <tbody>
-                {sqlResult.rows.map((row: any, i: number) => (
-                  <tr key={i}>{sqlResult.columns.map((c: string) => (
-                    <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' }}>
-                      {row[c] === null ? <span className="muted">NULL</span> : String(row[c])}
-                    </td>
-                  ))}</tr>
-                ))}
-              </tbody>
-            </table>
+        <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
+        {browseErr && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{browseErr}</p>}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {/* Schema tree */}
+          <div style={{ flex: '0 0 240px', border: '1px solid #ddd', borderRadius: 4, maxHeight: 520, overflow: 'auto', fontSize: 13 }}>
+            <div style={{ padding: '6px 8px', fontWeight: 600, borderBottom: '1px solid #eee', background: '#fafafa' }}>
+              wildwatch_nestcheck {tables && <span className="muted" style={{ fontWeight: 400 }}>· {tables.length}</span>}
+            </div>
+            {tables === null ? <div className="muted" style={{ padding: 8 }}>Loading…</div> : tables.map(t => (
+              <div key={t}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px', cursor: 'pointer', background: selTable === t ? '#e8f0fe' : undefined }}>
+                  <span onClick={() => toggleCols(t)} style={{ width: 14, textAlign: 'center', color: '#888', userSelect: 'none' }}>{expandedCols[t] ? '▾' : '▸'}</span>
+                  <span onClick={() => openTable(t)} style={{ flex: 1, fontFamily: 'monospace', fontWeight: selTable === t ? 600 : 400 }}>{t}</span>
+                </div>
+                {expandedCols[t] && (
+                  <div style={{ paddingLeft: 24, paddingBottom: 4 }}>
+                    {expandedCols[t].map((c: any) => (
+                      <div key={c.Field} style={{ fontFamily: 'monospace', fontSize: 11, color: '#555', padding: '1px 0' }}>
+                        {c.Key === 'PRI' ? '🔑 ' : ''}{c.Field} <span className="muted">{c.Type}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        )}
-        {sqlResult && !sqlError && sqlResult.columns.length === 0 && <p className="muted" style={{ marginTop: 8 }}>Query ran; no rows returned.</p>}
+          {/* Data grid for the selected table */}
+          <div style={{ flex: '1 1 420px', minWidth: 0 }}>
+            {!selTable ? <p className="muted">Select a table to view its rows.</p> : (
+              <>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                  <strong style={{ fontFamily: 'monospace' }}>{selTable}</strong>
+                  <span className="muted" style={{ fontSize: 12 }}>{tableCount.toLocaleString()} row{tableCount === 1 ? '' : 's'}</span>
+                  {tableCount > PAGE && (
+                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      <button className="action-btn" disabled={page === 0 || browseLoading} onClick={() => openTable(selTable, page - 1)}>‹ Prev</button>
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {(page * PAGE + 1).toLocaleString()}–{Math.min((page + 1) * PAGE, tableCount).toLocaleString()}
+                      </span>
+                      <button className="action-btn" disabled={(page + 1) * PAGE >= tableCount || browseLoading} onClick={() => openTable(selTable, page + 1)}>Next ›</button>
+                    </span>
+                  )}
+                  {tableData && tableData.rowCount > 0 && <button className="action-btn" onClick={() => copyCsv(tableData)}>Copy CSV</button>}
+                </div>
+                {browseLoading ? <p className="muted">Loading…</p>
+                  : tableData && tableData.columns.length > 0 ? resultGrid(tableData)
+                  : <p className="muted">Empty table.</p>}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Free-form SQL console */}
+        <details style={{ marginTop: 16 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>SQL console</summary>
+          <textarea
+            value={sqlText}
+            onChange={e => setSqlText(e.target.value)}
+            onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runSql(); } }}
+            placeholder="SELECT * FROM penguins LIMIT 20"
+            spellCheck={false}
+            style={{ width: '100%', minHeight: 90, fontFamily: 'monospace', fontSize: 13, padding: 8, boxSizing: 'border-box', marginTop: 8 }}
+          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+            <button className="action-btn" disabled={sqlRunning} onClick={runSql}>{sqlRunning ? 'Running…' : 'Run (⌘/Ctrl+Enter)'}</button>
+            {sqlResult && !sqlError && (
+              <>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'}{sqlResult.truncated ? ' (capped at 1000)' : ''} · {sqlResult.ms} ms
+                </span>
+                {sqlResult.rowCount > 0 && <button className="action-btn" onClick={() => copyCsv(sqlResult)}>Copy CSV</button>}
+              </>
+            )}
+          </div>
+          {sqlError && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, marginTop: 8, whiteSpace: 'pre-wrap' }}>{sqlError}</p>}
+          {sqlResult && !sqlError && sqlResult.columns.length > 0 && <div style={{ marginTop: 8 }}>{resultGrid(sqlResult)}</div>}
+          {sqlResult && !sqlError && sqlResult.columns.length === 0 && <p className="muted" style={{ marginTop: 8 }}>Query ran; no rows returned.</p>}
+        </details>
       </div>
       )}
 
