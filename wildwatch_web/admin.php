@@ -692,14 +692,23 @@ if ($action === 'save_colony') {
     $name = trim($input['colony_name'] ?? '');
     $regionId = (int)($input['region_id'] ?? 0);
     $locationSets = trim($input['location_sets_string'] ?? '');
+    // Locations excluded from Full Monitor detection (comma-separated). Only overwrite
+    // when the key is present so callers that don't send it keep the existing value.
+    $hasFmExcluded = is_array($input) && array_key_exists('fm_excluded_boxes', $input);
+    $fmExcluded = trim($input['fm_excluded_boxes'] ?? '');
     if (!$name || !$regionId) { http_response_code(400); echo json_encode(['error' => 'colony_name and region_id required']); exit; }
     $id = $input['colony_id'] ?? null;
     if ($id) {
-        $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ? WHERE colony_id = ?")
-            ->execute([$name, $regionId, $locationSets, $id]);
+        if ($hasFmExcluded) {
+            $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ?, fm_excluded_boxes = ? WHERE colony_id = ?")
+                ->execute([$name, $regionId, $locationSets, $fmExcluded, $id]);
+        } else {
+            $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ? WHERE colony_id = ?")
+                ->execute([$name, $regionId, $locationSets, $id]);
+        }
     } else {
-        $pdo->prepare("INSERT INTO colonies (colony_name, region_id, location_sets_string) VALUES (?, ?, ?)")
-            ->execute([$name, $regionId, $locationSets]);
+        $pdo->prepare("INSERT INTO colonies (colony_name, region_id, location_sets_string, fm_excluded_boxes) VALUES (?, ?, ?, ?)")
+            ->execute([$name, $regionId, $locationSets, $hasFmExcluded ? $fmExcluded : '0,AA,AB,AC']);
         $id = $pdo->lastInsertId();
     }
     echo json_encode(['success' => true, 'colony_id' => (int)$id]);

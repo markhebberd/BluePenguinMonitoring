@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS colonies (
     region_id INT NOT NULL,
     colony_name VARCHAR(100) NOT NULL,
     location_sets_string TEXT,
+    fm_excluded_boxes VARCHAR(255) NOT NULL DEFAULT '0,AA,AB,AC', -- locations excluded from Full Monitor detection
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY (region_id, colony_name),
     FOREIGN KEY (region_id) REFERENCES regions(region_id)

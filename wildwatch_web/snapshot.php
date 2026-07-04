@@ -29,6 +29,13 @@ $colonyId = (int)($_GET['colony_id'] ?? 1);
 requireColonyAccess($pdo, $observer, $colonyId);
 $since = $_GET['since'] ?? null;
 
+// Per-colony Full Monitor exclusion list — sent on every snapshot (full + incremental)
+// so an admin edit propagates to clients on their next poll without a full re-sync.
+$fmStmt = $pdo->prepare("SELECT fm_excluded_boxes FROM colonies WHERE colony_id = ?");
+$fmStmt->execute([$colonyId]);
+$fmExcludedBoxes = $fmStmt->fetchColumn();
+if ($fmExcludedBoxes === false) $fmExcludedBoxes = '0,AA,AB,AC';
+
 function getTotalCounts($pdo, $colonyId) {
     $c = function($sql, $params = []) use ($pdo) {
         $s = $pdo->prepare($sql); $s->execute($params); return (int)$s->fetchColumn();
@@ -112,6 +119,7 @@ if ($since) {
         'locations' => $locations->fetchAll(),
         'biometrics' => $bioRows,
         'edit_counts' => $editCounts,
+        'fm_excluded_boxes' => $fmExcludedBoxes,
         '_counts' => getTotalCounts($pdo, $colonyId),
     ]);
     exit;
@@ -173,6 +181,7 @@ $json = json_encode([
     'locations' => $locations->fetchAll(),
     'biometrics' => $bioRows,
     'edit_counts' => $editCounts,
+    'fm_excluded_boxes' => $fmExcludedBoxes,
     '_counts' => getTotalCounts($pdo, $colonyId),
 ]);
 

@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -455,7 +455,8 @@ function computeDateStats(date: string) {
   const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
   const allLocs = queryAllLocations();
   const dcmBoxes = getDcmBoxes(date);
-  const requiredBoxes = allLocs.filter(l => !dcmBoxes.has(l.location_name)).map(l => l.location_name);
+  const excluded = getFmExcluded();
+  const requiredBoxes = allLocs.filter(l => !dcmBoxes.has(l.location_name) && !excluded.has(l.location_name.toUpperCase())).map(l => l.location_name);
   const isFullMonitor = requiredBoxes.length > 0 && requiredBoxes.every(b => boxes.has(b));
   return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, totalLocations: allLocs.length };
 }
@@ -5284,19 +5285,20 @@ function RegionsAndColonies({ token }: { token: string }) {
 
         <h4 style={{color:'#1a5276', margin:'16px 0 6px'}}>Colonies</h4>
         <table style={{fontSize:12, borderCollapse:'collapse', width:'100%', marginBottom:8}}>
-          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Colony</th><th style={{textAlign:'left'}}>Region</th><th style={{textAlign:'left'}}>Box sets</th><th></th></tr></thead>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Colony</th><th style={{textAlign:'left'}}>Region</th><th style={{textAlign:'left'}}>Box sets</th><th style={{textAlign:'left'}}>FM-excluded</th><th></th></tr></thead>
           <tbody>
             {colonies!.map((c: any) => (
               <tr key={c.colony_id} style={{borderBottom:'1px solid #eee'}}>
                 <td style={{padding:'4px 8px'}}>{c.colony_name}</td>
                 <td style={{padding:'4px 8px'}} className="muted">{c.region_name}</td>
                 <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.location_sets_string}</td>
-                <td><button className="edit-btn" onClick={() => setEditColony({colony_id: c.colony_id, colony_name: c.colony_name, region_id: c.region_id, location_sets_string: c.location_sets_string || ''})}>Edit</button></td>
+                <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.fm_excluded_boxes}</td>
+                <td><button className="edit-btn" onClick={() => setEditColony({colony_id: c.colony_id, colony_name: c.colony_name, region_id: c.region_id, location_sets_string: c.location_sets_string || '', fm_excluded_boxes: c.fm_excluded_boxes ?? ''})}>Edit</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <button className="edit-btn" onClick={() => setEditColony({colony_name: '', region_id: regions[0]?.region_id || 0, location_sets_string: ''})}>+ Add colony</button>
+        <button className="edit-btn" onClick={() => setEditColony({colony_name: '', region_id: regions[0]?.region_id || 0, location_sets_string: '', fm_excluded_boxes: '0,AA,AB,AC'})}>+ Add colony</button>
 
         {editColony && (
           <div className="obs-card" style={{marginTop:8}}>
@@ -5310,6 +5312,10 @@ function RegionsAndColonies({ token }: { token: string }) {
             <input type="text" defaultValue={editColony.location_sets_string} placeholder="Box sets e.g. {1-150,AA-AC}"
               style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6, fontFamily:'monospace'}}
               onChange={e => editColony.location_sets_string = e.target.value} />
+            <label style={{fontSize:11, color:'#888', display:'block', marginBottom:2}}>Excluded from Full Monitor (comma-separated)</label>
+            <input type="text" defaultValue={editColony.fm_excluded_boxes} placeholder="e.g. 0,AA,AB,AC"
+              style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6, fontFamily:'monospace'}}
+              onChange={e => editColony.fm_excluded_boxes = e.target.value} />
             <div style={{display:'flex', gap:6}}>
               <button className="edit-btn" onClick={() => saveColony(editColony)}>Save</button>
               <button className="edit-btn" onClick={() => setEditColony(null)}>Cancel</button>

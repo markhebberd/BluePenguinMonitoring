@@ -38,8 +38,18 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 7; // Bump to force all clients to full re-sync (v7: rechip_by dropped — rechipper derived from chip order via chip_by)
+const CACHE_VERSION = 8; // Bump to force all clients to full re-sync (v8: FM-excluded boxes now per-colony from snapshot, not hardcoded)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
+
+// Locations excluded from Full Monitor detection. Now configured per-colony (colonies.fm_excluded_boxes,
+// delivered in the snapshot). This is only the fallback when a snapshot predates that field.
+const DEFAULT_FM_EXCLUDED = ['0', 'AA', 'AB', 'AC'];
+/** Parse the comma/space-separated excluded-box list. undefined/null (field absent) → historical
+ *  default; an explicit string (including "") → exactly that set, so admins can exclude nothing. */
+function parseFmExcluded(raw?: string | null): Set<string> {
+  if (raw === undefined || raw === null) return new Set(DEFAULT_FM_EXCLUDED);
+  return new Set(raw.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean));
+}
 type StoreNames = typeof STORES[number];
 
 // ============ Store subscriptions ============
@@ -85,6 +95,9 @@ interface MemCache {
   dateStats: Map<string, any>;         // NZ date string → stats
   observationDates: string[];          // sorted NZ dates with data
   obsByNzDate: Map<string, any[]>;     // NZ date string → observations
+  // Per-colony Full Monitor exclusions (from snapshot's fm_excluded_boxes)
+  fmExcludedRaw: string | null | undefined; // raw value used to build fmExcluded (for change detection)
+  fmExcluded: Set<string>;             // uppercased location names excluded from FM detection
 }
 
 let mem: MemCache | null = null;
@@ -117,10 +130,10 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   // Full monitor: a box not observed today is excused if its most recent breeding_status (before today) is DCM
   // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (covers both NZST+12 and NZDT+13)
   const utcCutoff = nzDate + ' 12:00:00';
-  const EXCLUDED_BOXES = new Set(['0', 'AA', 'AB', 'AC']);
+  const excluded = c.fmExcluded;
   const dcmBoxes = new Set<string>();
   for (const loc of c.locations) {
-    if (EXCLUDED_BOXES.has(loc.location_name.toUpperCase())) continue; // not part of FM calculation
+    if (excluded.has(loc.location_name.toUpperCase())) continue; // not part of FM calculation
     if (boxes.has(loc.location_name)) continue; // observed today — doesn't matter if DCM
     const locObs = (c.obsByLocation.get(loc.location_id) || [])
       .filter((o: any) => !o.is_deleted && o.breeding_status && o.observation_time_utc < utcCutoff)
@@ -128,7 +141,7 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
     if (locObs.length > 0 && locObs[0].breeding_status === 'DCM') dcmBoxes.add(loc.location_name);
   }
   // Required = all locations that are not DCM. FM = all required boxes were observed.
-  const missingBoxes = c.locations.filter(l => !EXCLUDED_BOXES.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !dcmBoxes.has(l.location_name));
+  const missingBoxes = c.locations.filter(l => !excluded.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !dcmBoxes.has(l.location_name));
   const isFullMonitor = missingBoxes.length === 0 && boxes.size > 0;
   return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, totalLocations: c.locations.length };
 }
@@ -150,9 +163,11 @@ function buildDateStats(c: MemCache): void {
   c.observationDates = [...c.obsByNzDate.keys()].sort();
 }
 
-function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[] }): MemCache {
+function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[] }, fmExcludedRaw?: string | null): MemCache {
   const cache: MemCache = {
     ...data,
+    fmExcludedRaw,
+    fmExcluded: parseFmExcluded(fmExcludedRaw),
     obsById: new Map(),
     obsByLocation: new Map(),
     scansByObs: new Map(),
@@ -310,8 +325,9 @@ async function loadMemFromIDB(): Promise<void> {
   ]);
   console.timeEnd('loadMemFromIDB:getAll');
   console.log(`loadMemFromIDB: ${observations.length} obs, ${scans.length} scans, ${penguins.length} penguins, ${locations.length} locations`);
+  const fmExcluded = await getMeta(db, 'fm_excluded_boxes');
   console.time('loadMemFromIDB:buildIndexes');
-  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics });
+  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics }, fmExcluded);
   console.timeEnd('loadMemFromIDB:buildIndexes');
   notifySubscribers();
 }
@@ -354,11 +370,12 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
     ]);
     console.timeEnd('idb-write');
     await setMeta(db, 'snapshot_time', data.snapshot_time);
+    await setMeta(db, 'fm_excluded_boxes', data.fm_excluded_boxes ?? null);
     console.time('buildIndexes');
     mem = buildIndexes({
       observations, scans: data.scans, penguins: data.penguins,
       chips: data.chips, locations: data.locations, biometrics: data.biometrics,
-    });
+    }, data.fm_excluded_boxes);
     console.timeEnd('buildIndexes');
     notifySubscribers();
   } else {
@@ -388,6 +405,8 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       }
     }
     await setMeta(db, 'snapshot_time', data.snapshot_time);
+    // Persist the latest FM-exclusion config before rebuilding so buildIndexes picks it up.
+    if (data.fm_excluded_boxes !== undefined) await setMeta(db, 'fm_excluded_boxes', data.fm_excluded_boxes ?? null);
     // Rebuild memory from IDB (simplest way to merge)
     await loadMemFromIDB();
   }
@@ -477,7 +496,16 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
       onProgress?.('Syncing changes...');
       await storeSnapshot(data, false);
     } else {
-      await setMeta(await openDB(), 'snapshot_time', data.snapshot_time);
+      await setMeta(db, 'snapshot_time', data.snapshot_time);
+      // FM-exclusion config comes back on every snapshot — apply an admin edit even
+      // when no observation rows changed (its edit doesn't move the sync watermark).
+      if (data.fm_excluded_boxes !== undefined && mem && data.fm_excluded_boxes !== mem.fmExcludedRaw) {
+        await setMeta(db, 'fm_excluded_boxes', data.fm_excluded_boxes ?? null);
+        mem.fmExcludedRaw = data.fm_excluded_boxes;
+        mem.fmExcluded = parseFmExcluded(data.fm_excluded_boxes);
+        buildDateStats(mem);
+        notifySubscribers();
+      }
     }
 
     // Verify counts match server
@@ -1113,6 +1141,11 @@ export function computeChickReturn(): any {
 /** Get all observation locations */
 export function queryAllLocations(): any[] {
   return mem?.locations || [];
+}
+
+/** Locations excluded from Full Monitor detection for the active colony. */
+export function getFmExcluded(): Set<string> {
+  return mem?.fmExcluded || new Set(DEFAULT_FM_EXCLUDED);
 }
 
 /** Get precomputed date stats (instant) */
