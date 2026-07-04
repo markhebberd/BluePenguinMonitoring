@@ -4511,7 +4511,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
   // Read-only DB browser + SQL console (restricted to a single operator; enforced server-side too).
   const canSql = localStorage.getItem('ww_email') === 'mark@wildwatch.co.nz';
-  const PAGE = 100;
+  const PAGE = 10000;
   const qId = (name: string) => '`' + String(name).replace(/`/g, '``') + '`';   // backtick-quote an identifier
 
   // Low-level: run one read-only statement, return the result JSON or throw.
@@ -4666,7 +4666,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       {canSql && (
-      <div className="admin-section">
+      <div className="admin-section" style={{ width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
         {browseErr && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{browseErr}</p>}
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
