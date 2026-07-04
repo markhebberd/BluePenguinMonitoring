@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync, loadBirdDetailIntoMem } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -4022,15 +4022,18 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
 }
 
 /**
- * Chrome-less panel for embedding (e.g. the nestcheck WebView modal). Renders ONLY the bird
- * OR box panel, fed by a live, scoped fetch (/api/bird-detail.php or /api/box-detail.php) —
- * no full colony sync. It loads that payload into the same `mem` and reuses the same
- * BirdPage / BoxPanel / computeBoxFamilies, so it's identical to what wildwatch shows —
- * see bird-detail.php / box-detail.php / snapshot_columns.php.
+ * Chrome-less panel for embedding (nestcheck WebView modal). Renders ONLY the bird OR box
+ * panel. Syncs the whole colony into the SAME per-colony IndexedDB the browser uses
+ * (primeFromCache for instant paint + offline, then syncDatabase), so after the first sync
+ * every panel — and every bird/box link tapped inside it — is an instant, offline-capable
+ * local query. Reuses the same BirdPage / BoxPanel / computeBoxFamilies as the full app.
  *
  * URL: /bird/<peng>?embed=1&colony_id=<n>  or  /box/<name>?embed=1&colony_id=<n>
- * Token: window.__WW_TOKEN__ (injected by the host), or ?token=, or the stored web token.
- * Bird/box links inside the panel re-fetch and navigate within the embed.
+ * Token: window.__WW_TOKEN__ (injected by host), or ?token=, or the stored web token.
+ *
+ * Host JS bridge (for a persistent pre-warmed WebView):
+ *   window.wwShow(kind, id)  — render a bird/box without reloading the page
+ *   window.wwSetColony(n)    — switch + re-sync colony in the background
  */
 export function EmbeddedPanel() {
   const params = new URLSearchParams(window.location.search);
@@ -4038,12 +4041,13 @@ export function EmbeddedPanel() {
   const initialId = decodeURIComponent(
     window.location.pathname.match(/\/(?:box|bird)\/([^/?#]+)/)?.[1]
     || params.get('peng') || params.get('peng_num') || params.get('box') || '');
-  const colonyId = parseInt(params.get('colony_id') || '1', 10) || 1;
   const token = (window as any).__WW_TOKEN__ || params.get('token') || localStorage.getItem('ww_token') || '';
 
+  const [colonyId, setEmbedColony] = useState<number>(parseInt(params.get('colony_id') || '1', 10) || 1);
   const [view, setView] = useState<{ kind: 'box'|'bird'; id: string }>({ kind: initialKind, id: initialId });
   const [status, setStatus] = useState<'loading'|'ready'|'error'>('loading');
   const [errMsg, setErrMsg] = useState('');
+  const [progress, setProgress] = useState('');
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
 
@@ -4051,30 +4055,50 @@ export function EmbeddedPanel() {
   const boxData = useBoxDetail(status === 'ready' && view.kind === 'box' ? view.id : null);
   const allPenguins = useAllPenguins();
 
-  // Make the host token available to the existing fetch helpers (fetchHistory etc.).
-  useEffect(() => { if (token) localStorage.setItem('ww_token', token); }, [token]);
-
+  // Sync the colony once into its own IndexedDB. primeFromCache paints instantly from a prior
+  // sync (and lets the panel work fully offline); syncDatabase refreshes in the background.
+  // Re-runs only on colony change (setActiveColony clears mem + swaps DB).
   useEffect(() => {
     let cancelled = false;
-    if (!view.id) { setStatus('error'); setErrMsg('Nothing specified'); return; }
-    setColonyId(colonyId);
-    setStatus('loading'); setHighlightObs(null); setScrollToObs(null);
-    const url = view.kind === 'box'
-      ? `/api/box-detail.php?box=${encodeURIComponent(view.id)}&colony_id=${colonyId}`
-      : `/api/bird-detail.php?peng_num=${encodeURIComponent(view.id)}&colony_id=${colonyId}`;
-    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(data => { if (cancelled) return; if (data?.error) throw new Error(data.error); loadBirdDetailIntoMem(data); setStatus('ready'); })
-      .catch(e => { if (cancelled) return; setStatus('error'); setErrMsg(String(e?.message || e)); });
+    if (token) localStorage.setItem('ww_token', token); // so snapshot.php / fetchHistory authenticate
+    setActiveColony(colonyId, `1-${colonyId}`);          // this colony's cache (region is irrelevant to the sync)
+    setStatus('loading'); setProgress('');
+    (async () => {
+      let primed = false;
+      try { primed = await primeFromCache(); if (!cancelled && primed) setStatus('ready'); }
+      catch { /* fall through to full sync */ }
+      try {
+        await syncDatabase((msg) => { if (!cancelled) setProgress(msg); });
+        if (!cancelled) setStatus('ready');
+      } catch (e) {
+        if (!cancelled && !primed) { setStatus('error'); setErrMsg(String((e as any)?.message || e)); }
+      }
+    })();
     return () => { cancelled = true; };
-  }, [view, colonyId, token]);
+  }, [colonyId, token]);
 
-  const goBird = (num: string) => { if (num && !(view.kind === 'bird' && view.id === num)) { setStatus('loading'); setView({ kind: 'bird', id: num }); } };
-  const goBox = (box: string) => { if (box && !(view.kind === 'box' && view.id === box)) { setStatus('loading'); setView({ kind: 'box', id: box }); } };
+  // Navigation is instant — the whole colony is in mem, so no fetch per bird/box.
+  const goBird = (num: string) => { if (num) { setHighlightObs(null); setScrollToObs(null); setView({ kind: 'bird', id: num }); } };
+  const goBox = (box: string) => { if (box) { setHighlightObs(null); setScrollToObs(null); setView({ kind: 'box', id: box }); } };
   const scrollObs = (t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); };
 
-  if (status === 'error') return <div className="embed-state embed-error">Couldn't load {view.kind} {view.id}<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
-  if (status !== 'ready') return <div className="embed-state">Loading {view.kind} {view.id}…</div>;
+  // JS bridge for a persistent host WebView: render a new bird/box or switch colony
+  // without a page reload (see EMBED-FULLSYNC-PLAN.md Phase 2).
+  useEffect(() => {
+    (window as any).wwShow = (kind: 'box'|'bird', id: string) => {
+      if (!id) return;
+      setHighlightObs(null); setScrollToObs(null);
+      setView({ kind: kind === 'box' ? 'box' : 'bird', id: String(id) });
+    };
+    (window as any).wwSetColony = (n: number) => {
+      const c = parseInt(String(n), 10);
+      if (c > 0) setEmbedColony(c);
+    };
+    return () => { delete (window as any).wwShow; delete (window as any).wwSetColony; };
+  }, []);
+
+  if (status === 'error') return <div className="embed-state embed-error">Couldn't load colony data<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
+  if (status !== 'ready') return <div className="embed-state">Syncing colony…<div className="muted" style={{marginTop:6, fontSize:12}}>{progress}</div></div>;
 
   if (view.kind === 'box') {
     if (!boxData?.location) return <div className="embed-state embed-error">Box {view.id} not found</div>;
