@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 6; // Bump to force all clients to full re-sync (v6: chipped-here matched by location_id, not box name, so same-named foreign boxes don't leak)
+const CACHE_VERSION = 7; // Bump to force all clients to full re-sync (v7: rechip_by dropped — rechipper derived from chip order via chip_by)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 type StoreNames = typeof STORES[number];
 
@@ -695,7 +695,9 @@ function queryBirdDetailInner(pengNum: string): any {
         sightingMap.set(key, {
           peng_num: pengNum, date: chip.chip_date, box: chip.chip_box, source: 'chip',
           adults: 0, eggs: 0, chicks: 0, breeding_status: null,
-          notes: 'Chipped by ' + (chip.chip_by || ''), seen_with: [],
+          // chips are sorted ascending by date, so any chip past the first is a rechip.
+          pit_id: chip.pit_id, chip_by: chip.chip_by || null, is_rechip: chip.pit_id !== chips[0]?.pit_id,
+          notes: (chip.pit_id !== chips[0]?.pit_id ? 'Rechipped by ' : 'Chipped by ') + (chip.chip_by || '?'), seen_with: [],
         });
       }
     }

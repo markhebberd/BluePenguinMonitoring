@@ -94,7 +94,7 @@ function handleBox($pdo, $colonyId, $boxName) {
         }
     }
     // Add birds chipped in this box
-    $chipStmt = $pdo->prepare("SELECT pc.peng_num, pc.pit_id, pc.chip_date, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code, pc.chip_by, pc.rechip_by
+    $chipStmt = $pdo->prepare("SELECT pc.peng_num, pc.pit_id, pc.chip_date, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code, pc.chip_by
         FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE pc.chip_box = ?");
     $chipStmt->execute([$boxName]);
     foreach ($chipStmt->fetchAll() as $c) {
@@ -102,12 +102,11 @@ function handleBox($pdo, $colonyId, $boxName) {
         if (!isset($allPenguins[$pnum])) {
             $allPenguins[$pnum] = ['peng_num'=>$pnum, 'pit_id'=>$c['pit_id'], 'sex'=>$c['sex'],
                 'is_dead'=>$c['is_dead'], 'chipped_as_adult'=>$c['chipped_as_adult'],
-                'chick_size_code'=>$c['chick_size_code'], 'chip_date'=>$c['chip_date'], 'chip_by'=>$c['chip_by'], 'rechip_by'=>$c['rechip_by'],
+                'chick_size_code'=>$c['chick_size_code'], 'chip_date'=>$c['chip_date'], 'chip_by'=>$c['chip_by'],
                 'scan_count'=>0, 'last_seen'=>$c['chip_date'], 'is_chipped_here'=>true];
         } else {
             $allPenguins[$pnum]['is_chipped_here'] = true;
             $allPenguins[$pnum]['chip_by'] = $c['chip_by'];
-            $allPenguins[$pnum]['rechip_by'] = $c['rechip_by'];
             if (empty($allPenguins[$pnum]['chip_date'])) $allPenguins[$pnum]['chip_date'] = $c['chip_date'];
         }
     }

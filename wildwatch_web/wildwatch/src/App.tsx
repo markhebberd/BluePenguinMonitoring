@@ -1460,7 +1460,7 @@ function ChipCard({ date, birds, chipBy, scan, box, onBoxClick, onBirdClick, onD
       {list.map((b: any) => (
         <div className="obs-nums" key={b.pit_id}>
           <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num)} observationDate={date} />
-          <span className="muted">{b.chip_by ? `Chipped by ${b.chip_by}` : b.rechip_by ? `Rechipped by ${b.rechip_by}` : 'Chipped by ?'}</span>
+          <span className="muted">{b.is_rechip ? `Rechipped by ${b.chip_by || '?'}` : `Chipped by ${b.chip_by || '?'}`}</span>
         </div>
       ))}
     </div>
@@ -1844,7 +1844,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         {expandedSections.sightings && sightings.map((s: any, i: number) => s.source === 'chip' ? (
           <ChipCard key={i} date={s.date} box={s.box} onBoxClick={onBoxClick} onDayClick={onDayClick} onBirdClick={onBirdClick}
             chipBy={s.chip_by}
-            scan={{ peng_num: p.peng_num, pit_id: s.pit_id || activeChip?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, rechip_by: s.rechip_by }} />
+            scan={{ peng_num: p.peng_num, pit_id: s.pit_id || activeChip?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, chip_by: s.chip_by, is_rechip: s.is_rechip }} />
         ) : (
           <div key={i} className="obs-card">
             <div className="obs-top">
