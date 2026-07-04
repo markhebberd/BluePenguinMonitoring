@@ -2619,8 +2619,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {Array.from({length: getSeasonStart().getFullYear() - 2000 - 20}, (_, i) => 21 + i).map(y => <option key={y} value={2000+y}>{y}</option>)}
             </select>
           </div>
-          <div className="entry-field">
-            <label>Box</label>
+          <div className="entry-field" style={{flex:'0 0 auto'}}>
+            <label style={{textAlign:'center'}}>Box</label>
             <div style={{display:'flex', gap:4, alignItems:'center'}}>
               {(() => {
                 const boxNames = queryAllLocations().map((l: any) => String(l.location_name));
