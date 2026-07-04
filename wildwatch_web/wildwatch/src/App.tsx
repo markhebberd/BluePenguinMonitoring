@@ -1613,7 +1613,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             )}
             {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
-            <tr><td className="muted">Notes</td><td>{!editing ? (p.kommentar || <span className="muted">-</span>) : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>
             {chips.map((c: any, i: number) => {
               // Rechips (any chip past the first) only show under Edit — the collapsed
               // summary lists just the initial chip.
@@ -1658,6 +1657,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               })}
               </>);
             })()}
+            {/* Notes last in the collapsed view; hidden when blank (still editable under Edit) */}
+            {(editing || !!p.kommentar) && <tr><td className="muted">Notes</td><td>{!editing ? p.kommentar : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>}
           </tbody>
         </table>
       </div>
