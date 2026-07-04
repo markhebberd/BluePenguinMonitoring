@@ -2694,13 +2694,13 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {entryRows.map((o: any, i: number) => o._chip ? (
             <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
-              <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
+              <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <PenguinMini scan={o} onClick={() => {}} observationDate={o.chip_date} navigateDirectly />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
             </div>
           ) : (
             <div key={i} className="entry-existing-row">
-              <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />
+              <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
@@ -5168,7 +5168,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Click-only deep-link anchor for a single observation. Unlike highlight/scroll (which
   // are hover-driven and transient) this persists into the URL as ?obs=, scoped to its box.
   const [obsAnchor, setObsAnchor] = useState<{box:string;time:string}|null>(initial.box && initial.obs ? { box: initial.box, time: initial.obs } : null);
-  const [dayBox, setDayBox] = useState<string|null>(null); // box to centre+highlight in day view
+  const [dayBox, setDayBox] = useState<string|null>(initial.day && initial.box ? initial.box : null); // box to centre+highlight in day view
   const allPenguins = useAllPenguins();
   const [penguinSearch, setPenguinSearch] = useState('');
   const [colonies, setColonies] = useState<any[]>([]);
@@ -5194,7 +5194,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (showAdmin) path = '/?admin=1';
     else if (showReports) path = '/?reports=1';
     else if (showEntry) path = '/?enter=1';
-    else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}`;
+    else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}${dayBox ? `&box=${encodeURIComponent(dayBox)}` : ''}`;
     else {
       const q = new URLSearchParams();
       if (selectedBox) q.set('box', selectedBox);
@@ -5207,7 +5207,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (window.location.pathname + window.location.search !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay, obsAnchor]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay, obsAnchor, dayBox]);
 
   // Handle browser back/forward
   useEffect(() => {
@@ -5215,7 +5215,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       const { box, bird, obs, enter, admin: adm, reports, day } = parseUrl();
       // Back/forward lands on a fresh view — drop cross-view scroll targets. The obs anchor
       // is restored below; the box-load effect re-scrolls to it once the box data is ready.
-      setHighlightObs(null); setScrollToObs(null); setDayBox(null);
+      setHighlightObs(null); setScrollToObs(null); setDayBox(day && box ? box : null);
       setObsAnchor(box && obs ? { box, time: obs } : null);
       setSelectedBox(box || null);
       setSelectedBird(bird || null);
