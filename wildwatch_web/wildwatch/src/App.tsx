@@ -4679,6 +4679,33 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setAddingUser(false);
   };
 
+  // 12-char password, avoiding visually ambiguous chars (0/O/1/l/I) for easy dictation.
+  const genPassword = (len = 12) => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    const a = new Uint32Array(len); crypto.getRandomValues(a);
+    return Array.from(a, n => chars[n % chars.length]).join('');
+  };
+  const [resetFor, setResetFor] = useState<any | null>(null);
+  const [resetPw, setResetPw] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const resetPassword = async () => {
+    if (!resetFor) return;
+    setResetMsg('');
+    if (resetPw.length < 6) { setResetMsg('Password must be at least 6 characters'); return; }
+    setResetting(true);
+    try {
+      const r = await fetch('/api/admin.php?action=reset_password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ observer_id: resetFor.observer_id, password: resetPw }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setResetMsg(`✓ Password for ${resetFor.observer_name} set to:  ${resetPw}`);
+    } catch (e: any) { setResetMsg(e.message || 'Failed to reset password'); }
+    setResetting(false);
+  };
+
 
 
   return (
@@ -4792,7 +4819,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <h3>Users</h3>
         {loading ? <p className="muted">Loading...</p> : (
           <table className="bird-table" style={{width:'100%'}}>
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.observer_id}>
@@ -4805,10 +4832,23 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                       <option value="admin">Admin</option>
                     </select>
                   </td>
+                  <td><button className="edit-btn" onClick={() => { setResetFor(u); setResetPw(genPassword()); setResetMsg(''); }}>Reset password</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+        {resetFor && (
+          <div style={{ marginTop: 12, padding: 10, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>
+            <b>Reset password for {resetFor.observer_name}</b>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
+              <input type="text" value={resetPw} onChange={e => setResetPw(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') resetPassword(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 180 }} />
+              <button className="edit-btn" type="button" onClick={() => setResetPw(genPassword())}>Generate</button>
+              <button className="edit-btn" onClick={resetPassword} disabled={resetting}>{resetting ? 'Setting…' : 'Set password'}</button>
+              <button className="edit-btn" onClick={() => { setResetFor(null); setResetPw(''); setResetMsg(''); }}>Close</button>
+            </div>
+            {resetMsg && <div style={{ marginTop: 6, fontSize: 13, fontFamily: resetMsg.startsWith('✓') ? 'monospace' : undefined, color: resetMsg.startsWith('✓') ? '#2e7d32' : '#c0392b' }}>{resetMsg}</div>}
+          </div>
         )}
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <input type="text" placeholder="Name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
@@ -4818,7 +4858,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             <option value="editor">Editor</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="password" placeholder="Password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px' }} />
+          <input type="text" placeholder="Password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace' }} />
+          <button className="edit-btn" type="button" onClick={() => setNewUser({ ...newUser, password: genPassword() })}>Generate</button>
           <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : 'Add user'}</button>
           {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
         </div>

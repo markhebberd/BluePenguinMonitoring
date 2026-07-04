@@ -255,6 +255,25 @@ if ($action === 'create_user') {
     exit;
 }
 
+if ($action === 'reset_password') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = (int)($input['observer_id'] ?? 0);
+    $password = (string)($input['password'] ?? '');
+    if (!$id) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
+    if (strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
+    $chk = $pdo->prepare("SELECT observer_name FROM observers WHERE observer_id = ?");
+    $chk->execute([$id]);
+    $row = $chk->fetch();
+    if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+    $pdo->prepare("UPDATE observers SET passphrase_hash = ? WHERE observer_id = ?")->execute([$hash, $id]);
+    // Never log the password itself — just that it was reset.
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
+        ->execute([$id, $observer['observer_id'], json_encode(['passphrase_hash'=>'(reset)'])]);
+    echo json_encode(['success'=>true, 'observer_name'=>$row['observer_name']]);
+    exit;
+}
+
 // Preview or delete observations from a specific date
 if ($action === 'preview_date' || $action === 'delete_date') {
     $body = json_decode(file_get_contents('php://input'), true) ?? [];
