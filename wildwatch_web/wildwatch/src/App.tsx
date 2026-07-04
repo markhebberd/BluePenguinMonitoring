@@ -1627,7 +1627,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>{!editing ? (c.chip_by || <span className="muted">-</span>) : <EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} />}</td></tr>
             </Fragment>);
             })}
-            {(editing || Number(p.is_dead)) && <tr><td className="muted">Dead</td><td>{!editing ? 'Dead' : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>}
+            {(editing || !!Number(p.is_dead)) && <tr><td className="muted">Dead</td><td>{!editing ? 'Dead' : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>}
             {(() => {
               if (biometrics.length === 0) return null;
               // Build summary
