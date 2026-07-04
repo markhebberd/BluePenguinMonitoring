@@ -4509,6 +4509,36 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // Read-only SQL console (restricted to a single operator; enforced server-side too).
+  const canSql = localStorage.getItem('ww_email') === 'mark@wildwatch.co.nz';
+  const [sqlText, setSqlText] = useState('');
+  const [sqlResult, setSqlResult] = useState<any>(null);
+  const [sqlError, setSqlError] = useState('');
+  const [sqlRunning, setSqlRunning] = useState(false);
+
+  const runSql = async () => {
+    if (!sqlText.trim() || sqlRunning) return;
+    setSqlRunning(true); setSqlError('');
+    try {
+      const r = await fetch('/api/admin.php?action=sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ sql: sqlText }),
+      });
+      const d = await r.json();
+      if (d.error) { setSqlError(d.error); setSqlResult(null); }
+      else setSqlResult(d);
+    } catch (e: any) { setSqlError(e.message); setSqlResult(null); }
+    setSqlRunning(false);
+  };
+
+  const copyCsv = (res: any) => {
+    const esc = (v: any) => v === null || v === undefined ? ''
+      : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+    const lines = [res.columns.join(','), ...res.rows.map((row: any) => res.columns.map((c: string) => esc(row[c])).join(','))];
+    navigator.clipboard.writeText(lines.join('\n'));
+  };
+
   const loadRecentChanges = async () => {
     setChangesLoading(true);
     const r = await fetch('/api/admin.php?action=recent_changes&days=7', { headers: { 'Authorization': `Bearer ${token}` } });
@@ -4565,6 +4595,58 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           setExporting(false);
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
       </div>
+
+      {canSql && (
+      <div className="admin-section">
+        <h3>SQL console <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
+        <textarea
+          value={sqlText}
+          onChange={e => setSqlText(e.target.value)}
+          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runSql(); } }}
+          placeholder="SELECT * FROM penguins LIMIT 20"
+          spellCheck={false}
+          style={{ width: '100%', minHeight: 90, fontFamily: 'monospace', fontSize: 13, padding: 8, boxSizing: 'border-box' }}
+        />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+          <button className="action-btn" disabled={sqlRunning} onClick={runSql}>{sqlRunning ? 'Running…' : 'Run (⌘/Ctrl+Enter)'}</button>
+          <select value="" onChange={e => { if (e.target.value) setSqlText(e.target.value); }} style={{ maxWidth: 220 }}>
+            <option value="">Starter queries…</option>
+            <option value="SELECT observer_id, observer_name, email, role FROM observers ORDER BY observer_id">Observers</option>
+            <option value="SELECT colony_id, colony_name, colony_prefix FROM colonies ORDER BY colony_id">Colonies</option>
+            <option value="SELECT DATE(CONVERT_TZ(observation_time_utc,'+00:00','+12:00')) d, COUNT(*) n FROM observations WHERE is_deleted=FALSE GROUP BY d ORDER BY d DESC LIMIT 30">Observations per day</option>
+            <option value="SELECT table_name, action, COUNT(*) n FROM audit_log GROUP BY table_name, action ORDER BY n DESC">Audit summary</option>
+          </select>
+          {sqlResult && !sqlError && (
+            <>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'}{sqlResult.truncated ? ' (capped at 1000)' : ''} · {sqlResult.ms} ms
+              </span>
+              {sqlResult.rowCount > 0 && <button className="action-btn" onClick={() => copyCsv(sqlResult)}>Copy CSV</button>}
+            </>
+          )}
+        </div>
+        {sqlError && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, marginTop: 8, whiteSpace: 'pre-wrap' }}>{sqlError}</p>}
+        {sqlResult && !sqlError && sqlResult.columns.length > 0 && (
+          <div style={{ overflow: 'auto', marginTop: 8, maxHeight: 420, border: '1px solid #ddd' }}>
+            <table style={{ fontSize: 12, fontFamily: 'monospace', borderCollapse: 'collapse' }}>
+              <thead><tr>{sqlResult.columns.map((c: string) => (
+                <th key={c} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{c}</th>
+              ))}</tr></thead>
+              <tbody>
+                {sqlResult.rows.map((row: any, i: number) => (
+                  <tr key={i}>{sqlResult.columns.map((c: string) => (
+                    <td key={c} style={{ padding: '3px 8px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                      {row[c] === null ? <span className="muted">NULL</span> : String(row[c])}
+                    </td>
+                  ))}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {sqlResult && !sqlError && sqlResult.columns.length === 0 && <p className="muted" style={{ marginTop: 8 }}>Query ran; no rows returned.</p>}
+      </div>
+      )}
 
       <div className="admin-section">
         <h3>Users</h3>

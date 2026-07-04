@@ -101,6 +101,48 @@ function getDbConnection($attemptsRemaining = 4) {
     }
 }
 
+/**
+ * Read-only DB connection for the admin SQL console. Uses a MySQL user granted
+ * only SELECT (see secrets.php), so it physically cannot write, drop, or write
+ * files regardless of the query — the security boundary is the grant, not any
+ * string checks upstream.
+ */
+function getReadOnlyDbConnection($attemptsRemaining = 2) {
+    try {
+        $pdo = new PDO(
+            "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
+            DB_RO_USER,
+            DB_RO_PASS,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_PERSISTENT => false,
+                PDO::ATTR_TIMEOUT => 5,
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION wait_timeout=30, time_zone='+00:00'"
+            ]
+        );
+        // Best-effort per-query time cap so a runaway console query self-kills.
+        // MariaDB: max_statement_time (seconds). MySQL: max_execution_time (ms).
+        try { $pdo->exec("SET SESSION max_statement_time=15"); }
+        catch (PDOException $e) { try { $pdo->exec("SET SESSION max_execution_time=15000"); } catch (PDOException $e2) {} }
+        return $pdo;
+    } catch (PDOException $e) {
+        if ($attemptsRemaining > 0 && (
+            strpos($e->getMessage(), 'gone away') !== false ||
+            strpos($e->getMessage(), 'timeout') !== false ||
+            strpos($e->getMessage(), 'Lost connection') !== false
+        )) {
+            usleep(300000);
+            return getReadOnlyDbConnection($attemptsRemaining - 1);
+        }
+        error_log("Read-only DB connection failed: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Read-only database connection failed']);
+        exit;
+    }
+}
+
 /** Sliding session: extend a valid token to 30 days from now, at most once per day. */
 function touchSession($pdo, $token) {
     $pdo->prepare("UPDATE sessions SET expires_at = NOW() + INTERVAL 30 DAY WHERE token = ? AND expires_at < NOW() + INTERVAL 29 DAY")

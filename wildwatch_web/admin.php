@@ -30,6 +30,50 @@ if (($observer['role'] ?? '') !== 'admin') { http_response_code(403); echo json_
 
 $action = $_GET['action'] ?? '';
 
+// Read-only SQL console. Admin-gated above; further restricted to a single operator.
+if ($action === 'sql') {
+    if (strcasecmp($observer['email'] ?? '', 'mark@wildwatch.co.nz') !== 0) {
+        http_response_code(403); echo json_encode(['error' => 'Not authorised for the SQL console']); exit;
+    }
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    $sql = trim($input['sql'] ?? '');
+    if ($sql === '') { echo json_encode(['error' => 'Empty query']); exit; }
+
+    // Strip a single trailing semicolon; reject anything that looks like stacked statements.
+    $sql = rtrim($sql, "; \t\n\r");
+    if (strpos($sql, ';') !== false) { echo json_encode(['error' => 'Only a single statement is allowed']); exit; }
+
+    // UX guardrail so mistakes fail fast. NOT the security boundary — that is the
+    // SELECT-only grant on DB_RO_USER, which makes writes impossible regardless.
+    if (!preg_match('/^(SELECT|WITH|SHOW|EXPLAIN|DESCRIBE|DESC)\b/i', $sql)) {
+        echo json_encode(['error' => 'Only SELECT / WITH / SHOW / EXPLAIN / DESCRIBE queries are allowed']); exit;
+    }
+
+    // Auto-cap row-returning queries; fetch one extra to detect truncation.
+    $limit = 1000; $capped = false;
+    if (preg_match('/^(SELECT|WITH)\b/i', $sql) && !preg_match('/\bLIMIT\s+\d/i', $sql)) {
+        $sql .= " LIMIT " . ($limit + 1); $capped = true;
+    }
+
+    try {
+        $ro = getReadOnlyDbConnection();
+        $t0 = microtime(true);
+        $stmt = $ro->query($sql);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $truncated = false;
+        if ($capped && count($rows) > $limit) { $rows = array_slice($rows, 0, $limit); $truncated = true; }
+        $columns = $rows ? array_keys($rows[0]) : [];
+        // Audit the query text (record_id 0 — not tied to a single row).
+        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('__sql_console', 0, 'SELECT', ?, ?)")
+            ->execute([$observer['observer_id'], json_encode(['sql' => $sql], JSON_UNESCAPED_SLASHES)]);
+        echo json_encode(['success' => true, 'columns' => $columns, 'rows' => $rows, 'rowCount' => count($rows), 'truncated' => $truncated, 'ms' => $ms]);
+    } catch (PDOException $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
 if ($action === 'duplicate_scans') {
     // Duplicates by pit_id
     $byPit = $pdo->query("
