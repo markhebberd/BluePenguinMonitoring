@@ -309,8 +309,12 @@ h3.collapsible:hover { color:#1a5276; }
 .cal-day.has-data:hover { background:#bbdefb; }
 .cal-day.full-monitor { background:#c8e6c9; color:#2e7d32; }
 .cal-day.full-monitor:hover { background:#a5d6a7; }
+/* Registered as an FM date but not achieved (missing observations) */
+.cal-day.fm-missed { background:#ffcdd2; color:#c62828; cursor:pointer; font-weight:500; }
+.cal-day.fm-missed:hover { background:#ef9a9a; }
 .cal-day.active { background:#1a5276; color:#fff; font-weight:700; }
 .cal-day.active.full-monitor { background:#2e7d32; }
+.cal-day.active.fm-missed { background:#c62828; color:#fff; }
 
 .cal-toggle { width:20px; height:20px; border-radius:50%; border:2px solid #ccc; background:#fff; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; flex-shrink:0; z-index:501; }
 .cal-toggle:hover { background:#e3f2fd; color:#1a5276; border-color:#90caf9; }

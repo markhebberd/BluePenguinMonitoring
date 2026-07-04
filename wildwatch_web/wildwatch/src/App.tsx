@@ -470,7 +470,7 @@ function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boole
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
-    {reg && <span style={{color:'#2e7d32'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}</span>}
+    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#c62828'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : ' — missed'}</span>}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}
@@ -3728,13 +3728,20 @@ function ChickReturnChart() {
 }
 
 function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[]; onDayClick: (day: string) => void }) {
-  const { show: showTip, hide: hideTip, statsCache } = useContext(DateTooltipCtx);
+  const { show: showTip, hide: hideTip, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
   const dateSet = useMemo(() => new Set(dates), [dates]);
   const fullMonitorDates = useMemo(() => {
     const fm = new Set<string>();
     for (const d of dates) { const s = statsCache.get(d); if (s?.isFullMonitor) fm.add(d); }
     return fm;
   }, [dates, statsCache]);
+  // Dates registered as FM in the enter-date workflow but not achieved (missing
+  // observations) — flagged red so a skipped monitor day is obvious.
+  const missedFmDates = useMemo(() => {
+    const s = new Set<string>();
+    for (const d of registeredFmDates.keys()) { if (!statsCache.get(d)?.isFullMonitor) s.add(d); }
+    return s;
+  }, [registeredFmDates, statsCache]);
 
   // Group dates by month, show months around current date. With no date (e.g. a brand-new
   // colony with no observations) fall back to today so the calendar still renders.
@@ -3802,13 +3809,17 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
                     const d = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const hasData = dateSet.has(d);
                     const isActive = d === date;
+                    const isMissedFm = missedFmDates.has(d);
+                    // A missed FM date is interactive even with no observations, so its
+                    // red cell can be hovered/opened to see why it wasn't a full monitor.
+                    const interactive = hasData || isMissedFm;
                     return (
                       <span
                         key={di}
-                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}${fullMonitorDates.has(d) ? ' full-monitor' : ''}`}
-                        onClick={hasData ? () => onDayClick(d) : undefined}
-                        onMouseEnter={hasData ? e => showTip(d, e) : undefined}
-                        onMouseLeave={hasData ? hideTip : undefined}
+                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}${fullMonitorDates.has(d) ? ' full-monitor' : ''}${isMissedFm ? ' fm-missed' : ''}`}
+                        onClick={interactive ? () => onDayClick(d) : undefined}
+                        onMouseEnter={interactive ? e => showTip(d, e) : undefined}
+                        onMouseLeave={interactive ? hideTip : undefined}
                       >{day}</span>
                     );
                   })}
