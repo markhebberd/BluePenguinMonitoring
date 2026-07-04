@@ -3,6 +3,9 @@ a { color:inherit; text-decoration:none; }
 html, body { overflow-x:hidden; width:100%; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f5f7fa; color:#333; }
 .app { min-height:100vh; max-width:100vw; overflow-x:hidden; }
+/* Day view overlays the box/bird view (which stays mounted underneath) — opaque, full-screen,
+   above the sticky header (z 500) but below dialogs (z >= 900). */
+.day-overlay { position:fixed; inset:0; z-index:650; overflow-y:auto; -webkit-overflow-scrolling:touch; background:#f5f7fa; }
 
 /* Header */
 header { background:linear-gradient(135deg,#1a5276,#2e86c1); color:#fff; padding:10px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; position:sticky; top:0; z-index:500; }

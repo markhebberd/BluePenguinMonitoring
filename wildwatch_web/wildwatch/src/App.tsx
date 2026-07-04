@@ -1608,15 +1608,13 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
             <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
             {chips.map((c: any, i: number) => {
-              // Rechips (any chip past the first) only show under Edit — the collapsed
-              // summary lists just the initial chip.
-              if (i > 0 && !editing) return null;
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();
-              // Collapsed: one consolidated line — "date in: box by: chipper".
+              // Collapsed: one consolidated line per chip — "date in: box by: chipper".
+              // The initial chip is "Chip Info"; each rechip gets its own "Rechip Info" line.
               if (!editing) {
                 return (
-                  <tr key={`chip${i}`}><td className="muted">Chip Info</td><td>
+                  <tr key={`chip${i}`}><td className="muted">{i === 0 ? 'Chip Info' : `${re}chip Info`}</td><td>
                     {c.chip_date ? <DateLink date={c.chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>}
                     {c.chip_box && <> <span className="muted">in:</span> <a className="clickable" href={`/box/${c.chip_box}`} onClick={e => navClick(e, () => onBoxClick(c.chip_box))}>{c.chip_box}</a></>}
                     {c.chip_by && <> <span className="muted">by:</span> {c.chip_by}</>}
@@ -5195,20 +5193,21 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  // While the day overlay is open, lock body scroll so the view underneath doesn't show a
+  // second scrollbar or scroll behind it.
+  useEffect(() => {
+    if (!selectedDay) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [selectedDay]);
+
   if (loading) return <div className="center loading-screen">
     {loadPct === null && <div className="spinner"/>}
     <p>{loadProgress || 'Loading colony data...'}</p>
     {loadPct !== null && <div className="progress-bar"><div className="progress-fill" style={{width: `${Math.round(loadPct * 100)}%`}}/></div>}
     <p className="muted" style={{fontSize:14, position:'absolute', bottom:16, right:16}}>Photo: Marty Melville</p>
   </div>;
-
-  // Wrap any return with tooltip provider + portal
-  const wrap = (content: React.ReactNode) => (
-    <DateTooltipCtx.Provider value={dateTipCtx}>
-      {content}
-      <DateTooltipPortal tip={dateTip.tip} statsCache={dateStatsCache} />
-    </DateTooltipCtx.Provider>
-  );
 
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
@@ -5331,6 +5330,31 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     </header>
   );
 
+  // Day view is a full-screen overlay (not an early return) so the box + bird panel beneath
+  // it stay mounted — their scroll position and expanded sections survive the detour. Dialogs
+  // (z-index ≥ 900) still layer above it; Escape / browser-back clear selectedDay to dismiss.
+  const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showSettings) ? (
+    <div className="app day-overlay">
+      {siteHeader}
+      <div className="colony-toolbar">
+        <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
+        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+        <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
+      </div>
+      <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
+    </div>
+  ) : null;
+
+  // Wrap any return with tooltip provider + portal, plus the day-view overlay on top.
+  const wrap = (content: React.ReactNode) => (
+    <DateTooltipCtx.Provider value={dateTipCtx}>
+      {content}
+      {dayOverlay}
+      <DateTooltipPortal tip={dateTip.tip} statsCache={dateStatsCache} />
+    </DateTooltipCtx.Provider>
+  );
+
   // Settings page
   if (showSettings) {
     return wrap(
@@ -5398,23 +5422,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <ChickSexChart />
           <ChickSexBothReturnedChart />
         </div>
-        {passwordDialog}
-      </div>
-    );
-  }
-
-  // Daily view - everything that happened on a date
-  if (selectedDay) {
-    return wrap(
-      <div className="app">
-        {siteHeader}
-        <div className="colony-toolbar">
-          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
-          {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
-        </div>
-        <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
         {passwordDialog}
       </div>
     );
