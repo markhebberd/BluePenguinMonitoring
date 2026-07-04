@@ -5739,12 +5739,24 @@ namespace PenguinMonitor
             }).Start();
         }
 
+        protected override void OnNewIntent(Android.Content.Intent? intent)
+        {
+            base.OnNewIntent(intent);
+            if (intent == null) return;
+            SetIntent(intent);                 // so this.Intent reflects the NEW deep link, not a stale one
+            HandleAuthDeepLink(intent);
+        }
+
         private void HandleAuthDeepLink(Android.Content.Intent? intent)
         {
             if (intent?.Data?.Scheme != "nestcheck" || intent?.Data?.Host != "auth") return;
             var token = intent.Data.GetQueryParameter("token");
             var name = intent.Data.GetQueryParameter("name");
             var observerId = intent.Data.GetQueryParameter("observer_id");
+            // Consume the deep link immediately so a later activity recreation can't re-process this
+            // same login (which would spuriously re-toast / re-apply the previous user).
+            intent.SetData(null);
+            intent.SetAction(null);
             if (!string.IsNullOrEmpty(token))
             {
                 _appSettings.AuthToken = token;
