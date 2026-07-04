@@ -219,6 +219,10 @@ namespace PenguinMonitor
                     try { StartSync(silent: true); } catch { }
                 }, 1500);
             }
+            // Pre-warm the embed WebView (boots the wildwatch embed app + colony sync in the
+            // background) so the first bird/box panel open is instant. Delayed so it doesn't
+            // compete with startup work.
+            new Handler(Looper.MainLooper).PostDelayed(() => WarmEmbedWebView(), 4000);
         }
         protected override void OnResume()
         {
@@ -2755,6 +2759,9 @@ namespace PenguinMonitor
 
                             // Download the new colony's data
                             StartSync();
+
+                            // Re-point the warm embed WebView at the new colony (background re-sync)
+                            WarmEmbedWebView();
                         };
 
                         // Pre-select current region
@@ -4860,28 +4867,99 @@ namespace PenguinMonitor
 
             return scanLayout;
         }
-        // Opens a read-only Wildwatch panel (bird or box) in a modal WebView, fetched live and
-        // scoped to that one bird/box (?embed=1 -> /api/bird-detail.php or /api/box-detail.php),
-        // reusing the exact web rendering so it can never drift from the website. The session
-        // token is injected as window.__WW_TOKEN__ before page scripts run, so it never appears
-        // in the URL (and thus never in a server log or history entry).
-        private void OpenEmbedPanel(string embedPath)
-        {
-            var colonyId = (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
-            var token = _appSettings?.AuthToken ?? "";
+        // Opens a read-only Wildwatch panel (bird or box) in a modal WebView (?embed=1 mode of
+        // the wildwatch app), reusing the exact web rendering so it can never drift from the
+        // website. The session token is injected as window.__WW_TOKEN__ before page scripts run,
+        // so it never appears in the URL (and thus never in a server log or history entry).
+        //
+        // One WebView is kept alive and pre-warmed (WarmEmbedWebView): the embed app boots once,
+        // syncs the whole colony into its IndexedDB, and subsequent opens just tell it what to
+        // render via the JS bridge (window.wwShow) — no page load, no network, works offline.
+        private Android.Webkit.WebView? _embedWebView;
+        private int _embedColonyId;
 
-            var webView = new Android.Webkit.WebView(this);
-            webView.Settings.JavaScriptEnabled = true;
-            webView.Settings.DomStorageEnabled = true; // the embed uses localStorage for the token
-            webView.SetWebViewClient(new EmbedWebViewClient(token));
-            webView.LoadUrl($"https://wildwatch.co.nz/{embedPath}?embed=1&colony_id={colonyId}");
+        private int CurrentColonyIdOrDefault() =>
+            (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
+
+        private static string JsEscape(string s) => s.Replace("\\", "\\\\").Replace("'", "\\'");
+
+        private Android.Webkit.WebView GetOrCreateEmbedWebView()
+        {
+            if (_embedWebView == null)
+            {
+                var webView = new Android.Webkit.WebView(this);
+                webView.Settings.JavaScriptEnabled = true;
+                webView.Settings.DomStorageEnabled = true; // the embed uses localStorage + IndexedDB
+                webView.SetWebViewClient(new EmbedWebViewClient(_appSettings?.AuthToken ?? ""));
+                _embedWebView = webView;
+            }
+            return _embedWebView;
+        }
+
+        // Boot the embed app + colony sync in the background so the first panel open is instant.
+        // Called on startup and after a colony switch (which re-syncs via wwSetColony).
+        private void WarmEmbedWebView()
+        {
+            if (string.IsNullOrEmpty(_appSettings?.AuthToken)) return; // embed needs auth
+            try
+            {
+                var colonyId = CurrentColonyIdOrDefault();
+                var webView = GetOrCreateEmbedWebView();
+                if (webView.Url == null)
+                {
+                    // "_" is a placeholder id — the WebView is hidden, we only want boot + sync.
+                    _embedColonyId = colonyId;
+                    webView.LoadUrl($"https://wildwatch.co.nz/box/_?embed=1&colony_id={colonyId}");
+                }
+                else if (_embedColonyId != colonyId)
+                {
+                    _embedColonyId = colonyId;
+                    webView.EvaluateJavascript($"window.wwSetColony&&window.wwSetColony({colonyId})", null);
+                }
+            }
+            catch { }
+        }
+
+        private void OpenEmbedPanel(string kind, string id)
+        {
+            var colonyId = CurrentColonyIdOrDefault();
+            var webView = GetOrCreateEmbedWebView();
+            (webView.Parent as ViewGroup)?.RemoveView(webView); // reclaim from a dismissed dialog
+
+            var targetUrl = $"https://wildwatch.co.nz/{kind}/{Android.Net.Uri.Encode(id)}?embed=1&colony_id={colonyId}";
+            if (webView.Url == null || _embedColonyId != colonyId)
+            {
+                // Cold or wrong-colony WebView — full load (boots the app + syncs the colony).
+                _embedColonyId = colonyId;
+                webView.LoadUrl(targetUrl);
+            }
+            else
+            {
+                // Warm path: render via the JS bridge. If the embed app hasn't finished booting
+                // yet (wwShow not registered), fall back to a full load of the target.
+                var js = $"typeof window.wwShow==='function'?(window.wwShow('{kind}','{JsEscape(id)}'),'ok'):'no'";
+                webView.EvaluateJavascript(js, new JsResultCallback(v =>
+                {
+                    if (v == null || !v.Contains("ok"))
+                        RunOnUiThread(() => webView.LoadUrl(targetUrl));
+                }));
+            }
 
             var dialog = new AlertDialog.Builder(this)
                 .SetView(webView)
                 .SetNegativeButton("Close", (s, e) => { })
                 .Create();
+            // Detach on dismiss so the warm WebView can be re-hosted by the next dialog.
+            dialog.DismissEvent += (s, e) => (webView.Parent as ViewGroup)?.RemoveView(webView);
             dialog.Show();
             dialog.Window?.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+        }
+
+        private class JsResultCallback : Java.Lang.Object, Android.Webkit.IValueCallback
+        {
+            private readonly Action<string?> _callback;
+            public JsResultCallback(Action<string?> callback) { _callback = callback; }
+            public void OnReceiveValue(Java.Lang.Object? value) => _callback(value?.ToString());
         }
 
         // Tapping a bird mini-view goes straight here — no prompt.
@@ -4899,14 +4977,14 @@ namespace PenguinMonitor
                 Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
                 return;
             }
-            OpenEmbedPanel($"bird/{Android.Net.Uri.Encode(pengNum)}");
+            OpenEmbedPanel("bird", pengNum);
         }
 
         // Tapping a box badge shows its breeding history + observations in a modal.
         private void ShowBoxPanel(string boxName)
         {
             if (string.IsNullOrEmpty(boxName)) return;
-            OpenEmbedPanel($"box/{Android.Net.Uri.Encode(boxName)}");
+            OpenEmbedPanel("box", boxName);
         }
 
         // Injects the session token as a JS global before the embed's own scripts execute, so

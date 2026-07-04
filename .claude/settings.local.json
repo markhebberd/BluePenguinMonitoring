@@ -77,7 +77,13 @@
       "Bash(git rebase:*)",
       "Bash(git stash:*)",
       "Bash(git checkout:*)",
-      "Bash(sort -t/ -k5 -r)"
+      "Bash(sort -t/ -k5 -r)",
+      "Bash(claude update:*)",
+      "Bash(npm update:*)",
+      "Bash(sudo npm:*)",
+      "Bash(git fetch:*)",
+      "Bash(sed -i 's/versionCode=\"3812\" android:versionName=\"38.12\"/versionCode=\"3813\" android:versionName=\"38.13\"/' nestcheck/AndroidManifest.xml)",
+      "Bash(sed -i 's|<ApplicationVersion>3812</ApplicationVersion>|<ApplicationVersion>3813</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.12</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.13</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)"
     ]
   }
 }
