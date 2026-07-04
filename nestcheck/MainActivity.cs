@@ -1247,6 +1247,14 @@ namespace PenguinMonitor
                         {
                             bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null || result.UploadErrors > 0;
                             syncDialog.SetTitle(hasErrors ? "Sync — Partial" : "Synced");
+                            if (hasErrors)
+                            {
+                                var details = new List<string>(progressMessages);
+                                if (!string.IsNullOrEmpty(result.Error)) details.Add($"Error: {result.Error}");
+                                if (result.TagSyncResult?.Error != null) details.Add($"Tags: {result.TagSyncResult.Error}");
+                                if (result.UploadErrors > 0) details.Add($"Upload errors: {result.UploadErrors}");
+                                syncDialog.SetMessage(string.Join("\n", details));
+                            }
                             var okBtn = syncDialog.GetButton((int)Android.Content.DialogButtonType.Negative);
                             if (okBtn != null) okBtn.Text = "OK";
                         }
