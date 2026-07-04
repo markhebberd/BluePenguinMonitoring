@@ -407,7 +407,9 @@ my-release-key.keystore
 secrets.props
 nestcheck/secrets.props
 wildwatch_web/secrets.php
+# Play Store upload credential (account-wide service account) — never commit
 play-service-account.json
+nestcheck/play-service-account.json
 backups/
 
 .DS_Store
