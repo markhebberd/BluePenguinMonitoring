@@ -558,8 +558,14 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
+  // Hovering a mini tied to a data entry shows that observation's NZ-local time. Only when
+  // observationDate carries a time (full timestamp), not a bare YYYY-MM-DD; never overrides
+  // an explicit title.
+  const nzTime = observationDate && observationDate.length > 10
+    ? parseDate(observationDate).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} title={title} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
       {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );
