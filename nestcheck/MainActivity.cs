@@ -3679,11 +3679,7 @@ namespace PenguinMonitor
                 boxBadge.SetTextColor(Color.White);
                 boxBadge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 boxBadge.Clickable = true;
-                boxBadge.Click += (s, e) =>
-                {
-                    StartActivity(new Android.Content.Intent(Android.Content.Intent.ActionView,
-                        Android.Net.Uri.Parse($"https://wildwatch.co.nz/box/{boxName}")));
-                };
+                boxBadge.Click += (s, e) => ShowBoxPanel(boxName);
                 scansRow.AddView(boxBadge);
             }
 
@@ -4864,11 +4860,31 @@ namespace PenguinMonitor
 
             return scanLayout;
         }
-        // Opens the read-only Wildwatch bird panel in a modal WebView. The panel is fetched
-        // live and scoped to this one bird (/bird/<peng>?embed=1 -> /api/bird-detail.php),
-        // reusing the exact web rendering so it can never drift from the website. Tapping a
-        // bird mini-view goes straight here — no prompt. The session token is injected as
-        // window.__WW_TOKEN__ before page scripts run, so it never appears in the URL.
+        // Opens a read-only Wildwatch panel (bird or box) in a modal WebView, fetched live and
+        // scoped to that one bird/box (?embed=1 -> /api/bird-detail.php or /api/box-detail.php),
+        // reusing the exact web rendering so it can never drift from the website. The session
+        // token is injected as window.__WW_TOKEN__ before page scripts run, so it never appears
+        // in the URL (and thus never in a server log or history entry).
+        private void OpenEmbedPanel(string embedPath)
+        {
+            var colonyId = (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
+            var token = _appSettings?.AuthToken ?? "";
+
+            var webView = new Android.Webkit.WebView(this);
+            webView.Settings.JavaScriptEnabled = true;
+            webView.Settings.DomStorageEnabled = true; // the embed uses localStorage for the token
+            webView.SetWebViewClient(new EmbedWebViewClient(token));
+            webView.LoadUrl($"https://wildwatch.co.nz/{embedPath}?embed=1&colony_id={colonyId}");
+
+            var dialog = new AlertDialog.Builder(this)
+                .SetView(webView)
+                .SetNegativeButton("Close", (s, e) => { })
+                .Create();
+            dialog.Show();
+            dialog.Window?.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+        }
+
+        // Tapping a bird mini-view goes straight here — no prompt.
         private void ShowBirdPanel(string birdId, string? pengNumHint = null)
         {
             var pengNum = pengNumHint ?? "";
@@ -4883,32 +4899,22 @@ namespace PenguinMonitor
                 Toast.MakeText(this, "Bird not in database", ToastLength.Short)?.Show();
                 return;
             }
-
-            var colonyId = (_appSettings?.SelectedColonyId ?? 0) > 0 ? _appSettings!.SelectedColonyId : 1;
-            var token = _appSettings?.AuthToken ?? "";
-
-            var webView = new Android.Webkit.WebView(this);
-            webView.Settings.JavaScriptEnabled = true;
-            webView.Settings.DomStorageEnabled = true; // the embed uses localStorage for the token
-            webView.SetWebViewClient(new BirdPanelWebViewClient(token));
-            var url = $"https://wildwatch.co.nz/bird/{Android.Net.Uri.Encode(pengNum)}?embed=1&colony_id={colonyId}";
-            webView.LoadUrl(url);
-
-            var dialog = new AlertDialog.Builder(this)
-                .SetView(webView)
-                .SetNegativeButton("Close", (s, e) => { })
-                .Create();
-            dialog.Show();
-            dialog.Window?.SetLayout(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+            OpenEmbedPanel($"bird/{Android.Net.Uri.Encode(pengNum)}");
         }
 
-        // Injects the session token as a JS global before the embed's own scripts execute,
-        // so its fetch to /api/bird-detail.php is authenticated without the token ever going
-        // into the URL (and thus never into a server log or history entry).
-        private class BirdPanelWebViewClient : Android.Webkit.WebViewClient
+        // Tapping a box badge shows its breeding history + observations in a modal.
+        private void ShowBoxPanel(string boxName)
+        {
+            if (string.IsNullOrEmpty(boxName)) return;
+            OpenEmbedPanel($"box/{Android.Net.Uri.Encode(boxName)}");
+        }
+
+        // Injects the session token as a JS global before the embed's own scripts execute, so
+        // its fetch is authenticated without the token ever going into the URL.
+        private class EmbedWebViewClient : Android.Webkit.WebViewClient
         {
             private readonly string _injectJs;
-            public BirdPanelWebViewClient(string token)
+            public EmbedWebViewClient(string token)
             {
                 // Session tokens are hex (bin2hex from auth.php), so no escaping is needed.
                 _injectJs = "window.__WW_TOKEN__='" + (token ?? "") + "';";
