@@ -4509,8 +4509,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  // Read-only DB browser + SQL console (restricted to a single operator; enforced server-side too).
-  const canSql = localStorage.getItem('ww_email') === 'mark@wildwatch.co.nz';
+  // Read-only DB browser + SQL console. Available to all admins (enforced server-side too).
+  const canSql = localStorage.getItem('ww_role') === 'admin';
   const PAGE = 10000;
   const qId = (name: string) => '`' + String(name).replace(/`/g, '``') + '`';   // backtick-quote an identifier
 

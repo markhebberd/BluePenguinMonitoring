@@ -30,11 +30,8 @@ if (($observer['role'] ?? '') !== 'admin') { http_response_code(403); echo json_
 
 $action = $_GET['action'] ?? '';
 
-// Read-only SQL console. Admin-gated above; further restricted to a single operator.
+// Read-only SQL console. Available to all admins (role gate enforced above).
 if ($action === 'sql') {
-    if (strcasecmp($observer['email'] ?? '', 'mark@wildwatch.co.nz') !== 0) {
-        http_response_code(403); echo json_encode(['error' => 'Not authorised for the SQL console']); exit;
-    }
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     $sql = trim($input['sql'] ?? '');
     if ($sql === '') { echo json_encode(['error' => 'Empty query']); exit; }
