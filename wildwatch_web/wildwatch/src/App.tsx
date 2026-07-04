@@ -1635,10 +1635,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               const sexCounts: Record<string,number> = {};
               const lastComment = biometrics.find((b: any) => b.notes)?.notes;
               const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
+              const flippers = biometrics.filter((b: any) => b.right_flipper_length).map((b: any) => parseFloat(b.right_flipper_length));
               biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
               const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${observedSexLabel(s, true)} ${n}x`).join(', ');
-              const weightSummary = weights.length > 0 ? `${Math.min(...weights)}-${Math.max(...weights)}g (${weights.length}x)` : '';
-              const summary = [sexSummary, weightSummary, lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
+              // Collapse an equal min==max range to a single value (no "1060-1060g"); show the count only when >1.
+              const range = (vals: number[], unit: string) => {
+                if (vals.length === 0) return '';
+                const lo = Math.round(Math.min(...vals)), hi = Math.round(Math.max(...vals));
+                return `${lo === hi ? lo : `${lo}-${hi}`}${unit}${vals.length > 1 ? ` (${vals.length}x)` : ''}`;
+              };
+              const weightSummary = range(weights, 'g');
+              const flipperSummary = range(flippers, 'mm');
+              const summary = [sexSummary, weightSummary, flipperSummary, lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
 
               return (<>
               <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
