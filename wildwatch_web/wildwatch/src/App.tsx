@@ -3764,6 +3764,11 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   }, [dates]);
 
   const calRef = useRef<HTMLDivElement>(null);
+  // Key the centring effect on stable primitives, not the `dates` array identity: callers
+  // often rebuild `dates` every render (e.g. `[...x].sort()`), so depending on the array
+  // itself re-fired this on unrelated re-renders — a date tooltip appearing — yanking the
+  // horizontal scroll. Length + first/last capture the only change that matters (data loaded).
+  const datesKey = dates.length ? `${dates.length}:${dates[0]}:${dates[dates.length - 1]}` : '';
   useEffect(() => {
     // Defer to the next frame so the scroll runs after the calendar (and its flex
     // parent) have laid out — otherwise the active day can be centred against a
@@ -3775,7 +3780,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
       if (target) target.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [currentMonth, dates]);
+  }, [currentMonth, datesKey]);
 
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
