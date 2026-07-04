@@ -628,9 +628,11 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
   const co = new Map<string, number>();
   for (const o of sObs) {
     const t = parseDate(o.observation_time_utc).getTime();
-    // Parents attend the nest from egg appearance to the end of guard; after that
-    // (post-guard) both feed at sea, so later scans are no evidence of parenthood.
-    if (t < c.windowStart || t > c.guardEnd) continue;
+    // Parents attend the nest from courtship/nest-building through the end of guard:
+    // scans up to ~30 days before laying count (e.g. a male seen only pre-egg is still
+    // a parent), but after guard both feed at sea, so later scans are no evidence.
+    const courtshipStart = (c.laid ?? c.windowStart) - 30 * DAY;
+    if (t < courtshipStart || t > c.guardEnd) continue;
     const present = Array.from(new Set(o.scans.map((s: Scan) => s.pit_id.slice(-8))));
     for (const k of present) counts.set(k, (counts.get(k) || 0) + 1);
     for (let i = 0; i < present.length; i++) for (let j = i + 1; j < present.length; j++) {
