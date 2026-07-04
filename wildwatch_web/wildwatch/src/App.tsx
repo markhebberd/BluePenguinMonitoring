@@ -4646,6 +4646,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     fetch('/api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
+    fetch('/api/admin.php?action=colonies', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json()).then(d => setColonies(Array.isArray(d) ? d : [])).catch(() => {});
     fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
   }, [token]);
@@ -4658,7 +4660,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
   };
 
-  const [newUser, setNewUser] = useState({ observer_name: '', email: '', role: 'viewer', password: '' });
+  const [colonies, setColonies] = useState<any[]>([]);
+  const emptyNewUser = { observer_name: '', email: '', role: 'viewer', password: '', colony_id: '', colony_role: 'view' };
+  const [newUser, setNewUser] = useState(emptyNewUser);
   const [addUserErr, setAddUserErr] = useState('');
   const [addingUser, setAddingUser] = useState(false);
   const createUser = async () => {
@@ -4669,12 +4673,19 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     try {
       const r = await fetch('/api/admin.php?action=create_user', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(newUser),
+        body: JSON.stringify({ observer_name: newUser.observer_name, email: newUser.email, role: newUser.role, password: newUser.password }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      // Optionally grant colony access to the new user (skipped for Admins — they see all).
+      if (newUser.colony_id && newUser.role !== 'admin') {
+        await fetch('/api/admin.php?action=save_colony_permission', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ colony_id: Number(newUser.colony_id), observer_id: d.observer_id, role: newUser.colony_role }),
+        });
+      }
       setUsers([...users, d]);
-      setNewUser({ observer_name: '', email: '', role: 'viewer', password: '' });
+      setNewUser(emptyNewUser);
     } catch (e: any) { setAddUserErr(e.message || 'Failed to add user'); }
     setAddingUser(false);
   };
@@ -4858,12 +4869,24 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             <option value="editor">Editor</option>
             <option value="admin">Admin</option>
           </select>
+          {newUser.role !== 'admin' && (<>
+            <select value={newUser.colony_id} onChange={e => setNewUser({ ...newUser, colony_id: e.target.value })} style={{ padding: '5px 8px' }}>
+              <option value="">— Colony access (optional) —</option>
+              {colonies.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}{c.region_name ? ` — ${c.region_name}` : ''}</option>)}
+            </select>
+            {newUser.colony_id && (
+              <select value={newUser.colony_role} onChange={e => setNewUser({ ...newUser, colony_role: e.target.value })} style={{ padding: '5px 8px' }}>
+                <option value="view">View</option>
+                <option value="edit">Edit</option>
+              </select>
+            )}
+          </>)}
           <input type="text" placeholder="Password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace' }} />
           <button className="edit-btn" type="button" onClick={() => setNewUser({ ...newUser, password: genPassword() })}>Generate</button>
           <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : 'Add user'}</button>
           {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
         </div>
-        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admin users also need colony access granted (per-colony permissions) before they can see anything.</p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admins see nothing until granted colony access — pick a colony above to grant it on creation, or manage more under Colony access.</p>
       </div>
 
       <div className="admin-section">
