@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -66,6 +66,18 @@ function displayStatus(status: string|null, eggs: number, chicks: number): strin
     if (s === 'BR') return 'NO';
   }
   return status;
+}
+
+/** Status badge for read-only views: an IGN observation shows the box's previous
+ *  (pre-IGN) nest status instead, so ignoring a nest doesn't hide its real state.
+ *  The editable ObsCard deliberately still shows IGN. `o` may be an observation or a
+ *  sighting object (time in observation_time_utc or date). */
+function displayStatusOrPrev(o: any, box?: string): string | null {
+  if ((o.breeding_status || '').trim() === 'IGN') {
+    const prev = box ? prevNonIgnObs(box, o.observation_time_utc || o.date) : null;
+    return prev ? displayStatus(prev.breeding_status, prev.eggs || 0, prev.chicks || 0) : null;
+  }
+  return displayStatus(o.breeding_status, o.eggs, o.chicks);
 }
 
 const DARK_TEXT_STATUSES = new Set(['NO','UNL','POT','CON','I','']);
@@ -1899,7 +1911,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     {Array.from({ length: sg.no_scan || 0 }).map((_, k) => (
                       <span key={`ns${k}`} className="scan no-scan">No scan</span>
                     ))}
-                    {(() => { const ds = displayStatus(sg.breeding_status, sg.eggs, sg.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                    {(() => { const ds = displayStatusOrPrev(sg, sg.box); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
                   </div>
                   {sg.notes && <div className="obs-notes">{sg.notes}</div>}
                 </div>
@@ -1923,7 +1935,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 <span className="bird-chip">Box {s.box}</span>
                 {s.eggs > 0 && <span>{'🥚'.repeat(Math.min(s.eggs, 4))}</span>}
                 {s.chicks > 0 && <span>{'🐣'.repeat(Math.min(s.chicks, 4))}</span>}
-                {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
                 {(s.also_seen || []).map((sw: any) => (
                   <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
                 ))}
@@ -2017,7 +2029,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
               {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
               {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
-              {(() => { const ds = displayStatus(s.breeding_status, s.eggs, s.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+              {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {((s.seen_with || []).length > 0 || (s.no_scan || 0) > 0) && <span className="muted">with</span>}
               {(s.seen_with || []).map((sw: any) => (
                 <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
@@ -2775,7 +2787,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             <div key={i} className="entry-existing-row">
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
-              {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+              {(() => { const ds = displayStatusOrPrev(o, box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
               {[...(o.scans || [])].sort((a: any, b: any) => {
                 // Male, female, BC, (SC,) LC; unsexed non-chick adults last
@@ -2815,9 +2827,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} />
           {parsedDate && <span className="date-preview"><DateLink date={parsedDate} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
           {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
-          {parsedDate && box && allBoxObs.some((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate) && (
-            <span className="date-preview date-dup">⚠ Box {box} already has an observation on this date</span>
-          )}
+          {parsedDate && box && (() => {
+            const dup = allBoxObs.find((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate);
+            return dup ? (
+              <span className="date-preview date-dup">⚠ Box {box} already has data on this date — <a className="day-box-link" href={`/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(dup.observation_time_utc)}`} target="_blank" rel="noopener">edit →</a></span>
+            ) : null;
+          })()}
         </div>
 
         {/* Previously seen in this box - sorted M by count, F by count */}
@@ -4018,7 +4033,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                 // Carry-forward row (orange)
                 const cfScans = (cf.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
                   .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
-                const cfDs = displayStatus(cf.breeding_status, cf.eggs, cf.chicks);
+                const cfDs = displayStatusOrPrev(cf, box);
                 return (
                   <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}
                     onClick={() => onBoxClick(box, cf.observation_time_utc)} style={{cursor:'pointer'}}>
@@ -4065,7 +4080,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                   const scanCounts: Record<string, number> = {};
                   for (const s of oScans) scanCounts[s.peng_num] = (scanCounts[s.peng_num] || 0) + 1;
                   const hasDupScan = Object.values(scanCounts).some((n: number) => n > 1);
-                  const oDs = displayStatus(o.breeding_status || '', o.eggs || 0, o.chicks || 0);
+                  const oDs = displayStatusOrPrev(o, box);
                   const isDup = obs.length > 1;
                   return (
                   <div key={o.observation_id || oi}>

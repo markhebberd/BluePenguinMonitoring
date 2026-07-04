@@ -1255,6 +1255,19 @@ export function getFmExcusedBoxes(beforeNzDate: string): Set<string> {
   return boxesWithLatestStatus(beforeNzDate, FM_EXCUSED_STATUSES);
 }
 
+/** The box's most recent observation before `beforeTimeUtc` that carries an actual
+ *  (non-blank, non-IGN) breeding status — used to show the pre-IGN status in read-only views. */
+export function prevNonIgnObs(boxName: string, beforeTimeUtc: string): any | null {
+  if (!mem || !boxName || !beforeTimeUtc) return null;
+  const loc = mem.locByName.get(boxName);
+  if (!loc) return null;
+  const prior = (mem.obsByLocation.get(loc.location_id) || [])
+    .filter((o: any) => !o.is_deleted && o.observation_time_utc < beforeTimeUtc
+      && (o.breeding_status || '').trim() && (o.breeding_status || '').trim() !== 'IGN')
+    .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
+  return prior[0] || null;
+}
+
 /** Get observations for a NZ date (same logic as day.php) */
 export function queryDay(date: string): any {
   if (!mem) return { date, observations: [], chippings: [] };
