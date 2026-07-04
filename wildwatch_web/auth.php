@@ -11,32 +11,19 @@
  * POST /penguin-api/auth.php         - Handle login form submission
  */
 require_once 'config.php';
-session_start();
 
 $pdo = getDbConnection();
 $error = '';
 
-// A leftover browser session is offered as a "Continue as …" convenience, but NEVER used
-// automatically — otherwise a different person opening this page in a browser where someone
-// else already logged in gets silently linked as that previous user (the "logged in as Mark
-// when marian signs in" bug).
-$sessionObserver = null;
-if (isset($_SESSION['observer_id'])) {
-    $stmt = $pdo->prepare("SELECT * FROM observers WHERE observer_id = ?");
-    $stmt->execute([$_SESSION['observer_id']]);
-    $sessionObserver = $stmt->fetch() ?: null;
-}
-
-// Explicit "Continue as <session user>"
-if (($_GET['continue'] ?? '') === '1' && $sessionObserver) {
-    redirectToApp($pdo, $sessionObserver);
-    exit;
-}
-
-// "Use a different account" — drop the stale session so it isn't offered.
-if (($_GET['switch'] ?? '') === '1') {
-    unset($_SESSION['observer_id']);
-    $sessionObserver = null;
+// Stateless by design: this link page never remembers a previous login, so opening it always
+// asks for credentials. (An earlier version kept its own PHP session cookie and would re-auth
+// as the last user who signed in on this browser — which is how "marian" got linked as "Mark".
+// That browser session is separate from nestcheck's token, so logging out of the app never
+// cleared it.) Also proactively drop any leftover session cookie from that old behaviour.
+if (session_status() === PHP_SESSION_ACTIVE || isset($_COOKIE[session_name()])) {
+    @session_start();
+    $_SESSION = [];
+    @session_destroy();
 }
 
 // Handle login form submission
@@ -57,7 +44,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($observer) {
-        $_SESSION['observer_id'] = $observer['observer_id'];
         redirectToApp($pdo, $observer);
         exit;
     } else {
@@ -102,19 +88,12 @@ function redirectToApp($pdo, $observer) {
         button { width:100%; padding:12px; background:#1a5276; color:#fff; border:none; border-radius:6px; font-size:1em; cursor:pointer; margin-top:1.5em; }
         button:hover { background:#154360; }
         .error { color:#F44336; font-size:0.85em; margin-top:8px; }
-        .continue { display:block; width:100%; padding:12px; background:#1a5276; color:#fff; border-radius:6px; font-size:1em; text-align:center; text-decoration:none; }
-        .continue:hover { background:#154360; }
-        .divider { text-align:center; color:#999; font-size:0.85em; margin:1.2em 0 0.2em; }
     </style>
 </head>
 <body>
     <div class="card">
         <h1>Link Nestcheck</h1>
         <p class="subtitle">Sign in with your Wildwatch account to connect the app.</p>
-        <?php if ($sessionObserver): ?>
-            <a class="continue" href="?continue=1">Continue as <?= htmlspecialchars($sessionObserver['observer_name']) ?></a>
-            <div class="divider">— or sign in as a different account —</div>
-        <?php endif; ?>
         <form method="POST">
             <label for="email">Email</label>
             <input type="email" id="email" name="email" required value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
