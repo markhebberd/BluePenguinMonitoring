@@ -917,15 +917,21 @@ namespace PenguinMonitor.Services
             }
         }
 
+        // Full reset: remove every file and subdirectory in the app's internal storage.
+        // Used on logout so no cached colony/penguin data, box tags, notes, or settings
+        // survive until the next login.
         public void ClearInternalStorageData(string filesDir)
         {
             try
             {
-                if (string.IsNullOrEmpty(filesDir)) return;
-                foreach (var f in new[] { COLONY_STATE_FILENAME })
+                if (string.IsNullOrEmpty(filesDir) || !Directory.Exists(filesDir)) return;
+                foreach (var f in Directory.GetFiles(filesDir))
                 {
-                    var path = Path.Combine(filesDir, f);
-                    if (File.Exists(path)) File.Delete(path);
+                    try { File.Delete(f); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Clear: {f}: {ex.Message}"); }
+                }
+                foreach (var d in Directory.GetDirectories(filesDir))
+                {
+                    try { Directory.Delete(d, recursive: true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Clear: {d}: {ex.Message}"); }
                 }
             }
             catch (Exception ex)

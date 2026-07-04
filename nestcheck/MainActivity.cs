@@ -2786,18 +2786,14 @@ namespace PenguinMonitor
                 var logoutButton = _uiFactory.CreateStyledButton($"Logout {_appSettings.ObserverName}", UIFactory.DANGER_RED);
                 logoutButton.Click += (s, e) =>
                 {
+                    int pending = (_colonyState?.PendingUploadCount ?? 0) + (_colonyState?.PendingBiometricCount ?? 0);
+                    var message = pending > 0
+                        ? $"Logout {_appSettings.ObserverName}?\n\n⚠️ You have {pending} unsynced record{(pending == 1 ? "" : "s")} that will be PERMANENTLY LOST. Sync first to keep them.\n\nAll local data will be cleared and you'll need to log in again."
+                        : $"Logout {_appSettings.ObserverName}?\n\nAll local data will be cleared and you'll need to log in again to sync.";
                     new AlertDialog.Builder(this)
                         .SetTitle("Logout")
-                        .SetMessage($"Logout {_appSettings.ObserverName}? You will need to log in again to sync.")
-                        .SetPositiveButton("Logout", (s2, e2) =>
-                        {
-                            _appSettings.AuthToken = "";
-                            _appSettings.ObserverName = "";
-                            _appSettings.ObserverId = 0;
-                            DataStorageService.saveApplicationSettings(_appSettings);
-                            UpdateStatusText();
-                            DrawPageLayouts();
-                        })
+                        .SetMessage(message)
+                        .SetPositiveButton("Logout & Clear", (s2, e2) => PerformFullLogout())
                         .SetNegativeButton("Cancel", (s2, e2) => { })
                         .Show();
                 };
@@ -5743,7 +5739,7 @@ namespace PenguinMonitor
         {
             base.OnNewIntent(intent);
             if (intent == null) return;
-            SetIntent(intent);                 // so this.Intent reflects the NEW deep link, not a stale one
+            Intent = intent;                   // so this.Intent reflects the NEW deep link, not a stale one
             HandleAuthDeepLink(intent);
         }
 
@@ -5829,6 +5825,52 @@ namespace PenguinMonitor
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to clear auto-save file: {ex.Message}");
             }
+        }
+
+        // Logout: wipe all local data (a full reset) and prompt the user to log in again.
+        // The user has already confirmed, including any warning about unsynced records.
+        private void PerformFullLogout()
+        {
+            try
+            {
+                // Stop background sync/polling before tearing down state.
+                _dataStorageService.StopBackgroundPolling();
+
+                // Remove every file in internal storage — colony/penguin data, box tags,
+                // notes, breeding dates, and settings all go.
+                ClearInternalStorageData();
+
+                // Reset in-memory state to a clean, logged-out slate.
+                _colonyState = new ColonyState();
+                _remotePenguinData = new Dictionary<string, PenguinData>();
+                _remoteBreedingDates = null;
+                _boxNotes = new Dictionary<string, BoxNoteData>();
+                _boxTags = new Dictionary<string, BoxTag>();
+
+                // Fresh default settings (no auth/observer/device prefs) and persist the cleared state.
+                var internalPath = FilesDir?.AbsolutePath;
+                if (!string.IsNullOrEmpty(internalPath))
+                {
+                    _appSettings = DataStorageService.loadAppSettingsFromDir(internalPath);
+                    _appSettings.PropertyChanged += (s, e) => DataStorageService.saveApplicationSettings(_appSettings);
+                    DataStorageService.saveApplicationSettings(_appSettings);
+                    if (!string.IsNullOrWhiteSpace(_appSettings.BoxTagsApiUrl))
+                    {
+                        BoxTagService.InitializeApi(_appSettings.BoxTagsApiUrl, () => _appSettings.AuthToken,
+                            () => _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1);
+                    }
+                }
+
+                UpdateStatusText();
+                DrawPageLayouts();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Logout wipe failed: {ex.Message}");
+            }
+
+            // Prompt to log back in.
+            ShowLoginPrompt();
         }
 
         // Called when a box is locked in Edit Box Tags mode: saves the most accurate GPS fix
