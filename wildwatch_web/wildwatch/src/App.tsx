@@ -2391,6 +2391,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [lastSavedObsId, setLastSavedObsId] = useState<number|null>(null);
+  // Set when a save was blocked by an existing observation on the same date — renders a link to it
+  const [dupObs, setDupObs] = useState<{box:string; time:string}|null>(null);
 
   // Load date mappings for season
   useEffect(() => {
@@ -2493,9 +2495,16 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     setScannedBirds(scannedBirds.filter(b => b !== tag));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (gateOverride?: string) => {
     if (!box || !parsedDate) { setMessage('Box and valid date required'); return; }
-    setSaving(true); setMessage('');
+    // Never save a duplicate — one observation per box per date
+    const dup = allBoxObs.find((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate);
+    if (dup) {
+      setMessage(`Not saved — Box ${box} already has an observation on ${formatDate(parsedDate)}`);
+      setDupObs({ box, time: dup.observation_time_utc });
+      return;
+    }
+    setSaving(true); setMessage(''); setDupObs(null);
 
     try {
       // Find location_id for this box — in the ACTIVE colony (so we never write to the wrong one)
@@ -2517,7 +2526,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           observation_time_utc: parsedDate + ' 02:00:00',
           adults, eggs, chicks, no_scan: noScan,
           breeding_status: breedingStatus || null,
-          gate_status: gateStatus || null,
+          gate_status: (gateOverride ?? gateStatus) || null,
           notes,
           monitor_filename: `web-entry, ${localStorage.getItem('ww_email') || 'unknown'}`
         })
@@ -2830,7 +2839,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         <div className="entry-row-group">
           <div className="entry-field">
             <label>Gate</label>
-            <select value={gateStatus} onChange={e => setGateStatus(e.target.value)}>
+            {/* Like the app: picking a gate status completes the box — auto-save if valid */}
+            <select value={gateStatus} onChange={e => {
+              const v = e.target.value;
+              setGateStatus(v);
+              if ((v === 'Gate up' || v === 'Regate') && box && parsedDate && !saving) handleSave(v);
+            }}>
               <option value="">-</option>
               <option value="Gate up">Gate up</option>
               <option value="Regate">Regate</option>
@@ -2855,8 +2869,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
         </div>
 
-        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') ? 'login-error' : 'entry-success'}>
+        {message && <div className={message.startsWith('Error') || message.startsWith('Failed') || message.startsWith('Not saved') ? 'login-error' : 'entry-success'}>
           {message}
+          {dupObs && message.startsWith('Not saved') && (
+            <a className="day-box-link" style={{marginLeft:8, whiteSpace:'nowrap'}} href={`/?box=${encodeURIComponent(dupObs.box)}&obs=${encodeURIComponent(dupObs.time)}`}>view existing observation →</a>
+          )}
           {lastSavedObsId && !message.startsWith('Error') && !message.startsWith('Failed') && (
             <button style={{marginLeft:8, padding:'2px 10px', fontSize:'12px', background:'#F44336', color:'#fff', border:'none', borderRadius:'4px', cursor:'pointer'}} onClick={async () => {
               await deleteRecord(token, 'observations', lastSavedObsId, 'Undo - entry made in error');
@@ -2866,7 +2883,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           )}
         </div>}
 
-        <button className="entry-save" onClick={handleSave} disabled={saving || !box || !parsedDate}>
+        <button className="entry-save" onClick={() => handleSave()} disabled={saving || !box || !parsedDate}>
           {saving ? 'Saving...' : 'Save observation'}
         </button>
       </div>
