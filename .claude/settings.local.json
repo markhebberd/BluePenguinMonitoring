@@ -83,7 +83,9 @@
       "Bash(sudo npm:*)",
       "Bash(git fetch:*)",
       "Bash(sed -i 's/versionCode=\"3812\" android:versionName=\"38.12\"/versionCode=\"3813\" android:versionName=\"38.13\"/' nestcheck/AndroidManifest.xml)",
-      "Bash(sed -i 's|<ApplicationVersion>3812</ApplicationVersion>|<ApplicationVersion>3813</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.12</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.13</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)"
+      "Bash(sed -i 's|<ApplicationVersion>3812</ApplicationVersion>|<ApplicationVersion>3813</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.12</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.13</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)",
+      "Bash(sed -i 's/versionCode=\"3815\" android:versionName=\"38.15\"/versionCode=\"3816\" android:versionName=\"38.16\"/' nestcheck/AndroidManifest.xml)",
+      "Bash(sed -i 's|<ApplicationVersion>3815</ApplicationVersion>|<ApplicationVersion>3816</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.15</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.16</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)"
     ]
   }
 }
