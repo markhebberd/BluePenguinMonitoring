@@ -2604,7 +2604,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
 
   return (
-    <div className="entry-page">
+    <div className={`entry-page${sideBird && sideBirdData?.penguin ? ' entry-page-docked' : ''}`}>
       <div className="entry-header">
         <button className="back-btn" onClick={onBack}>&larr; Back</button>
         <h2>Enter Observation Data</h2>
