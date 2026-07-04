@@ -316,6 +316,24 @@ async function loadMemFromIDB(): Promise<void> {
   notifySubscribers();
 }
 
+/** Load a scoped bird-detail payload (from /api/bird-detail.php) straight into memory,
+ *  bypassing IndexedDB entirely. Used by the embed view (?embed=1) so the nestcheck WebView
+ *  renders one bird's panel from a live, single-bird fetch instead of a full colony sync.
+ *  Uses the SAME buildIndexes as the full snapshot, so queryBirdDetailInner / computeBoxFamilies
+ *  assemble the panel identically. Ephemeral: nothing is persisted. */
+export function loadBirdDetailIntoMem(data: any): void {
+  const observations = applyEditCounts(data.observations || [], data.edit_counts || {});
+  mem = buildIndexes({
+    observations,
+    scans: data.scans || [],
+    penguins: data.penguins || [],
+    chips: data.chips || [],
+    locations: data.locations || [],
+    biometrics: data.biometrics || [],
+  });
+  notifySubscribers();
+}
+
 /** Store snapshot data into both IndexedDB and memory */
 async function storeSnapshot(data: any, full: boolean): Promise<void> {
   const db = await openDB();

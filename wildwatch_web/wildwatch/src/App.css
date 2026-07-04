@@ -6,6 +6,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 /* Day view overlays the box/bird view (which stays mounted underneath) — opaque, full-screen,
    above the sticky header (z 500) but below dialogs (z >= 900). */
 .day-overlay { position:fixed; inset:0; z-index:650; overflow-y:auto; -webkit-overflow-scrolling:touch; background:#f5f7fa; }
+/* Embedded bird panel (?embed=1) — chrome-less, fills the host WebView modal. */
+.embed-bird { max-width:640px; margin:0 auto; padding:10px 12px 24px; }
+.embed-state { padding:40px 16px; text-align:center; color:#666; font-size:15px; }
+.embed-error { color:#b00020; }
 
 /* Header */
 header { background:linear-gradient(135deg,#1a5276,#2e86c1); color:#fff; padding:10px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; position:sticky; top:0; z-index:500; }

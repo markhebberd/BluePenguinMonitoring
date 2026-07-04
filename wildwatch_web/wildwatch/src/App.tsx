@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, startPolling, stopPolling, getColonyId, setColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync, loadBirdDetailIntoMem } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -3910,6 +3910,63 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
   const birdMatch = path.match(/^\/bird\/(.+)/);
   const dayMatch = path.match(/^\/day\/(.+)/);
   return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', day: dayMatch?.[1] };
+}
+
+/**
+ * Chrome-less bird panel for embedding (e.g. the nestcheck WebView modal). Renders ONLY the
+ * BirdPage, fed by a live, scoped fetch of /api/bird-detail.php (no full colony sync). Because
+ * it loads that payload into the same `mem` and reuses the same BirdPage / computeBoxFamilies,
+ * it is identical to the panel wildwatch shows — see bird-detail.php / snapshot_columns.php.
+ *
+ * URL: /bird/<peng>?embed=1&colony_id=<n>   Token: window.__WW_TOKEN__ (injected by the host),
+ * falling back to ?token= or the web app's stored token for browser testing.
+ */
+export function EmbeddedBirdPanel() {
+  const params = new URLSearchParams(window.location.search);
+  const pathPeng = window.location.pathname.match(/\/bird\/([^/?#]+)/)?.[1];
+  const initialPeng = decodeURIComponent(pathPeng || params.get('peng') || params.get('peng_num') || '');
+  const colonyId = parseInt(params.get('colony_id') || '1', 10) || 1;
+  const token = (window as any).__WW_TOKEN__ || params.get('token') || localStorage.getItem('ww_token') || '';
+
+  const [peng, setPeng] = useState(initialPeng);
+  const [status, setStatus] = useState<'loading'|'ready'|'error'>('loading');
+  const [errMsg, setErrMsg] = useState('');
+  const birdData = useBirdDetail(status === 'ready' ? peng : null);
+
+  // Make the host token available to the existing fetch helpers (fetchHistory etc.).
+  useEffect(() => { if (token) localStorage.setItem('ww_token', token); }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!peng) { setStatus('error'); setErrMsg('No bird specified'); return; }
+    setColonyId(colonyId);
+    setStatus('loading');
+    fetch(`/api/bird-detail.php?peng_num=${encodeURIComponent(peng)}&colony_id=${colonyId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(data => { if (cancelled) return; if (data?.error) throw new Error(data.error); loadBirdDetailIntoMem(data); setStatus('ready'); })
+      .catch(e => { if (cancelled) return; setStatus('error'); setErrMsg(String(e?.message || e)); });
+    return () => { cancelled = true; };
+  }, [peng, colonyId, token]);
+
+  if (status === 'error') return <div className="embed-state embed-error">Couldn't load bird {peng}<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
+  if (status !== 'ready' || !birdData) return <div className="embed-state">Loading bird {peng}…</div>;
+  if (!birdData.penguin) return <div className="embed-state embed-error">Bird {peng} not found</div>;
+
+  return (
+    <div className="embed-bird">
+      <BirdPage
+        data={birdData}
+        onBirdClick={(num: string) => { if (num && num !== peng) { setStatus('loading'); setPeng(num); } }}
+        onBoxClick={() => {}}
+        onSightingClick={() => {}}
+        onDayClick={undefined}
+        token={token}
+        canEdit={false}
+      />
+    </div>
+  );
 }
 
 function App() {

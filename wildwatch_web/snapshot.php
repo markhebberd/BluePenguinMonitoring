@@ -16,6 +16,7 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
     throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
 });
 require_once 'config.php';
+require_once 'snapshot_columns.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-cache');
 header('Access-Control-Allow-Origin: *');
@@ -119,7 +120,7 @@ if ($since) {
 // Full snapshot
 $t0 = microtime(true);
 
-$obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.is_deleted
+$obs = $pdo->prepare("SELECT " . SNAP_COLS_OBS . "
     FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
     WHERE ol.colony_id = ?");
 $obs->execute([$colonyId]);
@@ -130,21 +131,21 @@ $ec = $pdo->query("SELECT record_id, COUNT(*) as c FROM audit_log WHERE table_na
 $editCounts = [];
 foreach ($ec->fetchAll() as $row) $editCounts[(int)$row['record_id']] = (int)$row['c'];
 
-$scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted
+$scans = $pdo->prepare("SELECT " . SNAP_COLS_SCAN . "
     FROM penguin_scans ps
     JOIN observations o ON ps.observation_id = o.observation_id
     JOIN observation_locations ol ON o.location_id = ol.location_id
     WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
 $scans->execute([$colonyId]);
 
-$penguins = $pdo->query("SELECT peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar FROM penguins");
+$penguins = $pdo->query("SELECT " . SNAP_COLS_PENG . " FROM penguins");
 
-$chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, solo FROM penguin_chips");
+$chips = $pdo->query("SELECT " . SNAP_COLS_CHIP . " FROM penguin_chips");
 
-$locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ?");
+$locations = $pdo->prepare("SELECT " . SNAP_COLS_LOC . " FROM observation_locations WHERE colony_id = ?");
 $locations->execute([$colonyId]);
 
-$bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, notes, is_moulting, disposition_aggressive, disposition_passive FROM penguin_biometric_data");
+$bio = $pdo->query("SELECT " . SNAP_COLS_BIO . " FROM penguin_biometric_data");
 
 $elapsed = round((microtime(true) - $t0) * 1000);
 
