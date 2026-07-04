@@ -558,11 +558,13 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
-  // Hovering a mini tied to a data entry shows that observation's NZ-local time. Only when
-  // observationDate carries a time (full timestamp), not a bare YYYY-MM-DD; never overrides
-  // an explicit title.
-  const nzTime = observationDate && observationDate.length > 10
-    ? parseDate(observationDate).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+  // Hovering a mini tied to a data entry shows that entry's NZ-local time. Use the first
+  // timestamped source available — an explicit observationDate, or a timestamp carried on the
+  // scan/sighting object — skipping bare YYYY-MM-DD dates; never overrides an explicit title.
+  const timeSrc = [observationDate, scan.observation_time_utc, scan.date, scan.last_seen]
+    .find((v: any) => typeof v === 'string' && v.length > 10);
+  const nzTime = timeSrc
+    ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
@@ -4078,14 +4080,14 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                         <span key={s.scan_id || `${s.peng_num}-${si}`}
                           style={scanCounts[s.peng_num] > 1 ? {outline:'2px solid #F44336', borderRadius:3} : undefined}
                           title={scanCounts[s.peng_num] > 1 ? `Duplicate scan: #${s.peng_num} recorded ${scanCounts[s.peng_num]}× in this observation` : undefined}>
-                          <PenguinMini scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={date} />
+                          <PenguinMini scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={o.observation_time_utc} />
                         </span>
                       ))}
                       {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                         <span key={`ns${k}`} className="scan no-scan">No scan</span>
                       ))}
                       {oi === 0 && chipMinis.map((c: any) => (
-                        <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
+                        <PenguinMini key={c.pit_id} scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={o.observation_time_utc} />
                       ))}
                       {o.gate_status && <span className="muted">{o.gate_status}</span>}
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
