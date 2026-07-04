@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -107,18 +107,19 @@ const STATUS_COLORS: Record<string,string> = {
   MOULT:'#42A5F5',    // blue - moulting
   ABN:'#F44336',      // red - alert
   DCM:'#BCAAA4',      // light brown
+  IGN:'#90A4AE',      // blue-grey - ignored (excused from Full Monitor)
   '':'#F5F5F5',
 };
 
 const STATUS_NAMES: Record<string,string> = {
   NO:'No', UNL:'Unlikely', POT:'Potential', CON:'Confident',
   I:'Incubation', G:'Guard', PG:'Post-guard', MOULT:'Moulting',
-  DCM:'DCM',
+  DCM:'DCM', IGN:'Ignored',
 };
 
 // Observer-settable breeding statuses for the quick radial status picker on a locked
 // observation. Order = ring position: CON at top (12 o'clock), then clockwise.
-const STATUS_PICK_OPTIONS = ['CON','POT','UNL','NO','ABN','DCM'];
+const STATUS_PICK_OPTIONS = ['CON','POT','UNL','NO','ABN','DCM','IGN'];
 
 function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
   observations: Observation[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
@@ -454,9 +455,9 @@ function computeDateStats(date: string) {
   const topName = Object.entries(nameCounts).sort((a, b) => b[1] - a[1])[0];
   const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
   const allLocs = queryAllLocations();
-  const dcmBoxes = getDcmBoxes(date);
+  const excusedBoxes = getFmExcusedBoxes(date);
   const excluded = getFmExcluded();
-  const requiredBoxes = allLocs.filter(l => !dcmBoxes.has(l.location_name) && !excluded.has(l.location_name.toUpperCase())).map(l => l.location_name);
+  const requiredBoxes = allLocs.filter(l => !excusedBoxes.has(l.location_name) && !excluded.has(l.location_name.toUpperCase())).map(l => l.location_name);
   const isFullMonitor = requiredBoxes.length > 0 && requiredBoxes.every(b => boxes.has(b));
   return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, totalLocations: allLocs.length };
 }
@@ -1281,7 +1282,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <label>{'\uD83D\uDC27'}</label><EditableField value={draft?.adults ?? 0} type="number" onSave={async v => { setField('adults', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83E\uDD5A'}</label><EditableField value={draft?.eggs ?? 0} type="number" onSave={async v => { setField('eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={draft?.chicks ?? 0} type="number" onSave={async v => { setField('chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
-          <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Location status" />
+          <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN','IGN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Nest status" />
           <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />
         </div>
@@ -1317,7 +1318,7 @@ function EditableField({ value, type, options, onSave, placeholder, canEdit, inl
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
   // Selects always render as a live dropdown, so a blank value is obviously
-  // settable (shows the placeholder, e.g. "Location status") rather than a "-".
+  // settable (shows the placeholder, e.g. "Nest status") rather than a "-".
   if (type === 'select') {
     if (!canEdit) return <span className="ef-value">{display ?? <span className="muted">{placeholder || '-'}</span>}</span>;
     const opts = options || [];
@@ -2911,6 +2912,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               <option value="CON">Confident</option>
               <option value="ABN">Abandoned</option>
               <option value="DCM">DCM</option>
+              <option value="IGN">Ignored</option>
             </select>
           </div>
         </div>

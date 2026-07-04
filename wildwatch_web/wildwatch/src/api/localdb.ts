@@ -50,6 +50,10 @@ function parseFmExcluded(raw?: string | null): Set<string> {
   if (raw === undefined || raw === null) return new Set(DEFAULT_FM_EXCLUDED);
   return new Set(raw.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean));
 }
+
+// A box whose most recent breeding_status is one of these is excused from Full Monitor:
+// DCM (dead/collapsed/missing) or IGN (deliberately ignored) — while it holds that status.
+const FM_EXCUSED_STATUSES = new Set(['DCM', 'IGN']);
 type StoreNames = typeof STORES[number];
 
 // ============ Store subscriptions ============
@@ -131,17 +135,17 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (covers both NZST+12 and NZDT+13)
   const utcCutoff = nzDate + ' 12:00:00';
   const excluded = c.fmExcluded;
-  const dcmBoxes = new Set<string>();
+  const excusedBoxes = new Set<string>();
   for (const loc of c.locations) {
     if (excluded.has(loc.location_name.toUpperCase())) continue; // not part of FM calculation
-    if (boxes.has(loc.location_name)) continue; // observed today — doesn't matter if DCM
+    if (boxes.has(loc.location_name)) continue; // observed today — status doesn't matter
     const locObs = (c.obsByLocation.get(loc.location_id) || [])
       .filter((o: any) => !o.is_deleted && o.breeding_status && o.observation_time_utc < utcCutoff)
       .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
-    if (locObs.length > 0 && locObs[0].breeding_status === 'DCM') dcmBoxes.add(loc.location_name);
+    if (locObs.length > 0 && FM_EXCUSED_STATUSES.has(locObs[0].breeding_status)) excusedBoxes.add(loc.location_name);
   }
-  // Required = all locations that are not DCM. FM = all required boxes were observed.
-  const missingBoxes = c.locations.filter(l => !excluded.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !dcmBoxes.has(l.location_name));
+  // Required = all locations not excluded/excused (DCM or IGN). FM = all required boxes observed.
+  const missingBoxes = c.locations.filter(l => !excluded.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !excusedBoxes.has(l.location_name));
   const isFullMonitor = missingBoxes.length === 0 && boxes.size > 0;
   return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, totalLocations: c.locations.length };
 }
@@ -1220,20 +1224,28 @@ export function queryPreviousObservations(nzDate: string, boxNames: string[]): R
   return out;
 }
 
-/** Get boxes whose most recent breeding_status before a date is DCM */
-export function getDcmBoxes(beforeNzDate: string): Set<string> {
-  const dcm = new Set<string>();
-  if (!mem) return dcm;
+/** Boxes whose most recent breeding_status before a date is one of `statuses`. */
+function boxesWithLatestStatus(beforeNzDate: string, statuses: Set<string>): Set<string> {
+  const out = new Set<string>();
+  if (!mem) return out;
   const utcCutoff = beforeNzDate + ' 12:00:00';
   for (const loc of mem.locations) {
     const locObs = (mem.obsByLocation.get(loc.location_id) || [])
       .filter((o: any) => !o.is_deleted && o.breeding_status && o.observation_time_utc < utcCutoff)
       .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
-    if (locObs.length > 0 && locObs[0].breeding_status === 'DCM') {
-      dcm.add(loc.location_name);
-    }
+    if (locObs.length > 0 && statuses.has(locObs[0].breeding_status)) out.add(loc.location_name);
   }
-  return dcm;
+  return out;
+}
+
+/** Get boxes whose most recent breeding_status before a date is DCM (for the Hide-DCM filter). */
+export function getDcmBoxes(beforeNzDate: string): Set<string> {
+  return boxesWithLatestStatus(beforeNzDate, new Set(['DCM']));
+}
+
+/** Boxes excused from Full Monitor (latest status DCM or IGN) — mirrors the statsCache calc. */
+export function getFmExcusedBoxes(beforeNzDate: string): Set<string> {
+  return boxesWithLatestStatus(beforeNzDate, FM_EXCUSED_STATUSES);
 }
 
 /** Get observations for a NZ date (same logic as day.php) */
