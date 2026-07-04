@@ -80,10 +80,53 @@ track, and commits — printing the versionCode. One-time on this machine:
 
 ### devian (Linux)
 
-> **TODO (Mark to fill in):** document the exact release command used on devian.
-> devian builds independently (`dotnet publish` as above) — this section just needs
-> the actual **upload** step it uses (the Gradle Play Publisher route, a script, or
-> `scripts/play-upload.py`). Left as a stub deliberately rather than guessed.
+Same script. Repo lives at `~/src/PenguinMonitor`; the service-account key sits at
+`nestcheck/play-service-account.json` (git-ignored, same account-wide SA as the
+sibling app dirs). `google-api-python-client` is installed system-wide.
+
+devian builds with a **clean build** rather than publish (never trust incremental
+output for a release) — the signed AAB lands directly in the build dir, not
+`publish/`:
+
+```bash
+cd ~/src/PenguinMonitor
+rm -rf nestcheck/bin/Release nestcheck/obj/Release
+dotnet build nestcheck/PenguinMonitor.csproj -c Release --no-incremental
+
+cd nestcheck
+python3 scripts/play-upload.py \
+    bin/Release/net9.0-android/nz.co.wildwatch.nestcheck-Signed.aab \
+    --track internal
+```
+
+Before building, always `git pull` **and** check the highest versionCode already on
+Play (releases happen from both machines, so local git can be behind Play — in
+Jul 2026 a stale build shipped as 3807 missing 3803–3806 features):
+
+```bash
+cd nestcheck
+python3 - <<'EOF'
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+creds = service_account.Credentials.from_service_account_file(
+    "play-service-account.json",
+    scopes=["https://www.googleapis.com/auth/androidpublisher"])
+svc = build("androidpublisher", "v3", credentials=creds, cache_discovery=False)
+pkg = "nz.co.wildwatch.nestcheck"
+edit = svc.edits().insert(packageName=pkg, body={}).execute()
+codes = [b["versionCode"] for b in svc.edits().bundles().list(
+    packageName=pkg, editId=edit["id"]).execute().get("bundles", [])]
+svc.edits().delete(packageName=pkg, editId=edit["id"]).execute()
+print("highest on Play:", max(codes))
+EOF
+```
+
+devian also sideloads test **APKs** (not AABs) to Google Drive for the field team:
+
+```bash
+rclone delete "devian:apks/NestCheck-38.apk"   # Drive duplicates instead of overwriting
+rclone copyto <local-apk> "devian:apks/NestCheck-38.apk"
+```
 
 ### Tracks
 
