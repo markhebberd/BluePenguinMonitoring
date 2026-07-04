@@ -2635,7 +2635,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                   <input type="text" value={boxInput} onChange={e => setBoxInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') commitBox(boxInput.trim()); }}
                     onBlur={() => commitBox(boxInput.trim())}
-                    placeholder="34" style={{width:'56px'}} />
+                    style={{width:'56px'}} />
                   <button className="entry-box-nav" title="Next box" onClick={() => stepBox(1)}>›</button>
                 </>;
               })()}
