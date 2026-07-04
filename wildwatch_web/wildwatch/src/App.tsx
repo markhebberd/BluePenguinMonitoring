@@ -2623,7 +2623,10 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             <label style={{textAlign:'center'}}>Box</label>
             <div style={{display:'flex', gap:4, alignItems:'center'}}>
               {(() => {
-                const boxNames = queryAllLocations().map((l: any) => String(l.location_name));
+                // mem.locations has no defined order (no ORDER BY + incremental sync appends),
+                // so natural-sort for sane ‹ › stepping (1, 2, … 99, 100, 103)
+                const boxNames = queryAllLocations().map((l: any) => String(l.location_name))
+                  .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }));
                 const commitBox = (name: string) => { setBoxInput(name); setBox(name); };
                 const stepBox = (dir: number) => {
                   if (!boxNames.length) return;
@@ -2740,7 +2743,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatus(o.breeding_status, o.eggs, o.chicks); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
-              {(o.scans || []).map((s: any, j: number) => (
+              {[...(o.scans || [])].sort((a: any, b: any) => {
+                // Male, female, BC, (SC,) LC; unsexed non-chick adults last
+                const rank = (s: any) => ({ BC: 2, SC: 3, LC: 4 } as any)[s.chick_size_code]
+                  ?? ({ M: 0, F: 1 } as any)[(s.sex || '').toUpperCase()] ?? 5;
+                return rank(a) - rank(b);
+              }).map((s: any, j: number) => (
                 <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setSideBird(s.peng_num)} observationDate={o.observation_time_utc} />
               ))}
               {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
