@@ -5015,8 +5015,8 @@ namespace PenguinMonitor
             var dialog = new AlertDialog.Builder(this)
                 .SetView(webView)
                 .SetNeutralButton("◀", (s, e) => { })
-                .SetNegativeButton("Close", (s, e) => { })
-                .SetPositiveButton("▶", (s, e) => { })
+                .SetPositiveButton("Close", (s, e) => { })
+                .SetNegativeButton("▶", (s, e) => { })
                 .Create();
             // Detach on dismiss so the warm WebView can be re-hosted by the next dialog.
             dialog.DismissEvent += (s, e) =>
@@ -5030,8 +5030,10 @@ namespace PenguinMonitor
             // they step through the embed's view history via the JS bridge.
             _embedBackBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Neutral);
             if (_embedBackBtn != null) _embedBackBtn.Click += (s, e) => webView.EvaluateJavascript("window.wwBack&&window.wwBack()", null);
-            _embedFwdBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Positive);
+            _embedFwdBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Negative);
             if (_embedFwdBtn != null) _embedFwdBtn.Click += (s, e) => webView.EvaluateJavascript("window.wwForward&&window.wwForward()", null);
+            // Fresh panel = fresh history session; the embed's title signal re-shows them.
+            _embedCanBack = _embedCanFwd = false;
             UpdateEmbedNavButtons();
         }
 
