@@ -25,13 +25,14 @@ interface ColonyMapProps {
 /** Fit the map to every box in the colony, so outliers (e.g. a box a few hundred
  *  metres from the cluster) are always framed rather than left off-screen. Refits only
  *  when the marker envelope changes (colony switch or a box moves), so a user's manual
- *  pan/zoom within the same colony isn't yanked back. No maxZoom cap — a tight cluster
- *  is allowed to zoom right in. */
+ *  pan/zoom within the same colony isn't yanked back. maxZoom caps how far it zooms in
+ *  so a tight cluster (e.g. NI) doesn't shoot to street/building level. */
+const MAX_FIT_ZOOM = 18;
 function FitToBounds({ positions, dep }: { positions: [number, number][]; dep: string }) {
   const map = useMap();
   useEffect(() => {
-    if (positions.length === 1) { map.setView(positions[0], 19); return; }
-    map.fitBounds(L.latLngBounds(positions), { padding: [40, 40] });
+    if (positions.length === 1) { map.setView(positions[0], MAX_FIT_ZOOM); return; }
+    map.fitBounds(L.latLngBounds(positions), { padding: [40, 40], maxZoom: MAX_FIT_ZOOM });
   }, [dep]);
   return null;
 }
