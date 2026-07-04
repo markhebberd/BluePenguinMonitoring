@@ -2373,6 +2373,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   });
   useEffect(() => { sessionStorage.setItem('ww_entry_season', String(season)); }, [season]);
   const [box, setBox] = useState('');
+  // The text field edits boxInput only; box (which drives all data loads) commits on Enter
+  // or via the steppers — so typing "100" never loads box 1 and 10 along the way.
+  const [boxInput, setBoxInput] = useState('');
   const [dateInput, setDateInput] = useState('');
   const [parsedDate, setParsedDate] = useState<string|null>(null);
   const [adults, setAdults] = useState(0);
@@ -2565,10 +2568,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [boxPenguins, setBoxPenguins] = useState<any[]>([]);
   useEffect(() => {
     if (!box) { setAllBoxObs([]); setBoxPenguins([]); return; }
+    let stale = false; // ignore out-of-order responses when the box changes again
     fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); })
-      .catch(() => { setAllBoxObs([]); setBoxPenguins([]); });
+      .then(d => { if (!stale) { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); } })
+      .catch(() => { if (!stale) { setAllBoxObs([]); setBoxPenguins([]); } });
+    return () => { stale = true; };
   }, [box, saving]);
 
   const seasonStart = `${season}-04-01`;
@@ -2616,14 +2621,18 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             <div style={{display:'flex', gap:4, alignItems:'center'}}>
               {(() => {
                 const boxNames = queryAllLocations().map((l: any) => String(l.location_name));
+                const commitBox = (name: string) => { setBoxInput(name); setBox(name); };
                 const stepBox = (dir: number) => {
                   if (!boxNames.length) return;
                   const i = boxNames.indexOf(box.trim());
-                  setBox(boxNames[i < 0 ? 0 : Math.min(boxNames.length - 1, Math.max(0, i + dir))]);
+                  commitBox(boxNames[i < 0 ? 0 : Math.min(boxNames.length - 1, Math.max(0, i + dir))]);
                 };
                 return <>
                   <button className="entry-box-nav" title="Previous box" onClick={() => stepBox(-1)}>‹</button>
-                  <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="34" style={{width:'56px'}} />
+                  <input type="text" value={boxInput} onChange={e => setBoxInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') commitBox(boxInput.trim()); }}
+                    onBlur={() => commitBox(boxInput.trim())}
+                    placeholder="34" style={{width:'56px'}} />
                   <button className="entry-box-nav" title="Next box" onClick={() => stepBox(1)}>›</button>
                 </>;
               })()}
