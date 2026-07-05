@@ -5723,10 +5723,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
   return (
     <div className="admin-panel">
-      <div className="admin-header">
-        <h2>Admin</h2>
-      </div>
-
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
         {(([['data', 'Import & data'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
           <button key={id} onClick={() => setAdminTab(id)}
