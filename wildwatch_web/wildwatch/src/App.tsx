@@ -5923,6 +5923,10 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
+      <div className="admin-section">
+        <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
+      </div>
+
       {canSql && (
       <div className="admin-section" style={{ width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
@@ -7222,7 +7226,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="reports-page">
           <h2 className="reports-title">Reports</h2>
-          <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setObsAnchor({ box, time }); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <UnproductiveParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <PenguinGroupsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
