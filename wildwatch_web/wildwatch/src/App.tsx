@@ -4361,12 +4361,6 @@ function SurvivalPredictionReport() {
           <div style={{fontSize:'1.4em', fontWeight:700, color:'#FF9800'}}>{d.toFixed(0)}%</div>
           <div style={{fontSize:'0.8em', color:'#888'}}>Early excess mortality</div>
         </div>
-        {medianAt && (
-          <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#9C27B0'}}>{medianAt.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Median adult residency</div>
-          </div>
-        )}
         {zeroAt && (
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{((100 - d) / b).toFixed(1)} years</div>
