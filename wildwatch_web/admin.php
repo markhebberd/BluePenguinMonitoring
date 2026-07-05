@@ -872,8 +872,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     }
     $prefix = getColonyPrefix($pdo, $colonyId);
 
-    // Earliest date each bird was ever seen in each box, to flag a bird turning up in a box
-    // it had never been seen in before this date. Keyed location_id|peng_num => earliest date.
+    // First & last date each bird was ever seen in each box, to flag a bird whose ONLY sighting
+    // in a box is this date — nothing before or after. Keyed location_id|peng_num => [min,max].
     $seenInBox = [];
     foreach ($pdo->query("SELECT o.location_id, o.observation_time_utc, pc.peng_num
         FROM penguin_scans ps
@@ -883,7 +883,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         WHERE ol.colony_id = " . (int)$colonyId . " AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)")->fetchAll() as $h) {
         $nz = substr($h['observation_time_utc'], 0, 10); // day-level is enough for a before/after test
         $key = $h['location_id'] . '|' . $h['peng_num'];
-        if (!isset($seenInBox[$key]) || $nz < $seenInBox[$key]) $seenInBox[$key] = $nz;
+        if (!isset($seenInBox[$key])) $seenInBox[$key] = ['min' => $nz, 'max' => $nz];
+        else { if ($nz < $seenInBox[$key]['min']) $seenInBox[$key]['min'] = $nz; if ($nz > $seenInBox[$key]['max']) $seenInBox[$key]['max'] = $nz; }
     }
 
     $dupStmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ? AND is_deleted = FALSE");
@@ -965,14 +966,24 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         // Bird cells -> scans. A filled cell is a scan regardless of whether the chip resolves.
-        $scans = []; $unmatchedHere = []; $rowKeys = []; $rowSeen = [];
+        // $miniPengs collects display peng_nums a flag refers to, so the report can show their minis.
+        $scans = []; $unmatchedHere = []; $rowKeys = []; $rowSeen = []; $miniPengs = [];
+        $addMini = function ($peng) use (&$miniPengs, $prefix) {
+            $d = displayPengNum($peng, $prefix);
+            if (!in_array($d, $miniPengs, true)) $miniPengs[] = $d;
+        };
         if (!$isDecom) {
             foreach ($birdCols as $bi) {
                 $val = trim((string)($rec[$bi] ?? ''));
                 if ($val === '') continue;
                 $key = ww_chipKey($val);
                 // Same chip listed twice in one box — almost always a copy-paste. Flag, scan once.
-                if (isset($rowSeen[$key])) { $warnings[] = "chip $val listed more than once in this box"; continue; }
+                if (isset($rowSeen[$key])) {
+                    $warnings[] = "chip $val listed more than once in this box";
+                    $c2 = $byKeyColony[$key] ?? null;
+                    if ($c2 && count($c2['pengs']) === 1) $addMini(array_key_first($c2['pengs']));
+                    continue;
+                }
                 $rowSeen[$key] = true; $rowKeys[] = $key;
                 $col = $byKeyColony[$key] ?? null;
                 $nPeng = $col ? count($col['pengs']) : 0;
@@ -1002,12 +1013,15 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
         // 5. Chips that didn't resolve to exactly one colony bird.
         foreach ($unmatchedHere as $u) $warnings[] = "chip {$u['chip']}: {$u['reason']}";
-        // 3. Bird turning up in a box it had never been seen in before this date.
+        // 3. Bird whose only sighting in this box is this date — none before or after.
         if ($obsDate && $locId !== null) {
             foreach ($scans as $sc) {
-                $prior = $seenInBox[$locId . '|' . $sc['peng_num']] ?? null;
-                if ($prior === null || $prior >= $obsDate)
-                    $warnings[] = 'first time in this box: #' . displayPengNum($sc['peng_num'], $prefix);
+                $s = $seenInBox[$locId . '|' . $sc['peng_num']] ?? null;
+                $seenOtherDate = $s && ($s['min'] < $obsDate || $s['max'] > $obsDate);
+                if (!$seenOtherDate) {
+                    $warnings[] = 'only ever in this box on this date: #' . displayPengNum($sc['peng_num'], $prefix);
+                    $addMini($sc['peng_num']);
+                }
             }
         }
         // 6. Date consistency — a monitor sheet should be one day.
@@ -1036,7 +1050,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks, 'no_scan' => $noScan,
             'breeding_status' => $breeding, 'is_decom' => $isDecom, 'notes' => $notes,
             'obs_time' => $obsTime, 'prev_obs' => $prevObs, 'scans' => $scans, 'unmatched' => $unmatchedHere,
-            'errors' => $errors, 'warnings' => $warnings, 'status' => $status,
+            'errors' => $errors, 'warnings' => $warnings, 'mini_pengs' => $miniPengs, 'status' => $status,
         ];
         // Track each scanned chip's box per day so we can flag a bird appearing in two boxes.
         if ($obsDate && $rowKeys) {
@@ -1066,12 +1080,15 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         foreach ($entries as $e) if (!in_array($e['box'], $boxes, true)) $boxes[] = $e['box'];
         if (count($boxes) < 2) continue;
         $chip = substr($dk, strpos($dk, '|') + 1);
+        $cc = $byKeyColony[$chip] ?? null;
+        $disp = ($cc && count($cc['pengs']) === 1) ? displayPengNum(array_key_first($cc['pengs']), $prefix) : null;
         foreach ($entries as $e) {
             $others = [];
             foreach ($boxes as $b) if ($b !== $e['box']) $others[] = $b;
             $row = &$R['rows'][$e['i']];
             $had = count($row['warnings']) > 0;
             $row['warnings'][] = "chip $chip also in box " . implode(', ', $others) . ' this day';
+            if ($disp !== null && !in_array($disp, $row['mini_pengs'], true)) $row['mini_pengs'][] = $disp;
             if ($row['status'] === 'ok' && !$had) $R['totals']['flagged']++;
             unset($row);
         }

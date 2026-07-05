@@ -5456,30 +5456,38 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [impResult, setImpResult] = useState<any>(null);
   const [impError, setImpError] = useState('');
   const [impRowFilter, setImpRowFilter] = useState<'issues' | 'all'>('issues');
+  const allPengsForMini = useAllPenguins();
+  const pengByNumMini = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const p of (allPengsForMini || [])) m.set(String(p.peng_num), p);
+    return m;
+  }, [allPengsForMini]);
 
   const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); };
 
-  const impPickFile = async (f: File | null) => {
-    impReset();
-    if (!f) { setImpFile(''); setImpCsv(''); return; }
-    setImpFile(f.name);
-    setImpCsv(await f.text());
-  };
-
-  const impAnalyze = async () => {
-    if (!impCsv.trim()) { setImpError('Choose a CSV file first'); return; }
+  // Analyze immediately (from args, since state updates are async on file pick / colony change).
+  const impAnalyze = async (csv = impCsv, filename = impFile, colony = impColony) => {
+    if (!csv.trim()) { setImpError('Choose a CSV file first'); return; }
     setImpAnalyzing(true); setImpError(''); setImpResult(null); setImpAnalysis(null);
     try {
       const r = await fetch('/api/admin.php?action=import_csv_analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ csv: impCsv, filename: impFile, colony_id: impColony }),
+        body: JSON.stringify({ csv, filename, colony_id: colony }),
       });
       const d = await r.json();
       if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
       setImpAnalysis(d);
-      setImpRowFilter('all');   // line-by-line report by default
+      setImpRowFilter('issues');   // problems first; toggle to all rows if wanted
     } catch (e: any) { setImpError(e.message || 'Analysis failed'); }
     setImpAnalyzing(false);
+  };
+
+  const impPickFile = async (f: File | null) => {
+    impReset();
+    if (!f) { setImpFile(''); setImpCsv(''); return; }
+    const text = await f.text();
+    setImpFile(f.name); setImpCsv(text);
+    impAnalyze(text, f.name, impColony);   // analyze on selection — no button
   };
 
   const impCommit = async () => {
@@ -5747,7 +5755,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         </p>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
           <label style={{ fontSize: 13 }}>Colony:{' '}
-            <select value={impColony} onChange={e => { setImpColony(Number(e.target.value)); impReset(); }}>
+            <select value={impColony} onChange={e => { const cid = Number(e.target.value); setImpColony(cid); if (impCsv) impAnalyze(impCsv, impFile, cid); else impReset(); }}>
               {colonies.length === 0 && <option value={impColony}>Colony {impColony}</option>}
               {colonies.map((c: any) => (
                 <option key={c.colony_id} value={c.colony_id}>{c.region_name} · {c.colony_name}</option>
@@ -5755,10 +5763,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             </select>
           </label>
           <input type="file" accept=".csv,text/csv" onChange={e => impPickFile(e.target.files?.[0] ?? null)} />
-          <button className="action-btn" disabled={!impCsv || impAnalyzing} onClick={impAnalyze}>
-            {impAnalyzing ? 'Analyzing…' : 'Analyze'}
-          </button>
-          {impFile && <span className="muted" style={{ fontSize: 12 }}>{impFile}</span>}
+          {impAnalyzing && <span className="muted" style={{ fontSize: 12 }}>Analyzing…</span>}
+          {impFile && !impAnalyzing && <span className="muted" style={{ fontSize: 12 }}>{impFile}</span>}
         </div>
 
         {impError && <p style={{ color: '#c0392b', fontSize: 13, whiteSpace: 'pre-wrap' }}>{impError}</p>}
@@ -5877,6 +5883,17 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                           <td style={{ padding: '2px 6px', color: '#c0392b' }}>
                             {(r.errors || []).join('; ')}
                             {r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>{r.errors?.length ? ' · ' : ''}{r.warnings.join('; ')}</span> : ''}
+                            {r.mini_pengs?.length > 0 && (
+                              <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', marginLeft: 6, verticalAlign: 'middle' }}>
+                                {r.mini_pengs.map((pn: string) => {
+                                  const p = pengByNumMini.get(String(pn));
+                                  if (!p) return <span key={pn} className="muted" style={{ fontSize: 11 }}>#{pn}</span>;
+                                  return <PenguinMini key={pn}
+                                    scan={{ peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, hasReturned: p.hasReturned }}
+                                    onClick={() => window.open(`/?bird=${encodeURIComponent(pn)}`, '_blank')} observationDate={r.date} />;
+                                })}
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
