@@ -4203,6 +4203,137 @@ function PenguinAgeCharts() {
   );
 }
 
+/** Survival curve from the first-season adult cohort.
+ *  Birds chipped in season 1 were a cross-section of ages; annual attrition from that
+ *  cohort gives mortality rate → predicted expected lifespan. */
+function SurvivalPredictionReport() {
+  const v = useDbVersion();
+  const allPenguins = useAllPenguins();
+  const result = useMemo(() => {
+    // Find the earliest season any adult-chipped bird was scanned in.
+    const birdSeasons = new Map<string, Set<string>>();
+    const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
+    let allSeasons = new Set<string>();
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      for (const obs of bd.observations) {
+        const season = getSeasonLabel(parseDate(obs.observation_time_utc));
+        allSeasons.add(season);
+        for (const s of obs.scans || []) {
+          if (!s.peng_num || !adultChipped.has(s.peng_num)) continue;
+          let ss = birdSeasons.get(s.peng_num);
+          if (!ss) { ss = new Set(); birdSeasons.set(s.peng_num, ss); }
+          ss.add(season);
+        }
+      }
+    }
+    const sortedSeasons = Array.from(allSeasons).sort();
+    if (sortedSeasons.length < 3) return null;
+    const firstSeason = sortedSeasons[0];
+    // Cohort: adult-chipped birds scanned in the first season
+    const cohort = Array.from(birdSeasons.entries())
+      .filter(([, ss]) => ss.has(firstSeason))
+      .map(([num, ss]) => ({ num, seasons: ss }));
+    if (cohort.length < 5) return null;
+
+    // For each subsequent season, how many of the cohort were still seen
+    const curve: { season: string; alive: number; pct: number }[] = [];
+    for (const season of sortedSeasons) {
+      const alive = cohort.filter(b => b.seasons.has(season)).length;
+      curve.push({ season, alive, pct: alive / cohort.length * 100 });
+    }
+
+    // Annual mortality rate: fit exponential decay.
+    // ln(survivors/cohort) = -mortality * years → least squares on seasons with survivors > 0
+    const points = curve.filter(c => c.alive > 0).map((c, i) => ({ x: i, y: Math.log(c.alive / cohort.length) }));
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const n = points.length;
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const annualMortality = 1 - Math.exp(slope);
+    const annualSurvival = Math.exp(slope);
+    // Expected lifespan from constant mortality: 1 / mortality rate
+    const expectedLifespan = annualMortality > 0 ? 1 / annualMortality : null;
+    // Median: ln(0.5) / slope
+    const medianLifespan = slope < 0 ? Math.log(0.5) / slope : null;
+
+    return { cohort: cohort.length, firstSeason, curve, annualMortality, annualSurvival, expectedLifespan, medianLifespan, sortedSeasons };
+  }, [v, allPenguins]);
+
+  if (!result) return null;
+
+  const { cohort, firstSeason, curve, annualMortality, annualSurvival, expectedLifespan, medianLifespan } = result;
+
+  // Draw survival curve
+  const W = 600, H = 280, PAD = { top: 30, right: 20, bottom: 55, left: 55 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const xScale = (i: number) => PAD.left + (i / (curve.length - 1)) * plotW;
+  const yScale = (pct: number) => PAD.top + plotH - (pct / 100) * plotH;
+
+  return (
+    <div className="report-card">
+      <h3>Predicted lifespan (first-season cohort)</h3>
+      <p className="muted">Survival curve of {cohort} adult-chipped birds from the first monitoring season ({firstSeason}) — annual attrition predicts expected lifespan</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+        {[25, 50, 75, 100].map(pct => (
+          <Fragment key={pct}>
+            <line x1={PAD.left} x2={PAD.left + plotW} y1={yScale(pct)} y2={yScale(pct)} stroke="#e8ecef" strokeWidth="1" />
+            <text x={PAD.left - 8} y={yScale(pct) + 4} textAnchor="end" fontSize="11" fill="#888">{pct}%</text>
+          </Fragment>
+        ))}
+        {/* Actual curve */}
+        <polyline
+          points={curve.map((c, i) => `${xScale(i)},${yScale(c.pct)}`).join(' ')}
+          fill="none" stroke="#2196F3" strokeWidth="2.5"
+        />
+        {/* Predicted exponential decay overlay */}
+        <polyline
+          points={curve.map((_, i) => `${xScale(i)},${yScale(Math.exp(Math.log(annualSurvival) * i) * 100)}`).join(' ')}
+          fill="none" stroke="#f44336" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7"
+        />
+        {/* Data points */}
+        {curve.map((c, i) => (
+          <circle key={i} cx={xScale(i)} cy={yScale(c.pct)} r="3" fill="#2196F3" />
+        ))}
+        {/* X axis labels */}
+        {curve.map((c, i) => (
+          i % 2 === 0 || curve.length <= 10 ? <text key={i} x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="9" fill="#666" transform={`rotate(-30, ${xScale(i)}, ${PAD.top + plotH + 16})`}>{c.season}</text> : null
+        ))}
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      </svg>
+      <div style={{display:'flex', gap:'2em', justifyContent:'center', margin:'0.8em 0', flexWrap:'wrap'}}>
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:'1.4em', fontWeight:700, color:'#2196F3'}}>{(annualSurvival * 100).toFixed(1)}%</div>
+          <div style={{fontSize:'0.8em', color:'#888'}}>Annual survival rate</div>
+        </div>
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:'1.4em', fontWeight:700, color:'#f44336'}}>{(annualMortality * 100).toFixed(1)}%</div>
+          <div style={{fontSize:'0.8em', color:'#888'}}>Annual mortality rate</div>
+        </div>
+        {expectedLifespan && (
+          <div style={{textAlign:'center'}}>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{expectedLifespan.toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Mean expected lifespan</div>
+          </div>
+        )}
+        {medianLifespan && (
+          <div style={{textAlign:'center'}}>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#9C27B0'}}>{medianLifespan.toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Median lifespan</div>
+          </div>
+        )}
+      </div>
+      <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed survival</span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> Fitted exponential decay</span>
+      </div>
+    </div>
+  );
+}
+
 /** Pair bond duration: how many consecutive seasons the same two adults share a box. */
 function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   const v = useDbVersion();
@@ -6856,6 +6987,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <ChickSexChart />
           <ChickSexBothReturnedChart />
           <PenguinAgeCharts />
+          <SurvivalPredictionReport />
           <PairBondReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <FloaterReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <BoxSuccessReport />
