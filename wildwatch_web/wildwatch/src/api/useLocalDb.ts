@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -48,6 +48,14 @@ export function useAdultCountMismatches(): { total: number; rows: any[] } {
 export function useChickReturn(): any {
   return useSyncExternalStore(subscribe, () => cached('chickReturn', computeChickReturn));
 }
+
+export function useBirdTwoBoxes(): any[] { return useSyncExternalStore(subscribe, () => cached('birdTwoBoxes', computeBirdTwoBoxes)); }
+export function useScanBeforeChip(): any[] { return useSyncExternalStore(subscribe, () => cached('scanBeforeChip', computeScanBeforeChip)); }
+export function useDeadScanned(): any[] { return useSyncExternalStore(subscribe, () => cached('deadScanned', computeDeadScanned)); }
+export function useImprobableCounts(): any[] { return useSyncExternalStore(subscribe, () => cached('improbableCounts', computeImprobableCounts)); }
+export function useFutureObservations(): any[] { return useSyncExternalStore(subscribe, () => cached('futureObservations', computeFutureObservations)); }
+export function useRetiredTagScans(): any[] { return useSyncExternalStore(subscribe, () => cached('retiredTagScans', computeRetiredTagScans)); }
+export function useChicksNoScan(): any[] { return useSyncExternalStore(subscribe, () => cached('chicksNoScan', computeChicksNoScan)); }
 
 export function useBoxDetail(boxName: string | null): any {
   return useSyncExternalStore(subscribe, () => {

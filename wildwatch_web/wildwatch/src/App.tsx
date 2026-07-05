@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -5456,7 +5456,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [adminTab, setAdminTab] = useState<'data' | 'users' | 'database' | 'system'>('data');
+  const [adminTab, setAdminTab] = useState<'io' | 'validation' | 'users' | 'database' | 'system'>('io');
 
   // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
   const [impFile, setImpFile] = useState<string>('');        // filename
@@ -5474,6 +5474,15 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     for (const p of (allPengsForMini || [])) m.set(String(p.peng_num), p);
     return m;
   }, [allPengsForMini]);
+
+  // Data-integrity checks — computed locally from the colony cache (instant).
+  const iBirdTwoBoxes = useBirdTwoBoxes();
+  const iScanBeforeChip = useScanBeforeChip();
+  const iDeadScanned = useDeadScanned();
+  const iImprobable = useImprobableCounts();
+  const iFuture = useFutureObservations();
+  const iRetired = useRetiredTagScans();
+  const iChicksNoScan = useChicksNoScan();
 
   const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); };
 
@@ -5735,7 +5744,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   return (
     <div className="admin-panel">
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['data', 'Import & data'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
+        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
           <button key={id} onClick={() => setAdminTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -5744,7 +5753,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         ))}
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <h3>Export</h3>
         <button className="action-btn" disabled={exporting} onClick={async () => {
           setExporting(true);
@@ -5762,7 +5771,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <h3>Import monitor CSV</h3>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
           Columns: <code>Date, Box, Adults, Eggs, Chicks, Bird-1…, No scan, Notes</code>. Dates must be year-first (<code>YYYY-MM-DD</code>); other formats are skipped.
@@ -6092,7 +6101,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admins see nothing until granted colony access — set it per colony above, or manage it later under Colony access.</p>
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <h3>Last 7 days DB changes</h3>
         <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
           {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
@@ -6112,7 +6121,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <h3>Delete Observations by Date</h3>
         <p className="muted">Preview and delete all observations from a specific date, then re-sync from server</p>
         <DateSearch dates={observationDates || []} onDayClick={previewDate} />
@@ -6149,7 +6158,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <h3>Sync Monitors (TCP Server)</h3>
         <p className="muted">Pull from TCP server (210.54.37.120). Query first, then import individual monitors.</p>
         <div>
@@ -6216,32 +6225,35 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <ColonyAccess token={token} />
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <RemovePenguin token={token} />
+      </div>
+
+      <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
         <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
-        <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
         <DuplicateScans token={token} />
         <SameGenderConflicts token={token} />
-        <IntegrityCheck token={token} action="bird_two_boxes" title="Bird in two boxes same day"
+        <IntegrityCheck rows={iBirdTwoBoxes} title="Bird in two boxes same day"
           desc="A penguin scanned at two different boxes on one day — can't be two places at once." empty="No birds in two boxes"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'boxes', label: 'Boxes', render: boxesCell }, { key: 'box_count', label: '#' }]} />
-        <IntegrityCheck token={token} action="scan_before_chip" title="Scan before chip date"
+        <IntegrityCheck rows={iScanBeforeChip} title="Scan before chip date"
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
-        <IntegrityCheck token={token} action="dead_scanned" title="Dead birds still scanned"
+        <IntegrityCheck rows={iDeadScanned} title="Dead birds still scanned"
           desc="Birds marked dead but scanned in the last year — the death flag or the scan is wrong." empty="No dead birds recently scanned"
           columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
-        <IntegrityCheck token={token} action="improbable_counts" title="Improbable counts"
+        <IntegrityCheck rows={iImprobable} title="Improbable counts"
           desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'adults', label: 'Adults', render: bigCountCell }, { key: 'eggs', label: 'Eggs', render: bigCountCell }, { key: 'chicks', label: 'Chicks', render: bigCountCell }]} />
-        <IntegrityCheck token={token} action="future_observations" title="Future-dated observations"
+        <IntegrityCheck rows={iFuture} title="Future-dated observations"
           desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
-          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'observer', label: 'Observer' }]} />
-        <IntegrityCheck token={token} action="retired_tag_scans" title="Retired-tag scans"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'monitor', label: 'Monitor' }]} />
+        <IntegrityCheck rows={iRetired} title="Retired-tag scans"
           desc="Scanned via an old (inactive) chip after the bird was rechipped." empty="No retired-tag scans"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'pit_id', label: 'Tag', render: (v: string) => String(v || '').slice(-8) }, { key: 'active_chip_date', label: 'Rechipped' }]} />
-        <IntegrityCheck token={token} action="chicks_no_scan" title="Chicks present but not scanned"
+        <IntegrityCheck rows={iChicksNoScan} title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />
       </div>
@@ -6766,34 +6778,22 @@ function SameGenderConflicts({ token }: { token: string }) {
   );
 }
 
-// Generic whole-DB integrity check: fetches an admin action, shows 5 rows + "show all".
-function IntegrityCheck({ token, title, desc, action, empty, columns }: {
-  token: string; title: string; desc?: string; action: string; empty?: string;
+// Presentational integrity check: renders rows (computed locally) — 5 by default + "show all".
+function IntegrityCheck({ title, desc, rows, empty, columns }: {
+  title: string; desc?: string; rows: any[]; empty?: string;
   columns: { key: string; label: string; render?: (v: any, row: any) => React.ReactNode }[];
 }) {
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const run = async () => {
-    setLoading(true);
-    const r = await fetch(`/api/admin.php?action=${action}`, { headers: { Authorization: `Bearer ${token}` } });
-    const d = await r.json();
-    setRows(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
-  useEffect(() => { run(); }, []); // run by default
-  const shown = rows && !showAll ? rows.slice(0, 5) : rows;
+  const shown = showAll ? rows : rows.slice(0, 5);
   return (
     <div style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8 }}>
       <h3 style={{ margin: '0 0 4px' }}>{title}</h3>
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
-      <button onClick={run} disabled={loading} style={{ marginRight: 8 }}>{loading ? 'Checking…' : 'Re-check'}</button>
-      {rows && rows.length === 0 && <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span>}
-      {rows && rows.length > 0 && (<>
-        <p style={{ color: '#F44336', fontWeight: 600, margin: '8px 0 4px' }}>{rows.length} found{rows.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
+      {rows.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
+        <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{rows.length} found{rows.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
         <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
           <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}</tr></thead>
-          <tbody>{shown!.map((row: any, i: number) => (
+          <tbody>{shown.map((row: any, i: number) => (
             <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
               {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
             </tr>

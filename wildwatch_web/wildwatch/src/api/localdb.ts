@@ -1079,6 +1079,155 @@ export function computeAdultCountMismatches(): { total: number; rows: any[] } {
   return { total: rows.length, rows };
 }
 
+// ============ Data-integrity checks (computed from the colony cache) ============
+// Client-side versions of the admin SQL checks — instant, scoped to the active colony.
+
+const byDateDesc = (a: any, b: any) => b.obs_date.localeCompare(a.obs_date);
+
+/** A penguin scanned at two different boxes on the same NZ day. */
+export function computeBirdTwoBoxes(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const map = new Map<string, Set<string>>(); // peng|date -> boxes
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    const box = c.locById.get(obs.location_id)?.location_name;
+    if (!chip || !box) continue;
+    const key = chip.peng_num + '|' + utcToNzDate(obs.observation_time_utc);
+    (map.get(key) || map.set(key, new Set()).get(key)!).add(box);
+  }
+  const rows: any[] = [];
+  for (const [key, boxes] of map) {
+    if (boxes.size < 2) continue;
+    const [peng_num, obs_date] = key.split('|');
+    rows.push({ peng_num, obs_date, box_count: boxes.size, boxes: [...boxes].sort(compareBoxNames).join(', ') });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** A scan dated before the bird's chip was fitted. */
+export function computeScanBeforeChip(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows: any[] = [];
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    if (!chip || !chip.chip_date) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const obs_date = utcToNzDate(obs.observation_time_utc);
+    if (obs_date < chip.chip_date.slice(0, 10))
+      rows.push({ obs_date, chip_date: chip.chip_date.slice(0, 10), box_name: c.locById.get(obs.location_id)?.location_name || '', peng_num: chip.peng_num });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** Birds marked dead that were still scanned in the last year. */
+export function computeDeadScanned(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const cutoff = utcToNzDate(new Date(Date.now() - 365 * 86400000).toISOString());
+  const rows: any[] = [];
+  for (const p of c.penguins) {
+    if (!p.is_dead) continue;
+    let last = '', count = 0;
+    for (const ch of (c.chipsByPeng.get(p.peng_num) || [])) {
+      for (const s of (c.scansByPit.get(ch.pit_id) || [])) {
+        if (s.scan_deleted) continue;
+        const obs = c.obsById.get(s.observation_id);
+        if (!obs || obs.is_deleted) continue;
+        const d = utcToNzDate(obs.observation_time_utc);
+        count++; if (d > last) last = d;
+      }
+    }
+    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count });
+  }
+  return rows.sort((a, b) => b.last_scan.localeCompare(a.last_scan));
+}
+
+/** Observations with adults > 2 or eggs + chicks > 2. */
+export function computeImprobableCounts(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows: any[] = [];
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const adults = o.adults || 0, eggs = o.eggs || 0, chicks = o.chicks || 0;
+    if (adults <= 2 && eggs + chicks <= 2) continue;
+    const box_name = c.locById.get(o.location_id)?.location_name;
+    if (!box_name) continue;
+    rows.push({ obs_date: utcToNzDate(o.observation_time_utc), box_name, adults, eggs, chicks });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** Observations dated after today (NZ). */
+export function computeFutureObservations(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const today = utcToNzDate(new Date().toISOString());
+  const rows: any[] = [];
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const obs_date = utcToNzDate(o.observation_time_utc);
+    if (obs_date > today)
+      rows.push({ obs_date, box_name: c.locById.get(o.location_id)?.location_name || '', monitor: o.monitor_filename || '' });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** Scans via a retired (inactive) chip after the bird was rechipped. */
+export function computeRetiredTagScans(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows: any[] = [];
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    if (!chip || chip.is_active) continue;
+    const active = (c.chipsByPeng.get(chip.peng_num) || []).find((ch: any) => ch.is_active);
+    if (!active || !active.chip_date) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const obs_date = utcToNzDate(obs.observation_time_utc);
+    if (obs_date > active.chip_date.slice(0, 10))
+      rows.push({ obs_date, box_name: c.locById.get(obs.location_id)?.location_name || '', peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10) });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** A box where >=2 chicks were chipped in the prior month, then chicks recorded with no scans. */
+export function computeChicksNoScan(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows: any[] = [];
+  for (const o of c.observations) {
+    if (o.is_deleted || (o.chicks || 0) <= 0) continue;
+    if ((c.scansByObs.get(o.observation_id) || []).some((s: any) => !s.scan_deleted)) continue; // has a scan
+    const loc = c.locById.get(o.location_id);
+    if (!loc) continue;
+    const obs_date = utcToNzDate(o.observation_time_utc);
+    const from = new Date(Date.parse(obs_date) - 31 * 86400000).toISOString().slice(0, 10);
+    const chipped = new Set<string>();
+    for (const ch of c.chips) {
+      if (!ch.chip_date) continue;
+      const cd = ch.chip_date.slice(0, 10);
+      if (cd >= obs_date || cd < from) continue;
+      const inBox = ch.location_id ? ch.location_id === o.location_id : ch.chip_box === loc.location_name;
+      if (!inBox) continue;
+      const peng = c.pengByNum.get(ch.peng_num);
+      if (!peng || peng.chipped_as_adult) continue;
+      chipped.add(ch.peng_num);
+    }
+    if (chipped.size >= 2) rows.push({ obs_date, box_name: loc.location_name, chicks: o.chicks || 0, chicks_chipped: chipped.size });
+  }
+  return rows.sort(byDateDesc);
+}
+
 /** Chick return rates by size, with return-age points. */
 export function computeChickReturn(): any {
   if (!mem) return { by_season: {}, totals: {}, points: [] };
