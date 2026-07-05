@@ -7044,7 +7044,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <ChickSexChart />
           <ChickSexBothReturnedChart />
           <PenguinAgeCharts />
-          <SurvivalPredictionReport />
+          {userName.toLowerCase() !== 'britta' && <SurvivalPredictionReport />}
           <PairBondReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <FloaterReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <BoxSuccessReport />
