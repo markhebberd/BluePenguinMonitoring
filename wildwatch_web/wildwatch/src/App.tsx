@@ -6234,7 +6234,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
         <IntegrityCheck token={token} action="improbable_counts" title="Improbable counts"
           desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
-          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'adults', label: 'Adults' }, { key: 'eggs', label: 'Eggs' }, { key: 'chicks', label: 'Chicks' }]} />
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'adults', label: 'Adults', render: bigCountCell }, { key: 'eggs', label: 'Eggs', render: bigCountCell }, { key: 'chicks', label: 'Chicks', render: bigCountCell }]} />
         <IntegrityCheck token={token} action="future_observations" title="Future-dated observations"
           desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'observer', label: 'Observer' }]} />
@@ -6809,6 +6809,7 @@ function IntegrityCheck({ token, title, desc, action, empty, columns }: {
 const dayCell = (d: string) => d ? <a className="clickable" href={`/day/${d}`}>{d}</a> : '';
 const boxCell = (b: string) => b ? <a className="clickable" href={`/box/${b}`}>Box {b}</a> : '';
 const pengCell = (n: string) => n ? <a className="clickable" href={`/penguin/${n}`}>#{n}</a> : '';
+const bigCountCell = (v: any) => Number(v) > 3 ? <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span> : v;
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
   <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`}>{b.trim()}</a></Fragment>
 ));
