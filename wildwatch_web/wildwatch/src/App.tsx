@@ -5445,6 +5445,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [adminTab, setAdminTab] = useState<'data' | 'users' | 'database' | 'system'>('data');
 
   // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
   const [impFile, setImpFile] = useState<string>('');        // filename
@@ -5726,7 +5727,17 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <h2>Admin</h2>
       </div>
 
-      <div className="admin-section">
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
+        {(([['data', 'Import & data'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
+          <button key={id} onClick={() => setAdminTab(id)}
+            style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
+              background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <h3>Export</h3>
         <button className="action-btn" disabled={exporting} onClick={async () => {
           setExporting(true);
@@ -5744,7 +5755,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
       </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Import monitor CSV</h3>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
           Columns: <code>Date, Box, Adults, Eggs, Chicks, Bird-1…, No scan, Notes</code>. Dates must be year-first (<code>YYYY-MM-DD</code>); other formats are skipped.
@@ -5923,12 +5934,12 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
       </div>
 
       {canSql && (
-      <div className="admin-section" style={{ width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
+      <div className="admin-section" style={{ display: adminTab === 'database' ? undefined : 'none', width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
         {browseErr && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{browseErr}</p>}
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -6010,7 +6021,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
       )}
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'users' ? undefined : 'none' }}>
         <h3>Users</h3>
         {loading ? <p className="muted">Loading...</p> : (
           <table className="bird-table" style={{width:'100%'}}>
@@ -6078,7 +6089,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admins see nothing until granted colony access — set it per colony above, or manage it later under Colony access.</p>
       </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Last 7 days DB changes</h3>
         <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
           {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
@@ -6098,7 +6109,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Delete Observations by Date</h3>
         <p className="muted">Preview and delete all observations from a specific date, then re-sync from server</p>
         <DateSearch dates={observationDates || []} onDayClick={previewDate} />
@@ -6135,7 +6146,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Sync Monitors (TCP Server)</h3>
         <p className="muted">Pull from TCP server (210.54.37.120). Query first, then import individual monitors.</p>
         <div>
@@ -6197,11 +6208,12 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
 
-      <RegionsAndColonies token={token} />
+      <div style={{ display: adminTab === 'users' ? undefined : 'none' }}>
+        <RegionsAndColonies token={token} />
+        <ColonyAccess token={token} />
+      </div>
 
-      <ColonyAccess token={token} />
-
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <h3>Data Security</h3>
         <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
@@ -6209,11 +6221,13 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <SameGenderConflicts token={token} />
       </div>
 
-      <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
-        <DiskHistoryChart token={token} />
-      </Suspense>
+      <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
+        <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
+          <DiskHistoryChart token={token} />
+        </Suspense>
+      </div>
 
-      <div className="admin-section">
+      <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <h3>Disk Write Test</h3>
         {serverDisk && <p className="muted">Account: {serverDisk.files_mb} MB files + {serverDisk.db_mb} MB DB = {serverDisk.used_mb} MB / {serverDisk.quota_mb} MB ({serverDisk.pct}%) · {serverDisk.observations} observations · {serverDisk.penguins} penguins</p>}
         <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
