@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, resetDatabase, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -34,6 +34,7 @@ interface Observation {
   observation_time_utc:string; monitor_filename:string;
   adults:number; eggs:number; chicks:number;
   breeding_status:string|null; gate_status:string|null; notes:string;
+  no_scan?:number;
   scans: Scan[];
   edit_count?:string|number;
 }
@@ -753,7 +754,7 @@ function seasonDataIssues(obs: Observation[]) {
     const pengPits = new Map<string, Set<string>>();
     for (const s of o.scans) {
       pitCounts.set(s.pit_id, (pitCounts.get(s.pit_id) || 0) + 1);
-      pitPeng.set(s.pit_id, s.peng_num);
+      pitPeng.set(s.pit_id, s.peng_num ?? null);
       if (s.peng_num) {
         if (!pengPits.has(s.peng_num)) pengPits.set(s.peng_num, new Set());
         pengPits.get(s.peng_num)!.add(s.pit_id);
@@ -1168,14 +1169,14 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     if (!draft || draftScans.some(s => s.pit_id === p.pit_id)) return;
     const f = countField(p);
     setDraftScans([...draftScans, { peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, life_stage: p.life_stage, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult }]);
-    setField(f, (draft[f] || 0) + 1);
+    setField(f, (Number(draft[f]) || 0) + 1);
     setBirdSearch('');
   };
   const draftRemoveScan = (scan: any) => {
     if (!draft) return;
     const f = countField(scan);
     setDraftScans(draftScans.filter(s => scanKey(s) !== scanKey(scan)));
-    setField(f, Math.max(0, (draft[f] || 0) - 1));
+    setField(f, Math.max(0, (Number(draft[f]) || 0) - 1));
   };
   // A "no scan" is an adult that was present but couldn't be scanned, so it counts
   // toward the adult total — add/remove it in step with the adult count.
@@ -4327,7 +4328,7 @@ function SurvivalPredictionReport() {
 
   if (!result) return null;
 
-  const { cohort, firstSeason, curve, b, d, k, model, zeroAt, medianAt } = result;
+  const { cohort, firstSeason, curve, b, d, k, model, zeroAt } = result;
 
   // Extend prediction into future until model reaches zero
   const futureSeasons: string[] = [];
@@ -4529,7 +4530,7 @@ function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
         }
         return false;
       })
-      .map(([num, e]) => ({
+      .map(([, e]) => ({
         bird: e.info,
         boxCount: e.boxes.size,
         totalScans: e.totalScans,
@@ -4785,7 +4786,7 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
-function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins, peekCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean }) {
+function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins: _allPenguins, peekCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
