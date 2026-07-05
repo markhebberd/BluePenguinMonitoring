@@ -4244,32 +4244,62 @@ function SurvivalPredictionReport() {
       curve.push({ season, alive, pct: alive / cohort.length * 100 });
     }
 
-    // Linear fit: S(t) = intercept + slope*t (least squares on percentage survival)
-    const pts = curve.map((c, i) => ({ x: i, y: c.pct }));
+    // Combined model: S(t) = max(0, a - b*t) - c*e^(-d*t)
+    // The linear component captures steady adult attrition; the exponential captures
+    // early excess mortality (young/weak birds dying in the first few seasons).
+    // Fit approach: linear regression on the later portion (after season 2) for the
+    // baseline rate, then fit the exponential to the residuals in the early portion.
+    const stableStart = Math.min(2, curve.length - 2);
+    const stablePts = curve.slice(stableStart).map((c, i) => ({ x: i + stableStart, y: c.pct }));
     let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (const p of pts) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
-    const n = pts.length;
+    for (const p of stablePts) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const n = stablePts.length;
     const linSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     const linIntercept = (sumY - linSlope * sumX) / n;
-    // Season at which line hits zero
-    const zeroAt = linSlope < 0 ? -linIntercept / linSlope : null;
-    // Annual loss rate (percentage points per season)
-    const annualLoss = -linSlope;
-    // Median residency: season at which line hits 50%
-    const medianAt = linSlope < 0 ? (50 - linIntercept) / linSlope : null;
 
-    return { cohort: cohort.length, firstSeason, curve, linSlope, linIntercept, zeroAt, annualLoss, medianAt, sortedSeasons };
+    // Exponential early-mortality: residuals below the linear in early seasons
+    // Model residual as c*e^(-d*t) where c = gap at t=0, d = decay rate
+    const linearAt0 = linIntercept; // what linear predicts at t=0
+    const earlyDrop = Math.max(0, linearAt0 - 100); // excess above 100% means line is too high at start
+    // Fit: difference between linear prediction and actual in first few seasons
+    const expDrop = Math.max(0, linIntercept - curve[0].pct); // gap at t=0
+    // Estimate decay rate from how quickly the gap closes
+    let expRate = 1.5; // default
+    if (curve.length >= 3 && expDrop > 0) {
+      const gap1 = (linIntercept + linSlope) - curve[1].pct;
+      if (gap1 > 0 && gap1 < expDrop) {
+        expRate = -Math.log(gap1 / expDrop);
+      }
+    }
+
+    // Combined model: S(t) = max(0, linIntercept + linSlope*t - expDrop*e^(-expRate*t))
+    const model = (t: number) => Math.max(0, linIntercept + linSlope * t - expDrop * Math.exp(-expRate * t));
+
+    // Season at which model hits zero (search forward)
+    let zeroAt: number | null = null;
+    for (let t = 0; t < 50; t += 0.1) {
+      if (model(t) <= 0) { zeroAt = t; break; }
+    }
+    // Annual loss rate from linear component
+    const annualLoss = -linSlope;
+    // Median residency: when model crosses 50%
+    let medianAt: number | null = null;
+    for (let t = 0; t < 50; t += 0.1) {
+      if (model(t) <= 50) { medianAt = t; break; }
+    }
+
+    return { cohort: cohort.length, firstSeason, curve, linSlope, linIntercept, expDrop, expRate, model, zeroAt, annualLoss, medianAt, sortedSeasons };
   }, [v, allPenguins]);
 
   if (!result) return null;
 
-  const { cohort, firstSeason, curve, linSlope, linIntercept, zeroAt, annualLoss, medianAt } = result;
+  const { cohort, firstSeason, curve, linSlope, linIntercept, expDrop, expRate, model, zeroAt, annualLoss, medianAt } = result;
 
-  // Extend prediction into future until line reaches zero
+  // Extend prediction into future until model reaches zero
   const futureSeasons: string[] = [];
   const lastSeasonYear = parseInt(result.sortedSeasons[result.sortedSeasons.length - 1]);
   const zeroSeason = zeroAt ? Math.ceil(zeroAt) : curve.length + 5;
-  for (let y = lastSeasonYear + 1; y <= lastSeasonYear + (zeroSeason - curve.length) + 1; y++) {
+  for (let y = lastSeasonYear + 1; y <= lastSeasonYear + (zeroSeason - curve.length) + 2; y++) {
     futureSeasons.push(String(y));
     if (futureSeasons.length > 30) break;
   }
@@ -4303,9 +4333,9 @@ function SurvivalPredictionReport() {
           points={curve.map((c, i) => `${xScale(i)},${yScale(c.pct)}`).join(' ')}
           fill="none" stroke="#2196F3" strokeWidth="2.5"
         />
-        {/* Linear fit line — full range including future */}
+        {/* Combined model: linear + exponential early mortality */}
         <polyline
-          points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(Math.max(0, linIntercept + linSlope * i))}`).join(' ')}
+          points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(model(i))}`).join(' ')}
           fill="none" stroke="#f44336" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7"
         />
         {/* Data points */}
@@ -4339,7 +4369,7 @@ function SurvivalPredictionReport() {
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed</span>
-        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {linIntercept.toFixed(1)} {linSlope >= 0 ? '+' : '−'} {Math.abs(linSlope).toFixed(1)}t</span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {linIntercept.toFixed(0)} − {Math.abs(linSlope).toFixed(1)}t − {expDrop.toFixed(0)}e<sup style={{fontSize:'0.75em'}}>−{expRate.toFixed(1)}t</sup></span>
       </div>
     </div>
   );
