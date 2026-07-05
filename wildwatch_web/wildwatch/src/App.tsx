@@ -4244,36 +4244,34 @@ function SurvivalPredictionReport() {
       curve.push({ season, alive, pct: alive / cohort.length * 100 });
     }
 
-    // Annual mortality rate: fit exponential decay.
-    // ln(survivors/cohort) = -mortality * years → least squares on seasons with survivors > 0
-    const points = curve.filter(c => c.alive > 0).map((c, i) => ({ x: i, y: Math.log(c.alive / cohort.length) }));
+    // Linear fit: S(t) = intercept + slope*t (least squares on percentage survival)
+    const pts = curve.map((c, i) => ({ x: i, y: c.pct }));
     let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
-    const n = points.length;
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    const annualMortality = 1 - Math.exp(slope);
-    const annualSurvival = Math.exp(slope);
-    // Expected lifespan from constant mortality: 1 / mortality rate
-    const expectedLifespan = annualMortality > 0 ? 1 / annualMortality : null;
-    // Median: ln(0.5) / slope
-    const medianLifespan = slope < 0 ? Math.log(0.5) / slope : null;
+    for (const p of pts) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const n = pts.length;
+    const linSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const linIntercept = (sumY - linSlope * sumX) / n;
+    // Season at which line hits zero
+    const zeroAt = linSlope < 0 ? -linIntercept / linSlope : null;
+    // Annual loss rate (percentage points per season)
+    const annualLoss = -linSlope;
+    // Median residency: season at which line hits 50%
+    const medianAt = linSlope < 0 ? (50 - linIntercept) / linSlope : null;
 
-    return { cohort: cohort.length, firstSeason, curve, annualMortality, annualSurvival, expectedLifespan, medianLifespan, sortedSeasons };
+    return { cohort: cohort.length, firstSeason, curve, linSlope, linIntercept, zeroAt, annualLoss, medianAt, sortedSeasons };
   }, [v, allPenguins]);
 
   if (!result) return null;
 
-  const { cohort, firstSeason, curve, annualMortality, annualSurvival, expectedLifespan, medianLifespan } = result;
+  const { cohort, firstSeason, curve, linSlope, linIntercept, zeroAt, annualLoss, medianAt } = result;
 
-  // Extend prediction into future until <5% survival
+  // Extend prediction into future until line reaches zero
   const futureSeasons: string[] = [];
   const lastSeasonYear = parseInt(result.sortedSeasons[result.sortedSeasons.length - 1]);
-  for (let y = lastSeasonYear + 1; ; y++) {
-    const i = curve.length + futureSeasons.length;
-    const predictedBirds = Math.exp(Math.log(annualSurvival) * i) * cohort;
-    if (predictedBirds < 0.5) break; // less than 1 bird predicted alive
+  const zeroSeason = zeroAt ? Math.ceil(zeroAt) : curve.length + 5;
+  for (let y = lastSeasonYear + 1; y <= lastSeasonYear + (zeroSeason - curve.length) + 1; y++) {
     futureSeasons.push(String(y));
-    if (futureSeasons.length > 20) break; // safety cap
+    if (futureSeasons.length > 30) break;
   }
   const totalPoints = curve.length + futureSeasons.length;
 
@@ -4305,9 +4303,9 @@ function SurvivalPredictionReport() {
           points={curve.map((c, i) => `${xScale(i)},${yScale(c.pct)}`).join(' ')}
           fill="none" stroke="#2196F3" strokeWidth="2.5"
         />
-        {/* Predicted exponential decay — full range including future */}
+        {/* Linear fit line — full range including future */}
         <polyline
-          points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(Math.exp(Math.log(annualSurvival) * i) * 100)}`).join(' ')}
+          points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(Math.max(0, linIntercept + linSlope * i))}`).join(' ')}
           fill="none" stroke="#f44336" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7"
         />
         {/* Data points */}
@@ -4323,29 +4321,25 @@ function SurvivalPredictionReport() {
       </svg>
       <div style={{display:'flex', gap:'2em', justifyContent:'center', margin:'0.8em 0', flexWrap:'wrap'}}>
         <div style={{textAlign:'center'}}>
-          <div style={{fontSize:'1.4em', fontWeight:700, color:'#2196F3'}}>{(annualSurvival * 100).toFixed(1)}%</div>
-          <div style={{fontSize:'0.8em', color:'#888'}}>Annual survival rate</div>
+          <div style={{fontSize:'1.4em', fontWeight:700, color:'#f44336'}}>{annualLoss.toFixed(1)}%</div>
+          <div style={{fontSize:'0.8em', color:'#888'}}>Lost per season</div>
         </div>
-        <div style={{textAlign:'center'}}>
-          <div style={{fontSize:'1.4em', fontWeight:700, color:'#f44336'}}>{(annualMortality * 100).toFixed(1)}%</div>
-          <div style={{fontSize:'0.8em', color:'#888'}}>Annual mortality rate</div>
-        </div>
-        {expectedLifespan && (
+        {medianAt && (
           <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{expectedLifespan.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Mean adult residency</div>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#9C27B0'}}>{medianAt.toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Median adult residency</div>
           </div>
         )}
-        {medianLifespan && (
+        {zeroAt && (
           <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#9C27B0'}}>{medianLifespan.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Median adult residency</div>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{zeroAt.toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Predicted last survivor</div>
           </div>
         )}
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
-        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed survival</span>
-        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {annualSurvival.toFixed(3)}<sup style={{fontSize:'0.75em'}}>t</sup></span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed</span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {linIntercept.toFixed(1)} {linSlope >= 0 ? '+' : '−'} {Math.abs(linSlope).toFixed(1)}t</span>
       </div>
     </div>
   );
