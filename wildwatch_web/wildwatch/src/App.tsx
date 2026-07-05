@@ -3348,6 +3348,57 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
   );
 }
 
+function UnproductiveParentsReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
+  const v = useDbVersion();
+  const rows = useMemo(() => {
+    // Same nest-family detection as Top chick parents, but counting breeding windows:
+    // clutches where the bird was a detected parent AND at least one egg appeared.
+    const byParent = new Map<string, { bird: any; windows: number; chicks: Set<string> }>();
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const fam of sd.families) {
+          if (fam.parents.length === 0 || fam.clutch.maxEggs < 1) continue;
+          for (const parent of fam.parents) {
+            if (!parent.peng_num) continue;
+            let e = byParent.get(parent.peng_num);
+            if (!e) { e = { bird: parent, windows: 0, chicks: new Set() }; byParent.set(parent.peng_num, e); }
+            e.windows++;
+            for (const ck of fam.chicks) if (ck.peng_num) e.chicks.add(ck.peng_num);
+          }
+        }
+      }
+    }
+    return Array.from(byParent.values())
+      .map(e => ({ bird: e.bird, windows: e.windows, chipped: e.chicks.size }))
+      .filter(r => r.windows >= 2)
+      .sort((a, b) => a.chipped - b.chipped || b.windows - a.windows || (parseInt(a.bird.peng_num) || 0) - (parseInt(b.bird.peng_num) || 0))
+      .slice(0, 25);
+  }, [v]);
+
+  return (
+    <div className="report-card">
+      <h3>Chronically unproductive parents</h3>
+      <p className="muted">Birds detected as part of a breeding pair in windows where at least one egg appeared, ranked by fewest chipped chicks then most windows (min 2 windows, top 25)</p>
+      {rows.length === 0 ? <p className="muted">No data available</p> : (
+        <table className="guess-rank-table count-cols">
+          <thead><tr><th>Penguin</th><th>Egg windows</th><th>Chipped chicks</th></tr></thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={r.bird.peng_num}>
+                <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
+                <td>{r.windows}</td>
+                <td><strong>{r.chipped}</strong></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function UnsexedByGuessesReport() {
   const allPenguins = useAllPenguins();
   const rows = useMemo(() => (allPenguins || [])
@@ -6390,6 +6441,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <div className="reports-page">
           <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setObsAnchor({ box, time }); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
+          <UnproductiveParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <PenguinGroupsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
