@@ -4917,8 +4917,8 @@ namespace PenguinMonitor
 
         private void UpdateEmbedNavButtons()
         {
-            if (_embedBackBtn != null) _embedBackBtn.Visibility = _embedCanBack ? ViewStates.Visible : ViewStates.Invisible;
-            if (_embedFwdBtn != null) _embedFwdBtn.Visibility = _embedCanFwd ? ViewStates.Visible : ViewStates.Invisible;
+            if (_embedBackBtn != null) { _embedBackBtn.Enabled = _embedCanBack; _embedBackBtn.Alpha = _embedCanBack ? 1f : 0.3f; }
+            if (_embedFwdBtn != null) { _embedFwdBtn.Enabled = _embedCanFwd; _embedFwdBtn.Alpha = _embedCanFwd ? 1f : 0.3f; }
         }
 
         private class EmbedChromeClient : Android.Webkit.WebChromeClient
