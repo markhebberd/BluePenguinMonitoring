@@ -4377,7 +4377,7 @@ function SurvivalPredictionReport() {
           return (
             <div style={{textAlign:'center'}}>
               <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{totalLifespan ? totalLifespan.toFixed(1) : decayLifespan.toFixed(1)} years</div>
-              <div style={{fontSize:'0.8em', color:'#888'}}>Predicted lifespan (old age)</div>
+              <div style={{fontSize:'0.8em', color:'#888'}}>Predicted age at last scan</div>
               <div style={{fontSize:'0.7em', color:'#aaa'}}>{meanReturnAge ? `${meanReturnAge.toFixed(1)}y return age + ${decayLifespan.toFixed(1)}y adult residency` : `${decayLifespan.toFixed(1)}y adult residency`}</div>
             </div>
           );
