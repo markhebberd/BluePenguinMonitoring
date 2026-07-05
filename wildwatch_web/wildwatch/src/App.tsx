@@ -3992,61 +3992,111 @@ function ChickReturnChart() {
       {data.points && data.points.length > 0 && (() => {
         const pts = (data.points as { size: string; age: number; peng_num: string }[]).filter(p => p.age > 0);
         if (pts.length === 0) return null;
-
-        // Bucket into 1-month bins
-        const ageMonths = pts.map(p => Math.round(p.age * 12));
-        const maxMonth = Math.max(...ageMonths);
-        const bins: number[] = Array(maxMonth + 1).fill(0);
-        for (const m of ageMonths) bins[m]++;
-        const maxCount = Math.max(...bins);
-
-        const SW = 800, SH = 300, SP = { top: 30, right: 20, bottom: 45, left: 50 };
-        const spW = SW - SP.left - SP.right;
-        const spH = SH - SP.top - SP.bottom;
-        const barW = spW / maxMonth;
-        const xScale2 = (m: number) => SP.left + (m - 1) * barW;
-        const yScale2 = (v: number) => SP.top + spH - (v / maxCount) * spH;
-
-        return (
-          <div className="report-card" style={{marginTop: '0.5em'}}>
-            <h3>Age at First Return</h3>
-            <p className="muted">How old penguins were when first scanned back at the colony (n={pts.length})</p>
-            <svg viewBox={`0 0 ${SW} ${SH}`} className="report-chart">
-              {/* X axis labels - every 6 months, with year lines */}
-              {Array.from({ length: Math.floor(maxMonth / 6) + 1 }, (_, i) => (i + 1) * 6).filter(m => m <= maxMonth).map(m => (
-                <Fragment key={m}>
-                  <line x1={xScale2(m) + barW / 2} x2={xScale2(m) + barW / 2} y1={SP.top} y2={SP.top + spH} stroke={m % 12 === 0 ? '#d0d0d0' : '#ececec'} strokeWidth="1" />
-                  <text x={xScale2(m) + barW / 2} y={SP.top + spH + 16} textAnchor="middle" fontSize="10" fill={m % 12 === 0 ? '#666' : '#999'} fontWeight={m % 12 === 0 ? '600' : '400'}>{m}m</text>
-                </Fragment>
-              ))}
-              {/* Y grid */}
-              {[0.25, 0.5, 0.75, 1].map(frac => (
-                <line key={frac} x1={SP.left} x2={SP.left + spW} y1={yScale2(maxCount * frac)} y2={yScale2(maxCount * frac)} stroke="#e8ecef" strokeWidth="1" />
-              ))}
-              {/* Y axis labels */}
-              {[0, 0.25, 0.5, 0.75, 1].map(frac => {
-                const v = Math.round(maxCount * frac);
-                return <text key={frac} x={SP.left - 8} y={yScale2(v) + 4} textAnchor="end" fontSize="11" fill="#888">{v}</text>;
-              })}
-              {/* Bars */}
-              {bins.map((count, m) => {
-                if (m === 0 || count === 0) return null;
-                const barH = (count / maxCount) * spH;
-                return (
-                  <Fragment key={m}>
-                    <rect x={xScale2(m)} y={yScale2(count)} width={Math.max(barW - 1, 1)} height={barH} fill="#2196F3" opacity="0.75" rx="1" />
-                    {count >= 3 && <text x={xScale2(m) + barW / 2} y={yScale2(count) - 3} textAnchor="middle" fontSize="8" fill="#2196F3" fontWeight="600">{count}</text>}
-                  </Fragment>
-                );
-              })}
-              {/* Axes */}
-              <line x1={SP.left} x2={SP.left} y1={SP.top} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
-              <line x1={SP.left} x2={SP.left + spW} y1={SP.top + spH} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
-              <text x={SP.left + spW / 2} y={SH - 2} textAnchor="middle" fontSize="12" fill="#666">Age at first return (months)</text>
-            </svg>
-          </div>
-        );
+        return <AgeHistogramCard title="Age at First Return" blurb={`How old penguins were when first scanned back at the colony (n=${pts.length})`} xLabel="Age at first return (months)" months={pts.map(p => Math.round(p.age * 12))} color="#2196F3" />;
       })()}
+      <BreedingAgeHistograms />
+    </>
+  );
+}
+
+/** Month-binned age histogram in a report card — same chart for first return / first egg / first offspring. */
+function AgeHistogramCard({ title, blurb, xLabel, months, color }: { title: string; blurb: string; xLabel: string; months: number[]; color: string }) {
+  if (months.length === 0) return null;
+  const maxMonth = Math.max(...months);
+  const bins: number[] = Array(maxMonth + 1).fill(0);
+  for (const m of months) bins[m]++;
+  const maxCount = Math.max(...bins);
+
+  const SW = 800, SH = 300, SP = { top: 30, right: 20, bottom: 45, left: 50 };
+  const spW = SW - SP.left - SP.right;
+  const spH = SH - SP.top - SP.bottom;
+  const barW = spW / maxMonth;
+  const xScale2 = (m: number) => SP.left + (m - 1) * barW;
+  const yScale2 = (v: number) => SP.top + spH - (v / maxCount) * spH;
+
+  return (
+    <div className="report-card" style={{marginTop: '0.5em'}}>
+      <h3>{title}</h3>
+      <p className="muted">{blurb}</p>
+      <svg viewBox={`0 0 ${SW} ${SH}`} className="report-chart">
+        {/* X axis labels - every 6 months, with year lines */}
+        {Array.from({ length: Math.floor(maxMonth / 6) + 1 }, (_, i) => (i + 1) * 6).filter(m => m <= maxMonth).map(m => (
+          <Fragment key={m}>
+            <line x1={xScale2(m) + barW / 2} x2={xScale2(m) + barW / 2} y1={SP.top} y2={SP.top + spH} stroke={m % 12 === 0 ? '#d0d0d0' : '#ececec'} strokeWidth="1" />
+            <text x={xScale2(m) + barW / 2} y={SP.top + spH + 16} textAnchor="middle" fontSize="10" fill={m % 12 === 0 ? '#666' : '#999'} fontWeight={m % 12 === 0 ? '600' : '400'}>{m}m</text>
+          </Fragment>
+        ))}
+        {/* Y grid */}
+        {[0.25, 0.5, 0.75, 1].map(frac => (
+          <line key={frac} x1={SP.left} x2={SP.left + spW} y1={yScale2(maxCount * frac)} y2={yScale2(maxCount * frac)} stroke="#e8ecef" strokeWidth="1" />
+        ))}
+        {/* Y axis labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => {
+          const v = Math.round(maxCount * frac);
+          return <text key={frac} x={SP.left - 8} y={yScale2(v) + 4} textAnchor="end" fontSize="11" fill="#888">{v}</text>;
+        })}
+        {/* Bars */}
+        {bins.map((count, m) => {
+          if (m === 0 || count === 0) return null;
+          const barH = (count / maxCount) * spH;
+          return (
+            <Fragment key={m}>
+              <rect x={xScale2(m)} y={yScale2(count)} width={Math.max(barW - 1, 1)} height={barH} fill={color} opacity="0.75" rx="1" />
+              {count >= 3 && <text x={xScale2(m) + barW / 2} y={yScale2(count) - 3} textAnchor="middle" fontSize="8" fill={color} fontWeight="600">{count}</text>}
+            </Fragment>
+          );
+        })}
+        {/* Axes */}
+        <line x1={SP.left} x2={SP.left} y1={SP.top} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
+        <line x1={SP.left} x2={SP.left + spW} y1={SP.top + spH} y2={SP.top + spH} stroke="#ccc" strokeWidth="1" />
+        <text x={SP.left + spW / 2} y={SH - 2} textAnchor="middle" fontSize="12" fill="#666">{xLabel}</text>
+      </svg>
+    </div>
+  );
+}
+
+/** Ages (from chip date, so ~a month or two under true age) at which chick-chipped birds
+ *  first joined a breeding pair whose clutch produced an egg, and first had a chick
+ *  chipped — from the shared computeBoxFamilies detection. */
+function BreedingAgeHistograms() {
+  const v = useDbVersion();
+  const { eggMonths, chickMonths } = useMemo(() => {
+    const firstEgg = new Map<string, number>();
+    const firstChick = new Map<string, number>();
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const fam of sd.families) {
+          for (const parent of fam.parents) {
+            if (parent.chipped_as_adult || !parent.chip_date) continue; // age only known for chick-chipped birds
+            const key = parent.pit_id ? parent.pit_id.slice(-8) : parent.peng_num;
+            if (!key) continue;
+            const born = parseDate(parent.chip_date).getTime();
+            const mo = (t: number) => Math.round((t - born) / (1000 * 60 * 60 * 24 * 30.44));
+            if (fam.clutch.maxEggs >= 1) {
+              const t = fam.clutch.laid ?? fam.clutch.windowStart;
+              if (t) {
+                const m = mo(t);
+                if (m > 0 && (!firstEgg.has(key) || m < firstEgg.get(key)!)) firstEgg.set(key, m);
+              }
+            }
+            for (const ck of fam.chicks) {
+              if (!ck.chip_date) continue;
+              const m = mo(parseDate(ck.chip_date).getTime());
+              if (m > 0 && (!firstChick.has(key) || m < firstChick.get(key)!)) firstChick.set(key, m);
+            }
+          }
+        }
+      }
+    }
+    return { eggMonths: Array.from(firstEgg.values()), chickMonths: Array.from(firstChick.values()) };
+  }, [v]);
+
+  return (
+    <>
+      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected in a breeding pair whose clutch had at least one egg (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
+      <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`How old chick-chipped penguins were when their first chick was chipped (n=${chickMonths.length}, age measured from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
     </>
   );
 }
