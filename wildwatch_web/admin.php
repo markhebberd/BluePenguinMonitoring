@@ -250,6 +250,30 @@ if ($action === 'retired_tag_scans') {
     exit;
 }
 
+// Chicks chipped in a box, then chicks recorded there within the following month but with no
+// scans on that observation — the chicks are chippable, so zero scans is a likely missed scan.
+if ($action === 'chicks_no_scan') {
+    echo json_encode($pdo->query("
+        SELECT ol.location_name AS box_name, " . WW_NZ . " AS obs_date, o.chicks,
+            (SELECT COUNT(DISTINCT pp.peng_num)
+               FROM penguin_chips c JOIN penguins pp ON c.peng_num = pp.peng_num
+               WHERE (c.location_id = o.location_id OR c.chip_box = ol.location_name)
+                 AND pp.chipped_as_adult = 0
+                 AND c.chip_date < " . WW_NZ . "
+                 AND c.chip_date >= DATE_SUB(" . WW_NZ . ", INTERVAL 31 DAY)
+            ) AS chicks_chipped
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE o.is_deleted = FALSE AND o.chicks > 0
+          AND NOT EXISTS (SELECT 1 FROM penguin_scans ps
+                          WHERE ps.observation_id = o.observation_id
+                            AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL))
+        HAVING chicks_chipped >= 2
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
 if ($action === 'cleanup_duplicate_observations') {
     // Keep the most recent observation per box per day, soft-delete the rest
     $stmt = $pdo->query("
