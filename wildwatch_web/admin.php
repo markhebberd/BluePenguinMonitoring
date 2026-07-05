@@ -1105,8 +1105,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 function ww_importInput() {
     $in = json_decode(file_get_contents('php://input'), true) ?? [];
     $csv = (string)($in['csv'] ?? '');
-    $filename = trim((string)($in['filename'] ?? 'import.csv'));
-    $filename = preg_replace('/\.csv$/i', '', basename($filename));
+    // Keep the filename as-is (incl. extension) — it becomes the day's monitor label, e.g. "FM-19 2024.csv".
+    $filename = basename(trim((string)($in['filename'] ?? 'import.csv')));
     $colonyId = (int)($in['colony_id'] ?? 0);
     return [$csv, $filename, $colonyId];
 }
