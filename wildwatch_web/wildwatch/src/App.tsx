@@ -5747,7 +5747,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       <div className="admin-section">
         <h3>Import monitor CSV</h3>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Columns: <code>Date, Box, Adults, Eggs, Chicks, Bird-1…, No scan, Notes</code>. Dates as DD/MM/YY.
+          Columns: <code>Date, Box, Adults, Eggs, Chicks, Bird-1…, No scan, Notes</code>. Dates must be year-first (<code>YYYY-MM-DD</code>); other formats are skipped.
           “Decom” in Adults imports as a DCM observation. Bird cells are chip numbers; unmatched chips are reported, not created.
           Problematic rows are flagged for review (e.g. <strong>Adults ≠ birds listed + No scan</strong>, unmatched chips) but still import once you accept.
           Only rows that can’t become an observation — unknown box, unreadable date/number, or an existing duplicate — are skipped.

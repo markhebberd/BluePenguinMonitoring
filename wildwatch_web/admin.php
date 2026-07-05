@@ -985,14 +985,13 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             if (!in_array($box, $seenBoxes, true)) $seenBoxes[] = $box;
         }
 
-        // Date -> observation_time. Stored as 2pm NZ on that date, converted to UTC.
-        $dt = null;
-        foreach (['d/m/y', 'd/m/Y', 'j/n/y', 'j/n/Y', 'Y-m-d'] as $fmt) {
-            $d = DateTime::createFromFormat($fmt, $dateRaw);
-            if ($d && $d->format($fmt) === $dateRaw) { $dt = $d; break; }
-        }
-        if (!$dt) $errors[] = "Invalid date '$dateRaw' (expected DD/MM/YY)";
-        $obsDate = $dt ? $dt->format('Y-m-d') : null;
+        // Date -> observation_time. Year-first ONLY (YYYY-MM-DD, or / . space separators) so
+        // DD/MM vs MM/DD can never be misread. Anything else is rejected and the row skipped.
+        $obsDate = null;
+        if (preg_match('/^(\d{4})[-\/. ](\d{1,2})[-\/. ](\d{1,2})$/', $dateRaw, $dm)
+            && checkdate((int)$dm[2], (int)$dm[3], (int)$dm[1]))
+            $obsDate = sprintf('%04d-%02d-%02d', (int)$dm[1], (int)$dm[2], (int)$dm[3]);
+        if ($obsDate === null) $errors[] = "Invalid date '$dateRaw' (expected YYYY-MM-DD)";
         $obsTime = null;
         if ($obsDate) {
             $nzDt = new DateTime($obsDate . ' 14:00:00', $tzNz);
