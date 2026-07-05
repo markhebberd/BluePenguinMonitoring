@@ -6213,7 +6213,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <ColonyAccess token={token} />
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
+      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Data Security</h3>
         <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
@@ -6308,6 +6308,7 @@ function ColonyAccess({ token }: { token: string }) {
     if (cols.length && colonyId == null) setColonyId(Number(cols[0].colony_id));
     setLoading(false);
   };
+  useEffect(() => { load(); }, []); // auto-load
 
   const roleFor = (observerId: number): string =>
     perms.find(p => Number(p.colony_id) === colonyId && Number(p.observer_id) === observerId)?.role || '';
@@ -6405,6 +6406,7 @@ function RegionsAndColonies({ token }: { token: string }) {
     setColonies(Array.isArray(cr) ? cr : []);
     setLoading(false);
   };
+  useEffect(() => { load(); }, []); // auto-load
 
   const saveRegion = async (data: any) => {
     await fetch('/api/admin.php?action=save_region', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
