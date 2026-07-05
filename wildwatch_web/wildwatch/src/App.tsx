@@ -3207,7 +3207,7 @@ function PenguinGroupsReport({ onOpenBird }: { onOpenBird: (num: string) => void
       </div>
       <p className="muted">{methodBlurb}</p>
       {result.rows.length === 0 ? <p className="muted">No groups found</p> : (
-        <table className="guess-rank-table group-table">
+        <table className="guess-rank-table rank-table">
           <thead><tr><th>#</th><th>Penguins</th><th>Boxes</th><th>Excl.</th></tr></thead>
           <tbody>
             {result.rows.map((r, i) => (
@@ -3331,7 +3331,7 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
       <h3>Most chipped chicks raised</h3>
       <p className="muted">Penguins ranked by distinct chipped chicks from nests where they were a detected parent (top 10)</p>
       {rows.length === 0 ? <p className="muted">No data available</p> : (
-        <table className="guess-rank-table">
+        <table className="guess-rank-table rank-table">
           <thead><tr><th>#</th><th>Penguin</th><th>Chipped chicks</th></tr></thead>
           <tbody>
             {rows.map((r: any, i: number) => (
@@ -3362,7 +3362,7 @@ function UnsexedByGuessesReport() {
       <h3>Unsexed penguins by sex guesses</h3>
       <p className="muted">Birds with no assigned sex, ordered by number of biometric sex guesses ({rows.length})</p>
       {rows.length === 0 ? <p className="muted">No data available</p> : (
-        <table className="guess-rank-table">
+        <table className="guess-rank-table count-cols">
           <thead><tr><th>Penguin</th><th>Guesses</th><th>{'♂'}</th><th>{'♀'}</th></tr></thead>
           <tbody>
             {rows.map((r: any) => (
