@@ -4101,81 +4101,103 @@ function BreedingAgeHistograms() {
   );
 }
 
-/** Age distribution of all penguins, split by chick-chipped (known age) and adult-chipped (minimum age). */
-function PenguinAgeChart() {
-  const allPenguins = useAllPenguins();
-  const data = useMemo(() => {
-    const now = Date.now();
-    const chickAges: number[] = [];
-    const adultAges: number[] = [];
-    for (const p of allPenguins) {
-      if (!p.chip_date) continue;
-      const years = (now - parseDate(p.chip_date).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      if (years < 0) continue;
-      const rounded = Math.floor(years);
-      if (p.chipped_as_adult) adultAges.push(rounded);
-      else chickAges.push(rounded);
-    }
-    return { chickAges, adultAges };
-  }, [allPenguins]);
+/** Single age histogram with quarterly (3-month) buckets, reusable for chick/adult split.
+ *  `quarters` array contains ages in quarter-year units (0 = 0–3 months, 1 = 3–6 months, etc). */
+function AgeBarChart({ quarters, color, xLabel }: { quarters: number[]; color: string; xLabel: string }) {
+  if (quarters.length === 0) return <p className="muted">No data</p>;
+  const maxQ = Math.max(...quarters, 3);
+  const bins: number[] = Array(maxQ + 1).fill(0);
+  for (const q of quarters) bins[q]++;
+  const maxCount = Math.max(...bins);
 
-  const { chickAges, adultAges } = data;
-  if (chickAges.length + adultAges.length === 0) return <div className="report-card"><h3>Penguin ages</h3><p className="muted">No data available</p></div>;
-
-  const maxAge = Math.max(...chickAges, ...adultAges, 1);
-  const chickBins: number[] = Array(maxAge + 1).fill(0);
-  const adultBins: number[] = Array(maxAge + 1).fill(0);
-  for (const a of chickAges) chickBins[a]++;
-  for (const a of adultAges) adultBins[a]++;
-  const maxCount = Math.max(...chickBins.map((c, i) => c + adultBins[i]));
-
-  const W = 600, H = 300, PAD = { top: 30, right: 20, bottom: 45, left: 50 };
+  const W = 700, H = 260, PAD = { top: 25, right: 20, bottom: 45, left: 50 };
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
-  const barW = Math.max(plotW / (maxAge + 1) - 1, 4);
-  const xScale = (age: number) => PAD.left + age * (plotW / (maxAge + 1));
+  const barW = Math.max(plotW / (maxQ + 1) - 1, 3);
+  const xScale = (q: number) => PAD.left + q * (plotW / (maxQ + 1));
   const yScale = (v: number) => PAD.top + plotH - (v / maxCount) * plotH;
   const yTicks = Array.from({ length: 5 }, (_, i) => Math.round(maxCount * (i + 1) / 5)).filter((v, i, a) => a.indexOf(v) === i);
 
   return (
-    <div className="report-card">
-      <h3>Penguin ages</h3>
-      <p className="muted">Age distribution of all penguins with a chip date — chick-chipped birds have a known age, adult-chipped show minimum time since chipping (n={chickAges.length + adultAges.length})</p>
-      <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
-        {yTicks.map(v => (
-          <Fragment key={v}>
-            <line x1={PAD.left} x2={PAD.left + plotW} y1={yScale(v)} y2={yScale(v)} stroke="#e8ecef" strokeWidth="1" />
-            <text x={PAD.left - 8} y={yScale(v) + 4} textAnchor="end" fontSize="11" fill="#888">{v}</text>
+    <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
+      {yTicks.map(v => (
+        <Fragment key={v}>
+          <line x1={PAD.left} x2={PAD.left + plotW} y1={yScale(v)} y2={yScale(v)} stroke="#e8ecef" strokeWidth="1" />
+          <text x={PAD.left - 8} y={yScale(v) + 4} textAnchor="end" fontSize="11" fill="#888">{v}</text>
+        </Fragment>
+      ))}
+      {bins.map((count, q) => {
+        if (count === 0) return null;
+        const x = xScale(q) + (plotW / (maxQ + 1) - barW) / 2;
+        const barH = (count / maxCount) * plotH;
+        return (
+          <Fragment key={q}>
+            <rect x={x} y={yScale(count)} width={barW} height={barH} fill={color} opacity="0.85" rx="1" />
+            {count >= 3 && barW >= 8 && <text x={x + barW / 2} y={yScale(count) - 3} textAnchor="middle" fontSize="8" fill="#666" fontWeight="600">{count}</text>}
           </Fragment>
-        ))}
-        {chickBins.map((count, age) => {
-          const ac = adultBins[age];
-          const total = count + ac;
-          if (total === 0) return null;
-          const x = xScale(age) + (plotW / (maxAge + 1) - barW) / 2;
-          const chickH = (count / maxCount) * plotH;
-          const adultH = (ac / maxCount) * plotH;
-          return (
-            <Fragment key={age}>
-              {count > 0 && <rect x={x} y={yScale(count + ac)} width={barW} height={chickH} fill="#2196F3" opacity="0.8" rx="1" />}
-              {ac > 0 && <rect x={x} y={yScale(ac)} width={barW} height={adultH} fill="#FF9800" opacity="0.7" rx="1" />}
-              {total >= 3 && barW >= 10 && <text x={x + barW / 2} y={yScale(total) - 3} textAnchor="middle" fontSize="8" fill="#666" fontWeight="600">{total}</text>}
-            </Fragment>
-          );
-        })}
-        {/* X axis labels */}
-        {chickBins.map((_, age) => (
-          barW >= 10 || age % 2 === 0 ? <text key={age} x={xScale(age) + plotW / (maxAge + 1) / 2} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#666">{age}</text> : null
-        ))}
-        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
-        <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
-        <text x={PAD.left + plotW / 2} y={H - 2} textAnchor="middle" fontSize="12" fill="#666">Age (years)</text>
-      </svg>
-      <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.5em 0'}}>
-        <span><span style={{display:'inline-block', width:12, height:12, backgroundColor:'#2196F3', opacity:0.8, borderRadius:2, verticalAlign:'middle', marginRight:4}}></span> Chick-chipped — known age ({chickAges.length})</span>
-        <span><span style={{display:'inline-block', width:12, height:12, backgroundColor:'#FF9800', opacity:0.7, borderRadius:2, verticalAlign:'middle', marginRight:4}}></span> Adult-chipped — min age since chipping ({adultAges.length})</span>
+        );
+      })}
+      {/* Label every whole year */}
+      {bins.map((_, q) => (
+        q % 4 === 0 ? <text key={q} x={xScale(q) + plotW / (maxQ + 1) / 2} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#666" fontWeight={q % 4 === 0 ? '600' : '400'}>{q / 4}y</text> : null
+      ))}
+      <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
+      <text x={PAD.left + plotW / 2} y={H - 2} textAnchor="middle" fontSize="12" fill="#666">{xLabel}</text>
+    </svg>
+  );
+}
+
+/** Age distribution: two separate charts for chick-chipped and adult-chipped penguins. */
+function PenguinAgeCharts() {
+  const v = useDbVersion();
+  const allPenguins = useAllPenguins();
+  const data = useMemo(() => {
+    const firstSeen = new Map<string, number>();
+    const lastSeen = new Map<string, number>();
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      for (const obs of bd.observations) {
+        const t = parseDate(obs.observation_time_utc).getTime();
+        for (const s of obs.scans || []) {
+          if (!s.peng_num) continue;
+          const prev = firstSeen.get(s.peng_num);
+          if (prev === undefined || t < prev) firstSeen.set(s.peng_num, t);
+          const prevL = lastSeen.get(s.peng_num);
+          if (prevL === undefined || t > prevL) lastSeen.set(s.peng_num, t);
+        }
+      }
+    }
+    const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
+    const chickQs: number[] = [];
+    const adultQs: number[] = [];
+    for (const [num, first] of firstSeen) {
+      const last = lastSeen.get(num)!;
+      if (last <= first) continue;
+      const quarters = Math.floor((last - first) / (1000 * 60 * 60 * 24 * 365.25 / 4));
+      if (adultChipped.has(num)) adultQs.push(quarters);
+      else chickQs.push(quarters);
+    }
+    return { chickQs, adultQs };
+  }, [v, allPenguins]);
+
+  const { chickQs, adultQs } = data;
+  if (chickQs.length + adultQs.length === 0) return <div className="report-card"><h3>Penguin ages</h3><p className="muted">No data available</p></div>;
+
+  return (
+    <>
+      <div className="report-card">
+        <h3>Chick-chipped penguin ages</h3>
+        <p className="muted">Time between earliest and most recent scan for penguins chipped as chicks (n={chickQs.length})</p>
+        <AgeBarChart quarters={chickQs} color="#DAA520" xLabel="Time between first and last scan" />
       </div>
-    </div>
+      <div className="report-card">
+        <h3>Adult-chipped penguin ages</h3>
+        <p className="muted">Time between earliest and most recent scan for penguins chipped as adults (n={adultQs.length})</p>
+        <AgeBarChart quarters={adultQs} color="#2196F3" xLabel="Time between first and last scan" />
+      </div>
+    </>
   );
 }
 
@@ -6831,7 +6853,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <ChickReturnChart />
           <ChickSexChart />
           <ChickSexBothReturnedChart />
-          <PenguinAgeChart />
+          <PenguinAgeCharts />
           <PairBondReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <FloaterReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <BoxSuccessReport />
