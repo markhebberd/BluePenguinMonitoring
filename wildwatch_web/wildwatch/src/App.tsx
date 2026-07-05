@@ -4362,8 +4362,8 @@ function SurvivalPredictionReport() {
         )}
         {zeroAt && (
           <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{zeroAt.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Predicted last survivor</div>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{(zeroAt / 2).toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Avg life expectancy (established adults)</div>
           </div>
         )}
       </div>
