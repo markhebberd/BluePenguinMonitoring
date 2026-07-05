@@ -4274,8 +4274,8 @@ function SurvivalPredictionReport() {
 
   return (
     <div className="report-card">
-      <h3>Predicted lifespan (first-season cohort)</h3>
-      <p className="muted">Survival curve of {cohort} adult-chipped birds from the first monitoring season ({firstSeason}) — annual attrition predicts expected lifespan</p>
+      <h3>Adult residency (first-season cohort)</h3>
+      <p className="muted">Survival curve of {cohort} adult-chipped birds from the first monitoring season ({firstSeason}) — annual attrition predicts median time an adult remains in the colony</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[25, 50, 75, 100].map(pct => (
           <Fragment key={pct}>
@@ -4316,13 +4316,13 @@ function SurvivalPredictionReport() {
         {expectedLifespan && (
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{expectedLifespan.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Mean expected lifespan</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Mean adult residency</div>
           </div>
         )}
         {medianLifespan && (
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:'1.4em', fontWeight:700, color:'#9C27B0'}}>{medianLifespan.toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Median lifespan</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Median adult residency</div>
           </div>
         )}
       </div>
