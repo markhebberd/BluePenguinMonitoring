@@ -1666,13 +1666,13 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   // over every box this bird was seen/chipped in, then keep the clutches where this bird
   // was a parent (→ partner + offspring) or a chick (→ parents + siblings). Recomputed
   // from `data`, which changes identity whenever the cache updates.
-  const { pengFamilies, boxWindows } = useMemo(() => {
+  const { pengFamilies, boxWindows, breedingSeasons } = useMemo(() => {
     const myPits = new Set<string>(chips.map((c: any) => (c.pit_id || '').slice(-8)).filter(Boolean));
     const boxNames = new Set<string>();
     for (const s of sightings) if (s.box) boxNames.add(s.box);
     for (const c of chips) if (c.chip_box) boxNames.add(c.chip_box);
     const isMine = (b: any) => myPits.has((b.pit_id || '').slice(-8));
-    type Entry = { season: string; seasonYear: number; box: string; role: 'parent' | 'chick'; fam: BoxFamily; partner?: any; parents: any[]; siblings: any[] };
+    type Entry = { season: string; seasonYear: number; box: string; role: 'parent' | 'chick'; fam: BoxFamily; partner?: any; parents: any[]; siblings: any[]; clutchIndex: number; clutchCount: number };
     const entries: Entry[] = [];
     // Per box: every clutch's breeding window, so a shared sighting can be flagged as
     // falling inside a breeding window (and get the black-box treatment).
@@ -1682,24 +1682,34 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       if (!bd?.observations?.length) continue;
       const wins: { windowStart: number; windowEnd: number; startObsTime: string; fam: BoxFamily }[] = [];
       for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
-        for (const fam of sd.families) {
+        const clutchCount = sd.families.length;
+        sd.families.forEach((fam, ci) => {
           const c = fam.clutch;
           wins.push({ windowStart: c.windowStart, windowEnd: c.windowEnd, startObsTime: c.startObsTime, fam });
           const asParent = (fam.male && myPits.has(fam.male)) || (fam.female && myPits.has(fam.female));
           const asChick = fam.chicks.some(isMine);
           if (asParent) {
             entries.push({ season: sd.label, seasonYear: sd.seasonYear, box, role: 'parent', fam,
-              partner: fam.parents.find(b => !isMine(b)), parents: fam.parents, siblings: [] });
+              partner: fam.parents.find(b => !isMine(b)), parents: fam.parents, siblings: [], clutchIndex: ci, clutchCount });
           } else if (asChick) {
             entries.push({ season: sd.label, seasonYear: sd.seasonYear, box, role: 'chick', fam,
-              parents: fam.parents, siblings: fam.chicks.filter(b => !isMine(b)) });
+              parents: fam.parents, siblings: fam.chicks.filter(b => !isMine(b)), clutchIndex: ci, clutchCount });
           }
-        }
+        });
       }
       boxWindows.set(box, wins);
     }
     entries.sort((a, b) => b.seasonYear - a.seasonYear || a.box.localeCompare(b.box));
-    return { pengFamilies: entries, boxWindows };
+    // Season timeline (newest first): every year between the bird's first and last breeding
+    // entry, so seasons it wasn't part of a pair render an explicit "No breeding" row.
+    const bySeasonYear = new Map<number, Entry[]>();
+    for (const e of entries) { if (!bySeasonYear.has(e.seasonYear)) bySeasonYear.set(e.seasonYear, []); bySeasonYear.get(e.seasonYear)!.push(e); }
+    const breedingSeasons: { seasonYear: number; entries: Entry[] }[] = [];
+    if (entries.length > 0) {
+      const yrs = entries.map(e => e.seasonYear);
+      for (let y = Math.max(...yrs); y >= Math.min(...yrs); y--) breedingSeasons.push({ seasonYear: y, entries: bySeasonYear.get(y) || [] });
+    }
+    return { pengFamilies: entries, boxWindows, breedingSeasons };
   }, [data]);
   // The breeding window (if any) containing a shared sighting, plus its NZ date range.
   const windowFor = (box: string, dateStr: string) => {
@@ -1846,7 +1856,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {pengFamilies.length > 0 && (
         <div className="bird-section">
           <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history ({pengFamilies.length})</h3>
-          {expandedSections.breeding && pengFamilies.map((e, i) => {
+          {expandedSections.breeding && breedingSeasons.map(season => season.entries.length === 0 ? (
+            <div key={`nb${season.seasonYear}`} className="obs-card breeding-none">
+              <div className="obs-top"><b>{seasonRange(String(season.seasonYear))}</b> <span className="muted">No breeding</span></div>
+            </div>
+          ) : season.entries.map((e) => {
             const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
             const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
             const c = e.fam.clutch;
@@ -1855,10 +1869,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 onClick={() => onSightingClick(e.box, c.startObsTime)}>{fmtMs(c.windowStart)} - {fmtMs(c.windowEnd)}</span>
             );
             return (
-              <div key={i} className="obs-card">
+              <div key={`${e.seasonYear}-${e.box}-${e.clutchIndex}`} className="obs-card">
                 <div className="obs-top">
                   <b>{seasonRange(e.season)}</b>
                   <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
+                  {e.clutchCount > 1 && <span className="clutch-label muted">{ordinal(e.clutchIndex + 1)} clutch</span>}
                 </div>
                 {e.role === 'parent' ? (
                   <div className="family-box">
@@ -1904,7 +1919,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 )}
               </div>
             );
-          })}
+          }))}
         </div>
       )}
 
