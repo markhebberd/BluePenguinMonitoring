@@ -645,3 +645,10 @@ select.ef-input.ef-placeholder { color:#888; }
 /* Entry page prev/next box steppers beside the box field */
 .entry-box-nav { padding:4px 10px; font-size:16px; line-height:1; background:#fff; border:1px solid #ccc; border-radius:4px; cursor:pointer; color:#1a5276; }
 .entry-box-nav:hover { background:#e3f2fd; }
+
+/* Penguin groups report method toggle + threshold slider */
+.group-method-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:8px 0; }
+.group-method-row button { padding:6px 12px; border:2px solid #ddd; background:#fff; border-radius:8px; cursor:pointer; font-size:13px; }
+.group-method-row button.active { border-color:#1a5276; background:#d4e6f1; color:#1a5276; font-weight:600; }
+.group-share-slider { display:flex; align-items:center; gap:6px; font-size:13px; color:#555; margin-left:8px; }
+.group-share-slider input { width:120px; }

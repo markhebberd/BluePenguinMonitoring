@@ -2996,6 +2996,248 @@ const SEASON_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#
 
 /** Unsexed penguins ranked by how many biometric sex guesses they have — surfaces birds
  *  worth confirming. Tie-break by female-leaning count then peng_num. */
+// ===== Penguin groups by box use =====
+// Bipartite penguin↔box graph built from every scan. Three grouping methods:
+//   strict    — connected components of the raw graph (a single shared sighting joins groups)
+//   threshold — drop boxes that are a small share of a bird's sightings, then components
+//   louvain   — modularity communities on the penguin co-occurrence projection
+
+function unionFind(n: number) {
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x: number): number => parent[x] === x ? x : (parent[x] = find(parent[x]));
+  const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  return { find, union };
+}
+
+// Louvain modularity clustering on a weighted undirected graph (adjacency map).
+// Returns node -> community label.
+function louvainCommunities(adj: Map<string, Map<string, number>>): Map<string, string> {
+  let mapping = new Map<string, string>([...adj.keys()].map(k => [k, k]));
+  let graph = adj;
+  for (let level = 0; level < 8; level++) {
+    const nodes = [...graph.keys()];
+    const k = new Map(nodes.map(n => [n, [...(graph.get(n) || new Map()).values()].reduce((a, b) => a + b, 0)]));
+    const m2 = nodes.reduce((a, n) => a + (k.get(n) || 0), 0); // 2m
+    if (m2 === 0) break;
+    const comm = new Map(nodes.map(n => [n, n]));
+    const commTot = new Map(nodes.map(n => [n, k.get(n) || 0]));
+    let movedAny = false;
+    for (let pass = 0; pass < 20; pass++) {
+      let moved = false;
+      for (const n of nodes) {
+        const cur = comm.get(n)!;
+        const ki = k.get(n) || 0;
+        commTot.set(cur, (commTot.get(cur) || 0) - ki);
+        const links = new Map<string, number>();
+        for (const [nb, w] of graph.get(n) || []) {
+          if (nb === n) continue;
+          const c = comm.get(nb)!;
+          links.set(c, (links.get(c) || 0) + w);
+        }
+        let best = cur;
+        let bestGain = (links.get(cur) || 0) - ((commTot.get(cur) || 0) * ki) / m2;
+        for (const [c, w] of links) {
+          if (c === cur) continue;
+          const gain = w - ((commTot.get(c) || 0) * ki) / m2;
+          if (gain > bestGain + 1e-12) { bestGain = gain; best = c; }
+        }
+        comm.set(n, best);
+        commTot.set(best, (commTot.get(best) || 0) + ki);
+        if (best !== cur) moved = true;
+      }
+      if (!moved) break;
+      movedAny = true;
+    }
+    if (!movedAny) break;
+    mapping = new Map([...mapping].map(([orig, sn]) => [orig, comm.get(sn)!]));
+    const agg = new Map<string, Map<string, number>>();
+    for (const [a, nbs] of graph) {
+      const ca = comm.get(a)!;
+      let row = agg.get(ca);
+      if (!row) { row = new Map(); agg.set(ca, row); }
+      for (const [b, w] of nbs) {
+        const cb = comm.get(b)!;
+        row.set(cb, (row.get(cb) || 0) + w);
+      }
+    }
+    if (agg.size === graph.size) break;
+    graph = agg;
+  }
+  return mapping;
+}
+
+function PenguinGroupsReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
+  const v = useDbVersion();
+  const [method, setMethod] = useState<'strict'|'threshold'|'louvain'>('threshold');
+  const [minShare, setMinShare] = useState(10);
+
+  // peng_num -> box -> sighting count, plus a representative scan per bird for PenguinMini.
+  const base = useMemo(() => {
+    const counts = new Map<string, Map<string, number>>();
+    const birdInfo = new Map<string, any>();
+    for (const loc of queryAllLocations()) {
+      const box = String(loc.location_name).trim();
+      const bd = queryBoxDetailSync(box);
+      for (const o of bd?.observations || []) {
+        for (const s of o.scans || []) {
+          if (!s.peng_num) continue;
+          let m = counts.get(s.peng_num);
+          if (!m) { m = new Map(); counts.set(s.peng_num, m); }
+          m.set(box, (m.get(box) || 0) + 1);
+          if (!birdInfo.has(s.peng_num)) birdInfo.set(s.peng_num, s);
+        }
+      }
+    }
+    return { counts, birdInfo };
+  }, [v]);
+
+  const result = useMemo(() => {
+    const { counts } = base;
+    const birds = [...counts.keys()];
+    let groupsBirds: string[][];
+
+    if (method === 'louvain') {
+      // Penguin projection: w_ab = Σ_box (ca·cb)/d_box — co-occurrence discounted by busy boxes.
+      const boxBirds = new Map<string, [string, number][]>();
+      for (const [num, m] of counts) for (const [box, c] of m) {
+        let l = boxBirds.get(box);
+        if (!l) { l = []; boxBirds.set(box, l); }
+        l.push([num, c]);
+      }
+      const adj = new Map<string, Map<string, number>>(birds.map(b => [b, new Map()]));
+      for (const [, list] of boxBirds) {
+        const db = list.reduce((a, [, c]) => a + c, 0);
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+          const w = (list[i][1] * list[j][1]) / db;
+          const a = list[i][0], b = list[j][0];
+          adj.get(a)!.set(b, (adj.get(a)!.get(b) || 0) + w);
+          adj.get(b)!.set(a, (adj.get(b)!.get(a) || 0) + w);
+        }
+      }
+      const comm = louvainCommunities(adj);
+      const byComm = new Map<string, string[]>();
+      for (const b of birds) {
+        const c = comm.get(b) || b;
+        let l = byComm.get(c);
+        if (!l) { l = []; byComm.set(c, l); }
+        l.push(b);
+      }
+      groupsBirds = [...byComm.values()];
+    } else {
+      // strict / threshold: union-find across birds + boxes on kept edges.
+      const birdIdx = new Map(birds.map((b, i) => [b, i]));
+      const boxIdx = new Map<string, number>();
+      for (const m of counts.values()) for (const box of m.keys())
+        if (!boxIdx.has(box)) boxIdx.set(box, birds.length + boxIdx.size);
+      const uf = unionFind(birds.length + boxIdx.size);
+      for (const [num, m] of counts) {
+        const total = [...m.values()].reduce((a, b) => a + b, 0);
+        for (const [box, c] of m) {
+          if (method === 'threshold' && !(c >= 2 && c / total >= minShare / 100)) continue;
+          uf.union(birdIdx.get(num)!, boxIdx.get(box)!);
+        }
+      }
+      const byRoot = new Map<number, string[]>();
+      for (const b of birds) {
+        const r = uf.find(birdIdx.get(b)!);
+        let l = byRoot.get(r);
+        if (!l) { l = []; byRoot.set(r, l); }
+        l.push(b);
+      }
+      groupsBirds = [...byRoot.values()];
+    }
+
+    // Shared post-processing: each box is "owned" by the group with the most sightings in
+    // it; a group's exclusivity = share of its birds' sightings that fall in its own boxes.
+    const groupOf = new Map<string, number>();
+    groupsBirds.forEach((ms, i) => ms.forEach(b => groupOf.set(b, i)));
+    const boxGroup = new Map<string, Map<number, number>>();
+    for (const [num, m] of counts) {
+      const g = groupOf.get(num)!;
+      for (const [box, c] of m) {
+        let bg = boxGroup.get(box);
+        if (!bg) { bg = new Map(); boxGroup.set(box, bg); }
+        bg.set(g, (bg.get(g) || 0) + c);
+      }
+    }
+    const owner = new Map<string, number>();
+    for (const [box, bg] of boxGroup) {
+      let bestG = -1, bestC = -1;
+      for (const [g, c] of bg) if (c > bestC) { bestC = c; bestG = g; }
+      owner.set(box, bestG);
+    }
+    const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    const rows = groupsBirds.map((members, i) => {
+      const boxes: { box: string; c: number }[] = [];
+      for (const [box, o] of owner) if (o === i) boxes.push({ box, c: boxGroup.get(box)!.get(i) || 0 });
+      boxes.sort((a, b) => b.c - a.c || cmp(a.box, b.box));
+      let total = 0, inOwn = 0;
+      for (const b of members) for (const [box, c] of counts.get(b)!) {
+        total += c;
+        if (owner.get(box) === i) inOwn += c;
+      }
+      return { members: [...members].sort(cmp), boxes, purity: total ? inOwn / total : 0 };
+    }).filter(r => r.members.length >= 2)
+      .sort((a, b) => b.members.length - a.members.length);
+    const singles = birds.length - rows.reduce((a, r) => a + r.members.length, 0);
+    return { rows, singles, totalBirds: birds.length };
+  }, [base, method, minShare]);
+
+  const methodBlurb = method === 'strict'
+    ? 'Connected components of the raw penguin↔box graph — a single shared sighting links two groups, so expect large merged clusters.'
+    : method === 'threshold'
+    ? `Boxes making up less than ${minShare}% of a bird's sightings (or seen under twice) are ignored, then connected components — groups split where links are only casual visits.`
+    : 'Louvain modularity communities on penguin co-occurrence (shared-box sightings, discounted in busy boxes) — finds mostly-exclusive groups even when box use overlaps.';
+
+  return (
+    <div className="report-card">
+      <h3>Penguin groups by box use</h3>
+      <p className="muted">Mutually exclusive groups of penguins based on which boxes they are usually seen in ({result.totalBirds} birds with scans)</p>
+      <div className="group-method-row">
+        <button className={method === 'strict' ? 'active' : ''} onClick={() => setMethod('strict')}>Strict components</button>
+        <button className={method === 'threshold' ? 'active' : ''} onClick={() => setMethod('threshold')}>Usual boxes</button>
+        <button className={method === 'louvain' ? 'active' : ''} onClick={() => setMethod('louvain')}>Communities</button>
+        {method === 'threshold' && (
+          <label className="group-share-slider">
+            min share
+            <input type="range" min={0} max={50} step={5} value={minShare} onChange={e => setMinShare(parseInt(e.target.value, 10))} />
+            {minShare}%
+          </label>
+        )}
+      </div>
+      <p className="muted">{methodBlurb}</p>
+      {result.rows.length === 0 ? <p className="muted">No groups found</p> : (
+        <table className="guess-rank-table">
+          <thead><tr><th>#</th><th>Penguins</th><th>Boxes</th><th>Exclusive</th></tr></thead>
+          <tbody>
+            {result.rows.map((r, i) => (
+              <tr key={i}>
+                <td>{r.members.length}</td>
+                <td>
+                  {r.members.map(num => (
+                    <PenguinMini key={num} scan={base.birdInfo.get(num)} onClick={() => onOpenBird(num)} />
+                  ))}
+                </td>
+                <td>
+                  {r.boxes.slice(0, 15).map((b, j) => (
+                    <Fragment key={b.box}>
+                      {j > 0 && ', '}
+                      <a className="clickable" href={`/box/${b.box}`}><strong>{b.box}</strong></a>
+                    </Fragment>
+                  ))}
+                  {r.boxes.length > 15 && <span className="muted"> +{r.boxes.length - 15} more</span>}
+                </td>
+                <td>{Math.round(r.purity * 100)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {result.singles > 0 && <p className="muted">{result.singles} bird{result.singles === 1 ? '' : 's'} in single-bird groups not shown</p>}
+    </div>
+  );
+}
+
 function MissedScansReport() {
   const boxes = useMissedScans();
 
@@ -6146,6 +6388,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <div className="reports-page">
           <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setObsAnchor({ box, time }); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
+          <PenguinGroupsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
