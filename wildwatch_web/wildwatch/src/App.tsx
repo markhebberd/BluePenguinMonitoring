@@ -5446,6 +5446,60 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
+  const [impFile, setImpFile] = useState<string>('');        // filename
+  const [impCsv, setImpCsv] = useState<string>('');          // raw CSV text
+  const [impColony, setImpColony] = useState<number>(getColonyId());
+  const [impAnalysis, setImpAnalysis] = useState<any>(null);
+  const [impAnalyzing, setImpAnalyzing] = useState(false);
+  const [impCommitting, setImpCommitting] = useState(false);
+  const [impResult, setImpResult] = useState<any>(null);
+  const [impError, setImpError] = useState('');
+  const [impRowFilter, setImpRowFilter] = useState<'issues' | 'all'>('issues');
+
+  const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); };
+
+  const impPickFile = async (f: File | null) => {
+    impReset();
+    if (!f) { setImpFile(''); setImpCsv(''); return; }
+    setImpFile(f.name);
+    setImpCsv(await f.text());
+  };
+
+  const impAnalyze = async () => {
+    if (!impCsv.trim()) { setImpError('Choose a CSV file first'); return; }
+    setImpAnalyzing(true); setImpError(''); setImpResult(null); setImpAnalysis(null);
+    try {
+      const r = await fetch('/api/admin.php?action=import_csv_analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ csv: impCsv, filename: impFile, colony_id: impColony }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+      setImpAnalysis(d);
+      setImpRowFilter('all');   // line-by-line report by default
+    } catch (e: any) { setImpError(e.message || 'Analysis failed'); }
+    setImpAnalyzing(false);
+  };
+
+  const impCommit = async () => {
+    if (!impAnalysis || impCommitting) return;
+    setImpCommitting(true); setImpError('');
+    try {
+      const r = await fetch('/api/admin.php?action=import_csv_commit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ csv: impCsv, filename: impFile, colony_id: impColony }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+      setImpResult(d);
+      setImpAnalysis(null);
+      // If we imported into the colony currently being viewed, pull the new rows into the cache.
+      if (impColony === getColonyId()) triggerSync();
+    } catch (e: any) { setImpError(e.message || 'Import failed'); }
+    setImpCommitting(false);
+  };
+
   // Read-only DB browser + SQL console. Available to all admins (enforced server-side too).
   const canSql = localStorage.getItem('ww_role') === 'admin';
   const PAGE = 10000;
@@ -5680,6 +5734,169 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           } catch (e: any) { alert('Export failed: ' + e.message); }
           setExporting(false);
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
+      </div>
+
+      <div className="admin-section">
+        <h3>Import monitor CSV</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Columns: <code>Date, Box, Adults, Eggs, Chicks, Bird-1…, No scan, Notes</code>. Dates as DD/MM/YY.
+          “Decom” in Adults imports as a DCM observation. Bird cells are chip numbers; unmatched chips are reported, not created.
+          Problematic rows are flagged for review (e.g. <strong>Adults ≠ birds listed + No scan</strong>, unmatched chips) but still import once you accept.
+          Only rows that can’t become an observation — unknown box, unreadable date/number, or an existing duplicate — are skipped.
+          Rows import as observations attributed to you. Nothing is written until you confirm.
+        </p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <label style={{ fontSize: 13 }}>Colony:{' '}
+            <select value={impColony} onChange={e => { setImpColony(Number(e.target.value)); impReset(); }}>
+              {colonies.length === 0 && <option value={impColony}>Colony {impColony}</option>}
+              {colonies.map((c: any) => (
+                <option key={c.colony_id} value={c.colony_id}>{c.region_name} · {c.colony_name}</option>
+              ))}
+            </select>
+          </label>
+          <input type="file" accept=".csv,text/csv" onChange={e => impPickFile(e.target.files?.[0] ?? null)} />
+          <button className="action-btn" disabled={!impCsv || impAnalyzing} onClick={impAnalyze}>
+            {impAnalyzing ? 'Analyzing…' : 'Analyze'}
+          </button>
+          {impFile && <span className="muted" style={{ fontSize: 12 }}>{impFile}</span>}
+        </div>
+
+        {impError && <p style={{ color: '#c0392b', fontSize: 13, whiteSpace: 'pre-wrap' }}>{impError}</p>}
+
+        {impResult && (
+          <div style={{ border: '1px solid #b7e0b7', background: '#f2fbf2', borderRadius: 6, padding: 12, fontSize: 13 }}>
+            <strong>✓ Imported into {impResult.colony_name}.</strong>{' '}
+            {impResult.imported} observation(s), {impResult.scans} scan(s) written.
+            {impResult.skipped_duplicates > 0 && <> {impResult.skipped_duplicates} duplicate row(s) skipped.</>}
+            {impResult.skipped_errors > 0 && <> {impResult.skipped_errors} error row(s) skipped.</>}
+            {impResult.unmatched_chips?.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <span className="muted">Unmatched chips (no scan written): </span>
+                {impResult.unmatched_chips.map((u: any) => `${u.chip}×${u.count}`).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+
+        {impAnalysis && (() => {
+          const t = impAnalysis.totals;
+          const tiles: [string, any, string?][] = [
+            ['Rows', t.rows], ['Will import', t.importable, '#1a7a1a'],
+            ['Flagged', t.flagged, t.flagged ? '#8a6d3b' : undefined],
+            ['Duplicates (skip)', t.duplicates, t.duplicates ? '#b8860b' : undefined],
+            ['Errors (skip)', t.error_rows, t.error_rows ? '#c0392b' : undefined],
+            ['Boxes', t.boxes], ['Decom→DCM', t.decom],
+            ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks], ['No-scan', t.no_scan],
+            ['Scans matched', t.scans_matched, '#1a7a1a'],
+            ['Chips unresolved', t.scans_unmatched, t.scans_unmatched ? '#c0392b' : undefined],
+          ];
+          const rows = impAnalysis.rows || [];
+          const shown = impRowFilter === 'issues'
+            ? rows.filter((r: any) => r.status !== 'ok' || r.warnings?.length)
+            : rows;
+          const canImport = t.importable > 0 && !impCommitting;
+          return (
+            <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
+              <div style={{ fontSize: 13, marginBottom: 8 }}>
+                <strong>{impAnalysis.filename}</strong> → {impAnalysis.colony_name}
+                {impAnalysis.date_min && <span className="muted"> · {impAnalysis.date_min}{impAnalysis.date_max !== impAnalysis.date_min ? ` – ${impAnalysis.date_max}` : ''}</span>}
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                {tiles.map(([label, val, color]) => (
+                  <div key={label} style={{ border: '1px solid #eee', borderRadius: 4, padding: '6px 10px', minWidth: 78 }}>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: color || '#222' }}>{val}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {impAnalysis.file_flags?.length > 0 && impAnalysis.file_flags.map((f: string, i: number) => (
+                <p key={i} style={{ color: '#8a6d3b', fontSize: 13, margin: '2px 0' }}>⚑ {f}</p>
+              ))}
+
+              {impAnalysis.unknown_boxes?.length > 0 && (
+                <p style={{ color: '#c0392b', fontSize: 13 }}>
+                  <strong>Unknown boxes</strong> (rows skipped — not locations in this colony): {impAnalysis.unknown_boxes.join(', ')}
+                </p>
+              )}
+
+              {impAnalysis.unmatched_chips?.length > 0 && (
+                <details style={{ marginBottom: 8 }} open>
+                  <summary style={{ cursor: 'pointer', fontSize: 13 }}>
+                    <strong>{impAnalysis.unmatched_chips.length} unmatched chip(s)</strong> — scans skipped, add these birds first if wanted
+                  </summary>
+                  <div style={{ fontSize: 12, fontFamily: 'monospace', marginTop: 6, maxHeight: 140, overflow: 'auto' }}>
+                    {impAnalysis.unmatched_chips.map((u: any) => (
+                      <div key={u.chip}>{u.chip} · ×{u.count} · box {u.boxes.join(', ')} · <span style={{ color: '#c0392b' }}>{u.reason}</span></div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0' }}>
+                <span className="muted" style={{ fontSize: 12 }}>Show:</span>
+                <button className="action-btn" style={{ opacity: impRowFilter === 'issues' ? 1 : 0.6 }} onClick={() => setImpRowFilter('issues')}>Issues only</button>
+                <button className="action-btn" style={{ opacity: impRowFilter === 'all' ? 1 : 0.6 }} onClick={() => setImpRowFilter('all')}>All rows</button>
+                <span className="muted" style={{ fontSize: 12 }}>{shown.length} shown</span>
+              </div>
+
+              <div style={{ overflow: 'auto', maxHeight: 380, border: '1px solid #eee' }}>
+                <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+                  <thead><tr>{['Line', 'Box', 'Date', 'A', 'E', 'C', 'NS', 'Status', 'Scans', 'Notes'].map(h => (
+                    <th key={h} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '3px 6px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}</tr></thead>
+                  <tbody>
+                    {shown.map((r: any) => {
+                      const bg = r.status === 'error' ? '#fdecea' : r.status === 'duplicate' ? '#fff6e0' : r.warnings?.length ? '#fffbe6' : 'transparent';
+                      const openBox = r.location_id
+                        ? () => window.open(`/?box=${encodeURIComponent(r.box)}${r.prev_obs ? `&obs=${encodeURIComponent(r.prev_obs)}` : ''}`, '_blank')
+                        : undefined;
+                      return (
+                        <tr key={r.line} style={{ background: bg, cursor: openBox ? 'pointer' : 'default' }}
+                          onClick={openBox}
+                          title={openBox ? (r.prev_obs ? `Open box ${r.box} — previous observation (${String(r.prev_obs).slice(0, 10)})` : `Open box ${r.box} (no earlier observation)`) : undefined}>
+                          <td style={{ padding: '2px 6px' }}>{r.line}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.box}</td>
+                          <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>{r.date || '—'}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.is_decom ? 'Decom' : r.adults}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.eggs}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.chicks}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.no_scan}</td>
+                          <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                            {r.status === 'error' ? <span style={{ color: '#c0392b' }}>error</span>
+                              : r.status === 'duplicate' ? <span style={{ color: '#b8860b' }}>duplicate</span>
+                              : r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>flag</span>
+                              : r.breeding_status === 'DCM' ? <span style={{ color: '#8a6d3b' }}>DCM</span>
+                              : <span style={{ color: '#1a7a1a' }}>ok</span>}
+                          </td>
+                          <td style={{ padding: '2px 6px' }}>
+                            {r.scans?.length ? `${r.scans.length}✓` : ''}
+                            {r.unmatched?.length ? <span style={{ color: '#c0392b' }}> {r.unmatched.length}✗</span> : ''}
+                          </td>
+                          <td style={{ padding: '2px 6px', color: '#c0392b' }}>
+                            {(r.errors || []).join('; ')}
+                            {r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>{r.errors?.length ? ' · ' : ''}{r.warnings.join('; ')}</span> : ''}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+                <button className="action-btn" disabled={!canImport}
+                  style={{ background: canImport ? '#1a7a1a' : undefined, color: canImport ? '#fff' : undefined }}
+                  onClick={impCommit}>
+                  {impCommitting ? 'Importing…' : `Confirm import of ${t.importable} observation(s)`}
+                </button>
+                <button className="action-btn" disabled={impCommitting} onClick={impReset}>Cancel</button>
+                {t.error_rows > 0 && <span className="muted" style={{ fontSize: 12 }}>{t.error_rows} error row(s) will be skipped.</span>}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {canSql && (

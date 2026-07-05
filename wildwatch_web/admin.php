@@ -777,4 +777,375 @@ if ($action === 'save_colony_permission') {
     exit;
 }
 
+// ============ Monitor CSV import ============
+// Two-phase: analyze (no writes) then commit. Both call ww_parseImportCsv so the
+// analysis page reflects exactly what the import will write. Row shape from the
+// monitor sheet: Date, Box, Adults, Eggs, Chicks, [No scan], Bird-1..Bird-N, Notes.
+//   - "Decom" in the Adults cell => observation with breeding_status DCM, zero counts.
+//   - Bird cells hold chip/PIT numbers; matched last-8 against penguin_chips.pit_id.
+//   - Unmatched chips are reported, never auto-created; their scan is skipped.
+
+function ww_normHeader($h) { return preg_replace('/[^a-z0-9]/', '', strtolower(trim((string)$h))); }
+
+// Last-8 uppercased alphanumerics of a chip/tag number — same key importMonitor() uses.
+function ww_chipKey($raw) { return strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', (string)$raw), -8)); }
+
+/**
+ * Parse + validate a monitor CSV against a colony. Pure analysis: NO DB writes.
+ * Returns the structure the analysis page renders and the commit step replays.
+ */
+function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
+    $R = [
+        'ok' => true, 'error' => null,
+        'colony_id' => $colonyId, 'colony_name' => null, 'filename' => $filename,
+        'headers' => null, 'rows' => [],
+        'unmatched_chips' => [], 'unknown_boxes' => [],
+        'date_min' => null, 'date_max' => null,
+        'totals' => [
+            'rows' => 0, 'importable' => 0, 'flagged' => 0, 'duplicates' => 0, 'error_rows' => 0,
+            'decom' => 0, 'boxes' => 0, 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
+            'no_scan' => 0, 'scans_matched' => 0, 'scans_unmatched' => 0,
+        ],
+    ];
+
+    $cstmt = $pdo->prepare("SELECT colony_name FROM colonies WHERE colony_id = ?");
+    $cstmt->execute([$colonyId]);
+    $colonyName = $cstmt->fetchColumn();
+    if ($colonyName === false) { $R['ok'] = false; $R['error'] = "Colony $colonyId not found"; return $R; }
+    $R['colony_name'] = $colonyName;
+
+    // Parse through a temp stream so quoted fields / embedded newlines are handled.
+    $fh = fopen('php://temp', 'r+');
+    fwrite($fh, $csv);
+    rewind($fh);
+    $records = [];
+    while (($row = fgetcsv($fh)) !== false) $records[] = $row;
+    fclose($fh);
+    if (count($records) < 2) { $R['ok'] = false; $R['error'] = 'CSV has no data rows'; return $R; }
+
+    $header = array_shift($records);
+    $idx = []; $birdCols = [];
+    foreach ($header as $i => $h) {
+        $n = ww_normHeader($h);
+        if ($n === 'date') $idx['date'] = $i;
+        elseif ($n === 'box') $idx['box'] = $i;
+        elseif ($n === 'adults' || $n === 'adult') $idx['adults'] = $i;
+        elseif ($n === 'eggs' || $n === 'egg') $idx['eggs'] = $i;
+        elseif ($n === 'chicks' || $n === 'chick') $idx['chicks'] = $i;
+        elseif ($n === 'noscan' || $n === 'noscans' || $n === 'notscanned') $idx['no_scan'] = $i;
+        elseif ($n === 'notes' || $n === 'note') $idx['notes'] = $i;
+        elseif (strpos($n, 'bird') === 0) $birdCols[] = $i;
+    }
+    $missing = [];
+    foreach (['date', 'box', 'adults'] as $req) if (!isset($idx[$req])) $missing[] = $req;
+    if ($missing) { $R['ok'] = false; $R['error'] = 'Missing required column(s): ' . implode(', ', $missing); return $R; }
+    $R['headers'] = [
+        'date' => $header[$idx['date']], 'box' => $header[$idx['box']], 'adults' => $header[$idx['adults']],
+        'eggs' => isset($idx['eggs']) ? $header[$idx['eggs']] : null,
+        'chicks' => isset($idx['chicks']) ? $header[$idx['chicks']] : null,
+        'no_scan' => isset($idx['no_scan']) ? $header[$idx['no_scan']] : null,
+        'notes' => isset($idx['notes']) ? $header[$idx['notes']] : null,
+        'bird_columns' => array_values(array_map(function ($i) use ($header) { return $header[$i]; }, $birdCols)),
+    ];
+
+    // Lookups: this colony's locations, and every known chip.
+    $locLookup = [];
+    $lstmt = $pdo->prepare("SELECT location_id, location_name FROM observation_locations WHERE colony_id = ?");
+    $lstmt->execute([$colonyId]);
+    foreach ($lstmt->fetchAll() as $l) $locLookup[strtoupper($l['location_name'])] = (int)$l['location_id'];
+
+    // Chip resolution scoped to THIS colony. Key = last-8 of pit_id; a CSV bird number is the
+    // same 8-digit subset. A cell resolves only if the subset maps to exactly one bird (peng_num)
+    // whose home colony is this one. Zero / many / another-colony all flag and skip the scan.
+    $byKeyColony = [];   // key => ['pengs'=>[peng=>1], 'pit'=>first pit, 'active'=>active pit]
+    $byKeyAny = [];      // key => [peng=>colony_id]  (all colonies — to spot foreign birds)
+    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, p.colony_id
+        FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num")->fetchAll() as $c) {
+        $k = ww_chipKey($c['pit_id']);
+        $byKeyAny[$k][$c['peng_num']] = (int)$c['colony_id'];
+        if ((int)$c['colony_id'] === $colonyId) {
+            if (!isset($byKeyColony[$k])) $byKeyColony[$k] = ['pengs' => [], 'pit' => null, 'active' => null];
+            $byKeyColony[$k]['pengs'][$c['peng_num']] = true;
+            if ($byKeyColony[$k]['pit'] === null) $byKeyColony[$k]['pit'] = $c['pit_id'];
+            if ($c['is_active'] && $byKeyColony[$k]['active'] === null) $byKeyColony[$k]['active'] = $c['pit_id'];
+        }
+    }
+    $prefix = getColonyPrefix($pdo, $colonyId);
+
+    // Earliest date each bird was ever seen in each box, to flag a bird turning up in a box
+    // it had never been seen in before this date. Keyed location_id|peng_num => earliest date.
+    $seenInBox = [];
+    foreach ($pdo->query("SELECT o.location_id, o.observation_time_utc, pc.peng_num
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+        WHERE ol.colony_id = " . (int)$colonyId . " AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)")->fetchAll() as $h) {
+        $nz = substr($h['observation_time_utc'], 0, 10); // day-level is enough for a before/after test
+        $key = $h['location_id'] . '|' . $h['peng_num'];
+        if (!isset($seenInBox[$key]) || $nz < $seenInBox[$key]) $seenInBox[$key] = $nz;
+    }
+
+    $dupStmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ? AND is_deleted = FALSE");
+    // Most recent existing observation in a box before the import instant — the row-click target.
+    $prevStmt = $pdo->prepare("SELECT observation_time_utc FROM observations WHERE location_id = ? AND is_deleted = FALSE AND observation_time_utc < ? ORDER BY observation_time_utc DESC LIMIT 1");
+
+    $parseInt = function ($v) {
+        $v = trim((string)$v);
+        if ($v === '') return [0, true];
+        if (!preg_match('/^-?\d+$/', $v)) return [0, false];
+        return [(int)$v, true];
+    };
+
+    $unmatched = [];      // chipKey => ['chip'=>original, 'reason'=>why, 'count'=>n, 'boxes'=>[...]]
+    $unknownBoxes = [];
+    $seenBoxes = [];
+    $distinctDates = [];
+    $refDate = null;      // first data row's date — the sheet's expected single date
+    $birdBoxes = [];      // "date|chipKey" => [['i'=>rowIndex, 'box'=>name], ...] — a bird can't be in two boxes at once
+    $R['file_flags'] = [];
+    $tzNz = new DateTimeZone('Pacific/Auckland');
+    $tzUtc = new DateTimeZone('UTC');
+    $lineNo = 1;          // header consumed as line 1
+
+    foreach ($records as $rec) {
+        $lineNo++;
+        if (!count(array_filter($rec, function ($v) { return trim((string)$v) !== ''; }))) continue; // blank line
+
+        $R['totals']['rows']++;
+        $box = trim((string)($rec[$idx['box']] ?? ''));
+        $dateRaw = trim((string)($rec[$idx['date']] ?? ''));
+        $adultsRaw = trim((string)($rec[$idx['adults']] ?? ''));
+        $notes = isset($idx['notes']) ? trim((string)($rec[$idx['notes']] ?? '')) : '';
+        $errors = []; $warnings = [];
+
+        // Box -> location
+        $locId = null;
+        if ($box === '') { $errors[] = 'Missing box'; }
+        else {
+            $locId = $locLookup[strtoupper($box)] ?? null;
+            if ($locId === null) {
+                $errors[] = "Unknown box '$box' — not a location in $colonyName";
+                if (!in_array($box, $unknownBoxes, true)) $unknownBoxes[] = $box;
+            }
+            if (!in_array($box, $seenBoxes, true)) $seenBoxes[] = $box;
+        }
+
+        // Date -> observation_time. Stored as 2pm NZ on that date, converted to UTC.
+        $dt = null;
+        foreach (['d/m/y', 'd/m/Y', 'j/n/y', 'j/n/Y', 'Y-m-d'] as $fmt) {
+            $d = DateTime::createFromFormat($fmt, $dateRaw);
+            if ($d && $d->format($fmt) === $dateRaw) { $dt = $d; break; }
+        }
+        if (!$dt) $errors[] = "Invalid date '$dateRaw' (expected DD/MM/YY)";
+        $obsDate = $dt ? $dt->format('Y-m-d') : null;
+        $obsTime = null;
+        if ($obsDate) {
+            $nzDt = new DateTime($obsDate . ' 14:00:00', $tzNz);
+            $nzDt->setTimezone($tzUtc);
+            $obsTime = $nzDt->format('Y-m-d H:i:s');
+            $distinctDates[$obsDate] = true;
+            if ($R['date_min'] === null || $obsDate < $R['date_min']) $R['date_min'] = $obsDate;
+            if ($R['date_max'] === null || $obsDate > $R['date_max']) $R['date_max'] = $obsDate;
+        }
+
+        // Counts / Decom
+        $isDecom = (bool)preg_match('/decom/i', $adultsRaw);
+        $adults = 0; $eggs = 0; $chicks = 0; $noScan = 0; $breeding = null; $countsOk = true;
+        if ($isDecom) {
+            $breeding = 'DCM';
+        } else {
+            list($adults, $aOk) = $parseInt($adultsRaw);
+            if (!$aOk) { $errors[] = "Adults '$adultsRaw' is not a number"; $countsOk = false; }
+            if (isset($idx['eggs'])) { list($eggs, $ok) = $parseInt($rec[$idx['eggs']] ?? ''); if (!$ok) { $errors[] = 'Eggs is not a number'; $countsOk = false; } }
+            if (isset($idx['chicks'])) { list($chicks, $ok) = $parseInt($rec[$idx['chicks']] ?? ''); if (!$ok) { $errors[] = 'Chicks is not a number'; $countsOk = false; } }
+            if (isset($idx['no_scan'])) { list($noScan, $ok) = $parseInt($rec[$idx['no_scan']] ?? ''); if (!$ok) { $errors[] = 'No-scan is not a number'; $countsOk = false; } }
+            if ($countsOk && $adults < 0) { $errors[] = 'Adults is negative'; $countsOk = false; }
+            if ($countsOk && $noScan < 0) { $errors[] = 'No-scan is negative'; $countsOk = false; }
+        }
+
+        // Bird cells -> scans. A filled cell is a scan regardless of whether the chip resolves.
+        $scans = []; $unmatchedHere = []; $rowKeys = []; $rowSeen = [];
+        if (!$isDecom) {
+            foreach ($birdCols as $bi) {
+                $val = trim((string)($rec[$bi] ?? ''));
+                if ($val === '') continue;
+                $key = ww_chipKey($val);
+                // Same chip listed twice in one box — almost always a copy-paste. Flag, scan once.
+                if (isset($rowSeen[$key])) { $warnings[] = "chip $val listed more than once in this box"; continue; }
+                $rowSeen[$key] = true; $rowKeys[] = $key;
+                $col = $byKeyColony[$key] ?? null;
+                $nPeng = $col ? count($col['pengs']) : 0;
+                if ($nPeng === 1) {
+                    $scans[] = ['pit_id' => $col['active'] ?? $col['pit'], 'chip' => $val, 'peng_num' => array_key_first($col['pengs'])];
+                } else {
+                    if ($nPeng > 1) $reason = "last-8 matches $nPeng birds in $colonyName";
+                    elseif (isset($byKeyAny[$key])) $reason = 'belongs to another colony';
+                    else $reason = "no bird in $colonyName";
+                    $unmatchedHere[] = ['chip' => $val, 'reason' => $reason];
+                    if (!isset($unmatched[$key])) $unmatched[$key] = ['chip' => $val, 'reason' => $reason, 'count' => 0, 'boxes' => []];
+                    $unmatched[$key]['count']++;
+                    if ($box !== '' && !in_array($box, $unmatched[$key]['boxes'], true)) $unmatched[$key]['boxes'][] = $box;
+                }
+            }
+        }
+
+        // ---- Flags: interesting/problematic but still importable (never exclude the row) ----
+        $birdsListed = count($scans) + count($unmatchedHere); // "#scans" = every filled Bird cell
+        if (!$isDecom) {
+            // 1. Improbable counts for a little-penguin box.
+            if ($adults > 2) $warnings[] = "adults = $adults (>2)";
+            if (($eggs + $chicks) > 2) $warnings[] = 'eggs + chicks = ' . ($eggs + $chicks) . ' (>2)';
+            // 2. Balance: adults must equal scans + no-scan.
+            if ($countsOk && ($adults - $birdsListed - $noScan) !== 0)
+                $warnings[] = "adults ($adults) ≠ scans ($birdsListed) + no-scan ($noScan)";
+        }
+        // 5. Chips that didn't resolve to exactly one colony bird.
+        foreach ($unmatchedHere as $u) $warnings[] = "chip {$u['chip']}: {$u['reason']}";
+        // 3. Bird turning up in a box it had never been seen in before this date.
+        if ($obsDate && $locId !== null) {
+            foreach ($scans as $sc) {
+                $prior = $seenInBox[$locId . '|' . $sc['peng_num']] ?? null;
+                if ($prior === null || $prior >= $obsDate)
+                    $warnings[] = 'first time in this box: #' . displayPengNum($sc['peng_num'], $prefix);
+            }
+        }
+        // 6. Date consistency — a monitor sheet should be one day.
+        if ($obsDate) {
+            if ($refDate === null) $refDate = $obsDate;
+            elseif ($obsDate !== $refDate) $warnings[] = "date $obsDate differs from $refDate";
+        }
+
+        // Duplicate check (same box + date + this observer, not deleted)
+        $duplicate = false;
+        if ($locId !== null && $obsTime !== null) {
+            $dupStmt->execute([$locId, $obsTime, $observerId]);
+            if ($dupStmt->fetchColumn()) $duplicate = true;
+        }
+        // Row-click target: most recent existing observation in this box before the import.
+        $prevObs = null;
+        if ($locId !== null && $obsTime !== null) {
+            $prevStmt->execute([$locId, $obsTime]);
+            $pv = $prevStmt->fetchColumn();
+            if ($pv !== false) $prevObs = $pv;
+        }
+
+        $status = count($errors) ? 'error' : ($duplicate ? 'duplicate' : 'ok');
+        $R['rows'][] = [
+            'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
+            'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks, 'no_scan' => $noScan,
+            'breeding_status' => $breeding, 'is_decom' => $isDecom, 'notes' => $notes,
+            'obs_time' => $obsTime, 'prev_obs' => $prevObs, 'scans' => $scans, 'unmatched' => $unmatchedHere,
+            'errors' => $errors, 'warnings' => $warnings, 'status' => $status,
+        ];
+        // Track each scanned chip's box per day so we can flag a bird appearing in two boxes.
+        if ($obsDate && $rowKeys) {
+            $ri = count($R['rows']) - 1;
+            foreach ($rowKeys as $k) $birdBoxes[$obsDate . '|' . $k][] = ['i' => $ri, 'box' => $box];
+        }
+
+        if ($status === 'error') { $R['totals']['error_rows']++; continue; }
+        if ($status === 'duplicate') { $R['totals']['duplicates']++; continue; }
+        // Importable row — tally what would actually be written.
+        $R['totals']['importable']++;
+        if (count($warnings)) $R['totals']['flagged']++;
+        if ($isDecom) $R['totals']['decom']++;
+        $R['totals']['adults'] += $adults; $R['totals']['eggs'] += $eggs; $R['totals']['chicks'] += $chicks;
+        $R['totals']['no_scan'] += $noScan; $R['totals']['scans_matched'] += count($scans);
+        $R['totals']['scans_unmatched'] += count($unmatchedHere);
+    }
+
+    if (count($distinctDates) > 1) {
+        $dl = array_keys($distinctDates); sort($dl);
+        $R['file_flags'][] = 'Sheet spans multiple dates: ' . implode(', ', $dl);
+    }
+
+    // A bird scanned in two different boxes on the same day can't be right — flag every box.
+    foreach ($birdBoxes as $dk => $entries) {
+        $boxes = [];
+        foreach ($entries as $e) if (!in_array($e['box'], $boxes, true)) $boxes[] = $e['box'];
+        if (count($boxes) < 2) continue;
+        $chip = substr($dk, strpos($dk, '|') + 1);
+        foreach ($entries as $e) {
+            $others = [];
+            foreach ($boxes as $b) if ($b !== $e['box']) $others[] = $b;
+            $row = &$R['rows'][$e['i']];
+            $had = count($row['warnings']) > 0;
+            $row['warnings'][] = "chip $chip also in box " . implode(', ', $others) . ' this day';
+            if ($row['status'] === 'ok' && !$had) $R['totals']['flagged']++;
+            unset($row);
+        }
+    }
+
+    $R['totals']['boxes'] = count($seenBoxes);
+    $R['unknown_boxes'] = $unknownBoxes;
+    $R['unmatched_chips'] = array_values($unmatched);
+    usort($R['unmatched_chips'], function ($a, $b) { return $b['count'] - $a['count']; });
+    return $R;
+}
+
+// Read {csv, filename, colony_id} from the request body.
+function ww_importInput() {
+    $in = json_decode(file_get_contents('php://input'), true) ?? [];
+    $csv = (string)($in['csv'] ?? '');
+    $filename = trim((string)($in['filename'] ?? 'import.csv'));
+    $filename = preg_replace('/\.csv$/i', '', basename($filename));
+    $colonyId = (int)($in['colony_id'] ?? 0);
+    return [$csv, $filename, $colonyId];
+}
+
+if ($action === 'import_csv_analyze') {
+    list($csv, $filename, $colonyId) = ww_importInput();
+    if ($csv === '') { http_response_code(400); echo json_encode(['error' => 'No CSV supplied']); exit; }
+    if (!$colonyId) { http_response_code(400); echo json_encode(['error' => 'colony_id required']); exit; }
+    echo json_encode(ww_parseImportCsv($pdo, $csv, $colonyId, (int)$observer['observer_id'], $filename));
+    exit;
+}
+
+if ($action === 'import_csv_commit') {
+    list($csv, $filename, $colonyId) = ww_importInput();
+    if ($csv === '') { http_response_code(400); echo json_encode(['error' => 'No CSV supplied']); exit; }
+    if (!$colonyId) { http_response_code(400); echo json_encode(['error' => 'colony_id required']); exit; }
+    $observerId = (int)$observer['observer_id'];
+
+    // Re-parse so what we write is exactly what was validated (DB may have shifted since analyze).
+    $A = ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename);
+    if (!$A['ok']) { http_response_code(400); echo json_encode(['error' => $A['error']]); exit; }
+
+    $imported = 0; $scans = 0; $skippedDup = 0; $skippedErr = 0;
+    try {
+        $pdo->beginTransaction();
+        $insObs = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, no_scan, breeding_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $insScan = $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)");
+        foreach ($A['rows'] as $row) {
+            if ($row['status'] === 'error') { $skippedErr++; continue; }
+            if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
+            $insObs->execute([
+                $row['location_id'], $observerId, $row['obs_time'],
+                $row['adults'], $row['eggs'], $row['chicks'], $row['no_scan'],
+                $row['breeding_status'], $row['notes'], $A['filename'],
+            ]);
+            $obsId = $pdo->lastInsertId();
+            $imported++;
+            foreach ($row['scans'] as $sc) {
+                $insScan->execute([$obsId, $sc['pit_id'], $row['obs_time']]);
+                $scans++;
+            }
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['error' => 'Import failed: ' . $e->getMessage()]);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
+        'imported' => $imported, 'scans' => $scans, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
+        'unmatched_chips' => $A['unmatched_chips'],
+    ]);
+    exit;
+}
+
 echo json_encode(['error'=>'Unknown action']);
