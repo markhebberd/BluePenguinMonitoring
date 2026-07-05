@@ -6217,7 +6217,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
-        <h3>Data Security</h3>
+        <h3>Data integrity</h3>
         <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
         <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
@@ -6677,6 +6677,7 @@ function DuplicateScans({ token }: { token: string }) {
     setDuplicates(Array.isArray(d) ? d : []);
     setLoading(false);
   };
+  useEffect(() => { check(); }, []); // run by default
 
   return (
     <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
@@ -6714,6 +6715,7 @@ function SameGenderConflicts({ token }: { token: string }) {
     setConflicts(Array.isArray(d) ? d : []);
     setLoading(false);
   };
+  useEffect(() => { check(); }, []); // run by default
 
   return (
     <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
