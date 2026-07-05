@@ -652,3 +652,8 @@ select.ef-input.ef-placeholder { color:#888; }
 .group-method-row button.active { border-color:#1a5276; background:#d4e6f1; color:#1a5276; font-weight:600; }
 .group-share-slider { display:flex; align-items:center; gap:6px; font-size:13px; color:#555; margin-left:8px; }
 .group-share-slider input { width:120px; }
+.group-table th:not(:first-child), .group-table td:not(:first-child) { text-align:left; width:auto; }
+.group-table th:first-child, .group-table td:first-child { width:30px; }
+.group-table th:last-child, .group-table td:last-child { width:50px; text-align:center; }
+.group-table td { vertical-align:top; }
+.group-members { display:flex; flex-wrap:wrap; gap:3px; }

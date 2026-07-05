@@ -3207,16 +3207,18 @@ function PenguinGroupsReport({ onOpenBird }: { onOpenBird: (num: string) => void
       </div>
       <p className="muted">{methodBlurb}</p>
       {result.rows.length === 0 ? <p className="muted">No groups found</p> : (
-        <table className="guess-rank-table">
-          <thead><tr><th>#</th><th>Penguins</th><th>Boxes</th><th>Exclusive</th></tr></thead>
+        <table className="guess-rank-table group-table">
+          <thead><tr><th>#</th><th>Penguins</th><th>Boxes</th><th>Excl.</th></tr></thead>
           <tbody>
             {result.rows.map((r, i) => (
               <tr key={i}>
                 <td>{r.members.length}</td>
                 <td>
-                  {r.members.map(num => (
-                    <PenguinMini key={num} scan={base.birdInfo.get(num)} onClick={() => onOpenBird(num)} />
-                  ))}
+                  <div className="group-members">
+                    {r.members.map(num => (
+                      <PenguinMini key={num} scan={base.birdInfo.get(num)} onClick={() => onOpenBird(num)} />
+                    ))}
+                  </div>
                 </td>
                 <td>
                   {r.boxes.slice(0, 15).map((b, j) => (
