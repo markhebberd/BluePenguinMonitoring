@@ -1076,7 +1076,7 @@ export function computeAdultCountMismatches(): { total: number; rows: any[] } {
     rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan });
   }
   rows.sort((a, b) => b.time.localeCompare(a.time));
-  return { total: rows.length, rows: rows.slice(0, 10) };
+  return { total: rows.length, rows };
 }
 
 /** Chick return rates by size, with return-age points. */

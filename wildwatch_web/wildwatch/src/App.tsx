@@ -3307,15 +3307,25 @@ function MissedScansReport() {
 
 function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: string) => void }) {
   const { total, rows } = useAdultCountMismatches();
+  const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
+  const recentDay = rows[0]?.date;
+  const shown = mode === 'all' ? rows
+    : mode === 'day' ? rows.filter((r: any) => r.date === recentDay)
+    : rows.slice(0, 3);
   return (
     <div className="report-card">
       <h3>Adult count vs scans mismatch</h3>
-      <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first{total > rows.length ? `, showing ${rows.length} of ${total}` : ` (${total})`}.</p>
-      {rows.length === 0 ? <p className="muted">No mismatches found</p> : (
+      <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first.</p>
+      {rows.length === 0 ? <p className="muted">No mismatches found</p> : (<>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {(([['top', 'Show 3'], ['day', `Most recent day${recentDay ? ` (${recentDay})` : ''}`], ['all', `Show all (${total})`]]) as const).map(([m, label]) => (
+            <button key={m} className="edit-btn" style={{ opacity: mode === m ? 1 : 0.55 }} onClick={() => setMode(m)}>{label}</button>
+          ))}
+        </div>
         <table className="guess-rank-table">
           <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th></tr></thead>
           <tbody>
-            {rows.map((r: any, i: number) => (
+            {shown.map((r: any, i: number) => (
               <tr key={i} className="clickable" onClick={() => onOpen(r.box, r.time)} title="Go to this observation">
                 <td>{r.date}</td>
                 <td><strong>{r.box}</strong></td>
@@ -3325,7 +3335,8 @@ function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: stri
             ))}
           </tbody>
         </table>
-      )}
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Showing {shown.length} of {total}</p>
+      </>)}
     </div>
   );
 }
@@ -5930,10 +5941,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
-      <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
-        <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
-      </div>
-
       {canSql && (
       <div className="admin-section" style={{ display: adminTab === 'database' ? undefined : 'none', width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
@@ -6211,6 +6218,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div className="admin-section" style={{ display: adminTab === 'data' ? undefined : 'none' }}>
         <h3>Data Security</h3>
+        <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
         <RemovePenguin token={token} />
         <DuplicateObservations token={token} />
         <DuplicateScans token={token} />
