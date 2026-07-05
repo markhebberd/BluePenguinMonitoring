@@ -4265,12 +4265,27 @@ function SurvivalPredictionReport() {
 
   const { cohort, firstSeason, curve, annualMortality, annualSurvival, expectedLifespan, medianLifespan } = result;
 
+  // Extend prediction into future until <5% survival
+  const futureSeasons: string[] = [];
+  const lastSeasonYear = parseInt(result.sortedSeasons[result.sortedSeasons.length - 1]);
+  for (let y = lastSeasonYear + 1; ; y++) {
+    const i = curve.length + futureSeasons.length;
+    const predicted = Math.exp(Math.log(annualSurvival) * i) * 100;
+    if (predicted < 0.5) break;
+    futureSeasons.push(String(y));
+    if (futureSeasons.length > 20) break; // safety cap
+  }
+  const totalPoints = curve.length + futureSeasons.length;
+
   // Draw survival curve
   const W = 600, H = 280, PAD = { top: 30, right: 20, bottom: 55, left: 55 };
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
-  const xScale = (i: number) => PAD.left + (i / (curve.length - 1)) * plotW;
+  const xScale = (i: number) => PAD.left + (i / (totalPoints - 1)) * plotW;
   const yScale = (pct: number) => PAD.top + plotH - (pct / 100) * plotH;
+
+  // All x-axis labels (observed + future)
+  const allLabels = [...curve.map(c => c.season), ...futureSeasons];
 
   return (
     <div className="report-card">
@@ -4283,14 +4298,16 @@ function SurvivalPredictionReport() {
             <text x={PAD.left - 8} y={yScale(pct) + 4} textAnchor="end" fontSize="11" fill="#888">{pct}%</text>
           </Fragment>
         ))}
+        {/* Boundary between observed and predicted */}
+        <line x1={xScale(curve.length - 1)} x2={xScale(curve.length - 1)} y1={PAD.top} y2={PAD.top + plotH} stroke="#ddd" strokeWidth="1" strokeDasharray="3,3" />
         {/* Actual curve */}
         <polyline
           points={curve.map((c, i) => `${xScale(i)},${yScale(c.pct)}`).join(' ')}
           fill="none" stroke="#2196F3" strokeWidth="2.5"
         />
-        {/* Predicted exponential decay overlay */}
+        {/* Predicted exponential decay — full range including future */}
         <polyline
-          points={curve.map((_, i) => `${xScale(i)},${yScale(Math.exp(Math.log(annualSurvival) * i) * 100)}`).join(' ')}
+          points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(Math.exp(Math.log(annualSurvival) * i) * 100)}`).join(' ')}
           fill="none" stroke="#f44336" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7"
         />
         {/* Data points */}
@@ -4298,8 +4315,8 @@ function SurvivalPredictionReport() {
           <circle key={i} cx={xScale(i)} cy={yScale(c.pct)} r="3" fill="#2196F3" />
         ))}
         {/* X axis labels */}
-        {curve.map((c, i) => (
-          i % 2 === 0 || curve.length <= 10 ? <text key={i} x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="9" fill="#666" transform={`rotate(-30, ${xScale(i)}, ${PAD.top + plotH + 16})`}>{c.season}</text> : null
+        {allLabels.map((label, i) => (
+          i % 2 === 0 || totalPoints <= 12 ? <text key={i} x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="9" fill={i >= curve.length ? '#bbb' : '#666'} transform={`rotate(-30, ${xScale(i)}, ${PAD.top + plotH + 16})`}>{label}</text> : null
         ))}
         <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
         <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
