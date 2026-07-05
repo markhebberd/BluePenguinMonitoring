@@ -3310,7 +3310,7 @@ function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: stri
   return (
     <div className="report-card">
       <h3>Adult count vs scans mismatch</h3>
-      <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers — a likely entry error. Newest first{total > rows.length ? `, showing ${rows.length} of ${total}` : ` (${total})`}.</p>
+      <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first{total > rows.length ? `, showing ${rows.length} of ${total}` : ` (${total})`}.</p>
       {rows.length === 0 ? <p className="muted">No mismatches found</p> : (
         <table className="guess-rank-table">
           <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th></tr></thead>
