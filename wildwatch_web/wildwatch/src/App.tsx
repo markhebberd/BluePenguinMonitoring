@@ -4496,7 +4496,7 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
       <h3>Pair bond duration</h3>
       <p className="muted">Breeding pairs detected together in multiple seasons, ranked by longest consecutive run (min 2 seasons, top 25)</p>
       {rows.length === 0 ? <p className="muted">No data available</p> : (
-        <table className="guess-rank-table rank-table">
+        <table className="guess-rank-table mini-list-table">
           <thead><tr><th>Pair</th><th>Consecutive</th><th>Total seasons</th><th>Boxes</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
@@ -4574,7 +4574,7 @@ function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
       <h3>Possible floaters</h3>
       <p className="muted">Adult birds scanned at 2+ boxes but never detected as a breeding parent — possible non-breeding floaters (top 25)</p>
       {rows.length === 0 ? <p className="muted">No data available</p> : (
-        <table className="guess-rank-table rank-table">
+        <table className="guess-rank-table mini-list-table">
           <thead><tr><th>Penguin</th><th>Boxes</th><th>Scans</th><th>Seen at</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
@@ -4588,118 +4588,6 @@ function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
           </tbody>
         </table>
       )}
-    </div>
-  );
-}
-
-/** Breeding success by box: chipped chicks per box across all seasons. */
-function BoxSuccessReport() {
-  const v = useDbVersion();
-  const rows = useMemo(() => {
-    const byBox = new Map<string, { seasons: Set<string>; chicks: number; eggs: number; clutches: number }>();
-    for (const loc of queryAllLocations()) {
-      const box = String(loc.location_name).trim();
-      const bd = queryBoxDetailSync(box);
-      if (!bd?.observations?.length) continue;
-      let e = byBox.get(box);
-      if (!e) { e = { seasons: new Set(), chicks: 0, eggs: 0, clutches: 0 }; byBox.set(box, e); }
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
-        for (const fam of sd.families) {
-          if (fam.clutch.maxEggs < 1) continue;
-          e.clutches++;
-          e.eggs += fam.clutch.maxEggs;
-          e.seasons.add(sd.label);
-          e.chicks += fam.chicks.length;
-        }
-      }
-    }
-    return Array.from(byBox.entries())
-      .map(([box, e]) => ({
-        box,
-        seasons: e.seasons.size,
-        clutches: e.clutches,
-        eggs: e.eggs,
-        chicks: e.chicks,
-        rate: e.eggs > 0 ? e.chicks / e.eggs : 0,
-      }))
-      .filter(r => r.clutches >= 1)
-      .sort((a, b) => b.rate - a.rate || b.chicks - a.chicks);
-  }, [v]);
-
-  if (rows.length === 0) return <div className="report-card"><h3>Breeding success by box</h3><p className="muted">No data available</p></div>;
-
-  // Bar chart: chipped chicks per egg, per box
-  const maxRate = Math.max(...rows.map(r => r.rate));
-  const yMax = Math.min(Math.ceil(maxRate * 10) / 10 + 0.05, 1.5);
-  const W = Math.max(600, rows.length * 18 + 100), H = 300;
-  const PAD = { top: 30, right: 20, bottom: 55, left: 50 };
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
-  const barW = Math.max(plotW / rows.length - 1, 2);
-  const yScale = (v: number) => PAD.top + plotH - (v / yMax) * plotH;
-  const yTicks = Array.from({ length: Math.ceil(yMax * 10) + 1 }, (_, i) => i / 10).filter(v => v <= yMax);
-
-  return (
-    <div className="report-card">
-      <h3>Breeding success by box</h3>
-      <p className="muted">Chipped chicks per egg across all seasons — higher means more eggs resulted in chipped chicks ({rows.length} boxes with clutches)</p>
-      <div style={{overflowX:'auto'}}>
-        <svg viewBox={`0 0 ${W} ${H}`} className="report-chart" style={{minWidth: W}}>
-          {yTicks.filter(v => v > 0).map(pct => (
-            <line key={pct} x1={PAD.left} x2={PAD.left + plotW} y1={yScale(pct)} y2={yScale(pct)} stroke="#e8ecef" strokeWidth="1" />
-          ))}
-          {yTicks.map(pct => (
-            <text key={pct} x={PAD.left - 8} y={yScale(pct) + 4} textAnchor="end" fontSize="11" fill="#888">{(pct * 100).toFixed(0)}%</text>
-          ))}
-          {rows.map((r, i) => {
-            const x = PAD.left + i * (plotW / rows.length) + (plotW / rows.length - barW) / 2;
-            const barH = (r.rate / yMax) * plotH;
-            const color = r.rate > 0.5 ? '#4CAF50' : r.rate > 0.2 ? '#FF9800' : '#f44336';
-            return (
-              <Fragment key={r.box}>
-                <rect x={x} y={yScale(r.rate)} width={barW} height={barH} fill={color} opacity="0.8" rx="1" />
-                {barW >= 12 && <text x={x + barW / 2} y={PAD.top + plotH + 14} textAnchor="middle" fontSize="8" fill="#666" transform={`rotate(-45, ${x + barW / 2}, ${PAD.top + plotH + 14})`}>{r.box}</text>}
-              </Fragment>
-            );
-          })}
-          <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
-          <line x1={PAD.left} x2={PAD.left + plotW} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
-          <text x={PAD.left + plotW / 2} y={H - 2} textAnchor="middle" fontSize="12" fill="#666">Box</text>
-        </svg>
-      </div>
-      {/* Top and bottom 5 table */}
-      <div style={{display:'flex', gap:'2em', justifyContent:'center', flexWrap:'wrap', margin:'1em 0'}}>
-        <div>
-          <h4 style={{margin:'0 0 0.3em'}}>Most successful</h4>
-          <table style={{borderCollapse:'collapse', fontSize:'0.85em'}}>
-            <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{padding:'0.3em 0.6em', textAlign:'left'}}>Box</th><th style={{padding:'0.3em 0.6em'}}>Chicks/egg</th><th style={{padding:'0.3em 0.6em'}}>Chicks</th><th style={{padding:'0.3em 0.6em'}}>Eggs</th><th style={{padding:'0.3em 0.6em'}}>Clutches</th></tr></thead>
-            <tbody>{rows.slice(0, 5).map(r => (
-              <tr key={r.box} style={{borderBottom:'1px solid #eee'}}>
-                <td style={{padding:'0.3em 0.6em', fontWeight:600}}>{r.box}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center', color:'#4CAF50', fontWeight:700}}>{(r.rate * 100).toFixed(0)}%</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.chicks}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.eggs}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.clutches}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-        <div>
-          <h4 style={{margin:'0 0 0.3em'}}>Least successful</h4>
-          <table style={{borderCollapse:'collapse', fontSize:'0.85em'}}>
-            <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{padding:'0.3em 0.6em', textAlign:'left'}}>Box</th><th style={{padding:'0.3em 0.6em'}}>Chicks/egg</th><th style={{padding:'0.3em 0.6em'}}>Chicks</th><th style={{padding:'0.3em 0.6em'}}>Eggs</th><th style={{padding:'0.3em 0.6em'}}>Clutches</th></tr></thead>
-            <tbody>{rows.slice(-5).reverse().map(r => (
-              <tr key={r.box} style={{borderBottom:'1px solid #eee'}}>
-                <td style={{padding:'0.3em 0.6em', fontWeight:600}}>{r.box}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center', color:'#f44336', fontWeight:700}}>{(r.rate * 100).toFixed(0)}%</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.chicks}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.eggs}</td>
-                <td style={{padding:'0.3em 0.6em', textAlign:'center'}}>{r.clutches}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }
@@ -7092,6 +6980,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className="reports-page">
+          <h2 className="reports-title">Reports</h2>
           <AdultCountMismatchReport onOpen={(box, time) => { setShowReports(false); setSelectedBird(null); setObsAnchor({ box, time }); setSelectedBox(box); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(time); setScrollToObs(time); }, 10); }} />
           <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <UnproductiveParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
@@ -7108,7 +6997,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <SurvivalPredictionReport />
           <PairBondReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
           <FloaterReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
-          <BoxSuccessReport />
         </div>
         {passwordDialog}
       </div>

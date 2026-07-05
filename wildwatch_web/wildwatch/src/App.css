@@ -284,10 +284,26 @@ h3.collapsible:hover { color:#1a5276; }
 .date-link.fm-date:hover { color:#1b5e20; }
 
 /* Reports */
-.reports-page { max-width:1000px; margin:0 auto; padding:20px; }
-.report-card { background:#fff; border-radius:12px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,.08); margin-bottom:20px; }
-.report-card h3 { color:#1a5276; margin-bottom:4px; }
-.report-chart { width:100%; height:auto; max-height:450px; }
+.reports-page { max-width:1080px; margin:0 auto; padding:24px 20px 44px; }
+.reports-title { font-size:1.45rem; font-weight:700; color:#1a5276; margin:0 0 16px; }
+.report-card { background:#fff; border-radius:12px; padding:20px 22px; box-shadow:0 1px 3px rgba(0,0,0,.06), 0 1px 10px rgba(0,0,0,.04); border:1px solid #eef1f4; margin-bottom:18px; }
+.report-card h3 { color:#1a5276; margin:0 0 3px; font-size:1.08rem; }
+.report-card > p.muted { font-size:0.82rem; line-height:1.45; margin-bottom:8px; }
+.report-chart { width:100%; height:auto; max-height:460px; display:block; }
+
+/* Reports on a phone (e.g. Pixel 9a, ~402px): tighter chrome, and wide tables scroll
+   inside their own card instead of overflowing the page. */
+@media (max-width:560px) {
+  .reports-page { padding:12px 10px 32px; }
+  .reports-title { font-size:1.2rem; margin-bottom:10px; }
+  .report-card { padding:14px; border-radius:10px; margin-bottom:12px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .report-card h3 { font-size:1rem; }
+  .report-card > p.muted { font-size:0.78rem; }
+  .guess-rank-table { font-size:12px; }
+  .guess-rank-table th, .guess-rank-table td { padding:4px 6px; }
+  .mini-list-table th:not(:first-child):not(:last-child),
+  .mini-list-table td:not(:first-child):not(:last-child) { width:auto; }
+}
 .guess-rank-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
 .guess-rank-table th { text-align:left; color:#888; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #e8ecef; padding:4px 8px; }
 .guess-rank-table td { padding:5px 8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
@@ -295,6 +311,11 @@ h3.collapsible:hover { color:#1a5276; }
 .count-cols th:not(:first-child), .count-cols td:not(:first-child) { text-align:center; width:60px; }
 .rank-table th:first-child, .rank-table td:first-child { width:30px; }
 .rank-table th:last-child, .rank-table td:last-child { text-align:center; width:90px; }
+/* mini-list-table = penguin mini(s) first + a box list last (pair bond, floaters): keep both
+   ends natural width, narrow-centre the numeric columns between, and let the list wrap. */
+.mini-list-table th:not(:first-child):not(:last-child),
+.mini-list-table td:not(:first-child):not(:last-child) { text-align:center; width:88px; white-space:nowrap; }
+.mini-list-table td:last-child { font-size:0.85em; color:#555; line-height:1.5; }
 
 /* Day calendar */
 .day-calendar { display:flex; overflow-x:auto; overscroll-behavior-x:contain; gap:0; padding:12px 20px; background:#fff; border-bottom:1px solid #e8ecef; }
