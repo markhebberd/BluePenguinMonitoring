@@ -4244,62 +4244,65 @@ function SurvivalPredictionReport() {
       curve.push({ season, alive, pct: alive / cohort.length * 100 });
     }
 
-    // Combined model: S(t) = max(0, a - b*t) - c*e^(-d*t)
-    // The linear component captures steady adult attrition; the exponential captures
-    // early excess mortality (young/weak birds dying in the first few seasons).
-    // Fit approach: linear regression on the later portion (after season 2) for the
-    // baseline rate, then fit the exponential to the residuals in the early portion.
+    // First principles survival model:
+    // S(t) = max(0, 100 - b*t - d*(1 - e^(-k*t)))
+    //   - Starts at 100% (t=0: 100 - 0 - 0 = 100)
+    //   - b = steady linear attrition (% lost per season for established adults)
+    //   - d = total early excess mortality (% that die young, saturating over time)
+    //   - k = rate at which early mortality plays out
+    //
+    // For large t: S(t) ≈ (100 - d) - b*t, a line with intercept (100-d) and slope -b.
+    // So fit a line to the stable portion to get b and d, then estimate k from early residuals.
+
     const stableStart = Math.min(2, curve.length - 2);
     const stablePts = curve.slice(stableStart).map((c, i) => ({ x: i + stableStart, y: c.pct }));
     let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
     for (const p of stablePts) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
     const n = stablePts.length;
-    const linSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    const linIntercept = (sumY - linSlope * sumX) / n;
+    const lateSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const lateIntercept = (sumY - lateSlope * sumX) / n;
 
-    // Exponential early-mortality: residuals below the linear in early seasons
-    // Model residual as c*e^(-d*t) where c = gap at t=0, d = decay rate
-    const linearAt0 = linIntercept; // what linear predicts at t=0
-    const earlyDrop = Math.max(0, linearAt0 - 100); // excess above 100% means line is too high at start
-    // Fit: difference between linear prediction and actual in first few seasons
-    const expDrop = Math.max(0, linIntercept - curve[0].pct); // gap at t=0
-    // Estimate decay rate from how quickly the gap closes
-    let expRate = 1.5; // default
-    if (curve.length >= 3 && expDrop > 0) {
-      const gap1 = (linIntercept + linSlope) - curve[1].pct;
-      if (gap1 > 0 && gap1 < expDrop) {
-        expRate = -Math.log(gap1 / expDrop);
+    // b = steady loss rate, d = early excess mortality
+    const b = -lateSlope; // positive: % lost per season
+    const d = Math.max(0, 100 - lateIntercept); // gap between 100% and where the linear extrapolates to at t=0
+
+    // Estimate k from early data: at t=1, S(1) = 100 - b - d*(1-e^(-k))
+    // So d*(1-e^(-k)) = 100 - b - S(1), giving e^(-k) = 1 - (100-b-S(1))/d
+    let k = 1.0;
+    if (d > 0 && curve.length >= 2) {
+      const earlyLoss = 100 - b - curve[1].pct; // how much was lost by season 1 beyond linear
+      const ratio = earlyLoss / d;
+      if (ratio > 0 && ratio < 1) {
+        k = -Math.log(1 - ratio);
       }
     }
 
-    // Combined model: S(t) = max(0, linIntercept + linSlope*t - expDrop*e^(-expRate*t))
-    const model = (t: number) => Math.max(0, linIntercept + linSlope * t - expDrop * Math.exp(-expRate * t));
+    const model = (t: number) => Math.max(0, 100 - b * t - d * (1 - Math.exp(-k * t)));
 
     // Season at which model hits zero (search forward)
     let zeroAt: number | null = null;
     for (let t = 0; t < 50; t += 0.1) {
       if (model(t) <= 0) { zeroAt = t; break; }
     }
-    // Annual loss rate from linear component
-    const annualLoss = -linSlope;
     // Median residency: when model crosses 50%
     let medianAt: number | null = null;
     for (let t = 0; t < 50; t += 0.1) {
       if (model(t) <= 50) { medianAt = t; break; }
     }
 
-    return { cohort: cohort.length, firstSeason, curve, linSlope, linIntercept, expDrop, expRate, model, zeroAt, annualLoss, medianAt, sortedSeasons };
+    return { cohort: cohort.length, firstSeason, curve, b, d, k, model, zeroAt, medianAt, sortedSeasons };
   }, [v, allPenguins]);
 
   if (!result) return null;
 
-  const { cohort, firstSeason, curve, linSlope, linIntercept, expDrop, expRate, model, zeroAt, annualLoss, medianAt } = result;
+  const { cohort, firstSeason, curve, b, d, k, model, zeroAt, medianAt } = result;
 
   // Extend prediction into future until model reaches zero
   const futureSeasons: string[] = [];
   const lastSeasonYear = parseInt(result.sortedSeasons[result.sortedSeasons.length - 1]);
-  const zeroSeason = zeroAt ? Math.ceil(zeroAt) : curve.length + 5;
-  for (let y = lastSeasonYear + 1; y <= lastSeasonYear + (zeroSeason - curve.length) + 2; y++) {
+  for (let y = lastSeasonYear + 1; ; y++) {
+    const t = curve.length + futureSeasons.length;
+    if (model(t) <= 0) { futureSeasons.push(String(y)); break; }
     futureSeasons.push(String(y));
     if (futureSeasons.length > 30) break;
   }
@@ -4351,8 +4354,12 @@ function SurvivalPredictionReport() {
       </svg>
       <div style={{display:'flex', gap:'2em', justifyContent:'center', margin:'0.8em 0', flexWrap:'wrap'}}>
         <div style={{textAlign:'center'}}>
-          <div style={{fontSize:'1.4em', fontWeight:700, color:'#f44336'}}>{annualLoss.toFixed(1)}%</div>
-          <div style={{fontSize:'0.8em', color:'#888'}}>Lost per season</div>
+          <div style={{fontSize:'1.4em', fontWeight:700, color:'#f44336'}}>{b.toFixed(1)}%</div>
+          <div style={{fontSize:'0.8em', color:'#888'}}>Lost per season (steady)</div>
+        </div>
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:'1.4em', fontWeight:700, color:'#FF9800'}}>{d.toFixed(0)}%</div>
+          <div style={{fontSize:'0.8em', color:'#888'}}>Early excess mortality</div>
         </div>
         {medianAt && (
           <div style={{textAlign:'center'}}>
@@ -4362,14 +4369,14 @@ function SurvivalPredictionReport() {
         )}
         {zeroAt && (
           <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{(zeroAt / 2).toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Avg life expectancy (established adults)</div>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{((100 - d) / (2 * b)).toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Avg residency (established)</div>
           </div>
         )}
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed</span>
-        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {linIntercept.toFixed(0)} − {Math.abs(linSlope).toFixed(1)}t − {expDrop.toFixed(0)}e<sup style={{fontSize:'0.75em'}}>−{expRate.toFixed(1)}t</sup></span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = 100 − {b.toFixed(1)}t − {d.toFixed(0)}(1 − e<sup style={{fontSize:'0.75em'}}>−{k.toFixed(1)}t</sup>)</span>
       </div>
     </div>
   );
