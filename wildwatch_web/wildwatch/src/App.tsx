@@ -4103,11 +4103,13 @@ function BreedingAgeHistograms() {
 
 /** Single age histogram with quarterly (3-month) buckets, reusable for chick/adult split.
  *  `quarters` array contains ages in quarter-year units (0 = 0–3 months, 1 = 3–6 months, etc). */
-function AgeBarChart({ quarters, color, xLabel }: { quarters: number[]; color: string; xLabel: string }) {
+function AgeBarChart({ quarters, color, xLabel, hideFirst }: { quarters: number[]; color: string; xLabel: string; hideFirst?: boolean }) {
   if (quarters.length === 0) return <p className="muted">No data</p>;
-  const maxQ = Math.max(...quarters, 3);
+  const filtered = hideFirst ? quarters.filter(q => q > 0) : quarters;
+  if (filtered.length === 0) return <p className="muted">No data</p>;
+  const maxQ = Math.max(...filtered, 3);
   const bins: number[] = Array(maxQ + 1).fill(0);
-  for (const q of quarters) bins[q]++;
+  for (const q of filtered) bins[q]++;
   const maxCount = Math.max(...bins);
 
   const W = 700, H = 260, PAD = { top: 25, right: 20, bottom: 45, left: 50 };
@@ -4190,7 +4192,7 @@ function PenguinAgeCharts() {
       <div className="report-card">
         <h3>Chick-chipped penguin ages</h3>
         <p className="muted">Time between earliest and most recent scan for penguins chipped as chicks (n={chickQs.length})</p>
-        <AgeBarChart quarters={chickQs} color="#DAA520" xLabel="Time between first and last scan" />
+        <AgeBarChart quarters={chickQs} color="#DAA520" xLabel="Time between first and last scan" hideFirst />
       </div>
       <div className="report-card">
         <h3>Adult-chipped penguin ages</h3>
