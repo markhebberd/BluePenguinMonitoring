@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -5483,6 +5483,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const iFuture = useFutureObservations();
   const iRetired = useRetiredTagScans();
   const iChicksNoScan = useChicksNoScan();
+  const iDupObs = useDuplicateObservations();
+  const iDupScans = useDuplicateScans();
+  const iSameGender = useSameGenderConflicts();
 
   const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); };
 
@@ -6232,9 +6235,15 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
         <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
-        <DuplicateObservations token={token} />
-        <DuplicateScans token={token} />
-        <SameGenderConflicts token={token} />
+        <IntegrityCheck rows={iDupObs} title="Duplicate observations"
+          desc="More than one observation for a box on the same day." empty="No duplicate observations"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'cnt', label: 'Count' }, { key: 'monitors', label: 'Monitors' }]} />
+        <IntegrityCheck rows={iDupScans} title="Duplicate scans"
+          desc="The same bird scanned more than once in one observation — kept as evidence of a data-entry error." empty="No duplicate scans"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'cnt', label: 'Count' }, { key: 'dup_type', label: 'Type' }]} />
+        <IntegrityCheck rows={iSameGender} title="Same-gender conflicts"
+          desc="Two+ penguins of the same sex scanned at one box on one day — a sex-assignment error or a genuine multi-bird visit." empty="No same-gender conflicts"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'sex', label: 'Sex', render: (v: string) => v === 'M' ? 'Male' : v === 'F' ? 'Female' : v }, { key: 'cnt', label: 'Count' }, { key: 'peng_nums', label: 'Penguins', render: (v: string) => (v || '').split(',').map((n: string, i: number) => <Fragment key={i}>{i > 0 ? ' ' : ''}{pengCell(n.trim())}</Fragment>) }]} />
         <IntegrityCheck rows={iBirdTwoBoxes} title="Bird in two boxes same day"
           desc="A penguin scanned at two different boxes on one day — can't be two places at once." empty="No birds in two boxes"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'boxes', label: 'Boxes', render: boxesCell }, { key: 'box_count', label: '#' }]} />
@@ -6648,136 +6657,6 @@ function RemovePenguin({ token }: { token: string }) {
   );
 }
 
-function DuplicateObservations({ token }: { token: string }) {
-  const [duplicates, setDuplicates] = useState<any[]|null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
-
-  const check = async () => {
-    setLoading(true); setResult(null);
-    const r = await fetch('/api/admin.php?action=duplicate_observations', { headers: { 'Authorization': `Bearer ${token}` } });
-    const d = await r.json();
-    setDuplicates(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
-
-  const cleanup = async () => {
-    if (!confirm(`Soft-delete duplicate observations from ${duplicates?.length} box/day groups? Keeps the most recent.`)) return;
-    setLoading(true);
-    const r = await fetch('/api/admin.php?action=cleanup_duplicate_observations', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-    const d = await r.json();
-    setResult(d);
-    setDuplicates(null);
-    setLoading(false);
-  };
-
-  return (
-    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
-      <h3 style={{margin:'0 0 8px'}}>Duplicate Observations</h3>
-      <p className="muted" style={{margin:'0 0 8px'}}>Multiple non-deleted observations for the same box on the same day</p>
-      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check'}</button>
-      {duplicates && duplicates.length === 0 && <span style={{color:'#4CAF50'}}>No duplicates found</span>}
-      {duplicates && duplicates.length > 0 && (<>
-        <p style={{color:'#F44336', fontWeight:600}}>{duplicates.length} box/day groups with multiple observations:</p>
-        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
-          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Count</th><th>By</th></tr></thead>
-          <tbody>{duplicates.map((d: any, i: number) => (
-            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
-              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
-              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
-              <td style={{color:'#F44336'}}>{d.cnt}x</td>
-              <td className="muted">{d.observers}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-        <button onClick={cleanup} disabled={loading} style={{marginTop:8, background:'#F44336', color:'#fff', border:'none', padding:'6px 16px', borderRadius:4, cursor:'pointer'}}>
-          Keep most recent, soft-delete rest
-        </button>
-      </>)}
-      {result && <p style={{color:'#4CAF50', marginTop:8}}>Soft-deleted {result.observations_deleted} duplicate observations from {result.duplicate_groups} groups</p>}
-    </div>
-  );
-}
-
-function DuplicateScans({ token }: { token: string }) {
-  const [duplicates, setDuplicates] = useState<any[]|null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const check = async () => {
-    setLoading(true);
-    const r = await fetch('/api/admin.php?action=duplicate_scans', { headers: { 'Authorization': `Bearer ${token}` } });
-    const d = await r.json();
-    setDuplicates(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
-  useEffect(() => { check(); }, []); // run by default
-
-  return (
-    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
-      <h3 style={{margin:'0 0 8px'}}>Duplicate Scans</h3>
-      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check for duplicates'}</button>
-      {duplicates && duplicates.length === 0 && <span style={{color:'#4CAF50'}}>No duplicates found</span>}
-      {duplicates && duplicates.length > 0 && (<>
-        <p style={{color:'#F44336', fontWeight:600}}>{duplicates.length} duplicate groups found:</p>
-        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
-          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Penguin</th><th>Count</th><th>Type</th></tr></thead>
-          <tbody>{duplicates.map((d: any, i: number) => (
-            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
-              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
-              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
-              <td>#{d.peng_num}</td>
-              <td style={{color:'#F44336'}}>{d.cnt}x</td>
-              <td className="muted">{d.dup_type === 'peng_num' ? 'multi-chip' : 'exact'}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-        <p className="muted" style={{marginTop:8}}>Duplicate scans are kept on purpose — they flag data-entry errors. Review each from the box card for that date; they are also marked “⚠ dup scan” in the day view.</p>
-      </>)}
-    </div>
-  );
-}
-
-function SameGenderConflicts({ token }: { token: string }) {
-  const [conflicts, setConflicts] = useState<any[]|null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const check = async () => {
-    setLoading(true);
-    const r = await fetch('/api/admin.php?action=same_gender_conflicts', { headers: { 'Authorization': `Bearer ${token}` } });
-    const d = await r.json();
-    setConflicts(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
-  useEffect(() => { check(); }, []); // run by default
-
-  return (
-    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
-      <h3 style={{margin:'0 0 8px'}}>Same-Gender Conflicts</h3>
-      <p className="muted" style={{margin:'0 0 8px'}}>Multiple penguins of the same sex scanned at the same box on the same day</p>
-      <button onClick={check} disabled={loading} style={{marginRight:8}}>{loading ? 'Checking...' : 'Check'}</button>
-      {conflicts && conflicts.length === 0 && <span style={{color:'#4CAF50'}}>No conflicts found</span>}
-      {conflicts && conflicts.length > 0 && (<>
-        <p style={{color:'#F44336', fontWeight:600}}>{conflicts.length} same-gender conflicts found:</p>
-        <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
-          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th>Date</th><th>Box</th><th>Sex</th><th>Count</th><th>Penguins</th></tr></thead>
-          <tbody>{conflicts.map((d: any, i: number) => (
-            <tr key={i} style={{borderBottom:'1px solid #eee'}}>
-              <td><a className="clickable" href={`/day/${d.obs_date}`}>{d.obs_date}</a></td>
-              <td><a className="clickable" href={`/box/${d.box_name}`}>Box {d.box_name}</a></td>
-              <td>{d.sex === 'M' ? 'Male' : d.sex === 'F' ? 'Female' : d.sex}</td>
-              <td style={{color:'#F44336'}}>{d.cnt}x</td>
-              <td>{d.peng_nums?.split(',').map((n: string) => (
-                <a key={n} className="clickable" href={`/penguin/${n.trim()}`} style={{marginRight:6}}>#{n.trim()}</a>
-              ))}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-        <p className="muted" style={{marginTop:8}}>May indicate a sex assignment error or a genuine multi-bird visit.</p>
-      </>)}
-    </div>
-  );
-}
-
 // Presentational integrity check: renders rows (computed locally) — 5 by default + "show all".
 function IntegrityCheck({ title, desc, rows, empty, columns }: {
   title: string; desc?: string; rows: any[]; empty?: string;
@@ -6794,7 +6673,9 @@ function IntegrityCheck({ title, desc, rows, empty, columns }: {
         <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
           <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
-            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+            <tr key={i} style={{ borderBottom: '1px solid #eee', cursor: row._href ? 'pointer' : 'default' }}
+              onClick={row._href ? () => { window.location.href = row._href; } : undefined}
+              title={row._href ? 'Go to the observation' : undefined}>
               {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
             </tr>
           ))}</tbody>
@@ -6805,13 +6686,15 @@ function IntegrityCheck({ title, desc, rows, empty, columns }: {
   );
 }
 
-// Cell renderers for integrity tables — clickable box/day/penguin links.
-const dayCell = (d: string) => d ? <a className="clickable" href={`/day/${d}`}>{d}</a> : '';
-const boxCell = (b: string) => b ? <a className="clickable" href={`/box/${b}`}>Box {b}</a> : '';
-const pengCell = (n: string) => n ? <a className="clickable" href={`/penguin/${n}`}>#{n}</a> : '';
+// Cell renderers for integrity tables — clickable box/day/penguin links. stopPropagation so a
+// link click goes to its own target rather than the row's "go to observation" handler.
+const stop = (e: React.MouseEvent) => e.stopPropagation();
+const dayCell = (d: string) => d ? <a className="clickable" href={`/day/${d}`} onClick={stop}>{d}</a> : '';
+const boxCell = (b: string) => b ? <a className="clickable" href={`/box/${b}`} onClick={stop}>Box {b}</a> : '';
+const pengCell = (n: string) => n ? <a className="clickable" href={`/penguin/${n}`} onClick={stop}>#{n}</a> : '';
 const bigCountCell = (v: any) => Number(v) > 3 ? <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span> : v;
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
-  <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`}>{b.trim()}</a></Fragment>
+  <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`} onClick={stop}>{b.trim()}</a></Fragment>
 ));
 
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {

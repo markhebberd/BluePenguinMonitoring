@@ -1083,12 +1083,14 @@ export function computeAdultCountMismatches(): { total: number; rows: any[] } {
 // Client-side versions of the admin SQL checks — instant, scoped to the active colony.
 
 const byDateDesc = (a: any, b: any) => b.obs_date.localeCompare(a.obs_date);
+/** Deep-link that opens a box and highlights one observation (obsAnchor). */
+const obsHref = (box: string, time: string) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`;
 
 /** A penguin scanned at two different boxes on the same NZ day. */
 export function computeBirdTwoBoxes(): any[] {
   if (!mem) return [];
   const c = mem;
-  const map = new Map<string, Set<string>>(); // peng|date -> boxes
+  const map = new Map<string, { boxes: Set<string>; firstTime: string; firstBox: string }>(); // peng|date
   for (const s of c.scans) {
     if (s.scan_deleted) continue;
     const obs = c.obsById.get(s.observation_id);
@@ -1096,14 +1098,18 @@ export function computeBirdTwoBoxes(): any[] {
     const chip = c.chipByPit.get(s.pit_id);
     const box = c.locById.get(obs.location_id)?.location_name;
     if (!chip || !box) continue;
-    const key = chip.peng_num + '|' + utcToNzDate(obs.observation_time_utc);
-    (map.get(key) || map.set(key, new Set()).get(key)!).add(box);
+    const t = obs.observation_time_utc;
+    const key = chip.peng_num + '|' + utcToNzDate(t);
+    let e = map.get(key);
+    if (!e) { e = { boxes: new Set(), firstTime: t, firstBox: box }; map.set(key, e); }
+    e.boxes.add(box);
+    if (t < e.firstTime) { e.firstTime = t; e.firstBox = box; }
   }
   const rows: any[] = [];
-  for (const [key, boxes] of map) {
-    if (boxes.size < 2) continue;
+  for (const [key, e] of map) {
+    if (e.boxes.size < 2) continue;
     const [peng_num, obs_date] = key.split('|');
-    rows.push({ peng_num, obs_date, box_count: boxes.size, boxes: [...boxes].sort(compareBoxNames).join(', ') });
+    rows.push({ peng_num, obs_date, box_count: e.boxes.size, boxes: [...e.boxes].sort(compareBoxNames).join(', '), _href: obsHref(e.firstBox, e.firstTime) });
   }
   return rows.sort(byDateDesc);
 }
@@ -1120,8 +1126,10 @@ export function computeScanBeforeChip(): any[] {
     const obs = c.obsById.get(s.observation_id);
     if (!obs || obs.is_deleted) continue;
     const obs_date = utcToNzDate(obs.observation_time_utc);
-    if (obs_date < chip.chip_date.slice(0, 10))
-      rows.push({ obs_date, chip_date: chip.chip_date.slice(0, 10), box_name: c.locById.get(obs.location_id)?.location_name || '', peng_num: chip.peng_num });
+    if (obs_date < chip.chip_date.slice(0, 10)) {
+      const box_name = c.locById.get(obs.location_id)?.location_name || '';
+      rows.push({ obs_date, chip_date: chip.chip_date.slice(0, 10), box_name, peng_num: chip.peng_num, _href: obsHref(box_name, obs.observation_time_utc) });
+    }
   }
   return rows.sort(byDateDesc);
 }
@@ -1134,17 +1142,18 @@ export function computeDeadScanned(): any[] {
   const rows: any[] = [];
   for (const p of c.penguins) {
     if (!p.is_dead) continue;
-    let last = '', count = 0;
+    let last = '', count = 0, lastTime = '', lastBox = '';
     for (const ch of (c.chipsByPeng.get(p.peng_num) || [])) {
       for (const s of (c.scansByPit.get(ch.pit_id) || [])) {
         if (s.scan_deleted) continue;
         const obs = c.obsById.get(s.observation_id);
         if (!obs || obs.is_deleted) continue;
-        const d = utcToNzDate(obs.observation_time_utc);
-        count++; if (d > last) last = d;
+        const t = obs.observation_time_utc;
+        count++;
+        if (t > lastTime) { lastTime = t; last = utcToNzDate(t); lastBox = c.locById.get(obs.location_id)?.location_name || ''; }
       }
     }
-    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count });
+    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count, _href: obsHref(lastBox, lastTime) });
   }
   return rows.sort((a, b) => b.last_scan.localeCompare(a.last_scan));
 }
@@ -1160,7 +1169,7 @@ export function computeImprobableCounts(): any[] {
     if (adults <= 2 && eggs + chicks <= 2) continue;
     const box_name = c.locById.get(o.location_id)?.location_name;
     if (!box_name) continue;
-    rows.push({ obs_date: utcToNzDate(o.observation_time_utc), box_name, adults, eggs, chicks });
+    rows.push({ obs_date: utcToNzDate(o.observation_time_utc), box_name, adults, eggs, chicks, _href: obsHref(box_name, o.observation_time_utc) });
   }
   return rows.sort(byDateDesc);
 }
@@ -1174,8 +1183,10 @@ export function computeFutureObservations(): any[] {
   for (const o of c.observations) {
     if (o.is_deleted) continue;
     const obs_date = utcToNzDate(o.observation_time_utc);
-    if (obs_date > today)
-      rows.push({ obs_date, box_name: c.locById.get(o.location_id)?.location_name || '', monitor: o.monitor_filename || '' });
+    if (obs_date > today) {
+      const box_name = c.locById.get(o.location_id)?.location_name || '';
+      rows.push({ obs_date, box_name, monitor: o.monitor_filename || '', _href: obsHref(box_name, o.observation_time_utc) });
+    }
   }
   return rows.sort(byDateDesc);
 }
@@ -1194,8 +1205,10 @@ export function computeRetiredTagScans(): any[] {
     const obs = c.obsById.get(s.observation_id);
     if (!obs || obs.is_deleted) continue;
     const obs_date = utcToNzDate(obs.observation_time_utc);
-    if (obs_date > active.chip_date.slice(0, 10))
-      rows.push({ obs_date, box_name: c.locById.get(obs.location_id)?.location_name || '', peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10) });
+    if (obs_date > active.chip_date.slice(0, 10)) {
+      const box_name = c.locById.get(obs.location_id)?.location_name || '';
+      rows.push({ obs_date, box_name, peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10), _href: obsHref(box_name, obs.observation_time_utc) });
+    }
   }
   return rows.sort(byDateDesc);
 }
@@ -1223,7 +1236,88 @@ export function computeChicksNoScan(): any[] {
       if (!peng || peng.chipped_as_adult) continue;
       chipped.add(ch.peng_num);
     }
-    if (chipped.size >= 2) rows.push({ obs_date, box_name: loc.location_name, chicks: o.chicks || 0, chicks_chipped: chipped.size });
+    if (chipped.size >= 2) rows.push({ obs_date, box_name: loc.location_name, chicks: o.chicks || 0, chicks_chipped: chipped.size, _href: obsHref(loc.location_name, o.observation_time_utc) });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** More than one non-deleted observation for a box on the same day. */
+export function computeDuplicateObservations(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const map = new Map<string, any[]>(); // box|date -> observations
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    const box = c.locById.get(o.location_id)?.location_name;
+    if (!box) continue;
+    const key = box + '|' + utcToNzDate(o.observation_time_utc);
+    (map.get(key) || map.set(key, []).get(key)!).push(o);
+  }
+  const rows: any[] = [];
+  for (const [key, obs] of map) {
+    if (obs.length < 2) continue;
+    const [box_name, obs_date] = key.split('|');
+    const monitors = [...new Set(obs.map((o: any) => o.monitor_filename).filter(Boolean))].join(', ');
+    const first = obs.reduce((a: any, b: any) => a.observation_time_utc < b.observation_time_utc ? a : b);
+    rows.push({ obs_date, box_name, cnt: obs.length, monitors, _href: obsHref(box_name, first.observation_time_utc) });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** The same bird scanned more than once within one observation (exact, or via multiple chips). */
+export function computeDuplicateScans(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const rows: any[] = [];
+  for (const [obsId, allScans] of c.scansByObs) {
+    const obs = c.obsById.get(obsId);
+    if (!obs || obs.is_deleted) continue;
+    const scans = allScans.filter((s: any) => !s.scan_deleted);
+    if (scans.length < 2) continue;
+    const box_name = c.locById.get(obs.location_id)?.location_name || '';
+    const obs_date = utcToNzDate(obs.observation_time_utc);
+    const pitCount = new Map<string, number>();
+    const pengPits = new Map<string, Set<string>>();
+    for (const s of scans) {
+      pitCount.set(s.pit_id, (pitCount.get(s.pit_id) || 0) + 1);
+      const peng = c.chipByPit.get(s.pit_id)?.peng_num;
+      if (peng) (pengPits.get(peng) || pengPits.set(peng, new Set()).get(peng)!).add(s.pit_id);
+    }
+    const href = obsHref(box_name, obs.observation_time_utc);
+    for (const [pit, cnt] of pitCount) if (cnt > 1)
+      rows.push({ obs_date, box_name, peng_num: c.chipByPit.get(pit)?.peng_num || pit, cnt, dup_type: 'exact', _href: href });
+    for (const [peng, pits] of pengPits) if (pits.size > 1)
+      rows.push({ obs_date, box_name, peng_num: peng, cnt: pits.size, dup_type: 'multi-chip', _href: href });
+  }
+  return rows.sort(byDateDesc);
+}
+
+/** Two or more penguins of the same sex scanned at the same box on the same day. */
+export function computeSameGenderConflicts(): any[] {
+  if (!mem) return [];
+  const c = mem;
+  const map = new Map<string, { pengs: Set<string>; firstTime: string }>(); // box|date|sex
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const chip = c.chipByPit.get(s.pit_id);
+    const sex = (chip ? c.pengByNum.get(chip.peng_num)?.sex : '')?.toUpperCase();
+    if (sex !== 'M' && sex !== 'F') continue;
+    const box = c.locById.get(obs.location_id)?.location_name;
+    if (!box) continue;
+    const t = obs.observation_time_utc;
+    const key = box + '|' + utcToNzDate(t) + '|' + sex;
+    let e = map.get(key);
+    if (!e) { e = { pengs: new Set(), firstTime: t }; map.set(key, e); }
+    e.pengs.add(chip!.peng_num);
+    if (t < e.firstTime) e.firstTime = t;
+  }
+  const rows: any[] = [];
+  for (const [key, e] of map) {
+    if (e.pengs.size < 2) continue;
+    const [box_name, obs_date, sex] = key.split('|');
+    rows.push({ obs_date, box_name, sex, cnt: e.pengs.size, peng_nums: [...e.pengs].join(', '), _href: obsHref(box_name, e.firstTime) });
   }
   return rows.sort(byDateDesc);
 }

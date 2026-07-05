@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -56,6 +56,9 @@ export function useImprobableCounts(): any[] { return useSyncExternalStore(subsc
 export function useFutureObservations(): any[] { return useSyncExternalStore(subscribe, () => cached('futureObservations', computeFutureObservations)); }
 export function useRetiredTagScans(): any[] { return useSyncExternalStore(subscribe, () => cached('retiredTagScans', computeRetiredTagScans)); }
 export function useChicksNoScan(): any[] { return useSyncExternalStore(subscribe, () => cached('chicksNoScan', computeChicksNoScan)); }
+export function useDuplicateObservations(): any[] { return useSyncExternalStore(subscribe, () => cached('duplicateObservations', computeDuplicateObservations)); }
+export function useDuplicateScans(): any[] { return useSyncExternalStore(subscribe, () => cached('duplicateScans', computeDuplicateScans)); }
+export function useSameGenderConflicts(): any[] { return useSyncExternalStore(subscribe, () => cached('sameGenderConflicts', computeSameGenderConflicts)); }
 
 export function useBoxDetail(boxName: string | null): any {
   return useSyncExternalStore(subscribe, () => {
