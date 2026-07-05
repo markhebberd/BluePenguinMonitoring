@@ -4328,7 +4328,7 @@ function SurvivalPredictionReport() {
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed survival</span>
-        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> Fitted exponential decay</span>
+        <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = {annualSurvival.toFixed(3)}<sup style={{fontSize:'0.75em'}}>t</sup></span>
       </div>
     </div>
   );
