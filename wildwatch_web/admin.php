@@ -153,6 +153,103 @@ if ($action === 'duplicate_observations') {
     exit;
 }
 
+// ---- Data-integrity checks (whole-DB versions of the CSV-import validations) ----
+define('WW_NZ', "DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))");
+
+// A penguin scanned at two different boxes on the same day — can't be two places at once.
+if ($action === 'bird_two_boxes') {
+    echo json_encode($pdo->query("
+        SELECT pc.peng_num, " . WW_NZ . " AS obs_date,
+            COUNT(DISTINCT ol.location_name) AS box_count,
+            GROUP_CONCAT(DISTINCT ol.location_name ORDER BY ol.location_name + 0) AS boxes
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+        WHERE o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        GROUP BY pc.peng_num, " . WW_NZ . "
+        HAVING box_count > 1
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
+// A scan dated before the bird's chip was fitted — impossible.
+if ($action === 'scan_before_chip') {
+    echo json_encode($pdo->query("
+        SELECT pc.peng_num, pc.chip_date, ol.location_name AS box_name, " . WW_NZ . " AS obs_date
+        FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+        WHERE o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+          AND pc.chip_date IS NOT NULL AND " . WW_NZ . " < pc.chip_date
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
+// Birds marked dead that were still scanned in the last year — death flag or scan is wrong.
+if ($action === 'dead_scanned') {
+    echo json_encode($pdo->query("
+        SELECT p.peng_num, MAX(" . WW_NZ . ") AS last_scan, COUNT(*) AS scan_count
+        FROM penguins p
+        JOIN penguin_chips pc ON pc.peng_num = p.peng_num
+        JOIN penguin_scans ps ON ps.pit_id = pc.pit_id
+        JOIN observations o ON ps.observation_id = o.observation_id
+        WHERE p.is_dead = 1 AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        GROUP BY p.peng_num
+        HAVING last_scan >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+        ORDER BY last_scan DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
+// Improbable counts for a little-penguin box: adults > 2 or eggs + chicks > 2.
+if ($action === 'improbable_counts') {
+    echo json_encode($pdo->query("
+        SELECT ol.location_name AS box_name, " . WW_NZ . " AS obs_date,
+            o.adults, o.eggs, o.chicks, o.no_scan
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE o.is_deleted = FALSE AND (o.adults > 2 OR (o.eggs + o.chicks) > 2)
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
+// Observations dated in the future (NZ) — almost always a typo.
+if ($action === 'future_observations') {
+    echo json_encode($pdo->query("
+        SELECT ol.location_name AS box_name, " . WW_NZ . " AS obs_date,
+            COALESCE(ob.observer_name, '?') AS observer
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+        WHERE o.is_deleted = FALSE
+          AND " . WW_NZ . " > DATE(CONVERT_TZ(NOW(), '+00:00', '+12:00'))
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
+// Scans recorded via a retired (inactive) chip AFTER the bird got a newer active one.
+if ($action === 'retired_tag_scans') {
+    echo json_encode($pdo->query("
+        SELECT pc.peng_num, ps.pit_id, ol.location_name AS box_name,
+            " . WW_NZ . " AS obs_date, a.chip_date AS active_chip_date
+        FROM penguin_scans ps
+        JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 0
+        JOIN penguin_chips a ON a.peng_num = pc.peng_num AND a.is_active = 1
+        JOIN observations o ON ps.observation_id = o.observation_id
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+          AND a.chip_date IS NOT NULL AND " . WW_NZ . " > a.chip_date
+        ORDER BY obs_date DESC
+        LIMIT 500")->fetchAll());
+    exit;
+}
+
 if ($action === 'cleanup_duplicate_observations') {
     // Keep the most recent observation per box per day, soft-delete the rest
     $stmt = $pdo->query("

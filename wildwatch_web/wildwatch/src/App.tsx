@@ -6223,6 +6223,24 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <DuplicateObservations token={token} />
         <DuplicateScans token={token} />
         <SameGenderConflicts token={token} />
+        <IntegrityCheck token={token} action="bird_two_boxes" title="Bird in two boxes same day"
+          desc="A penguin scanned at two different boxes on one day — can't be two places at once." empty="No birds in two boxes"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'boxes', label: 'Boxes', render: boxesCell }, { key: 'box_count', label: '#' }]} />
+        <IntegrityCheck token={token} action="scan_before_chip" title="Scan before chip date"
+          desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
+          columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
+        <IntegrityCheck token={token} action="dead_scanned" title="Dead birds still scanned"
+          desc="Birds marked dead but scanned in the last year — the death flag or the scan is wrong." empty="No dead birds recently scanned"
+          columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
+        <IntegrityCheck token={token} action="improbable_counts" title="Improbable counts"
+          desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'adults', label: 'Adults' }, { key: 'eggs', label: 'Eggs' }, { key: 'chicks', label: 'Chicks' }]} />
+        <IntegrityCheck token={token} action="future_observations" title="Future-dated observations"
+          desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'observer', label: 'Observer' }]} />
+        <IntegrityCheck token={token} action="retired_tag_scans" title="Retired-tag scans"
+          desc="Scanned via an old (inactive) chip after the bird was rechipped." empty="No retired-tag scans"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'pit_id', label: 'Tag', render: (v: string) => String(v || '').slice(-8) }, { key: 'active_chip_date', label: 'Rechipped' }]} />
       </div>
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
@@ -6744,6 +6762,53 @@ function SameGenderConflicts({ token }: { token: string }) {
     </div>
   );
 }
+
+// Generic whole-DB integrity check: fetches an admin action, shows 5 rows + "show all".
+function IntegrityCheck({ token, title, desc, action, empty, columns }: {
+  token: string; title: string; desc?: string; action: string; empty?: string;
+  columns: { key: string; label: string; render?: (v: any, row: any) => React.ReactNode }[];
+}) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const run = async () => {
+    setLoading(true);
+    const r = await fetch(`/api/admin.php?action=${action}`, { headers: { Authorization: `Bearer ${token}` } });
+    const d = await r.json();
+    setRows(Array.isArray(d) ? d : []);
+    setLoading(false);
+  };
+  useEffect(() => { run(); }, []); // run by default
+  const shown = rows && !showAll ? rows.slice(0, 5) : rows;
+  return (
+    <div style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8 }}>
+      <h3 style={{ margin: '0 0 4px' }}>{title}</h3>
+      {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
+      <button onClick={run} disabled={loading} style={{ marginRight: 8 }}>{loading ? 'Checking…' : 'Re-check'}</button>
+      {rows && rows.length === 0 && <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span>}
+      {rows && rows.length > 0 && (<>
+        <p style={{ color: '#F44336', fontWeight: 600, margin: '8px 0 4px' }}>{rows.length} found{rows.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
+        <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+          <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}</tr></thead>
+          <tbody>{shown!.map((row: any, i: number) => (
+            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+            </tr>
+          ))}</tbody>
+        </table>
+        {rows.length > 5 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all (${rows.length})`}</button>}
+      </>)}
+    </div>
+  );
+}
+
+// Cell renderers for integrity tables — clickable box/day/penguin links.
+const dayCell = (d: string) => d ? <a className="clickable" href={`/day/${d}`}>{d}</a> : '';
+const boxCell = (b: string) => b ? <a className="clickable" href={`/box/${b}`}>Box {b}</a> : '';
+const pengCell = (n: string) => n ? <a className="clickable" href={`/penguin/${n}`}>#{n}</a> : '';
+const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
+  <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`}>{b.trim()}</a></Fragment>
+));
 
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
