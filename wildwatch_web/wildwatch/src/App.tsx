@@ -7,7 +7,23 @@ import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
-const DiskHistoryChart = lazy(() => import('./components/DiskHistoryChart'));
+// A code-split chunk can 404 after a new deploy (its hashed filename is gone), and nginx's
+// SPA fallback then serves index.html (text/html) in its place — so the dynamic import fails
+// with a MIME-type error. Reload once to pick up the fresh index + chunk hashes; a sessionStorage
+// guard prevents a reload loop if the import genuinely can't be loaded.
+function lazyWithReload<T extends React.ComponentType<any>>(factory: () => Promise<{ default: T }>) {
+  return lazy(() => factory()
+    .then(m => { sessionStorage.removeItem('ww_chunk_reload'); return m; })
+    .catch((err: unknown) => {
+      if (!sessionStorage.getItem('ww_chunk_reload')) {
+        sessionStorage.setItem('ww_chunk_reload', '1');
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {}); // never resolves; page is reloading
+      }
+      throw err;
+    }));
+}
+const DiskHistoryChart = lazyWithReload(() => import('./components/DiskHistoryChart'));
 import type { BoxTag } from './types';
 import './App.css';
 
