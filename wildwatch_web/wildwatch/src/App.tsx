@@ -4209,6 +4209,7 @@ function PenguinAgeCharts() {
 function SurvivalPredictionReport() {
   const v = useDbVersion();
   const allPenguins = useAllPenguins();
+  const chickReturn = useChickReturn();
   const result = useMemo(() => {
     // Find the earliest season any adult-chipped bird was scanned in.
     const birdSeasons = new Map<string, Set<string>>();
@@ -4361,12 +4362,26 @@ function SurvivalPredictionReport() {
           <div style={{fontSize:'1.4em', fontWeight:700, color:'#FF9800'}}>{d.toFixed(0)}%</div>
           <div style={{fontSize:'0.8em', color:'#888'}}>Early excess mortality</div>
         </div>
-        {zeroAt && (
-          <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{((100 - d) / b).toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Predicted lifespan (old age)</div>
-          </div>
-        )}
+        {zeroAt && (() => {
+          const decayLifespan = (100 - d) / b;
+          // Mean age at first return across all size classes
+          const returnTotals = chickReturn?.totals;
+          const allAges = returnTotals ? ['LC','BC','SC'].flatMap((s: string) => {
+            const t = returnTotals[s];
+            return t?.avg_return_age ? [{ age: t.avg_return_age, n: t.returned }] : [];
+          }) : [];
+          const meanReturnAge = allAges.length > 0
+            ? allAges.reduce((s, a) => s + a.age * a.n, 0) / allAges.reduce((s, a) => s + a.n, 0)
+            : null;
+          const totalLifespan = meanReturnAge ? decayLifespan + meanReturnAge : null;
+          return (
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{totalLifespan ? totalLifespan.toFixed(1) : decayLifespan.toFixed(1)} years</div>
+              <div style={{fontSize:'0.8em', color:'#888'}}>Predicted lifespan (old age)</div>
+              <div style={{fontSize:'0.7em', color:'#aaa'}}>{meanReturnAge ? `${meanReturnAge.toFixed(1)}y return age + ${decayLifespan.toFixed(1)}y adult residency` : `${decayLifespan.toFixed(1)}y adult residency`}</div>
+            </div>
+          );
+        })()}
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed</span>
