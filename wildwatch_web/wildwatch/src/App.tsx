@@ -4270,8 +4270,8 @@ function SurvivalPredictionReport() {
   const lastSeasonYear = parseInt(result.sortedSeasons[result.sortedSeasons.length - 1]);
   for (let y = lastSeasonYear + 1; ; y++) {
     const i = curve.length + futureSeasons.length;
-    const predicted = Math.exp(Math.log(annualSurvival) * i) * 100;
-    if (predicted < 0.5) break;
+    const predictedBirds = Math.exp(Math.log(annualSurvival) * i) * cohort;
+    if (predictedBirds < 0.5) break; // less than 1 bird predicted alive
     futureSeasons.push(String(y));
     if (futureSeasons.length > 20) break; // safety cap
   }
