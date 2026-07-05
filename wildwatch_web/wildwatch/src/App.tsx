@@ -4277,6 +4277,19 @@ function SurvivalPredictionReport() {
       curve.push({ season, alive, pct: alive / cohort.length * 100 });
     }
 
+    return { cohort: cohort.length, firstSeason, curve, sortedSeasons };
+  }, [v, allPenguins]);
+
+  // Backtest slider: fit the model on only the first N observed seasons (2021–22, 2021–23, …),
+  // while the full observed curve stays on the chart — so a prediction made with less history
+  // can be judged against what actually happened since. null = use all observed seasons.
+  const [fitCount, setFitCount] = useState<number | null>(null);
+  const effFitCount = result ? Math.max(2, Math.min(fitCount ?? result.curve.length, result.curve.length)) : 0;
+
+  const fit = useMemo(() => {
+    if (!result) return null;
+    const curveFit = result.curve.slice(0, effFitCount);
+
     // First principles survival model:
     // S(t) = max(0, 100 - b*t - d*(1 - e^(-k*t)))
     //   - Starts at 100% (t=0: 100 - 0 - 0 = 100)
@@ -4287,8 +4300,8 @@ function SurvivalPredictionReport() {
     // For large t: S(t) ≈ (100 - d) - b*t, a line with intercept (100-d) and slope -b.
     // So fit a line to the stable portion to get b and d, then estimate k from early residuals.
 
-    const stableStart = Math.min(2, curve.length - 2);
-    const stablePts = curve.slice(stableStart).map((c, i) => ({ x: i + stableStart, y: c.pct }));
+    const stableStart = Math.min(2, curveFit.length - 2);
+    const stablePts = curveFit.slice(stableStart).map((c, i) => ({ x: i + stableStart, y: c.pct }));
     let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
     for (const p of stablePts) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
     const n = stablePts.length;
@@ -4302,8 +4315,8 @@ function SurvivalPredictionReport() {
     // Estimate k from early data: at t=1, S(1) = 100 - b - d*(1-e^(-k))
     // So d*(1-e^(-k)) = 100 - b - S(1), giving e^(-k) = 1 - (100-b-S(1))/d
     let k = 1.0;
-    if (d > 0 && curve.length >= 2) {
-      const earlyLoss = 100 - b - curve[1].pct; // how much was lost by season 1 beyond linear
+    if (d > 0 && curveFit.length >= 2) {
+      const earlyLoss = 100 - b - curveFit[1].pct; // how much was lost by season 1 beyond linear
       const ratio = earlyLoss / d;
       if (ratio > 0 && ratio < 1) {
         k = -Math.log(1 - ratio);
@@ -4323,12 +4336,13 @@ function SurvivalPredictionReport() {
       if (model(t) <= 50) { medianAt = t; break; }
     }
 
-    return { cohort: cohort.length, firstSeason, curve, b, d, k, model, zeroAt, medianAt, sortedSeasons };
-  }, [v, allPenguins]);
+    return { b, d, k, model, zeroAt, medianAt };
+  }, [result, effFitCount]);
 
-  if (!result) return null;
+  if (!result || !fit) return null;
 
-  const { cohort, firstSeason, curve, b, d, k, model, zeroAt } = result;
+  const { cohort, firstSeason, curve } = result;
+  const { b, d, k, model, zeroAt } = fit;
 
   // Extend prediction into future until model reaches zero
   const futureSeasons: string[] = [];
@@ -4355,6 +4369,15 @@ function SurvivalPredictionReport() {
     <div className="report-card">
       <h3>Adult residency (first-season cohort)</h3>
       <p className="muted">Survival curve of {cohort} adult-chipped birds from the first monitoring season ({firstSeason}) — annual attrition predicts median time an adult remains in the colony</p>
+      <div style={{display:'flex', alignItems:'center', gap:10, justifyContent:'center', margin:'0.2em 0 0.5em', flexWrap:'wrap'}}>
+        <span style={{fontSize:'0.8em', color:'#888'}}>Predictor data:</span>
+        <input type="range" min={2} max={curve.length} step={1} value={effFitCount}
+          onChange={e => { const n = parseInt(e.target.value); setFitCount(n >= curve.length ? null : n); }}
+          style={{width:180}} title="How many observed seasons the model is fitted on — hollow points are held out, so you can see how an earlier prediction compares with what actually happened" />
+        <span style={{fontSize:'0.8em', fontWeight:600, color: effFitCount < curve.length ? '#FF9800' : '#888'}}>
+          {firstSeason}–{curve[effFitCount - 1].season}{effFitCount === curve.length ? ' (all data)' : ` (${curve.length - effFitCount} season${curve.length - effFitCount !== 1 ? 's' : ''} held out)`}
+        </span>
+      </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[25, 50, 75, 100].map(pct => (
           <Fragment key={pct}>
@@ -4364,6 +4387,10 @@ function SurvivalPredictionReport() {
         ))}
         {/* Boundary between observed and predicted */}
         <line x1={xScale(curve.length - 1)} x2={xScale(curve.length - 1)} y1={PAD.top} y2={PAD.top + plotH} stroke="#ddd" strokeWidth="1" strokeDasharray="3,3" />
+        {/* Backtest cutoff: model fitted only on data left of this line */}
+        {effFitCount < curve.length && (
+          <line x1={xScale(effFitCount - 1)} x2={xScale(effFitCount - 1)} y1={PAD.top} y2={PAD.top + plotH} stroke="#FF9800" strokeWidth="1.5" strokeDasharray="4,3" />
+        )}
         {/* Actual curve */}
         <polyline
           points={curve.map((c, i) => `${xScale(i)},${yScale(c.pct)}`).join(' ')}
@@ -4374,9 +4401,10 @@ function SurvivalPredictionReport() {
           points={Array.from({ length: totalPoints }, (_, i) => `${xScale(i)},${yScale(model(i))}`).join(' ')}
           fill="none" stroke="#f44336" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.7"
         />
-        {/* Data points */}
+        {/* Data points — hollow beyond the fit cutoff (held out from the predictor) */}
         {curve.map((c, i) => (
-          <circle key={i} cx={xScale(i)} cy={yScale(c.pct)} r="3" fill="#2196F3" />
+          <circle key={i} cx={xScale(i)} cy={yScale(c.pct)} r="3"
+            fill={i < effFitCount ? '#2196F3' : '#fff'} stroke="#2196F3" strokeWidth={i < effFitCount ? 0 : 1.5} />
         ))}
         {/* X axis labels */}
         {allLabels.map((label, i) => (
@@ -4417,6 +4445,7 @@ function SurvivalPredictionReport() {
       </div>
       <div style={{display:'flex', gap:'1.5em', justifyContent:'center', fontSize:'0.85em', margin:'0.3em 0'}}>
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#2196F3', verticalAlign:'middle', marginRight:4}}></span> Observed</span>
+        {effFitCount < curve.length && <span><span style={{display:'inline-block', width:9, height:9, borderRadius:'50%', border:'1.5px solid #2196F3', verticalAlign:'middle', marginRight:4}}></span> Held out of fit</span>}
         <span><span style={{display:'inline-block', width:16, height:3, backgroundColor:'#f44336', verticalAlign:'middle', marginRight:4, borderTop:'1.5px dashed #f44336'}}></span> S(t) = 100 − {b.toFixed(1)}t − {d.toFixed(0)}(1 − e<sup style={{fontSize:'0.75em'}}>−{k.toFixed(1)}t</sup>)</span>
       </div>
     </div>
