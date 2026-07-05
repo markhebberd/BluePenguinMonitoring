@@ -4369,8 +4369,8 @@ function SurvivalPredictionReport() {
         )}
         {zeroAt && (
           <div style={{textAlign:'center'}}>
-            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{((100 - d) / (2 * b)).toFixed(1)} years</div>
-            <div style={{fontSize:'0.8em', color:'#888'}}>Avg residency (established)</div>
+            <div style={{fontSize:'1.4em', fontWeight:700, color:'#4CAF50'}}>{((100 - d) / b).toFixed(1)} years</div>
+            <div style={{fontSize:'0.8em', color:'#888'}}>Predicted lifespan (old age)</div>
           </div>
         )}
       </div>
