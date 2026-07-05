@@ -790,6 +790,25 @@ function ww_normHeader($h) { return preg_replace('/[^a-z0-9]/', '', strtolower(t
 // Last-8 uppercased alphanumerics of a chip/tag number — same key importMonitor() uses.
 function ww_chipKey($raw) { return strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', (string)$raw), -8)); }
 
+// Digits only — for near-match on hand-typed chip numbers.
+function ww_digits($s) { return preg_replace('/\D+/', '', (string)$s); }
+
+// All digit strings one edit away (substitution / adjacent transposition / insertion / deletion).
+// Used to suggest the intended bird when a typed chip matches nothing — the classic transcription slip.
+function ww_editNeighbors($d) {
+    $out = []; $n = strlen($d);
+    for ($i = 0; $i < $n; $i++) {
+        $out[substr($d, 0, $i) . substr($d, $i + 1)] = true;                        // deletion
+        for ($c = 0; $c <= 9; $c++) if ($d[$i] !== (string)$c)
+            $out[substr($d, 0, $i) . $c . substr($d, $i + 1)] = true;               // substitution
+        if ($i + 1 < $n && $d[$i] !== $d[$i + 1])
+            $out[substr($d, 0, $i) . $d[$i + 1] . $d[$i] . substr($d, $i + 2)] = true; // transposition
+    }
+    for ($i = 0; $i <= $n; $i++) for ($c = 0; $c <= 9; $c++)
+        $out[substr($d, 0, $i) . $c . substr($d, $i)] = true;                       // insertion
+    return array_keys($out);
+}
+
 /**
  * Parse + validate a monitor CSV against a colony. Pure analysis: NO DB writes.
  * Returns the structure the analysis page renders and the commit step replays.
@@ -803,7 +822,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         'date_min' => null, 'date_max' => null,
         'totals' => [
             'rows' => 0, 'importable' => 0, 'flagged' => 0, 'duplicates' => 0, 'error_rows' => 0,
-            'decom' => 0, 'boxes' => 0, 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
+            'decom' => 0, 'boxes' => 0, 'boxes_in_colony' => 0, 'boxes_missing' => 0,
+            'adults' => 0, 'eggs' => 0, 'chicks' => 0,
             'no_scan' => 0, 'scans_matched' => 0, 'scans_unmatched' => 0,
         ],
     ];
@@ -824,7 +844,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     if (count($records) < 2) { $R['ok'] = false; $R['error'] = 'CSV has no data rows'; return $R; }
 
     $header = array_shift($records);
-    $idx = []; $birdCols = [];
+    $headerCount = count($header);
+    $idx = []; $birdCols = []; $ignoredCols = [];
     foreach ($header as $i => $h) {
         $n = ww_normHeader($h);
         if ($n === 'date') $idx['date'] = $i;
@@ -835,6 +856,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         elseif ($n === 'noscan' || $n === 'noscans' || $n === 'notscanned') $idx['no_scan'] = $i;
         elseif ($n === 'notes' || $n === 'note') $idx['notes'] = $i;
         elseif (strpos($n, 'bird') === 0) $birdCols[] = $i;
+        elseif ($n !== '') $ignoredCols[] = trim((string)$h);
     }
     $missing = [];
     foreach (['date', 'box', 'adults'] as $req) if (!isset($idx[$req])) $missing[] = $req;
@@ -859,18 +881,44 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     // whose home colony is this one. Zero / many / another-colony all flag and skip the scan.
     $byKeyColony = [];   // key => ['pengs'=>[peng=>1], 'pit'=>first pit, 'active'=>active pit]
     $byKeyAny = [];      // key => [peng=>colony_id]  (all colonies — to spot foreign birds)
-    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, p.colony_id
+    $pengMeta = [];      // peng_num => ['sex'=>M/F/'', 'dead'=>bool]  (this colony)
+    $pengFirstChip = []; // peng_num => earliest chip_date (YYYY-MM-DD)
+    $pengActiveKey = []; // peng_num => last-8 of its active chip (to spot retired-tag scans)
+    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, pc.chip_date, p.colony_id, p.sex, p.is_dead
         FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num")->fetchAll() as $c) {
         $k = ww_chipKey($c['pit_id']);
         $byKeyAny[$k][$c['peng_num']] = (int)$c['colony_id'];
-        if ((int)$c['colony_id'] === $colonyId) {
-            if (!isset($byKeyColony[$k])) $byKeyColony[$k] = ['pengs' => [], 'pit' => null, 'active' => null];
-            $byKeyColony[$k]['pengs'][$c['peng_num']] = true;
-            if ($byKeyColony[$k]['pit'] === null) $byKeyColony[$k]['pit'] = $c['pit_id'];
-            if ($c['is_active'] && $byKeyColony[$k]['active'] === null) $byKeyColony[$k]['active'] = $c['pit_id'];
-        }
+        if ((int)$c['colony_id'] !== $colonyId) continue;
+        if (!isset($byKeyColony[$k])) $byKeyColony[$k] = ['pengs' => [], 'pit' => null, 'active' => null];
+        $byKeyColony[$k]['pengs'][$c['peng_num']] = true;
+        if ($byKeyColony[$k]['pit'] === null) $byKeyColony[$k]['pit'] = $c['pit_id'];
+        if ($c['is_active']) { if ($byKeyColony[$k]['active'] === null) $byKeyColony[$k]['active'] = $c['pit_id']; $pengActiveKey[$c['peng_num']] = $k; }
+        $pengMeta[$c['peng_num']] = ['sex' => strtoupper((string)($c['sex'] ?? '')), 'dead' => !empty($c['is_dead'])];
+        if (!empty($c['chip_date']) && (!isset($pengFirstChip[$c['peng_num']]) || $c['chip_date'] < $pengFirstChip[$c['peng_num']]))
+            $pengFirstChip[$c['peng_num']] = substr($c['chip_date'], 0, 10);
     }
     $prefix = getColonyPrefix($pdo, $colonyId);
+
+    // Biometric sex guesses so a same-sex-pair check can use suspected sex too.
+    // observed_sex codes: PM/MM/M => male, PF/MF/F => female, U ignored.
+    $pengGuess = [];     // peng_num => ['m'=>n, 'f'=>n]
+    foreach ($pdo->query("SELECT b.peng_num, b.observed_sex FROM penguin_biometric_data b
+        JOIN penguins p ON b.peng_num = p.peng_num
+        WHERE p.colony_id = " . (int)$colonyId . " AND (b.is_deleted = 0 OR b.is_deleted IS NULL)")->fetchAll() as $b) {
+        $s = strtoupper((string)($b['observed_sex'] ?? ''));
+        if ($s === 'PM' || $s === 'MM' || $s === 'M') $pengGuess[$b['peng_num']]['m'] = ($pengGuess[$b['peng_num']]['m'] ?? 0) + 1;
+        elseif ($s === 'PF' || $s === 'MF' || $s === 'F') $pengGuess[$b['peng_num']]['f'] = ($pengGuess[$b['peng_num']]['f'] ?? 0) + 1;
+    }
+    // Effective sex per bird: confirmed if known, else the biometric lean (flagged unconfirmed).
+    $effSex = function ($peng) use ($pengMeta, $pengGuess) {
+        $s = $pengMeta[$peng]['sex'] ?? '';
+        if ($s === 'M' || $s === 'F') return [$s, true];
+        $g = $pengGuess[$peng] ?? [];
+        $m = $g['m'] ?? 0; $f = $g['f'] ?? 0;
+        if ($m > $f) return ['M', false];
+        if ($f > $m) return ['F', false];
+        return ['', false];
+    };
 
     // First & last date each bird was ever seen in each box, to flag a bird whose ONLY sighting
     // in a box is this date — nothing before or after. Keyed location_id|peng_num => [min,max].
@@ -907,6 +955,10 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     $R['file_flags'] = [];
     $tzNz = new DateTimeZone('Pacific/Auckland');
     $tzUtc = new DateTimeZone('UTC');
+    $today = (new DateTime('now', $tzNz))->format('Y-m-d');
+    $prevBirdDigits = [];  // bird column index => previous row's digits (fill-drag detection)
+    $prevDate = null;
+    $sheetSeen = [];       // "locId|date" => first line seen (within-sheet duplicate box)
     $lineNo = 1;          // header consumed as line 1
 
     foreach ($records as $rec) {
@@ -919,6 +971,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         $adultsRaw = trim((string)($rec[$idx['adults']] ?? ''));
         $notes = isset($idx['notes']) ? trim((string)($rec[$idx['notes']] ?? '')) : '';
         $errors = []; $warnings = [];
+        if (count($rec) !== $headerCount) $warnings[] = 'row has ' . count($rec) . " columns, expected $headerCount — misaligned?";
 
         // Box -> location
         $locId = null;
@@ -946,6 +999,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             $nzDt->setTimezone($tzUtc);
             $obsTime = $nzDt->format('Y-m-d H:i:s');
             $distinctDates[$obsDate] = true;
+            if ($obsDate > $today) $warnings[] = "date $obsDate is in the future";
             if ($R['date_min'] === null || $obsDate < $R['date_min']) $R['date_min'] = $obsDate;
             if ($R['date_max'] === null || $obsDate > $R['date_max']) $R['date_max'] = $obsDate;
         }
@@ -963,6 +1017,13 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             if (isset($idx['no_scan'])) { list($noScan, $ok) = $parseInt($rec[$idx['no_scan']] ?? ''); if (!$ok) { $errors[] = 'No-scan is not a number'; $countsOk = false; } }
             if ($countsOk && $adults < 0) { $errors[] = 'Adults is negative'; $countsOk = false; }
             if ($countsOk && $noScan < 0) { $errors[] = 'No-scan is negative'; $countsOk = false; }
+        }
+
+        // Column shift: an 8-digit chip-like value where a count/note belongs — the row slid sideways.
+        foreach (['eggs' => 'Eggs', 'chicks' => 'Chicks', 'no_scan' => 'No scan', 'notes' => 'Notes'] as $ck => $lbl) {
+            if (!isset($idx[$ck])) continue;
+            $cell = trim((string)($rec[$idx[$ck]] ?? ''));
+            if (preg_match('/^\d{8}$/', $cell)) $warnings[] = "$lbl column has a chip-like value ($cell) — shifted row?";
         }
 
         // Bird cells -> scans. A filled cell is a scan regardless of whether the chip resolves.
@@ -988,13 +1049,21 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 $col = $byKeyColony[$key] ?? null;
                 $nPeng = $col ? count($col['pengs']) : 0;
                 if ($nPeng === 1) {
-                    $scans[] = ['pit_id' => $col['active'] ?? $col['pit'], 'chip' => $val, 'peng_num' => array_key_first($col['pengs'])];
+                    $scans[] = ['pit_id' => $col['active'] ?? $col['pit'], 'chip' => $val, 'key' => $key, 'peng_num' => array_key_first($col['pengs'])];
                 } else {
                     if ($nPeng > 1) $reason = "last-8 matches $nPeng birds in $colonyName";
                     elseif (isset($byKeyAny[$key])) $reason = 'belongs to another colony';
                     else $reason = "no bird in $colonyName";
-                    $unmatchedHere[] = ['chip' => $val, 'reason' => $reason];
-                    if (!isset($unmatched[$key])) $unmatched[$key] = ['chip' => $val, 'reason' => $reason, 'count' => 0, 'boxes' => []];
+                    $u = ['chip' => $val, 'reason' => $reason, 'suggest' => null, 'suggest_peng' => null, 'suggest_key' => null];
+                    // Transcription near-match: a single colony bird one edit away from the typed number.
+                    if ($nPeng === 0 && !isset($byKeyAny[$key])) {
+                        $cand = [];
+                        foreach (ww_editNeighbors(ww_digits($val)) as $nb)
+                            if (isset($byKeyColony[$nb])) foreach (array_keys($byKeyColony[$nb]['pengs']) as $pg) $cand[$pg] = $nb;
+                        if (count($cand) === 1) { $pg = array_key_first($cand); $u['suggest'] = displayPengNum($pg, $prefix); $u['suggest_peng'] = $pg; $u['suggest_key'] = $cand[$pg]; }
+                    }
+                    $unmatchedHere[] = $u;
+                    if (!isset($unmatched[$key])) $unmatched[$key] = ['chip' => $val, 'reason' => $reason, 'suggest' => $u['suggest'], 'count' => 0, 'boxes' => []];
                     $unmatched[$key]['count']++;
                     if ($box !== '' && !in_array($box, $unmatched[$key]['boxes'], true)) $unmatched[$key]['boxes'][] = $box;
                 }
@@ -1011,8 +1080,40 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             if ($countsOk && ($adults - $birdsListed - $noScan) !== 0)
                 $warnings[] = "adults ($adults) ≠ scans ($birdsListed) + no-scan ($noScan)";
         }
-        // 5. Chips that didn't resolve to exactly one colony bird.
-        foreach ($unmatchedHere as $u) $warnings[] = "chip {$u['chip']}: {$u['reason']}";
+        // 5. Chips that didn't resolve to exactly one colony bird (with a "did you mean" near-match).
+        foreach ($unmatchedHere as $u) {
+            $msg = "chip {$u['chip']}: {$u['reason']}";
+            if (!empty($u['suggest'])) { $msg .= " — did you mean #{$u['suggest']} ({$u['suggest_key']})?"; $addMini($u['suggest_peng']); }
+            $warnings[] = $msg;
+        }
+        // Per-scanned-bird checks.
+        foreach ($scans as $sc) {
+            $pg = $sc['peng_num'];
+            // Retired tag: typed an old (inactive) chip when the bird has a newer active one.
+            if (isset($pengActiveKey[$pg]) && $pengActiveKey[$pg] !== $sc['key']) {
+                $warnings[] = "chip {$sc['chip']} is a retired tag for #" . displayPengNum($pg, $prefix) . " (active {$pengActiveKey[$pg]})";
+                $addMini($pg);
+            }
+            // Scan dated before the bird was chipped.
+            if ($obsDate && isset($pengFirstChip[$pg]) && $obsDate < $pengFirstChip[$pg]) {
+                $warnings[] = "scanned $obsDate, before #" . displayPengNum($pg, $prefix) . " was chipped ({$pengFirstChip[$pg]})";
+                $addMini($pg);
+            }
+            // Bird recorded dead in the database.
+            if (!empty($pengMeta[$pg]['dead'])) { $warnings[] = 'recorded dead: #' . displayPengNum($pg, $prefix); $addMini($pg); }
+        }
+        // Two adults of the same sex (confirmed or suspected) — unusual for a breeding pair.
+        if (!$isDecom && count($scans) >= 2) {
+            $sexes = []; $known = 0; $anyGuess = false;
+            foreach ($scans as $sc) {
+                list($sx, $conf) = $effSex($sc['peng_num']);
+                if ($sx !== '') { $sexes[$sx] = true; $known++; if (!$conf) $anyGuess = true; }
+            }
+            if ($known >= 2 && count($sexes) === 1) {
+                $warnings[] = 'two ' . (array_key_first($sexes) === 'M' ? 'male' : 'female') . ' adults' . ($anyGuess ? ' (incl. suspected)' : '');
+                foreach ($scans as $sc) $addMini($sc['peng_num']);
+            }
+        }
         // 3. Bird whose only sighting in this box is this date — none before or after.
         if ($obsDate && $locId !== null) {
             foreach ($scans as $sc) {
@@ -1024,6 +1125,24 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 }
             }
         }
+        // Spreadsheet fill-down: a bird number exactly +1 from the row above (same column),
+        // or a date exactly one day later — drag-handle artifacts, not real observations.
+        $curBirdDigits = [];
+        foreach ($birdCols as $bi) {
+            $dg = ww_digits(trim((string)($rec[$bi] ?? '')));
+            if ($dg === '') continue;
+            $curBirdDigits[$bi] = $dg;
+            if (isset($prevBirdDigits[$bi]) && strlen($dg) === 8 && strlen($prevBirdDigits[$bi]) === 8
+                && (int)$dg === (int)$prevBirdDigits[$bi] + 1)
+                $warnings[] = "chip $dg is +1 from the row above — spreadsheet fill-down?";
+        }
+        if ($obsDate && $prevDate) {
+            $pd = date_create($prevDate);
+            if ($pd && $pd->modify('+1 day')->format('Y-m-d') === $obsDate) $warnings[] = 'date is +1 day from the row above — fill-down?';
+        }
+        $prevBirdDigits = $curBirdDigits;
+        if ($obsDate) $prevDate = $obsDate;
+
         // 6. Date consistency — a monitor sheet should be one day.
         if ($obsDate) {
             if ($refDate === null) $refDate = $obsDate;
@@ -1036,6 +1155,14 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             $dupStmt->execute([$locId, $obsTime, $observerId]);
             if ($dupStmt->fetchColumn()) $duplicate = true;
         }
+        // Within-sheet duplicate: same box+date appears earlier in THIS file. Skip the repeat
+        // (the DB check can't catch it — neither row is in the DB yet at analyse time).
+        $sheetDupOf = null;
+        if ($locId !== null && $obsDate !== null) {
+            $sk = $locId . '|' . $obsDate;
+            if (isset($sheetSeen[$sk])) $sheetDupOf = $sheetSeen[$sk];
+            else $sheetSeen[$sk] = $lineNo;
+        }
         // Row-click target: most recent existing observation in this box before the import.
         $prevObs = null;
         if ($locId !== null && $obsTime !== null) {
@@ -1044,7 +1171,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             if ($pv !== false) $prevObs = $pv;
         }
 
-        $status = count($errors) ? 'error' : ($duplicate ? 'duplicate' : 'ok');
+        if ($sheetDupOf !== null) $warnings[] = "duplicate of line $sheetDupOf in this sheet (same box + date)";
+        $status = count($errors) ? 'error' : (($duplicate || $sheetDupOf !== null) ? 'duplicate' : 'ok');
         $R['rows'][] = [
             'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
             'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks, 'no_scan' => $noScan,
@@ -1073,6 +1201,18 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         $dl = array_keys($distinctDates); sort($dl);
         $R['file_flags'][] = 'Sheet spans multiple dates: ' . implode(', ', $dl);
     }
+    if ($ignoredCols) $R['file_flags'][] = 'Ignored columns (not imported): ' . implode(', ', $ignoredCols);
+
+    // Coverage: colony boxes absent from this sheet (is it a full monitor or a partial?).
+    $present = [];
+    foreach ($seenBoxes as $b) $present[strtoupper($b)] = true;
+    $missing = [];
+    foreach ($locLookup as $up => $lid) if (!isset($present[$up])) $missing[] = $up;
+    sort($missing, SORT_NATURAL);
+    $R['totals']['boxes_in_colony'] = count($locLookup);
+    $R['totals']['boxes_missing'] = count($missing);
+    $R['coverage_missing'] = $missing;
+    if ($missing) $R['file_flags'][] = count($missing) . ' of ' . count($locLookup) . ' colony boxes not in this sheet';
 
     // A bird scanned in two different boxes on the same day can't be right — flag every box.
     foreach ($birdBoxes as $dk => $entries) {

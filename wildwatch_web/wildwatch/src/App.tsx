@@ -5791,7 +5791,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             ['Flagged', t.flagged, t.flagged ? '#8a6d3b' : undefined],
             ['Duplicates (skip)', t.duplicates, t.duplicates ? '#b8860b' : undefined],
             ['Errors (skip)', t.error_rows, t.error_rows ? '#c0392b' : undefined],
-            ['Boxes', t.boxes], ['Decom→DCM', t.decom],
+            ['Boxes', t.boxes], ['Not in sheet', t.boxes_missing, t.boxes_missing ? '#8a6d3b' : undefined], ['Decom→DCM', t.decom],
             ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks], ['No-scan', t.no_scan],
             ['Scans matched', t.scans_matched, '#1a7a1a'],
             ['Chips unresolved', t.scans_unmatched, t.scans_unmatched ? '#c0392b' : undefined],
@@ -5821,6 +5821,13 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                 <p key={i} style={{ color: '#8a6d3b', fontSize: 13, margin: '2px 0' }}>⚑ {f}</p>
               ))}
 
+              {impAnalysis.coverage_missing?.length > 0 && (
+                <details style={{ marginBottom: 8 }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13 }}>{impAnalysis.coverage_missing.length} colony box(es) not in this sheet</summary>
+                  <div style={{ fontSize: 12, marginTop: 6, maxHeight: 120, overflow: 'auto' }}>{impAnalysis.coverage_missing.join(', ')}</div>
+                </details>
+              )}
+
               {impAnalysis.unknown_boxes?.length > 0 && (
                 <p style={{ color: '#c0392b', fontSize: 13 }}>
                   <strong>Unknown boxes</strong> (rows skipped — not locations in this colony): {impAnalysis.unknown_boxes.join(', ')}
@@ -5834,7 +5841,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                   </summary>
                   <div style={{ fontSize: 12, fontFamily: 'monospace', marginTop: 6, maxHeight: 140, overflow: 'auto' }}>
                     {impAnalysis.unmatched_chips.map((u: any) => (
-                      <div key={u.chip}>{u.chip} · ×{u.count} · box {u.boxes.join(', ')} · <span style={{ color: '#c0392b' }}>{u.reason}</span></div>
+                      <div key={u.chip}>{u.chip} · ×{u.count} · box {u.boxes.join(', ')} · <span style={{ color: '#c0392b' }}>{u.reason}</span>{u.suggest ? <span style={{ color: '#1a7a1a' }}> → maybe #{u.suggest}</span> : ''}</div>
                     ))}
                   </div>
                 </details>
