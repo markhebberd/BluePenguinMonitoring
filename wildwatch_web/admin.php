@@ -1298,12 +1298,16 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 foreach ($scans as $sc) $addMini($sc['peng_num']);
             }
         }
-        // 3. Bird whose only sighting in this box is this date — none before or after.
+        // 3. Bird recorded in this box for the first time (no prior scan or chipping here).
         if ($obsDate && $locId !== null) {
             foreach ($scans as $sc) {
                 $s = $seenInBox[$locId . '|' . $sc['peng_num']] ?? null;
-                $seenOtherDate = $s && ($s['min'] < $obsDate || $s['max'] > $obsDate);
-                if (!$seenOtherDate) {
+                $seenBefore = $s && ($s['min'] < $obsDate || $s['max'] > $obsDate);
+                // Being chipped in this box also counts as having been here before.
+                if (!$seenBefore)
+                    foreach ($pengChips[$sc['peng_num']] ?? [] as $ce)
+                        if ($ce['box'] === strtoupper($box)) { $seenBefore = true; break; }
+                if (!$seenBefore) {
                     $warnings[] = 'Never seen in box ' . $box . ':';
                     $addMini($sc['peng_num']);
                 }
