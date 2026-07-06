@@ -6095,6 +6095,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                           <td style={{ padding: '2px 6px', color: '#c0392b' }}>
                             {(r.errors || []).join('; ')}
                             {r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>{r.errors?.length ? ' · ' : ''}{r.warnings.join('; ')}</span> : ''}
+                            {r.notes ? <span className="muted" style={{ fontStyle: 'italic' }}>{(r.errors?.length || r.warnings?.length) ? ' · ' : ''}“{r.notes}”</span> : ''}
                             {r.mini_pengs?.length > 0 && (
                               <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', marginLeft: 6, verticalAlign: 'middle' }}>
                                 {r.mini_pengs.map((pn: string) => {
