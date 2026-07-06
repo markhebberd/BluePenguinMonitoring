@@ -942,6 +942,9 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
   // Always surface the current season, even with no sightings yet.
   const currentLabel = getSeasonLabel();
   if (!seasonBirds.has(currentLabel)) seasonBirds.set(currentLabel, new Map());
+  // Surface every monitored season (has observations) even if no bird was ever scanned — the
+  // overview shows it with "No breeding observed".
+  for (const label of seasonObsMap.keys()) if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
 
   const seasons = Array.from(seasonBirds.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   const result: BoxSeasonData[] = [];
@@ -1208,6 +1211,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 rows.push(clutchRow(ci));
                 rows.push(gapRow(ci));
               }
+              // No clutch detected this season — say so explicitly.
+              if (clutches.length === 0) rows.push(
+                <div key="nobreeding" className="obs-card breeding-none">
+                  <div className="obs-top"><span className="muted">No breeding observed</span></div>
+                </div>
+              );
               return rows;
             })()}
           </div>
