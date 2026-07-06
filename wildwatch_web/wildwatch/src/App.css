@@ -402,7 +402,11 @@ h3.collapsible:hover { color:#1a5276; }
 .copy-pit-btn:hover { background:#bbdefb; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
-.breeding-pair { display:inline-flex; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
+.breeding-pair { display:inline-flex; flex-wrap:wrap; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
+/* Active breeding window: predicted stage dates (hatch / guard end / chip / fledge). */
+.clutch-predictions { display:flex; flex-wrap:wrap; gap:2px 10px; font-size:10px; color:#666; }
+/* Inside the box-page pair row, push the line below the pair. */
+.breeding-pair .clutch-predictions { flex-basis:100%; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
 .breeding-pair .offspring-final, .family-box .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
 /* Bird-page breeding history: black box holding partner/parents, offspring and the date

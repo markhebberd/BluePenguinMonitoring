@@ -747,6 +747,29 @@ const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3r
 /** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
+const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+/** Clutch still running: no terminating observation yet and predicted fledge not passed. */
+const clutchActive = (c: { end: number | null; windowEnd: number }) => c.end === null && Date.now() <= c.windowEnd;
+/** Breeding-window date range; an active window reads "6 Jul – current". */
+const windowRange = (c: { windowStart: number; windowEnd: number; end: number | null }) =>
+  `${fmtMs(c.windowStart)} – ${clutchActive(c) ? 'current' : fmtMs(c.windowEnd)}`;
+
+/** Active window only: ALL upcoming stage dates predicted from the laid estimate — same
+ *  offsets as the nestcheck Next Breeding Dates card. Hatch is shown only while the
+ *  clutch is still in the egg phase; the chip window runs to fledge. */
+function ClutchPredictions({ clutch }: { clutch: Clutch }) {
+  if (!clutchActive(clutch) || clutch.laid === null) return null;
+  const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
+  return (
+    <span className="clutch-predictions">
+      {clutch.maxChicks === 0 && <span>hatch ~{d(BREEDING_OFFSETS.hatch)}</span>}
+      <span>guard ends ~{d(BREEDING_OFFSETS.pg)}</span>
+      <span>chip ~{d(BREEDING_OFFSETS.chip)} – {d(BREEDING_OFFSETS.fledge)}</span>
+      <span>fledge ~{d(BREEDING_OFFSETS.fledge)}</span>
+    </span>
+  );
+}
+
 
 /** Per-box data-quality checks (mirrors the admin-page checks, scoped to one box's
  *  observations). All dates are NZ days. Returns human-readable detail lines so the
@@ -1040,8 +1063,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         };
         const slotRow = (slot: string) => slotBirds(slot).map(x => birdWithCount(x.b, x.n));
 
-        const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
-
         // Newest observation in this season — the scroll/expand target for the matching
         // season section in the observation list lower on the page.
         const latestObs = sObsChrono.reduce((m, o) => o.observation_time_utc > m ? o.observation_time_utc : m, '');
@@ -1127,7 +1148,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         ))}
                         <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
                           title="Go to where the egg/chick was first detected"
-                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{fmtMs(clutch.windowStart)} – {fmtMs(clutch.windowEnd)}</span>
+                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
+                        <ClutchPredictions clutch={clutch} />
                       </span>
                       {slotRow(`w${ci}`)}
                     </div>
@@ -1949,7 +1971,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} /></td></tr>
             </Fragment>);
             })}
-            {(editing || !!Number(p.is_dead)) && <tr><td className="muted">Dead</td><td>{!editing ? 'Dead' : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>}
+            {(editing || !!p.death_date) && <tr><td className="muted">Dead</td><td>{!editing
+              ? <>Dead{p.death_date && <> <span className="muted">({p.death_date.slice(0, 10)})</span></>}</>
+              // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
+              : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
+                  onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="death date" canEdit={true} />}</td></tr>}
             <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
             {/* Notes last in the collapsed view; hidden when blank (still editable under Edit) */}
             {(editing || !!p.kommentar) && <tr><td className="muted">Notes</td><td>{!editing ? p.kommentar : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>}
@@ -1971,11 +1997,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             </div>
           ) : season.entries.map((e) => {
             const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
-            const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
             const c = e.fam.clutch;
             const dateRange = (
               <span className="clutch-dates clickable" title="Go to where the eggs/chicks first appeared"
-                onClick={() => onSightingClick(e.box, c.startObsTime)}>{fmtMs(c.windowStart)} - {fmtMs(c.windowEnd)}</span>
+                onClick={() => onSightingClick(e.box, c.startObsTime)}>{windowRange(c)}</span>
             );
             return (
               <div key={`${e.seasonYear}-${e.box}-${e.clutchIndex}`} className="obs-card">
@@ -2006,6 +2031,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                         ))}
                       </div>
                     )}
+                    <ClutchPredictions clutch={c} />
                   </div>
                 ) : (
                   <div className="family-box">
@@ -2024,6 +2050,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                         ))}
                       </div>
                     )}
+                    <ClutchPredictions clutch={c} />
                   </div>
                 )}
               </div>
@@ -2068,7 +2095,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           <h3 className="collapsible" onClick={() => toggleSection('partners')}>{expandedSections.partners ? '▾' : '▸'} Shared sightings ({partners.length})</h3>
           {expandedSections.partners && <p className="muted">Birds seen in the same box at the same time &middot; "No scan" = unscanned birds present</p>}
           {expandedSections.partners && partners.map((pt: any, pi: number) => {
-            const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
             const partnerRow = (s: any, i: number) => (
               <a key={i} className="partner-row clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>
                 <DateLink date={s.date} onDayClick={onDayClick} />
@@ -2133,9 +2159,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                             <a className="partner-window-dates clickable" href={`/box/${g.rows[0].box}`}
                               title="Go to the nest at the start of the breeding window"
                               onClick={ev => navClick(ev, () => onSightingClick(g.rows[0].box, g.win.startObsTime))}>
-                              {fmtMs(g.win.windowStart)} &ndash; {fmtMs(g.win.windowEnd)}
+                              {windowRange(fam.clutch)}
                             </a>
                           </div>
+                          <ClutchPredictions clutch={fam.clutch} />
                           <div className="partner-sightings">{g.rows.map(partnerRow)}</div>
                         </div>
                         );
@@ -6369,8 +6396,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
         <IntegrityCheck rows={iDeadScanned} errorType="dead_scanned" title="Dead birds still scanned"
-          desc="Birds marked dead but scanned in the last year — the death flag or the scan is wrong." empty="No dead birds recently scanned"
-          columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
+          desc="Birds scanned after their recorded death date — the death date or the scan is wrong." empty="No dead birds scanned after death"
+          columns={[{ key: 'death_date', label: 'Died' }, { key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
         <IntegrityCheck rows={iImprobable} errorType="improbable_counts" title="Improbable counts"
           desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell },
@@ -6747,7 +6774,7 @@ function RemovePenguin({ token }: { token: string }) {
             <tbody>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Peng #</td><td style={{padding:'2px 8px', fontWeight:600}}>{preview.penguin.peng_num}</td></tr>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Sex</td><td style={{padding:'2px 8px'}}>{preview.penguin.sex || '—'}</td></tr>
-              <tr><td style={{padding:'2px 8px', color:'#666'}}>Status</td><td style={{padding:'2px 8px'}}>{preview.penguin.is_dead ? 'Dead' : 'Alive'}</td></tr>
+              <tr><td style={{padding:'2px 8px', color:'#666'}}>Status</td><td style={{padding:'2px 8px'}}>{preview.penguin.death_date ? `Dead (${preview.penguin.death_date.slice(0, 10)})` : 'Alive'}</td></tr>
               <tr><td style={{padding:'2px 8px', color:'#666'}}>Chipped as</td><td style={{padding:'2px 8px'}}>{preview.penguin.chipped_as_adult ? 'Adult' : 'Chick'}</td></tr>
             </tbody>
           </table>
