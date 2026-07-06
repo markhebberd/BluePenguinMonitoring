@@ -1087,6 +1087,8 @@ export function computeAdultCountMismatches(): { total: number; rows: any[] } {
 const byDateDesc = (a: any, b: any) => b.obs_date.localeCompare(a.obs_date);
 /** Deep-link that opens a box and highlights one observation (obsAnchor). */
 const obsHref = (box: string, time: string) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`;
+/** Deep-link to a whole day (all boxes) — for issues that span boxes, not one observation. */
+const dayHref = (date: string) => `/?day=${encodeURIComponent(date)}`;
 
 /** A penguin scanned at two different boxes on the same NZ day. */
 export function computeBirdTwoBoxes(): any[] {
@@ -1111,7 +1113,7 @@ export function computeBirdTwoBoxes(): any[] {
   for (const [key, e] of map) {
     if (e.boxes.size < 2) continue;
     const [peng_num, obs_date] = key.split('|');
-    rows.push({ peng_num, obs_date, box_count: e.boxes.size, boxes: [...e.boxes].sort(compareBoxNames).join(', '), _href: obsHref(e.firstBox, e.firstTime) });
+    rows.push({ peng_num, obs_date, box_count: e.boxes.size, boxes: [...e.boxes].sort(compareBoxNames).join(', '), _href: dayHref(obs_date) });
   }
   return rows.sort(byDateDesc);
 }
