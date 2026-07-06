@@ -786,10 +786,10 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!clutchActive(clutch) || clutch.laid === null) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
   const parts = [
-    ...(clutch.maxChicks === 0 ? [`Hatch ~${d(BREEDING_OFFSETS.hatch)}`] : []),
-    `Guard ends ~${d(BREEDING_OFFSETS.pg)}`,
-    `Chip ~${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`,
-    `Fledge ~${d(BREEDING_OFFSETS.fledge)}`,
+    ...(clutch.maxChicks === 0 ? [`Hatch ${d(BREEDING_OFFSETS.hatch)}`] : []),
+    `Guard ends ${d(BREEDING_OFFSETS.pg)}`,
+    `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`,
+    `Fledge ${d(BREEDING_OFFSETS.fledge)}`,
   ];
   const unc = clutch.laidUncertainty !== null && clutch.laidUncertainty > 0
     ? ` ± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
