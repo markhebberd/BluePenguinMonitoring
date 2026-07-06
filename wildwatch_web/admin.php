@@ -1214,19 +1214,14 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                     if ($sexRaw !== '') {
                         list($size, $obsSex) = $parseSexCell($sexRaw);
                         if ($size !== '') {
-                            // A size code is valid only if this bird was chipped as a chick in THIS
-                            // box on or before this date (chipping day, then later re-sightings).
-                            $chippedHere = false;
-                            foreach ($pengChips[$pgR] ?? [] as $ce)
-                                if ($ce['box'] === strtoupper($box) && (!$obsDate || $ce['date'] <= $obsDate)) { $chippedHere = true; break; }
+                            // Validate the chick size code against the bird's recorded chick_size_code.
+                            // Only a genuine conflict is flagged; a match — or no recorded size — passes
+                            // quietly (chip_box is too unreliable to demand a same-box chipping).
                             $recorded = $pengChickSize[$pgR] ?? '';
-                            if (!$chippedHere)
-                                $warnings[] = "size $size on #" . displayPengNum($pgR, $prefix) . ' — no chick chipping in box ' . $box . ' on/before ' . ($obsDate ?: '?');
-                            elseif ($recorded === '')
-                                $warnings[] = "size $size for #" . displayPengNum($pgR, $prefix) . ' but no chick size recorded';
-                            elseif ($recorded !== $size)
-                                $warnings[] = "size $size ≠ recorded $recorded for #" . displayPengNum($pgR, $prefix);
-                            $addMini($pgR);
+                            if ($recorded !== '' && $recorded !== $size) {
+                                $warnings[] = "chick size $size ≠ recorded $recorded for #" . displayPengNum($pgR, $prefix);
+                                $addMini($pgR);
+                            }
                         }
                         if ($obsSex === null) { $warnings[] = "unrecognised sex '$sexRaw' for #" . displayPengNum($pgR, $prefix); $addMini($pgR); }
                         elseif ($obsSex !== '') $bios[] = ['peng_num' => $pgR, 'observed_sex' => $obsSex];
