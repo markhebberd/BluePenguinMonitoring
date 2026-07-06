@@ -2057,7 +2057,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     <div className="family-head">
                       <span className="muted">parents</span>
                       {e.parents.length > 0
-                        ? e.parents.map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                        ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
                         : <span className="muted">not identified</span>}
                       {dateRange}
                     </div>
@@ -4667,8 +4667,9 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
               <tr key={i}>
                 <td>
                   <div className="group-members">
-                    <PenguinMini scan={r.a} onClick={() => onOpenBird(r.a.peng_num)} />
-                    <PenguinMini scan={r.b} onClick={() => onOpenBird(r.b.peng_num)} />
+                    {[r.a, r.b].sort((x, y) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((p, k) => (
+                      <PenguinMini key={k} scan={p} onClick={() => onOpenBird(p.peng_num)} />
+                    ))}
                   </div>
                 </td>
                 <td><strong>{r.consecutive}</strong></td>
