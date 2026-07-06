@@ -660,7 +660,7 @@ namespace PenguinMonitor.Services
                 PengNum = S("peng_num") ?? "",
                 ObservationDate = S("observation_date") ?? dateFallback,
                 Weight = S("weight"),
-                RightFlipperLength = S("right_flipper_length"),
+                FlipperLength = S("flipper_length"),
                 ObservedSex = S("observed_sex"),
                 ConditionMoulting = B("condition_moulting"),
                 ConditionTicks = B("condition_ticks"),
@@ -697,7 +697,7 @@ namespace PenguinMonitor.Services
                         ["observation_date"] = bio.ObservationDate,
                     };
                     if (!string.IsNullOrEmpty(bio.Weight)) fields["weight"] = bio.Weight;
-                    if (!string.IsNullOrEmpty(bio.RightFlipperLength)) fields["right_flipper_length"] = bio.RightFlipperLength;
+                    if (!string.IsNullOrEmpty(bio.FlipperLength)) fields["flipper_length"] = bio.FlipperLength;
                     if (!string.IsNullOrEmpty(bio.ObservedSex)) fields["observed_sex"] = bio.ObservedSex;
                     if (bio.ConditionMoulting) fields["condition_moulting"] = true;
                     if (bio.ConditionTicks) fields["condition_ticks"] = true;

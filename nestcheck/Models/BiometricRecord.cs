@@ -13,7 +13,7 @@ namespace PenguinMonitor.Models
         public string ObservationDate { get; set; } = ""; // yyyy-MM-dd (NZ date)
 
         public string? Weight { get; set; }
-        public string? RightFlipperLength { get; set; }
+        public string? FlipperLength { get; set; }
         public string? ObservedSex { get; set; }
         public bool ConditionMoulting { get; set; }
         public bool ConditionTicks { get; set; }

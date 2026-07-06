@@ -5151,7 +5151,7 @@ namespace PenguinMonitor
             // Right flipper length
             card.AddView(createLabel("Flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
-            flipperInput.Text = existing?.RightFlipperLength ?? "";
+            flipperInput.Text = existing?.FlipperLength ?? "";
             card.AddView(flipperInput);
 
             // Sex
@@ -5225,7 +5225,7 @@ namespace PenguinMonitor
                     PengNum = pengNum,
                     ObservationDate = NzNow.ToString("yyyy-MM-dd"),
                     Weight = string.IsNullOrEmpty(weightInput.Text) ? null : weightInput.Text,
-                    RightFlipperLength = string.IsNullOrEmpty(flipperInput.Text) ? null : flipperInput.Text,
+                    FlipperLength = string.IsNullOrEmpty(flipperInput.Text) ? null : flipperInput.Text,
                     ObservedSex = ObservedSexOptions.FirstOrDefault(o => o.label == selectedSexLabel).code,
                     ConditionMoulting = conditionChecks["condition_moulting"].Checked,
                     ConditionTicks = conditionChecks["condition_ticks"].Checked,
@@ -5486,7 +5486,7 @@ namespace PenguinMonitor
                         // 3. Create biometric record if any data entered
                         var bioFields = new Dictionary<string, object>();
                         if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
-                        if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["right_flipper_length"] = flipperInput.Text;
+                        if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["flipper_length"] = flipperInput.Text;
                         if (!string.IsNullOrEmpty(sex)) bioFields["observed_sex"] = sex;
                         foreach (var (field, cb) in bioConditionChecks)
                             if (cb.Checked) bioFields[field] = true;
