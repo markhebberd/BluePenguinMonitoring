@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
