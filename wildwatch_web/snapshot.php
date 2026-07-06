@@ -54,7 +54,7 @@ if ($since) {
     // Incremental sync: only rows updated since the given timestamp
     $ts = date('Y-m-d H:i:s', strtotime($since));
 
-    $obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.is_deleted, o.updated_at
+    $obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted, o.updated_at
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
         WHERE ol.colony_id = ? AND o.updated_at >= ?");
     $obs->execute([$colonyId, $ts]);

@@ -232,6 +232,7 @@ header h1:hover { opacity:.8; }
 .scan.f { background:#FFE4E1; }
 .scan.m { background:#E6F3FF; }
 .scan.chick { background:#FFF9C4; border-color:#FDD835; }
+.scan.chick.offspring-fledged { cursor:default; font-style:italic; }
 .sex-icon { font-weight:700; margin-right:2px; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }

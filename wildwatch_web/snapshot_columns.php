@@ -12,7 +12,7 @@
  * ', o.updated_at' to the observations list; nothing else differs.
  */
 
-const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.is_deleted';
+const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted';
 const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted';
 const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, solo';

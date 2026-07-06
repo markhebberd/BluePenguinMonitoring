@@ -35,6 +35,7 @@ interface Observation {
   adults:number; eggs:number; chicks:number;
   breeding_status:string|null; gate_status:string|null; notes:string;
   no_scan?:number;
+  fledged_unchipped?:number;
   scans: Scan[];
   edit_count?:string|number;
 }
@@ -791,7 +792,8 @@ interface BoxFamily {
   parents: any[];    // parent bird objects (0-2)
   chicks: any[];     // this-season chicks chipped in the nest (bird objects)
   failedEggs: number;   // eggs that never became a chick (final stage), capped at 4
-  plainChicks: number;  // chicks never chipped in the nest (final stage), capped at 4
+  plainChicks: number;  // unchipped chicks assumed to have died (final stage), capped at 4
+  fledgedUnchipped: number; // unchipped chicks a monitor recorded as presumed fledged
 }
 interface BoxSeasonData {
   label: string;
@@ -904,8 +906,16 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
       const chicks = birds.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
       // Offspring at FINAL life stage: egg that never hatched, chick never chipped.
       const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
-      const plainChicks = Math.max(0, Math.min(clutch.maxChicks, 4) - chicks.length);
-      return { clutch, male, female, parents, chicks, failedEggs, plainChicks };
+      const unchipped = Math.max(0, Math.min(clutch.maxChicks, 4) - chicks.length);
+      // Of the never-chipped chicks, those a monitor logged as presumed-fledged (summed
+      // over this clutch's observations) render as fledged rather than assumed-died. Cap
+      // at the unchipped count so an over-entry can't invent chicks.
+      const fledgedUnchipped = Math.min(unchipped, sObsChrono.reduce((s, o) => {
+        const t = parseDate(o.observation_time_utc).getTime();
+        return (t >= clutch.start && t <= (clutch.end ?? Infinity)) ? s + (Number(o.fledged_unchipped) || 0) : s;
+      }, 0));
+      const plainChicks = unchipped - fledgedUnchipped;
+      return { clutch, male, female, parents, chicks, failedEggs, plainChicks, fledgedUnchipped };
     });
 
     result.push({ label, seasonYear, seasonStart, seasonEnd, seasonObs: sObsChrono, birds, birdMap, clutches, families, parentKeys, chickFamily, isCurrent: label === currentLabel });
@@ -1047,7 +1057,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 return gb.length > 0 ? <div key={`gap${gi}`} className="bird-row">{gb}</div> : null;
               };
               const clutchRow = (ci: number) => {
-                const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks } = families[ci];
+                const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
                 return (
                   <div key={`cl${ci}`} className="clutch-row">
                     {clutches.length > 1 && (
@@ -1075,6 +1085,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                        ))}
+                        {Array.from({ length: fledgedUnchipped }).map((_, i) => (
+                          <span key={`fu${i}`} className="scan chick offspring-fledged" title="Unchipped chick — presumed fledged">Unchipped</span>
                         ))}
                         <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
                           title="Go to where the egg/chick was first detected"
@@ -1138,7 +1151,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   // Edit mode is a local DRAFT — nothing is written to the server until "Done"
   // (Cancel discards). This removes the silent last-write-wins where each field saved
   // live, letting a second editor's stale view clobber the first's data.
-  type Draft = { adults:number; eggs:number; chicks:number; breeding_status:string; gate_status:string; notes:string; no_scan:number };
+  type Draft = { adults:number; eggs:number; chicks:number; breeding_status:string; gate_status:string; notes:string; no_scan:number; fledged_unchipped:number };
   const [draft, setDraft] = useState<Draft|null>(null);
   const [draftScans, setDraftScans] = useState<Scan[]>([]);
   const setField = (f: keyof Draft, v: any) => setDraft(d => d ? { ...d, [f]: v } : d);
@@ -1148,7 +1161,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     setDraft({
       adults: Number(obs.adults)||0, eggs: Number(obs.eggs)||0, chicks: Number(obs.chicks)||0,
       breeding_status: obs.breeding_status || '', gate_status: obs.gate_status || '',
-      notes: obs.notes || '', no_scan: Number(obs.no_scan)||0,
+      notes: obs.notes || '', no_scan: Number(obs.no_scan)||0, fledged_unchipped: Number(obs.fledged_unchipped)||0,
     });
     setDraftScans([...obs.scans]);
     setEditing(true);
@@ -1188,7 +1201,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const commit = async () => {
     if (!obsId || !token || !draft) { cancelEdit(); return; }
     const fields: Record<string, any> = {};
-    for (const f of ['adults','eggs','chicks','no_scan'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
+    for (const f of ['adults','eggs','chicks','no_scan','fledged_unchipped'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
     for (const f of ['breeding_status','gate_status','notes'] as (keyof Draft)[]) if (((obs as any)[f]||'') !== (draft[f]||'')) fields[f] = draft[f] || null;
     const draftKeys = new Set(draftScans.map(scanKey));
     const toAdd = draftScans.filter(s => !s.scan_id);
@@ -1323,6 +1336,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <label>{'\uD83D\uDC27'}</label><EditableField value={draft?.adults ?? 0} type="number" onSave={async v => { setField('adults', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83E\uDD5A'}</label><EditableField value={draft?.eggs ?? 0} type="number" onSave={async v => { setField('eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={draft?.chicks ?? 0} type="number" onSave={async v => { setField('chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
+          <label title="Unchipped chicks presumed fledged">{'\uD83D\uDD4A'}</label><EditableField value={draft?.fledged_unchipped ?? 0} type="number" onSave={async v => { setField('fledged_unchipped', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN','IGN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Nest status" />
           <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />
