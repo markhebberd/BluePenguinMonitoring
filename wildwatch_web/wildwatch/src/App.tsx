@@ -5502,7 +5502,18 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [adminTab, setAdminTab] = useState<'io' | 'validation' | 'users' | 'database' | 'system'>('io');
+  const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
+  type AdminTab = typeof ADMIN_TABS[number];
+  const [adminTab, setAdminTab] = useState<AdminTab>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return (ADMIN_TABS as readonly string[]).includes(t || '') ? (t as AdminTab) : 'io';
+  });
+  const selectTab = (id: AdminTab) => {
+    setAdminTab(id);
+    const u = new URL(window.location.href);
+    if (id === 'io') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
+    window.history.replaceState(null, '', u.pathname + u.search);
+  };
 
   // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
   const [impFile, setImpFile] = useState<string>('');        // filename
@@ -5794,7 +5805,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     <div className="admin-panel">
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
         {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
-          <button key={id} onClick={() => setAdminTab(id)}
+          <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
             {label}
@@ -6816,7 +6827,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // an open bird panel is preserved across box changes, refresh, and back/forward.
   useEffect(() => {
     let path = '/';
-    if (showAdmin) path = '/?admin=1';
+    if (showAdmin) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?admin=1' + (t ? `&tab=${t}` : ''); }
     else if (showReports) path = '/?reports=1';
     else if (showEntry) path = '/?enter=1';
     else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}${dayBox ? `&box=${encodeURIComponent(dayBox)}` : ''}`;
