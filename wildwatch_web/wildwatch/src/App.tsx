@@ -674,16 +674,18 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
  *  is one M + one F where at least one sex is confirmed — the other may come from
  *  majority biometric sex guesses (M+F, M+UF, F+UM; never UM+UF). Pairs actually
  *  scanned together in the same observation outrank pairs that merely share the
- *  window; ties break on combined sighting counts. */
-function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, any>, excluded: (b: any) => boolean): { male: string; female: string } | null {
+ *  window; ties break on combined sighting counts. Chip events at this box (already
+ *  deduped against same-day scans) count as single sightings — a bird chipped at the
+ *  nest attended it even when no observation was recorded that day. */
+function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, any>, excluded: (b: any) => boolean, chipEvents: { key: string; t: number }[] = []): { male: string; female: string } | null {
   const counts = new Map<string, number>();
   const co = new Map<string, number>();
+  // Parents attend the nest from courtship/nest-building through the end of guard:
+  // scans up to ~30 days before laying count (e.g. a male seen only pre-egg is still
+  // a parent), but after guard both feed at sea, so later scans are no evidence.
+  const courtshipStart = (c.laid ?? c.windowStart) - 30 * DAY;
   for (const o of sObs) {
     const t = parseDate(o.observation_time_utc).getTime();
-    // Parents attend the nest from courtship/nest-building through the end of guard:
-    // scans up to ~30 days before laying count (e.g. a male seen only pre-egg is still
-    // a parent), but after guard both feed at sea, so later scans are no evidence.
-    const courtshipStart = (c.laid ?? c.windowStart) - 30 * DAY;
     if (t < courtshipStart || t > c.guardEnd) continue;
     const present = Array.from(new Set(o.scans.map((s: Scan) => s.pit_id.slice(-8))));
     for (const k of present) counts.set(k, (counts.get(k) || 0) + 1);
@@ -691,6 +693,9 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
       const key = [present[i], present[j]].sort().join('|');
       co.set(key, (co.get(key) || 0) + 1);
     }
+  }
+  for (const ev of chipEvents) {
+    if (ev.t >= courtshipStart && ev.t <= c.guardEnd) counts.set(ev.key, (counts.get(ev.key) || 0) + 1);
   }
   const sexOf = (b: any): { sex: string; confirmed: boolean } | null => {
     const s = (b.sex || '').toUpperCase();
@@ -872,7 +877,29 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     const sObsChrono = (seasonObsMap.get(label) || []).slice()
       .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
     const clutches = segmentClutches(sObsChrono);
-    const pairs = clutches.map(c => detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason));
+    // Chippings at this box count as nest attendance for pair detection — e.g. an
+    // adult chipped while guarding chicks is a parent even if never scanned in an
+    // observation. Dedup: a bird chipped AND scanned here on the same NZ day is one
+    // visit, so the chip event is dropped in favour of the scan.
+    const scannedDays = new Map<string, Set<string>>();
+    for (const o of sObsChrono) {
+      const day = toNzDateStr(o.observation_time_utc);
+      for (const s of o.scans) {
+        const k = s.pit_id.slice(-8);
+        if (!scannedDays.has(k)) scannedDays.set(k, new Set());
+        scannedDays.get(k)!.add(day);
+      }
+    }
+    const chipEvents: { key: string; t: number }[] = [];
+    for (const p of (allPenguinsInBox || [])) {
+      if (!p.is_chipped_here || !p.chip_date || !p.pit_id) continue;
+      const cd = new Date(p.chip_date);
+      if (cd < seasonStart || cd >= seasonEnd) continue;
+      const key = p.pit_id.slice(-8);
+      if (scannedDays.get(key)?.has(p.chip_date.slice(0, 10))) continue;
+      chipEvents.push({ key, t: cd.getTime() });
+    }
+    const pairs = clutches.map(c => detectClutchPair(c, sObsChrono, birdMap, chippedThisSeason, chipEvents));
     const parentKeys = new Set<string>();
     for (const pair of pairs) if (pair) { if (pair.male) parentKeys.add(pair.male); if (pair.female) parentKeys.add(pair.female); }
 
