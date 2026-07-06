@@ -4305,6 +4305,10 @@ function ChickReturnChart() {
 function AgeHistogramCard({ title, blurb, xLabel, months, color }: { title: string; blurb: string; xLabel: string; months: number[]; color: string }) {
   if (months.length === 0) return null;
   const maxMonth = Math.max(...months);
+  const minMonth = Math.min(...months);
+  // Don't waste the axis on the empty 0..first-bar range — start just below the first bar
+  // (the age labels stay on 6-month gridlines).
+  const startMonth = Math.max(0, minMonth - 2);
   const bins: number[] = Array(maxMonth + 1).fill(0);
   for (const m of months) bins[m]++;
   const maxCount = Math.max(...bins);
@@ -4312,8 +4316,8 @@ function AgeHistogramCard({ title, blurb, xLabel, months, color }: { title: stri
   const SW = 800, SH = 300, SP = { top: 30, right: 20, bottom: 45, left: 50 };
   const spW = SW - SP.left - SP.right;
   const spH = SH - SP.top - SP.bottom;
-  const barW = spW / maxMonth;
-  const xScale2 = (m: number) => SP.left + (m - 1) * barW;
+  const barW = spW / Math.max(1, maxMonth - startMonth);
+  const xScale2 = (m: number) => SP.left + (m - startMonth - 1) * barW;
   const yScale2 = (v: number) => SP.top + spH - (v / maxCount) * spH;
 
   return (
@@ -4322,7 +4326,7 @@ function AgeHistogramCard({ title, blurb, xLabel, months, color }: { title: stri
       <p className="muted">{blurb}</p>
       <svg viewBox={`0 0 ${SW} ${SH}`} className="report-chart">
         {/* X axis labels - every 6 months, with year lines */}
-        {Array.from({ length: Math.floor(maxMonth / 6) + 1 }, (_, i) => (i + 1) * 6).filter(m => m <= maxMonth).map(m => (
+        {Array.from({ length: Math.floor(maxMonth / 6) + 1 }, (_, i) => (i + 1) * 6).filter(m => m > startMonth && m <= maxMonth).map(m => (
           <Fragment key={m}>
             <line x1={xScale2(m) + barW / 2} x2={xScale2(m) + barW / 2} y1={SP.top} y2={SP.top + spH} stroke={m % 12 === 0 ? '#d0d0d0' : '#ececec'} strokeWidth="1" />
             <text x={xScale2(m) + barW / 2} y={SP.top + spH + 16} textAnchor="middle" fontSize="10" fill={m % 12 === 0 ? '#666' : '#999'} fontWeight={m % 12 === 0 ? '600' : '400'}>{m}m</text>
