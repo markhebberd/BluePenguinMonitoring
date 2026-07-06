@@ -6961,6 +6961,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // false/false no longer needed — hooks return data synchronously
   const [loading, setLoading] = useState(true);
   const [selectedBird, setSelectedBird] = useState<string|null>(initial.bird || null);
+  // A bird opened without a box (deep link ?bird=, search, admin) adopts its most-recently-
+  // seen box so it renders in the box+bird split (panel docked on the right) instead of a
+  // wide, centred, lone page. Cleared once the box is adopted; wide screens only.
+  const [dockBirdToBox, setDockBirdToBox] = useState<boolean>(!!(initial.bird && !initial.box));
   // birdData from useBirdDetail hook
   const [highlightObs, setHighlightObs] = useState<string|null>(null);
   const [scrollToObs, setScrollToObs] = useState<string|null>(null);
@@ -7165,8 +7169,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       setPreviousBox(selectedBox);
       setSelectedBox(null);
     }
+    if (!selectedBox) setDockBirdToBox(true); // opened standalone -> dock beside its recent box
     setSelectedBird(pengNum);
   };
+
+  // Adopt the bird's most-recently-seen box (sightings are newest-first) so a standalone bird
+  // opens as the box+bird split with the panel docked right. Wide screens only — on narrow the
+  // full-width bird page is fine.
+  useEffect(() => {
+    if (!dockBirdToBox || !selectedBird || selectedBox) return;
+    if (window.innerWidth < 900) { setDockBirdToBox(false); return; }
+    const box = birdData?.sightings?.[0]?.box;
+    if (box) { setSelectedBox(box); setDockBirdToBox(false); }
+  }, [dockBirdToBox, selectedBird, selectedBox, birdData]);
 
   const closeBird = () => {
     setSelectedBird(null);
