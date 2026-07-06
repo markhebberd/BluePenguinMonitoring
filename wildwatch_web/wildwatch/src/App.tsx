@@ -1087,7 +1087,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                           <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
                         ))}
                         {Array.from({ length: fledgedUnchipped }).map((_, i) => (
-                          <span key={`fu${i}`} className="scan chick offspring-fledged" title="Unchipped chick — presumed fledged">Unchipped</span>
+                          <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                         ))}
                         <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
                           title="Go to where the egg/chick was first detected"
