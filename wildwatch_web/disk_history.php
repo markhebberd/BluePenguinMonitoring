@@ -27,7 +27,7 @@ function ww_maybe_alert_low_disk($freeMb) {
     $stateFile = __DIR__ . '/disk_alert_last.txt';
     $last = @file_get_contents($stateFile);
     if ($last !== false && (time() - (int)$last) < 12 * 3600) return false; // throttle 12h
-    $to = 'markhebberd@gmail.com, bdot@snotch.com'; $from = 'mark@wildwatch.co.nz';
+    $to = 'markhebberd@gmail.com, bdot@snotch.com'; $from = 'no-reply@wildwatch.co.nz';
     $freeGb = round($freeMb / 1024, 1); $thresholdGb = (int)round($thresholdMb / 1024);
     $headers = "From: $from\r\nReply-To: $from\r\nContent-Type: text/plain; charset=UTF-8";
     $ok = @mail($to, "DISK LOW ({$freeGb} GB free) - wildwatch.co.nz",

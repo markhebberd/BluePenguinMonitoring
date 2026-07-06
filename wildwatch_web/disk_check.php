@@ -1,12 +1,12 @@
 <?php
 $alertEmail = 'markhebberd@gmail.com, bdot@snotch.com';
-$alertFrom  = 'mark@wildwatch.co.nz'; // must be a REAL mailbox on this server — a non-existent noreply@ From got mail() rejected/dropped
+$alertFrom  = 'no-reply@wildwatch.co.nz'; // send-only sender on the local mail server; rspamd DKIM-signs it, Postfix relays out
 $testFile = __DIR__ . '/disk_test.tmp';
 $alertStateFile  = __DIR__ . '/disk_alert_last.txt'; // throttle state for the low-space warning
 $lowDiskWarnMb   = 10 * 1024;                         // warn when free space drops below 10 GB
 $lowDiskThrottle = 12 * 3600;                         // at most one low-space warning per 12h
 
-/** Send a disk alert from a real local mailbox, with a valid envelope sender (-f) so the MTA accepts it. */
+/** Send a disk alert with a valid envelope sender (-f) so the MTA accepts it. */
 function sendDiskAlert($to, $from, $subject, $body) {
     $headers = "From: $from\r\nReply-To: $from\r\nContent-Type: text/plain; charset=UTF-8";
     return @mail($to, $subject, $body, $headers, "-f$from");
