@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 12; // Bump to force all clients to full re-sync (v12: observations.fledged_unchipped)
+const CACHE_VERSION = 13; // Bump to force all clients to full re-sync (v13: penguins.death_date)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 
 // Locations excluded from Full Monitor detection. Now configured per-colony (colonies.fm_excluded_boxes,
@@ -1233,22 +1233,26 @@ export function computeScanBeforeChip(): any[] {
 export function computeDeadScanned(): any[] {
   if (!mem) return [];
   const c = mem;
-  const cutoff = utcToNzDate(new Date(Date.now() - 365 * 86400000).toISOString());
+  // Parse a UTC datetime string ("YYYY-MM-DD HH:MM:SS") to epoch ms, same normalisation
+  // as utcToNzDate. death_date is stamped at 2pm NZ (02:00 UTC) on the death date.
+  const toMs = (u: string) => new Date(u.includes('T') || u.includes('Z') ? u : u.replace(' ', 'T') + 'Z').getTime();
   const rows: any[] = [];
   for (const p of c.penguins) {
-    if (!p.is_dead) continue;
-    let last = '', count = 0, lastTime = '', lastBox = '';
+    if (!p.death_date) continue;
+    const deathMs = toMs(p.death_date);
+    let count = 0, lastTime = '', lastBox = '';
     for (const ch of (c.chipsByPeng.get(p.peng_num) || [])) {
       for (const s of (c.scansByPit.get(ch.pit_id) || [])) {
         if (s.scan_deleted) continue;
         const obs = c.obsById.get(s.observation_id);
         if (!obs || obs.is_deleted) continue;
         const t = obs.observation_time_utc;
+        if (toMs(t) <= deathMs) continue; // only scans AFTER the bird died
         count++;
-        if (t > lastTime) { lastTime = t; last = utcToNzDate(t); lastBox = c.locById.get(obs.location_id)?.location_name || ''; }
+        if (t > lastTime) { lastTime = t; lastBox = c.locById.get(obs.location_id)?.location_name || ''; }
       }
     }
-    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count, _href: obsBirdHref(lastBox, lastTime, p.peng_num) });
+    if (count > 0) rows.push({ peng_num: p.peng_num, death_date: utcToNzDate(p.death_date), last_scan: utcToNzDate(lastTime), scan_count: count, _href: obsBirdHref(lastBox, lastTime, p.peng_num) });
   }
   return rows.sort((a, b) => b.last_scan.localeCompare(a.last_scan));
 }

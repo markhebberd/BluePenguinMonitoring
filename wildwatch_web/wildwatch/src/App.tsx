@@ -7131,6 +7131,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, [boxDetail, selectedBox, obsAnchor]);
 
   const birdData = useBirdDetail(loading ? null : selectedBird);
+  // Reports page: clicking a bird docks a peng panel on the right instead of leaving.
+  const [reportsBird, setReportsBird] = useState<string|null>(null);
+  const reportsBirdData = useBirdDetail(reportsBird);
 
   const openBird = (pengNum: string) => {
     if (window.innerWidth < 900 && selectedBox) {
@@ -7424,11 +7427,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <div className="reports-page">
+        <div className={`reports-page${reportsBird && reportsBirdData?.penguin ? ' reports-page-docked' : ''}`}>
           <h2 className="reports-title">Reports</h2>
-          <TopChickParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
-          <UnproductiveParentsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
-          <PenguinGroupsReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
+          <TopChickParentsReport onOpenBird={setReportsBird} />
+          <UnproductiveParentsReport onOpenBird={setReportsBird} />
+          <PenguinGroupsReport onOpenBird={setReportsBird} />
           <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
@@ -7439,9 +7442,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <ChickSexBothReturnedChart />
           <PenguinAgeCharts />
           <SurvivalPredictionReport />
-          <PairBondReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
-          <FloaterReport onOpenBird={(num) => { setShowReports(false); openBird(num); }} />
+          <PairBondReport onOpenBird={setReportsBird} />
+          <FloaterReport onOpenBird={setReportsBird} />
         </div>
+        {reportsBird && reportsBirdData?.penguin && (
+          <div className="day-bird-dock entry-bird-dock">
+            <BirdPage data={reportsBirdData} onBirdClick={(num: string) => setReportsBird(num)}
+              onBoxClick={(box: string) => { setShowReports(false); openBox(box); }}
+              onSightingClick={(box: string, date: string) => { setShowReports(false); goToBoxFromBird(box, date); }}
+              onDayClick={(d: string) => { setShowReports(false); goToDay(d); }}
+              onClose={() => setReportsBird(null)}
+              token={token} canEdit={userRole !== 'viewer'} />
+          </div>
+        )}
         {passwordDialog}
       </div>
     );

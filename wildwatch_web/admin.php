@@ -189,17 +189,19 @@ if ($action === 'scan_before_chip') {
     exit;
 }
 
-// Birds marked dead that were still scanned in the last year — death flag or scan is wrong.
+// Birds scanned AFTER their recorded death date — the death date or the scan is wrong.
 if ($action === 'dead_scanned') {
     echo json_encode($pdo->query("
-        SELECT p.peng_num, MAX(" . WW_NZ . ") AS last_scan, COUNT(*) AS scan_count
+        SELECT p.peng_num, DATE(CONVERT_TZ(p.death_date, '+00:00', '+12:00')) AS death_date,
+            MAX(" . WW_NZ . ") AS last_scan, COUNT(*) AS scan_count
         FROM penguins p
         JOIN penguin_chips pc ON pc.peng_num = p.peng_num
         JOIN penguin_scans ps ON ps.pit_id = pc.pit_id
         JOIN observations o ON ps.observation_id = o.observation_id
-        WHERE p.is_dead = 1 AND o.is_deleted = FALSE AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
-        GROUP BY p.peng_num
-        HAVING last_scan >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+        WHERE p.death_date IS NOT NULL AND o.is_deleted = FALSE
+          AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+          AND o.observation_time_utc > p.death_date
+        GROUP BY p.peng_num, p.death_date
         ORDER BY last_scan DESC
         LIMIT 500")->fetchAll());
     exit;

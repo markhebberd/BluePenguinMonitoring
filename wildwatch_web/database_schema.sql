@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS penguins (
     chip_date DATE,
     chipped_as_adult BOOLEAN DEFAULT FALSE,
     sex VARCHAR(10),
-    is_dead BOOLEAN DEFAULT FALSE,
+    death_date DATETIME NULL, -- 2pm NZ (02:00 UTC) on the death date; NULL = alive
+    is_dead BOOLEAN GENERATED ALWAYS AS (death_date IS NOT NULL) STORED,
     vid_for_scanner VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
