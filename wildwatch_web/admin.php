@@ -1214,13 +1214,14 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                     if ($sexRaw !== '') {
                         list($size, $obsSex) = $parseSexCell($sexRaw);
                         if ($size !== '') {
-                            // A size code is only valid for a chick chipped in THIS box on THIS date.
+                            // A size code is valid only if this bird was chipped as a chick in THIS
+                            // box on or before this date (chipping day, then later re-sightings).
                             $chippedHere = false;
                             foreach ($pengChips[$pgR] ?? [] as $ce)
-                                if ($ce['date'] === $obsDate && $ce['box'] === strtoupper($box)) { $chippedHere = true; break; }
+                                if ($ce['box'] === strtoupper($box) && (!$obsDate || $ce['date'] <= $obsDate)) { $chippedHere = true; break; }
                             $recorded = $pengChickSize[$pgR] ?? '';
                             if (!$chippedHere)
-                                $warnings[] = "size $size on #" . displayPengNum($pgR, $prefix) . ' — not a chick chipped in box ' . $box . ' on ' . ($obsDate ?: '?');
+                                $warnings[] = "size $size on #" . displayPengNum($pgR, $prefix) . ' — no chick chipping in box ' . $box . ' on/before ' . ($obsDate ?: '?');
                             elseif ($recorded === '')
                                 $warnings[] = "size $size for #" . displayPengNum($pgR, $prefix) . ' but no chick size recorded';
                             elseif ($recorded !== $size)
