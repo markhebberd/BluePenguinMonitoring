@@ -1304,7 +1304,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 $s = $seenInBox[$locId . '|' . $sc['peng_num']] ?? null;
                 $seenOtherDate = $s && ($s['min'] < $obsDate || $s['max'] > $obsDate);
                 if (!$seenOtherDate) {
-                    $warnings[] = 'Never seen in this box:';
+                    $warnings[] = 'Never seen in box ' . $box . ':';
                     $addMini($sc['peng_num']);
                 }
             }
