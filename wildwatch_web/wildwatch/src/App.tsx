@@ -783,14 +783,13 @@ const windowRange = (c: { windowStart: number; windowEnd: number; end: number | 
 function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!clutchActive(clutch) || clutch.laid === null) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
-  return (
-    <span className="clutch-predictions">
-      {clutch.maxChicks === 0 && <span>hatch ~{d(BREEDING_OFFSETS.hatch)}</span>}
-      <span>guard ends ~{d(BREEDING_OFFSETS.pg)}</span>
-      <span>chip ~{d(BREEDING_OFFSETS.chip)} – {d(BREEDING_OFFSETS.fledge)}</span>
-      <span>fledge ~{d(BREEDING_OFFSETS.fledge)}</span>
-    </span>
-  );
+  const parts = [
+    ...(clutch.maxChicks === 0 ? [`Hatch ~${d(BREEDING_OFFSETS.hatch)}`] : []),
+    `Guard ends ~${d(BREEDING_OFFSETS.pg)}`,
+    `Chip ~${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`,
+    `Fledge ~${d(BREEDING_OFFSETS.fledge)}`,
+  ];
+  return <span className="clutch-predictions">{parts.join(', ')}</span>;
 }
 
 
@@ -5701,15 +5700,28 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
           <div key={i} className="obs-card" style={{marginBottom:2, padding:'4px 10px', marginLeft:8}}>
             <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
               <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
-              <span>{e.table_name}{e.box_name ? ` · Box ${e.box_name}` : ''} #{e.record_id}</span>
+              <span>{e.table_name === '__sql_console' ? 'SQL console' : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
               <span className="muted">{e.observer_name || ''}</span>
               {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
             </div>
+            {e.table_name === '__sql_console' && fields?.sql && (
+              <div style={{fontSize:11, marginTop:2, fontFamily:'monospace', color:'#555', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{fields.sql}</div>
+            )}
             {e.action === 'UPDATE' && fields && (
               <div style={{fontSize:11, marginTop:2}}>
                 {Object.entries(fields).map(([k, v]: [string, any]) => (
                   <span key={k} className="muted" style={{marginRight:8}}>{k}: {v && typeof v === 'object' && 'old' in v ? <><s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</> : String(v ?? '')}</span>
                 ))}
+              </div>
+            )}
+            {/* INSERTs store the whole new row — show its meaningful fields (drop the ids/plumbing). */}
+            {e.action === 'INSERT' && fields && e.table_name !== '__sql_console' && (
+              <div style={{fontSize:11, marginTop:2}}>
+                {Object.entries(fields)
+                  .filter(([k, v]: [string, any]) => !['location_id','observer_id','colony_id','monitor_filename','is_deleted','observation_id','scan_id','biometric_id'].includes(k) && v !== null && v !== '' )
+                  .map(([k, v]: [string, any]) => (
+                    <span key={k} className="muted" style={{marginRight:8}}>{k}: {String(typeof v === 'string' && /^\d{4}-\d\d-\d\d[ T]/.test(v) ? v.slice(0, 16).replace('T', ' ') : v)}</span>
+                  ))}
               </div>
             )}
           </div>
