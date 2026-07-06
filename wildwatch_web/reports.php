@@ -10,6 +10,7 @@ $report = $_GET['report'] ?? '';
 
 switch ($report) {
     case 'egg_arrival': eggArrival($pdo, $colonyId); break;
+    case 'breeding_dates': breedingDates($pdo, $colonyId); break;
     case 'chick_sex': chickSex($pdo, $colonyId); break;
     case 'chick_return': chickReturn($pdo, $colonyId); break;
     case 'distinct_adults': distinctAdults($pdo, $colonyId); break;
@@ -75,6 +76,69 @@ function eggArrival($pdo, $colonyId) {
 
     usort($result, function($a, $b) { return strcmp($a['season'], $b['season']); });
     echo json_encode($result);
+}
+
+/**
+ * Per-box predicted breeding milestones for the box's CURRENT clutch, keyed by box name.
+ * Faithful port of nestcheck's removed local estimator (GetBoxBreedingStatusString): walk
+ * back from the latest observation while offspring are present to the last empty check, take
+ * the midpoint as the probable laid date (minus 2 days if the current clutch has 2+ eggs),
+ * then project stages at laid + 38/52/80/87 days. Returns ± uncertainty (half the gap).
+ * Consumed by nestcheck's "Next breeding dates" card.
+ */
+function breedingDates($pdo, $colonyId) {
+    $stmt = $pdo->prepare("SELECT ol.location_name AS box,
+        DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) AS nz_date,
+        COALESCE(o.eggs,0) AS eggs, COALESCE(o.chicks,0) AS chicks, o.breeding_status AS bs
+        FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        ORDER BY ol.location_name, o.observation_time_utc ASC");
+    $stmt->execute([$colonyId]);
+
+    // Stage offsets (days after laid): hatch, post-guard, chip-window start, fledge.
+    $HATCH = 38; $PG = 52; $CHIP = 80; $FLEDGE = 87;
+    $mk = function(DateTime $laid, $off) { $d = clone $laid; $d->modify("+$off days"); return $d->format('Y-m-d'); };
+
+    // Group observations by box, chronological (query already sorts ascending).
+    $byBox = [];
+    foreach ($stmt->fetchAll() as $r) $byBox[$r['box']][] = $r;
+
+    $out = [];
+    foreach ($byBox as $box => $obs) {
+        $desc = array_reverse($obs);              // newest first
+        $cur = $desc[0];
+        if ($cur['bs'] === 'ABN') continue;       // abandoned
+        if ((int)$cur['eggs'] + (int)$cur['chicks'] === 0) continue; // not currently breeding
+
+        $whenFound = new DateTime($cur['nz_date']);   // walked back to first sighting of this clutch
+        $sawEggs = (int)$cur['eggs'] > 0;
+        for ($i = 1; $i < count($desc); $i++) {
+            $o = $desc[$i];
+            if ($o['bs'] === 'ABN' && (int)$o['eggs'] + (int)$o['chicks'] > 0) break; // abandoned mid-clutch
+            if ((int)$o['eggs'] > 0) $sawEggs = true;
+            if ((int)$o['eggs'] + (int)$o['chicks'] === 0) {        // last empty check before the clutch
+                if ($o['bs'] === 'ABN') break;
+                if ((int)$cur['eggs'] > 1) $whenFound->modify('-2 days'); // 1st egg ~2d before found
+                $notFound = new DateTime($o['nz_date']);
+                $gapDays = ($whenFound->getTimestamp() - $notFound->getTimestamp()) / 86400;
+                $laid = (clone $notFound)->modify('+' . (int)ceil($gapDays / 2) . ' days');
+                $out[$box] = [
+                    'boxNumber' => is_numeric($box) ? (int)$box : 0,
+                    'estHatchDate' => ($sawEggs && (int)$cur['chicks'] === 0) ? $mk($laid, $HATCH) : '',
+                    'estPGDate' => $mk($laid, $PG),
+                    'chipWindowStart' => $mk($laid, $CHIP),
+                    'chipWindowFinish' => $mk($laid, $FLEDGE),
+                    'estFledgeDate' => $mk($laid, $FLEDGE),
+                    'probableLaidDate' => $laid->format('Y-m-d'),
+                    'uncertaintyDays' => (int)floor($gapDays / 2),
+                ];
+                break;
+            }
+            $whenFound = new DateTime($o['nz_date']);   // still offspring — keep walking back
+        }
+    }
+    echo json_encode((object)$out); // object (not []) so an empty result deserialises as a map
 }
 
 function chickSex($pdo, $colonyId) {
