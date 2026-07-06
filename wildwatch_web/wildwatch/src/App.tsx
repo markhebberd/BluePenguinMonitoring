@@ -555,7 +555,7 @@ function wigglePengMinis(keys: (string | null | undefined)[]) {
     el.classList.remove('peng-wiggle');
     void (el as HTMLElement).offsetWidth; // reflow so a re-added class restarts the animation
     el.classList.add('peng-wiggle');
-    wiggleTimers.set(el, setTimeout(() => el.classList.remove('peng-wiggle'), 1000));
+    wiggleTimers.set(el, setTimeout(() => el.classList.remove('peng-wiggle'), 2000));
   }
 }
 
