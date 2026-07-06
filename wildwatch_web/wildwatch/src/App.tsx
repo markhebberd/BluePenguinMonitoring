@@ -540,6 +540,25 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}</a>;
 }
 
+/** Peng_num of the bird whose peng panel is currently open (null when none). Lets a
+ *  mini click detect "already selected" and re-trigger the wiggle. */
+let openPanelPengNum: string | null = null;
+const wiggleTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+/** Briefly wiggle every mini matching the given peng/pit keys, including the peng
+ *  panel's own header mini. Safe to re-trigger mid-wiggle: the animation restarts. */
+function wigglePengMinis(keys: (string | null | undefined)[]) {
+  const ks = keys.filter(Boolean) as string[];
+  if (ks.length === 0) return;
+  const els = Array.from(document.querySelectorAll(ks.map(k => `[data-peng="${CSS.escape(k)}"]`).join(',')));
+  for (const el of els) {
+    clearTimeout(wiggleTimers.get(el));
+    el.classList.remove('peng-wiggle');
+    void (el as HTMLElement).offsetWidth; // reflow so a re-added class restarts the animation
+    el.classList.add('peng-wiggle');
+    wiggleTimers.set(el, setTimeout(() => el.classList.remove('peng-wiggle'), 1000));
+  }
+}
+
 function PenguinMini({ scan, onClick, observationDate, navigateDirectly, currentStatus, title }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean; currentStatus?: boolean; title?: string }) {
   const sex = (scan.sex || '').toUpperCase();
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
@@ -597,7 +616,11 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
+      onClick();
+      // Re-clicking the bird already open in the panel won't remount it — re-wiggle here.
+      if (scan.peng_num && scan.peng_num === openPanelPengNum) wigglePengMinis([scan.peng_num, chip]);
+    })}>
       {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );
@@ -1824,16 +1847,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
 
   const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
 
-  // When the panel opens or switches bird, briefly wiggle every OTHER mini of this bird
-  // on the page so the user sees at a glance where else it's referenced.
+  // When the panel opens or switches bird, briefly wiggle every mini of this bird on
+  // the page (panel header included) so the user sees at a glance where it's referenced.
   useEffect(() => {
-    const keys = [p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))].filter(Boolean);
-    if (keys.length === 0) return;
-    const els = Array.from(document.querySelectorAll(keys.map(k => `[data-peng="${CSS.escape(String(k))}"]`).join(',')))
-      .filter(el => !el.closest('.bird-detail'));
-    els.forEach(el => el.classList.add('peng-wiggle'));
-    const t = setTimeout(() => els.forEach(el => el.classList.remove('peng-wiggle')), 1000);
-    return () => { clearTimeout(t); els.forEach(el => el.classList.remove('peng-wiggle')); };
+    openPanelPengNum = p.peng_num || null;
+    wigglePengMinis([p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))]);
+    return () => { openPanelPengNum = null; };
   }, [p.peng_num]);
 
   // Peng-centric breeding family: run the SAME nest family detection (computeBoxFamilies)
