@@ -1552,7 +1552,7 @@ namespace PenguinMonitor
 
             _statusText = new TextView(this)
             {
-                TextSize = 14,
+                TextSize = 13,
                 Gravity = GravityFlags.Center
             };
             _statusText.SetTextColor(Color.Black);
