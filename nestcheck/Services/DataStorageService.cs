@@ -52,6 +52,7 @@ namespace PenguinMonitor.Services
         internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/api/sync.php";
         internal const string WILDWATCH_API_KEY = "b30181424b2d70102fb90a32af6c013e63e7b0d49ae466ebf90aa0f969ddbe02";
         internal const string WILDWATCH_EVENTS_URL = "https://wildwatch.co.nz/api/events.php";
+        internal const string WILDWATCH_REPORTS_URL = "https://wildwatch.co.nz/api/reports.php";
 
         // ===== Background Polling =====
 
@@ -433,6 +434,24 @@ namespace PenguinMonitor.Services
                     return merged;
                 }, "Biometrics", null, isCancelled);
 
+                // Breeding dates: fetch per-box current-clutch predictions from wildwatch
+                // (which now owns the estimator). Non-critical — failures don't fail the sync.
+                Task datesTask = WithRetry(async () =>
+                {
+                    int cid = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
+                    var req = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_REPORTS_URL}?report=breeding_dates&colony_id={cid}");
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
+                    resp.EnsureSuccessStatusCode();
+                    var datesJson = await resp.Content.ReadAsStringAsync();
+                    if (string.IsNullOrEmpty(datesJson) || !datesJson.TrimStart().StartsWith("{"))
+                        throw new Exception("Breeding dates API: expected JSON object");
+                    var parsed = JsonConvert.DeserializeObject<Dictionary<string, BoxPredictedDates>>(datesJson);
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BREEDING_DATES_FILENAME), datesJson);
+                    return parsed?.Count ?? 0;
+                }, "Breeding dates", null, isCancelled);
+
                 // Tags: fetch + sync
                 Task<BoxTagService.SyncResult?> tagSyncTask;
                 if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)
@@ -446,7 +465,7 @@ namespace PenguinMonitor.Services
                     tagSyncTask = Task.FromResult<BoxTagService.SyncResult?>(null);
 
                 // Wait for all — don't throw if individual tasks fail
-                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask, bioTask); } catch { }
+                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask, bioTask, datesTask); } catch { }
 
                 // Save colony state after all tasks complete (boxes task already mutated it)
                 SaveColonyState(context, colonyState);

@@ -263,6 +263,7 @@ namespace PenguinMonitor
         private async Task ApplyPostSync(DataStorageService.SyncResult result)
         {
             _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+            _remoteBreedingDates = await _dataStorageService.loadBreedingDatesFromAppDataDir(this);
             _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
             if (result.BoxTags != null) _boxTags = result.BoxTags;
             _lastSyncCheckUtc = DateTime.UtcNow;
@@ -5738,6 +5739,7 @@ namespace PenguinMonitor
 
                 // Load remote penguin data.
                 _remotePenguinData = await _dataStorageService.loadRemotePengInfoFromAppDataDir(this);
+                _remoteBreedingDates = await _dataStorageService.loadBreedingDatesFromAppDataDir(this);
                 _boxNotes = _dataStorageService.LoadBoxNotesFromDisk(this);
                 if (_remotePenguinData != null &&  _remoteBreedingDates != null)
                 {
