@@ -785,15 +785,22 @@ const windowRange = (c: { windowStart: number; windowEnd: number; end: number | 
 function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!clutchActive(clutch) || clutch.laid === null) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
+  const t = (off: number) => clutch.laid! + off * DAY;
   const parts = [
-    ...(clutch.maxChicks === 0 ? [`Hatch ${d(BREEDING_OFFSETS.hatch)}`] : []),
-    `Guard ends ${d(BREEDING_OFFSETS.pg)}`,
-    `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`,
-    `Fledge ${d(BREEDING_OFFSETS.fledge)}`,
+    ...(clutch.maxChicks === 0 ? [{ text: `Hatch ${d(BREEDING_OFFSETS.hatch)}`, t: t(BREEDING_OFFSETS.hatch) }] : []),
+    { text: `Guard ends ${d(BREEDING_OFFSETS.pg)}`, t: t(BREEDING_OFFSETS.pg) },
+    { text: `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.chip) },
+    { text: `Fledge ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.fledge) },
   ];
+  const nextIdx = parts.findIndex(p => p.t >= Date.now()); // the stage coming up next
   const unc = clutch.laidUncertainty !== null && clutch.laidUncertainty > 0
-    ? ` ± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
-  return <span className="clutch-predictions">{parts.join(', ') + unc}</span>;
+    ? `± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
+  return (
+    <span className="clutch-predictions">
+      {parts.map((p, i) => <span key={i}>{i > 0 ? ', ' : ''}{i === nextIdx ? <b>{p.text}</b> : p.text}</span>)}
+      {unc ? `, ${unc}` : ''}
+    </span>
+  );
 }
 
 
