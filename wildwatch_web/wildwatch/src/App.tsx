@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -3851,6 +3851,33 @@ function PeakAdultsChart({ onDayClick }: { onDayClick?: (day: string) => void })
   );
 }
 
+/** First egg recorded in the colony each breeding season, with the box it appeared in. */
+function FirstEggReport({ onDayClick }: { onDayClick?: (day: string) => void }) {
+  const rows = useFirstEgg();
+  if (rows.length === 0) return <div className="report-card"><p className="muted">No egg data available</p></div>;
+  const fmt = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <div className="report-card">
+      <h3>First Egg Each Season</h3>
+      <p className="muted">The earliest egg recorded anywhere in the colony each breeding season (Apr–Mar), newest first</p>
+      <table className="guess-rank-table mini-list-table">
+        <thead><tr><th>Season</th><th>First egg</th><th>Box</th></tr></thead>
+        <tbody>
+          {rows.map((r: any) => (
+            <tr key={r.season}>
+              <td style={{ fontWeight: 600 }}>{r.season}</td>
+              <td>{onDayClick
+                ? <span className="clickable" style={{ color: '#1565c0', textDecoration: 'underline' }} onClick={() => onDayClick(r.date)}>{fmt(r.date)}</span>
+                : fmt(r.date)}</td>
+              <td><a className="day-box-link" href={`/box/${r.box}`}>Box {r.box}</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function EggArrivalChart() {
   const data = useEggArrival();
 
@@ -7689,6 +7716,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
           <PeakAdultsChart onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
+          <FirstEggReport onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
           <EggArrivalChart />
           <ChickReturnChart />
           <ChickSexChart />

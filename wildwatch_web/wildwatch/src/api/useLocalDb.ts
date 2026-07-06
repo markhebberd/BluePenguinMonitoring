@@ -29,6 +29,10 @@ export function useEggArrival(): any[] {
   return useSyncExternalStore(subscribe, () => cached('eggArrival', computeEggArrival));
 }
 
+export function useFirstEgg(): any[] {
+  return useSyncExternalStore(subscribe, () => cached('firstEgg', computeFirstEgg));
+}
+
 export function useDistinctAdults(): any[] {
   return useSyncExternalStore(subscribe, () => cached('distinctAdults', computeDistinctAdults));
 }

@@ -940,6 +940,26 @@ export function computeEggArrival(): any[] {
   return result;
 }
 
+/** The first egg seen in the colony each breeding season — earliest observation with eggs > 0. */
+export function computeFirstEgg(): { season: string; date: string; box: string; obs_time: string }[] {
+  if (!mem) return [];
+  const c = mem;
+  const bySeason = new Map<string, { date: string; box: string; obs_time: string }>();
+  for (const o of c.observations) {
+    if (o.is_deleted || (o.eggs || 0) < 1) continue;
+    const box = c.locById.get(o.location_id)?.location_name;
+    if (!box) continue;
+    const season = seasonLabel(seasonYearFromDate(utcToNzDate(o.observation_time_utc)));
+    const cur = bySeason.get(season);
+    if (!cur || o.observation_time_utc < cur.obs_time) {
+      bySeason.set(season, { date: utcToNzDate(o.observation_time_utc), box, obs_time: o.observation_time_utc });
+    }
+  }
+  return Array.from(bySeason.entries())
+    .map(([season, v]) => ({ season, ...v }))
+    .sort((a, b) => b.season.localeCompare(a.season)); // newest season first
+}
+
 /** Count of distinct adult penguins scanned per season. */
 export function computeDistinctAdults(): any[] {
   if (!mem) return [];
