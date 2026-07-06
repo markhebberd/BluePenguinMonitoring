@@ -4273,7 +4273,9 @@ function BreedingAgeHistograms() {
             if (!key) continue;
             const born = parseDate(parent.chip_date).getTime();
             const mo = (t: number) => Math.round((t - born) / (1000 * 60 * 60 * 24 * 30.44));
-            if (fam.clutch.maxEggs >= 1) {
+            // A clutch that produced a chick necessarily had an egg, even if the egg stage was
+            // never recorded — so it counts toward "first egg" too (a chick can't predate its egg).
+            if (fam.clutch.maxEggs >= 1 || fam.chicks.length > 0) {
               const t = fam.clutch.laid ?? fam.clutch.windowStart;
               if (t) {
                 const m = mo(t);
@@ -4294,7 +4296,7 @@ function BreedingAgeHistograms() {
 
   return (
     <>
-      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected in a breeding pair whose clutch had at least one egg (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
+      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected in a breeding pair whose clutch had an egg — or produced a chick (an egg that was never recorded) (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
       <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`How old chick-chipped penguins were when their first chick was chipped (n=${chickMonths.length}, age measured from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
     </>
   );
