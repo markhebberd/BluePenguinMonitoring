@@ -731,6 +731,18 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
   return null;
 }
 
+/** Display sort rank by sex: M first, F second, unsexed last. An unsexed bird with a
+ *  majority biometric sex guess (rendered as UM/UF) ranks with the confirmed sex. */
+function sexSortOrder(b: any): number {
+  const s = (b.sex || '').toUpperCase();
+  if (s === 'M') return 0;
+  if (s === 'F') return 1;
+  const g = observedSexGuess(b.peng_num);
+  if (g.m > g.f) return 0;
+  if (g.f > g.m) return 1;
+  return 2;
+}
+
 const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
 /** Season label "2026" → "2026/27" (breeding season spans two calendar years). */
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
@@ -916,13 +928,10 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
       if (fi >= 0) chickFamily.set(k, fi);
     }
 
-    // Sort birds: M, F, unsexed; within a group by scan count descending
+    // Sort birds: M, F, unsexed (sex guesses count); within a group by scan count descending
     const birds = Array.from(birdMap.values()).sort((a, b) => {
-      const aSex = (a.sex || '').toUpperCase();
-      const bSex = (b.sex || '').toUpperCase();
-      const aOrder = aSex === 'M' ? 0 : aSex === 'F' ? 1 : 2;
-      const bOrder = bSex === 'M' ? 0 : bSex === 'F' ? 1 : 2;
-      if (aOrder !== bOrder) return aOrder - bOrder;
+      const diff = sexSortOrder(a) - sexSortOrder(b);
+      if (diff !== 0) return diff;
       return b.scanCount - a.scanCount;
     });
 
@@ -1108,10 +1117,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
-                          <span key={`fe${i}`} className="offspring-final" title="Egg did not hatch">{'🥚'}</span>
+                          <span key={`fe${i}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'🥚'}<span className="fail-x">{'✕'}</span></span>
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
-                          <span key={`pc${i}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                          <span key={`pc${i}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'🐣'}<span className="fail-x">{'✕'}</span></span>
                         ))}
                         {Array.from({ length: fledgedUnchipped }).map((_, i) => (
                           <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
@@ -1978,10 +1987,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                         ))}
                         {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
-                          <span key={`fe${j}`} className="offspring-final" title="Egg did not hatch">{'\uD83E\uDD5A'}</span>
+                          <span key={`fe${j}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'\uD83E\uDD5A'}<span className="fail-x">{'\u2715'}</span></span>
                         ))}
                         {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
-                          <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}</span>
+                          <span key={`pc${j}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}<span className="fail-x">{'\u2715'}</span></span>
                         ))}
                       </div>
                     )}
@@ -2096,17 +2105,17 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                         <div key={`w${gi}`} className="partner-window-box">
                           <div className="partner-window-head">
                             {/* Offspring at their final life stage: chipped chick →
-                                PenguinMini, chick never chipped → 🐣, egg that never
-                                hatched → plain egg. */}
+                                PenguinMini, chick never chipped → red-✕ 🐣, egg that
+                                never hatched → red-✕ egg. */}
                             <span className="partner-window-offspring">
                               {fam.chicks.map((ck: any) => (
                                 <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={ck.chip_date ? chickContextDate(ck.chip_date) : undefined} />
                               ))}
                               {Array.from({ length: fam.plainChicks }).map((_, j) => (
-                                <span key={`pc${j}`} className="offspring-final" title="Chick was not chipped in the nest">{'🐣'}</span>
+                                <span key={`pc${j}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'🐣'}<span className="fail-x">{'✕'}</span></span>
                               ))}
                               {Array.from({ length: fam.failedEggs }).map((_, j) => (
-                                <span key={`fe${j}`} className="offspring-final" title="Egg did not hatch">{'🥚'}</span>
+                                <span key={`fe${j}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'🥚'}<span className="fail-x">{'✕'}</span></span>
                               ))}
                             </span>
                             <a className="partner-window-dates clickable" href={`/box/${g.rows[0].box}`}
@@ -2965,8 +2974,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             }
           }
           const sorted = Array.from(seenBirds.entries()).sort(([,a], [,b]) => {
-            const sexOrder = (s: any) => (s.sex || '').toUpperCase() === 'M' ? 0 : (s.sex || '').toUpperCase() === 'F' ? 1 : 2;
-            const diff = sexOrder(a) - sexOrder(b);
+            const diff = sexSortOrder(a) - sexSortOrder(b);
             return diff !== 0 ? diff : b.count - a.count;
           });
           return sorted.length > 0 ? (
