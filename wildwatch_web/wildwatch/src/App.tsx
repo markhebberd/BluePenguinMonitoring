@@ -5632,6 +5632,10 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [impResult, setImpResult] = useState<any>(null);
   const [impError, setImpError] = useState('');
   const [impRowFilter, setImpRowFilter] = useState<'issues' | 'all'>('issues');
+  // Bird panel docked on the right of the admin screen (opened from #peng cells / import minis).
+  const [adminBird, setAdminBird] = useState<string|null>(null);
+  const adminBirdData = useBirdDetail(adminBird);
+  useEffect(() => { _adminOpenBird = setAdminBird; return () => { if (_adminOpenBird === setAdminBird) _adminOpenBird = null; }; }, []);
   const allPengsForMini = useAllPenguins();
   const pengByNumMini = useMemo(() => {
     const m = new Map<string, any>();
@@ -5912,7 +5916,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
 
   return (
-    <div className="admin-panel">
+    <>
+    <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
         {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
@@ -6061,9 +6066,12 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                   <tbody>
                     {shown.map((r: any) => {
                       const bg = r.status === 'error' ? '#fdecea' : r.status === 'duplicate' ? '#fff6e0' : r.warnings?.length ? '#fffbe6' : 'transparent';
-                      const openBox = r.location_id
-                        ? () => window.open(`/?box=${encodeURIComponent(r.box)}${r.prev_obs ? `&obs=${encodeURIComponent(r.prev_obs)}` : ''}`, '_blank')
-                        : undefined;
+                      // Click a row (incl. errors) to investigate: the box anchored at this row's own
+                      // date/observation, or — if the box is unknown — the whole day.
+                      const invHref = r.location_id
+                        ? `/?box=${encodeURIComponent(r.box)}${(r.obs_time || r.prev_obs) ? `&obs=${encodeURIComponent(r.obs_time || r.prev_obs)}` : ''}`
+                        : (r.date ? `/?day=${encodeURIComponent(r.date)}` : null);
+                      const openBox = invHref ? () => window.open(invHref, '_blank') : undefined;
                       return (
                         <tr key={r.line} style={{ background: bg, cursor: openBox ? 'pointer' : 'default' }}
                           onClick={openBox}
@@ -6097,7 +6105,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                                   if (!p) return <span key={pn} className="muted" style={{ fontSize: 11 }}>#{pn}</span>;
                                   return <PenguinMini key={pn}
                                     scan={{ peng_num: p.peng_num, pit_id: p.pit_id, sex: p.sex, chip_date: p.chip_date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, hasReturned: p.hasReturned }}
-                                    onClick={() => window.open(`/?bird=${encodeURIComponent(pn)}`, '_blank')} observationDate={r.date} />;
+                                    onClick={() => setAdminBird(String(pn))} observationDate={r.date} />;
                                 })}
                               </span>
                             )}
@@ -6514,6 +6522,17 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         )}
       </div>
     </div>
+    {adminBird && adminBirdData?.penguin && (
+      <div className="day-bird-dock entry-bird-dock">
+        <BirdPage data={adminBirdData} onBirdClick={(num: string) => setAdminBird(num)}
+          onBoxClick={(box: string) => window.open(`/box/${box}`, '_blank')}
+          onSightingClick={(box: string, date: string) => window.open(`/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(date)}`, '_blank')}
+          onDayClick={(d: string) => window.open(`/?day=${encodeURIComponent(d)}`, '_blank')}
+          onClose={() => setAdminBird(null)}
+          token={token} canEdit={localStorage.getItem('ww_role') !== 'viewer'} />
+      </div>
+    )}
+    </>
   );
 }
 
@@ -6923,7 +6942,12 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
 // (its _href → the exact observation/date, highlighted) rather than a naked /day or /box.
 const dayCell = (d: string) => d ? <span className="clickable">{d}</span> : '';
 const boxCell = (b: string) => b ? <span className="clickable">Box {b}</span> : '';
-const pengCell = (n: string) => n ? <span className="clickable">#{n}</span> : '';
+// The mounted AdminPanel registers its bird-dock opener here so #peng cells in the integrity
+// tables open the panel on the right (stopPropagation so the row's own nav doesn't also fire).
+let _adminOpenBird: ((n: string) => void) | null = null;
+const pengCell = (n: string) => n
+  ? <span className="clickable" onClick={e => { if (_adminOpenBird && n) { e.stopPropagation(); _adminOpenBird(String(n)); } }}>#{n}</span>
+  : '';
 const redNum = (v: any) => <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span>;
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
   <Fragment key={i}>{i > 0 ? ', ' : ''}<span className="clickable">{b.trim()}</span></Fragment>
