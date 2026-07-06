@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 8; // Bump to force all clients to full re-sync (v8: FM-excluded boxes now per-colony from snapshot, not hardcoded)
+const CACHE_VERSION = 9; // Bump to force all clients to full re-sync (v9: biometrics carry is_deleted)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 
 // Locations excluded from Full Monitor detection. Now configured per-colony (colonies.fm_excluded_boxes,
@@ -700,7 +700,9 @@ function queryBirdDetailInner(pengNum: string): any {
   const chips = (c.chipsByPeng.get(pengNum) || []).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
   const result = { ...penguin, chips };
 
-  const biometrics = (c.bioByPeng.get(pengNum) || []).sort((a: any, b: any) => (b.observation_date || '').localeCompare(a.observation_date || ''));
+  const allBio = (c.bioByPeng.get(pengNum) || []).slice().sort((a: any, b: any) => (b.observation_date || '').localeCompare(a.observation_date || ''));
+  const biometrics = allBio.filter((b: any) => !b.is_deleted);
+  const biometricsDeleted = allBio.filter((b: any) => b.is_deleted);
 
   // Find this penguin's scans via pit_ids
   const myPitIds = new Set(chips.map((ch: any) => ch.pit_id));
@@ -846,7 +848,7 @@ function queryBirdDetailInner(pengNum: string): any {
   }
   const breedingStats = Array.from(bsMap.values()).sort((a, b) => b.season.localeCompare(a.season));
 
-  return { penguin: result, sightings, biometrics, partners, breeding_stats: breedingStats };
+  return { penguin: result, sightings, biometrics, biometrics_deleted: biometricsDeleted, partners, breeding_stats: breedingStats };
 }
 
 /** Get all penguins with active chip info (for search/PenguinMini) */

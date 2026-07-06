@@ -17,4 +17,4 @@ const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted 
 const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, vid_for_scanner, chick_size_code, kommentar';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, solo';
 const SNAP_COLS_LOC  = 'location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy';
-const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, notes, is_moulting, disposition_aggressive, disposition_passive';
+const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date, observed_sex, weight, right_flipper_length, condition_ticks, notes, is_moulting, disposition_aggressive, disposition_passive, is_deleted';

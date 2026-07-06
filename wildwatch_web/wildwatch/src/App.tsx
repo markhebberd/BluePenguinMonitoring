@@ -1652,6 +1652,90 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
   );
 }
 
+// Biometrics for a bird: summary line that expands to per-record view/edit, an add form,
+// and a "removed" section (soft-deleted records) with restore. Renders table rows for bird-table.
+function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editing }: {
+  pengNum: string; biometrics: any[]; deleted: any[]; token?: string; canEdit: boolean; editing: boolean;
+}) {
+  const [showBio, setShowBio] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const emptyForm = { observation_date: toNzDateStr(new Date().toISOString()), observed_sex: '', weight: '', right_flipper_length: '', is_moulting: false, condition_ticks: false, notes: '' };
+  const [form, setForm] = useState<any>(emptyForm);
+  const [busy, setBusy] = useState(false);
+  const SEX_OPTS = ['', 'PM', 'MM', 'U', 'MF', 'PF'];
+  const setF = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  if (biometrics.length === 0 && deleted.length === 0 && !editing) return null;
+
+  const saveField = (id: number, field: string) => async (val: any) => {
+    if (token) return updateRecord(token, 'penguin_biometric_data', id, { [field]: val === '' ? null : val });
+  };
+  const toggle = async (b: any, field: string, val: boolean) => { if (token) await updateRecord(token, 'penguin_biometric_data', b.biometric_id, { [field]: val ? 1 : 0 }); };
+  const remove = async (b: any) => { if (token && confirm('Remove this biometric record?')) await deleteRecord(token, 'penguin_biometric_data', b.biometric_id); };
+  const restore = async (b: any) => { if (token) await updateRecord(token, 'penguin_biometric_data', b.biometric_id, { is_deleted: 0 }); };
+  const submitAdd = async () => {
+    if (!token || busy) return;
+    if (!form.observation_date) { alert('Date is required'); return; }
+    setBusy(true);
+    const rec: any = { peng_num: pengNum, observation_date: form.observation_date, observed_sex: form.observed_sex || null,
+      is_moulting: form.is_moulting ? 1 : 0, condition_ticks: form.condition_ticks ? 1 : 0, notes: form.notes.trim() || null };
+    if (String(form.weight).trim()) rec.weight = parseFloat(form.weight);
+    if (String(form.right_flipper_length).trim()) rec.right_flipper_length = parseFloat(form.right_flipper_length);
+    await createRecord(token, 'penguin_biometric_data', rec);
+    setBusy(false); setAdding(false); setForm(emptyForm);
+  };
+
+  const sexCounts: Record<string, number> = {};
+  const lastComment = biometrics.find((b: any) => b.notes)?.notes;
+  const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
+  const flippers = biometrics.filter((b: any) => b.right_flipper_length).map((b: any) => parseFloat(b.right_flipper_length));
+  biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
+  const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${observedSexLabel(s, true)} ${n}x`).join(', ');
+  const range = (vals: number[], unit: string) => { if (!vals.length) return ''; const lo = Math.round(Math.min(...vals)), hi = Math.round(Math.max(...vals)); return `${lo === hi ? lo : `${lo}-${hi}`}${unit}${vals.length > 1 ? ` (${vals.length}x)` : ''}`; };
+  const summary = [sexSummary, range(weights, 'g'), range(flippers, 'mm'), lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
+
+  const record = (b: any, i: number, removed: boolean) => {
+    const flags = [b.is_moulting && 'Moulting', b.condition_ticks && 'Ticks', b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive'].filter(Boolean);
+    const ed = editing && !removed;
+    return (<Fragment key={`${removed ? 'del' : 'bio'}${b.biometric_id ?? i}`}>
+      <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 4, fontSize: 11 }}>
+        {ed ? <EditableField value={b.observation_date} type="date" onSave={saveField(b.biometric_id, 'observation_date')} canEdit={true} /> : (b.observation_date || '')}
+        {removed && <span className="bird-badge" style={{ background: '#FFCDD2', marginLeft: 6 }}>removed</span>}
+        {removed && canEdit && <button className="edit-btn" style={{ marginLeft: 8 }} onClick={() => restore(b)}>Restore</button>}
+        {ed && <button className="edit-btn" style={{ marginLeft: 8 }} onClick={() => remove(b)}>Remove</button>}
+      </td></tr>
+      <tr><td className="muted">Sex</td><td>{ed ? <EditableField value={b.observed_sex} type="select" options={SEX_OPTS} onSave={saveField(b.biometric_id, 'observed_sex')} canEdit={true} placeholder="-" /> : (observedSexLabel(b.observed_sex, false) || <span className="muted">-</span>)}</td></tr>
+      <tr><td className="muted">Weight</td><td>{ed ? <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveField(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></> : (b.weight ? `${parseFloat(b.weight).toFixed(0)}g` : <span className="muted">-</span>)}</td></tr>
+      <tr><td className="muted">Flipper</td><td>{ed ? <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveField(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></> : (b.right_flipper_length ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <span className="muted">-</span>)}</td></tr>
+      {ed
+        ? <tr><td className="muted">Flags</td><td><label style={{ marginRight: 8 }}><input type="checkbox" checked={!!b.is_moulting} onChange={e => toggle(b, 'is_moulting', e.target.checked)} /> Moult</label><label><input type="checkbox" checked={!!b.condition_ticks} onChange={e => toggle(b, 'condition_ticks', e.target.checked)} /> Ticks</label></td></tr>
+        : (flags.length > 0 ? <tr><td className="muted">Flags</td><td>{flags.join(', ')}</td></tr> : null)}
+      <tr><td className="muted">Note</td><td style={{ fontSize: 11 }}>{ed ? <EditableField value={b.notes} onSave={saveField(b.biometric_id, 'notes')} placeholder="-" canEdit={true} multiline /> : (b.notes || <span className="muted">-</span>)}</td></tr>
+    </Fragment>);
+  };
+
+  return (<>
+    <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary || <span className="muted">-</span>} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
+    {showBio && <>
+      {biometrics.map((b, i) => record(b, i, false))}
+      {editing && !adding && <tr><td></td><td><button className="edit-btn" onClick={() => setAdding(true)}>+ Add biometric</button></td></tr>}
+      {editing && adding && <>
+        <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 6, fontSize: 11 }}>New biometric</td></tr>
+        <tr><td className="muted">Date</td><td><input type="date" value={form.observation_date} onChange={e => setF('observation_date', e.target.value)} /></td></tr>
+        <tr><td className="muted">Sex</td><td><select value={form.observed_sex} onChange={e => setF('observed_sex', e.target.value)}>{SEX_OPTS.map(s => <option key={s} value={s}>{s ? observedSexLabel(s, false) : '-'}</option>)}</select></td></tr>
+        <tr><td className="muted">Weight</td><td><input type="number" value={form.weight} onChange={e => setF('weight', e.target.value)} placeholder="g" style={{ width: 80 }} /> g</td></tr>
+        <tr><td className="muted">Flipper</td><td><input type="number" value={form.right_flipper_length} onChange={e => setF('right_flipper_length', e.target.value)} placeholder="mm" style={{ width: 80 }} /> mm</td></tr>
+        <tr><td className="muted">Flags</td><td><label style={{ marginRight: 8 }}><input type="checkbox" checked={form.is_moulting} onChange={e => setF('is_moulting', e.target.checked)} /> Moult</label><label><input type="checkbox" checked={form.condition_ticks} onChange={e => setF('condition_ticks', e.target.checked)} /> Ticks</label></td></tr>
+        <tr><td className="muted">Note</td><td><input type="text" value={form.notes} onChange={e => setF('notes', e.target.value)} placeholder="-" /></td></tr>
+        <tr><td></td><td><button className="edit-btn done-btn" disabled={busy} onClick={submitAdd}>{busy ? 'Saving…' : 'Save'}</button> <button className="edit-btn" onClick={() => { setAdding(false); setForm(emptyForm); }}>Cancel</button></td></tr>
+      </>}
+      {deleted.length > 0 && <tr><td></td><td className="clickable muted small" onClick={() => setShowRemoved(!showRemoved)}>{deleted.length} removed {showRemoved ? '▲' : '▼'}</td></tr>}
+      {showRemoved && deleted.map((b, i) => record(b, i, true))}
+    </>}
+  </>);
+}
+
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
   const sightings: any[] = data.sightings || [];
@@ -1720,7 +1804,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [showBio, setShowBio] = useState(false);
   const [copiedPit, setCopiedPit] = useState(false);
   const copyPit = (v: string) => { navigator.clipboard?.writeText(v); setCopiedPit(true); setTimeout(() => setCopiedPit(false), 1500); };
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
@@ -1741,11 +1824,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     const reason = prompt(`Change ${field} on chip ${pitId.slice(-8)}?\n\nReason (optional):`);
     if (reason === null) return;
     return updateRecord(token || '', 'penguin_chips', pitId, {[field]: val}, reason || undefined);
-  };
-  const saveBio = (bioId: number, field: string) => async (val: any) => {
-    const reason = prompt(`Change ${field} on biometric record?\n\nReason (optional):`);
-    if (reason === null) return;
-    return updateRecord(token || '', 'penguin_biometric_data', bioId, {[field]: val}, reason || undefined);
   };
 
 
@@ -1805,44 +1883,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             </Fragment>);
             })}
             {(editing || !!Number(p.is_dead)) && <tr><td className="muted">Dead</td><td>{!editing ? 'Dead' : <label><input type="checkbox" checked={!!Number(p.is_dead)} onChange={e => savePenguin('is_dead')(e.target.checked ? 1 : 0)} /> Dead</label>}</td></tr>}
-            {(() => {
-              if (biometrics.length === 0) return null;
-              // Build summary
-              const sexCounts: Record<string,number> = {};
-              const lastComment = biometrics.find((b: any) => b.notes)?.notes;
-              const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
-              const flippers = biometrics.filter((b: any) => b.right_flipper_length).map((b: any) => parseFloat(b.right_flipper_length));
-              biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
-              const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${observedSexLabel(s, true)} ${n}x`).join(', ');
-              // Collapse an equal min==max range to a single value (no "1060-1060g"); show the count only when >1.
-              const range = (vals: number[], unit: string) => {
-                if (vals.length === 0) return '';
-                const lo = Math.round(Math.min(...vals)), hi = Math.round(Math.max(...vals));
-                return `${lo === hi ? lo : `${lo}-${hi}`}${unit}${vals.length > 1 ? ` (${vals.length}x)` : ''}`;
-              };
-              const weightSummary = range(weights, 'g');
-              const flipperSummary = range(flippers, 'mm');
-              const summary = [sexSummary, weightSummary, flipperSummary, lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
-
-              return (<>
-              <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
-              {showBio && biometrics.map((b: any, i: number) => {
-                const flags = [
-                  b.is_moulting && 'Moulting',
-                  b.condition_ticks && 'Ticks',
-                  b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive',
-                ].filter(Boolean);
-                return (<Fragment key={`bio${i}`}>
-                <tr><td className="muted" colSpan={2} style={{fontWeight:600, paddingTop:4, fontSize:11}}>{b.observation_date || ''}</td></tr>
-                {b.observed_sex && <tr><td className="muted">Sex</td><td>{observedSexLabel(b.observed_sex, false)}</td></tr>}
-                {b.weight && <tr><td className="muted">Weight</td><td>{!editing ? `${parseFloat(b.weight).toFixed(0)}g` : <><EditableField value={parseFloat(b.weight).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></>}</td></tr>}
-                {b.right_flipper_length && <tr><td className="muted">Flipper</td><td>{!editing ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <><EditableField value={parseFloat(b.right_flipper_length).toFixed(0)} type="number" onSave={saveBio(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></>}</td></tr>}
-                {flags.length > 0 && <tr><td className="muted">Flags</td><td>{flags.join(', ')}</td></tr>}
-                {b.notes && <tr><td className="muted">Note</td><td style={{fontSize:11}}>{b.notes}</td></tr>}
-              </Fragment>);
-              })}
-              </>);
-            })()}
+            <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
             {/* Notes last in the collapsed view; hidden when blank (still editable under Edit) */}
             {(editing || !!p.kommentar) && <tr><td className="muted">Notes</td><td>{!editing ? p.kommentar : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>}
           </tbody>
@@ -6265,6 +6306,18 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <IntegrityCheck rows={iChicksNoScan} title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />
+
+        <h3 style={{ marginTop: 28 }}>Flipper-length import (6 Jul 2026)</h3>
+        <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+          Flipper lengths from the chip spreadsheet were added to each bird's chip-day biometric (999 imported;
+          680 chip-day biometrics created where none existed). These two lists record the birds that need a human eye.
+        </p>
+        <IntegrityCheck rows={FLIPPER_IMPORT_MISSING} title="Missing flipper length"
+          desc="Birds in the chip spreadsheet with no flipper measurement recorded — there was nothing to import." empty="None"
+          columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'chip_weight', label: 'Chip weight (g)' }]} />
+        <IntegrityCheck rows={FLIPPER_IMPORT_WEIGHT_DIFFS} title="Chip-weight discrepancies"
+          desc="The spreadsheet's chip weight disagreed with the weight already stored on the chip-day biometric. The existing database weight was kept and the flipper length was still added — worth reconciling by hand." empty="None"
+          columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'sheet_weight', label: 'Sheet (g)' }, { key: 'db_weight', label: 'Kept in DB (g)' }, { key: 'flipper', label: 'Flipper added (mm)' }]} />
       </div>
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
@@ -6599,8 +6652,8 @@ function RemovePenguin({ token }: { token: string }) {
   };
 
   return (
-    <div style={{marginTop:16, padding:12, border:'1px solid #e8ecef', borderRadius:8}}>
-      <h3 style={{margin:'0 0 8px'}}>Remove Penguin</h3>
+    <div>
+      <h3>Remove Penguin</h3>
       <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
         <input type="text" value={pengNum} onChange={e => setPengNum(e.target.value)} placeholder="Penguin #"
           onKeyDown={e => e.key === 'Enter' && search()}
@@ -6696,6 +6749,25 @@ const bigCountCell = (v: any) => Number(v) > 3 ? <span style={{ color: '#F44336'
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
   <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`} onClick={stop}>{b.trim()}</a></Fragment>
 ));
+
+// One-off record of exceptions from the 6 Jul 2026 flipper-length import (chip spreadsheet).
+// The source sheet isn't in the app and the weight comparison can't be recomputed live, so the
+// birds needing manual attention are recorded here rather than derived from the cache.
+const FLIPPER_IMPORT_MISSING = [
+  { peng_num: 'PT372', chip_date: '2022-10-13', chip_weight: 1190 },
+  { peng_num: 'PT937', chip_date: '2025-10-28', chip_weight: 970 },
+];
+const FLIPPER_IMPORT_WEIGHT_DIFFS = [
+  { peng_num: 'PT215', chip_date: '2021-09-21', sheet_weight: 890, db_weight: 910, flipper: 115 },
+  { peng_num: 'PT214', chip_date: '2021-09-21', sheet_weight: 910, db_weight: 890, flipper: 112 },
+  { peng_num: 'PT518', chip_date: '2023-06-27', sheet_weight: 940, db_weight: 960, flipper: 120 },
+  { peng_num: 'PT328', chip_date: '2022-04-11', sheet_weight: 1100, db_weight: 1110, flipper: 123 },
+  { peng_num: 'PT339', chip_date: '2022-05-03', sheet_weight: 1100, db_weight: 1350, flipper: 120 },
+  { peng_num: 'PT338', chip_date: '2022-05-03', sheet_weight: 1010, db_weight: 1180, flipper: 111 },
+  { peng_num: 'PT344', chip_date: '2022-06-15', sheet_weight: 960, db_weight: 860, flipper: 113 },
+  { peng_num: 'PT247', chip_date: '2021-10-19', sheet_weight: 800, db_weight: 880, flipper: 110 },
+  { peng_num: 'PT646', chip_date: '2023-11-15', sheet_weight: 980, db_weight: 920, flipper: 109 },
+];
 
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
