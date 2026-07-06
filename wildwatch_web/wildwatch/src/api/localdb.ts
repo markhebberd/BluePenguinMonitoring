@@ -940,24 +940,34 @@ export function computeEggArrival(): any[] {
   return result;
 }
 
-/** The first egg seen in the colony each breeding season — earliest observation with eggs > 0. */
-export function computeFirstEgg(): { season: string; date: string; box: string; obs_time: string }[] {
+/** The first egg seen in the colony each breeding season — the earliest egg DATE, and every box
+ *  that recorded an egg on that date (there can be more than one). */
+export function computeFirstEgg(): { season: string; date: string; boxes: { box: string; obs_time: string }[] }[] {
   if (!mem) return [];
   const c = mem;
-  const bySeason = new Map<string, { date: string; box: string; obs_time: string }>();
+  // season → NZ date → box → earliest obs_time on that box+date.
+  const bySeason = new Map<string, Map<string, Map<string, string>>>();
   for (const o of c.observations) {
     if (o.is_deleted || (o.eggs || 0) < 1) continue;
     const box = c.locById.get(o.location_id)?.location_name;
     if (!box) continue;
-    const season = seasonLabel(seasonYearFromDate(utcToNzDate(o.observation_time_utc)));
-    const cur = bySeason.get(season);
-    if (!cur || o.observation_time_utc < cur.obs_time) {
-      bySeason.set(season, { date: utcToNzDate(o.observation_time_utc), box, obs_time: o.observation_time_utc });
-    }
+    const nzDate = utcToNzDate(o.observation_time_utc);
+    const season = seasonLabel(seasonYearFromDate(nzDate));
+    if (!bySeason.has(season)) bySeason.set(season, new Map());
+    const dateMap = bySeason.get(season)!;
+    if (!dateMap.has(nzDate)) dateMap.set(nzDate, new Map());
+    const boxMap = dateMap.get(nzDate)!;
+    if (!boxMap.has(box) || o.observation_time_utc < boxMap.get(box)!) boxMap.set(box, o.observation_time_utc);
   }
-  return Array.from(bySeason.entries())
-    .map(([season, v]) => ({ season, ...v }))
-    .sort((a, b) => b.season.localeCompare(a.season)); // newest season first
+  const result: { season: string; date: string; boxes: { box: string; obs_time: string }[] }[] = [];
+  for (const [season, dateMap] of bySeason) {
+    const earliest = Array.from(dateMap.keys()).sort()[0];
+    const boxes = Array.from(dateMap.get(earliest)!.entries())
+      .map(([box, obs_time]) => ({ box, obs_time }))
+      .sort((a, b) => a.box.localeCompare(b.box, undefined, { numeric: true }));
+    result.push({ season, date: earliest, boxes });
+  }
+  return result.sort((a, b) => b.season.localeCompare(a.season)); // newest season first
 }
 
 /** Count of distinct adult penguins scanned per season. */

@@ -3861,7 +3861,7 @@ function FirstEggReport({ onDayClick }: { onDayClick?: (day: string) => void }) 
       <h3>First Egg Each Season</h3>
       <p className="muted">The earliest egg recorded anywhere in the colony each breeding season (Apr–Mar), newest first</p>
       <table className="guess-rank-table mini-list-table">
-        <thead><tr><th>Season</th><th>First egg</th><th>Box</th></tr></thead>
+        <thead><tr><th>Season</th><th>First egg</th><th>Boxes</th></tr></thead>
         <tbody>
           {rows.map((r: any) => (
             <tr key={r.season}>
@@ -3869,7 +3869,9 @@ function FirstEggReport({ onDayClick }: { onDayClick?: (day: string) => void }) 
               <td>{onDayClick
                 ? <span className="clickable" style={{ color: '#1565c0', textDecoration: 'underline' }} onClick={() => onDayClick(r.date)}>{fmt(r.date)}</span>
                 : fmt(r.date)}</td>
-              <td><a className="day-box-link" href={`/box/${r.box}`}>Box {r.box}</a></td>
+              <td>{r.boxes.map((b: any, i: number) => (
+                <Fragment key={b.box}>{i > 0 ? ', ' : ''}<a className="day-box-link" href={`/?box=${encodeURIComponent(b.box)}&obs=${encodeURIComponent(b.obs_time)}`}>Box {b.box}</a></Fragment>
+              ))}</td>
             </tr>
           ))}
         </tbody>
