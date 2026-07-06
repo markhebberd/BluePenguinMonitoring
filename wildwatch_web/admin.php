@@ -362,19 +362,40 @@ if ($action === 'create_user') {
     $email = trim($input['email'] ?? '');
     $role = $input['role'] ?? 'viewer';
     $password = (string)($input['password'] ?? '');
-    if ($name === '' || $password === '') { http_response_code(400); echo json_encode(['error'=>'Name and password are required']); exit; }
-    if (strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
+    // Two ways in: an explicit password, or (with an email) an invite — the account is
+    // created with an unguessable placeholder password and the user sets their own via
+    // the emailed link.
+    $invite = $password === '' && $email !== '';
+    if ($name === '' || ($password === '' && !$invite)) { http_response_code(400); echo json_encode(['error'=>'Name and either a password or an email (to send an invite) are required']); exit; }
+    if (!$invite && strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
     if (!in_array($role, ['viewer', 'editor', 'admin'], true)) { http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit; }
     $dup = $pdo->prepare("SELECT observer_id FROM observers WHERE observer_name = ?");
     $dup->execute([$name]);
     if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>"A user named \"$name\" already exists"]); exit; }
-    $hash = password_hash($password, PASSWORD_BCRYPT);
+    $hash = password_hash($invite ? bin2hex(random_bytes(32)) : $password, PASSWORD_BCRYPT);
     $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash, role) VALUES (?, ?, ?, ?)")
         ->execute([$name, $email !== '' ? $email : null, $hash, $role]);
     $id = (int)$pdo->lastInsertId();
     $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'CREATE', ?, ?)")
-        ->execute([$id, $observer['observer_id'], json_encode(['observer_name'=>$name, 'email'=>$email, 'role'=>$role])]);
-    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s')]);
+        ->execute([$id, $observer['observer_id'], json_encode(['observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'invited'=>$invite])]);
+    $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
+    exit;
+}
+
+// Email a set-password link to an existing user (invite resend / reset on their behalf)
+if ($action === 'send_reset') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = (int)($input['observer_id'] ?? 0);
+    $chk = $pdo->prepare("SELECT observer_id, observer_name, email FROM observers WHERE observer_id = ?");
+    $chk->execute([$id]);
+    $row = $chk->fetch();
+    if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
+    if (empty($row['email'])) { http_response_code(400); echo json_encode(['error'=>'User has no email address']); exit; }
+    $pdo->prepare("DELETE FROM password_resets WHERE observer_id = ? AND used_at IS NULL")->execute([$id]);
+    $ok = sendPasswordSetupEmail($pdo, $row, 'invite'); // 7-day link: admin-sent, so give the recipient time
+    if (!$ok) { http_response_code(500); echo json_encode(['error'=>'Mail could not be sent']); exit; }
+    echo json_encode(['success'=>true, 'email'=>$row['email']]);
     exit;
 }
 

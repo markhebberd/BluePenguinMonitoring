@@ -2502,6 +2502,25 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
   const [submitting, setSubmitting] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isForgot, setIsForgot] = useState(false);
+  const [forgotMsg, setForgotMsg] = useState('');
+
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setForgotMsg('');
+    setSubmitting(true);
+    try {
+      const r = await fetch('/api/crud.php?action=request_password_reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const d = await r.json();
+      setForgotMsg(d.message || 'If that email has an account, a reset link has been sent.');
+    } catch (e: any) {
+      setError('Connection failed: ' + (e.message || ''));
+    }
+    setSubmitting(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2556,6 +2575,15 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
       <div className="login-card">
         <h1>Wildwatch</h1>
         <p className="login-sub">Penguin Colony Monitoring</p>
+        {isForgot ? (
+          <form onSubmit={handleForgot}>
+            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+            {error && <div className="login-error">{error}</div>}
+            {forgotMsg && <div className="login-info">{forgotMsg}</div>}
+            <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : 'Email me a reset link'}</button>
+            <p className="login-alt"><a className="clickable" onClick={() => { setIsForgot(false); setForgotMsg(''); setError(''); }}>Back to log in</a></p>
+          </form>
+        ) : (
         <form onSubmit={handleSubmit}>
           {isRegister && <input type="text" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />}
           <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required />
@@ -2565,7 +2593,82 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
           </div>
           {error && <div className="login-error">{error}</div>}
           <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : isRegister ? 'Register' : 'Log in'}</button>
+          <p className="login-alt"><a className="clickable" onClick={() => { setIsForgot(true); setError(''); }}>Forgot password?</a></p>
         </form>
+        )}
+      </div>
+      <p className="login-credit">Photo: Marty Melville</p>
+    </div>
+  );
+}
+
+/** Set-password screen for emailed links (/?setpw=TOKEN) — covers both new-user
+ *  invites and forgot-password resets. On success the API returns a session, so the
+ *  user lands straight in the app. */
+function SetPasswordScreen({ setpwToken, onLogin }: { setpwToken: string; onLogin: (token: string, name: string, observerId?: number | string, role?: string) => void }) {
+  const [checking, setChecking] = useState(true);
+  const [who, setWho] = useState<{ observer_name: string; purpose: string } | null>(null);
+  const [error, setError] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/crud.php?action=check_reset_token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: setpwToken })
+    }).then(r => r.json()).then(d => {
+      if (d.valid) setWho(d); else setError(d.error || 'This link is invalid or has expired.');
+      setChecking(false);
+    }).catch(() => { setError('Connection failed'); setChecking(false); });
+  }, [setpwToken]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (pw.length < 6) { setError('Password must be at least 6 characters'); return; }
+    if (pw !== pw2) { setError('Passwords do not match'); return; }
+    setSubmitting(true);
+    try {
+      const r = await fetch('/api/crud.php?action=reset_password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: setpwToken, password: pw })
+      });
+      const d = await r.json();
+      if (d.token) {
+        if (d.email) localStorage.setItem('ww_email', d.email);
+        window.history.replaceState({}, '', '/'); // drop the one-time token from the URL
+        onLogin(d.token, d.name, d.observer_id, d.role);
+      } else setError(d.error || 'Failed to set password');
+    } catch (e: any) { setError('Connection failed: ' + (e.message || '')); }
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="login-page login-bg">
+      <div className="login-card">
+        <h1>Wildwatch</h1>
+        {checking ? <p className="login-sub">Checking link…</p> : who ? (
+          <>
+            <p className="login-sub">{who.purpose === 'invite' ? `Welcome, ${who.observer_name} — choose a password for your account.` : `Hi ${who.observer_name} — set a new password.`}</p>
+            <form onSubmit={submit}>
+              <div className="password-field">
+                <input type={showPassword ? 'text' : 'password'} placeholder="New password" value={pw} onChange={e => setPw(e.target.value)} required minLength={6} autoFocus />
+                <button type="button" className="toggle-pw" onClick={() => setShowPassword(!showPassword)}>{'\u{1F441}'}</button>
+              </div>
+              <input type={showPassword ? 'text' : 'password'} placeholder="Repeat password" value={pw2} onChange={e => setPw2(e.target.value)} required minLength={6} />
+              {error && <div className="login-error">{error}</div>}
+              <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : 'Set password & log in'}</button>
+            </form>
+          </>
+        ) : (
+          <>
+            <p className="login-sub">Set password</p>
+            <div className="login-error">{error}</div>
+            <p className="login-alt"><a className="clickable" onClick={() => { window.location.href = '/'; }}>Go to log in</a></p>
+          </>
+        )}
       </div>
       <p className="login-credit">Photo: Marty Melville</p>
     </div>
@@ -4273,9 +4376,11 @@ function BreedingAgeHistograms() {
             if (!key) continue;
             const born = parseDate(parent.chip_date).getTime();
             const mo = (t: number) => Math.round((t - born) / (1000 * 60 * 60 * 24 * 30.44));
-            // A clutch that produced a chick necessarily had an egg, even if the egg stage was
-            // never recorded — so it counts toward "first egg" too (a chick can't predate its egg).
-            if (fam.clutch.maxEggs >= 1 || fam.chicks.length > 0) {
+            // Every clutch from segmentClutches is a real breeding attempt — it starts at egg
+            // appearance (or the season's first brood, where the egg phase was missed) — so a bird
+            // parenting it had an egg. Defer to the same breeding-window the box view shows rather
+            // than re-checking egg counts; this also keeps first-egg age <= first-chick age.
+            {
               const t = fam.clutch.laid ?? fam.clutch.windowStart;
               if (t) {
                 const m = mo(t);
@@ -4296,7 +4401,7 @@ function BreedingAgeHistograms() {
 
   return (
     <>
-      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected in a breeding pair whose clutch had an egg — or produced a chick (an egg that was never recorded) (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
+      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected as a parent of a clutch (using the box view's breeding-window detection) (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
       <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`How old chick-chipped penguins were when their first chick was chipped (n=${chickMonths.length}, age measured from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
     </>
   );
@@ -5356,6 +5461,13 @@ function App() {
       .catch(() => {});
   }, [authToken]);
 
+  // Emailed set-password link (invite or forgot-password) — takes over even when a
+  // session exists, since the link may be for a different account on this device.
+  const setpwToken = new URLSearchParams(window.location.search).get('setpw');
+  if (setpwToken) {
+    return <SetPasswordScreen setpwToken={setpwToken} onLogin={handleLogin} />;
+  }
+
   if (!authToken) {
     return <LoginScreen onLogin={handleLogin} />;
   }
@@ -5862,11 +5974,13 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [newUserColonies, setNewUserColonies] = useState<Record<string, string>>({}); // colony_id -> 'view' | 'edit'
   const [addUserErr, setAddUserErr] = useState('');
+  const [addUserOk, setAddUserOk] = useState('');
   const [addingUser, setAddingUser] = useState(false);
   const createUser = async () => {
-    setAddUserErr('');
-    if (!newUser.observer_name.trim() || !newUser.password) { setAddUserErr('Name and password are required'); return; }
-    if (newUser.password.length < 6) { setAddUserErr('Password must be at least 6 characters'); return; }
+    setAddUserErr(''); setAddUserOk('');
+    const inviting = !newUser.password && !!newUser.email.trim();
+    if (!newUser.observer_name.trim() || (!newUser.password && !inviting)) { setAddUserErr('Name plus a password — or an email to send an invite — are required'); return; }
+    if (newUser.password && newUser.password.length < 6) { setAddUserErr('Password must be at least 6 characters'); return; }
     setAddingUser(true);
     try {
       const r = await fetch('/api/admin.php?action=create_user', {
@@ -5885,8 +5999,27 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       }
       setUsers([...users, d]);
       setNewUser(emptyNewUser); setNewUserColonies({});
+      if (d.invited) setAddUserOk(d.email_sent ? `✓ Invite emailed to ${d.email}` : `Created, but the invite email failed — use "Email link" to retry`);
     } catch (e: any) { setAddUserErr(e.message || 'Failed to add user'); }
     setAddingUser(false);
+  };
+
+  // Email a set-password link (invite resend / forgot-password on the user's behalf)
+  const [sendingResetFor, setSendingResetFor] = useState<number | null>(null);
+  const [sendResetMsg, setSendResetMsg] = useState('');
+  const sendResetEmail = async (u: any) => {
+    setSendResetMsg('');
+    setSendingResetFor(u.observer_id);
+    try {
+      const r = await fetch('/api/admin.php?action=send_reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ observer_id: u.observer_id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setSendResetMsg(`✓ Set-password link emailed to ${d.email} (${u.observer_name})`);
+    } catch (e: any) { setSendResetMsg(`${u.observer_name}: ${e.message || 'failed to send email'}`); }
+    setSendingResetFor(null);
   };
 
   // 12-char password, avoiding visually ambiguous chars (0/O/1/l/I) for easy dictation.
@@ -6235,12 +6368,18 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                       <option value="admin">Admin</option>
                     </select>
                   </td>
-                  <td><button className="edit-btn" onClick={() => { setResetFor(u); setResetPw(genPassword()); setResetMsg(''); }}>Reset password</button></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="edit-btn" onClick={() => { setResetFor(u); setResetPw(genPassword()); setResetMsg(''); }}>Reset password</button>
+                    {u.email && <button className="edit-btn" style={{ marginLeft: 6 }} disabled={sendingResetFor === u.observer_id}
+                      title={`Email ${u.email} a link to set their own password`}
+                      onClick={() => sendResetEmail(u)}>{sendingResetFor === u.observer_id ? 'Sending…' : 'Email link'}</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        {sendResetMsg && <div style={{ marginTop: 8, fontSize: 13, color: sendResetMsg.startsWith('✓') ? '#2e7d32' : '#c0392b' }}>{sendResetMsg}</div>}
         {resetFor && (
           <div style={{ marginTop: 12, padding: 10, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>
             <b>Reset password for {resetFor.observer_name}</b>
@@ -6261,10 +6400,11 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             <option value="editor">Editor</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="text" placeholder="Password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace' }} />
+          <input type="text" placeholder="Password (blank = email invite)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 200 }} />
           <button className="edit-btn" type="button" onClick={() => setNewUser({ ...newUser, password: genPassword() })}>Generate</button>
-          <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : 'Add user'}</button>
+          <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : (!newUser.password && newUser.email.trim()) ? 'Add & send invite' : 'Add user'}</button>
           {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
+          {addUserOk && <span style={{ color: addUserOk.startsWith('✓') ? '#2e7d32' : '#c0392b', fontSize: 13 }}>{addUserOk}</span>}
         </div>
         {newUser.role !== 'admin' && colonies.length > 0 && (
           <div style={{ marginTop: 8 }}>
@@ -6283,7 +6423,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             </div>
           </div>
         )}
-        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>New users can log in immediately. Non-Admins see nothing until granted colony access — set it per colony above, or manage it later under Colony access.</p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>With a password, new users can log in immediately. Leave the password blank (email required) to send an invite from no-reply@wildwatch.co.nz — the user sets their own password via a 7-day link. Non-Admins see nothing until granted colony access — set it per colony above, or manage it later under Colony access.</p>
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>

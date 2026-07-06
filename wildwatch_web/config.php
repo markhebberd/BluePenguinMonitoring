@@ -254,6 +254,60 @@ function recordDiskSample($pdo, $dir = null) {
 }
 
 /**
+ * Simple HTML mail from the send-only no-reply account (rspamd DKIM-signs it,
+ * Postfix relays out — same path as the disk alert).
+ */
+function sendWildwatchMail($to, $subject, $html) {
+    $from = 'no-reply@wildwatch.co.nz';
+    $headers = "From: Wildwatch <$from>\r\n"
+        . "Reply-To: $from\r\n"
+        . "MIME-Version: 1.0\r\n"
+        . "Content-Type: text/html; charset=UTF-8";
+    return @mail($to, $subject, $html, $headers, "-f$from");
+}
+
+/**
+ * Create a one-time set-password token for an observer and return the RAW token
+ * (only the sha256 is stored). $purpose: 'invite' (new user) or 'reset'.
+ */
+function createPasswordResetToken($pdo, $observerId, $purpose, $ttlSeconds) {
+    $token = bin2hex(random_bytes(32));
+    $pdo->prepare("INSERT INTO password_resets (token_hash, observer_id, purpose, expires_at)
+        VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))")
+        ->execute([hash('sha256', $token), $observerId, $purpose, $ttlSeconds]);
+    return $token;
+}
+
+/**
+ * Email an observer a set-password link. $purpose 'invite' welcomes a new user
+ * (7-day link); 'reset' is the forgot-password flow (1-hour link).
+ * Returns true when the mail was accepted for delivery.
+ */
+function sendPasswordSetupEmail($pdo, $observer, $purpose) {
+    if (empty($observer['email'])) return false;
+    $ttl = $purpose === 'invite' ? 7 * 86400 : 3600;
+    $token = createPasswordResetToken($pdo, $observer['observer_id'], $purpose, $ttl);
+    $link = 'https://wildwatch.co.nz/?setpw=' . $token;
+    $name = htmlspecialchars($observer['observer_name']);
+    if ($purpose === 'invite') {
+        $subject = 'Welcome to Wildwatch — set your password';
+        $intro = "An account has been created for you on <b>Wildwatch</b> (wildwatch.co.nz), the penguin colony monitoring site.";
+        $validity = 'This link is valid for 7 days.';
+    } else {
+        $subject = 'Wildwatch password reset';
+        $intro = "A password reset was requested for your <b>Wildwatch</b> account. If this wasn't you, you can ignore this email — your password is unchanged.";
+        $validity = 'This link is valid for 1 hour.';
+    }
+    $html = "<div style=\"font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;color:#333;max-width:520px\">"
+        . "<h2 style=\"color:#1a5276\">Wildwatch</h2>"
+        . "<p>Hi $name,</p><p>$intro</p>"
+        . "<p><a href=\"$link\" style=\"display:inline-block;background:#1a5276;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none\">Set your password</a></p>"
+        . "<p style=\"font-size:13px;color:#666\">Or paste this link into your browser:<br>$link</p>"
+        . "<p style=\"font-size:13px;color:#666\">$validity</p></div>";
+    return sendWildwatchMail($observer['email'], $subject, $html);
+}
+
+/**
  * Check recent disk_history for a linear descent that would hit zero within 24 hours.
  * If detected and the descent spans >= 45 minutes, email an alert with an SVG graph.
  *

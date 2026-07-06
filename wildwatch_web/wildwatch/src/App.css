@@ -461,6 +461,9 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .login-card button[type="submit"]:hover, .login-card form > button:hover { background:#2e86c1; }
 .login-card button:disabled { background:#999; }
 .login-error { color:#F44336; font-size:13px; margin-bottom:8px; }
+.login-info { color:#2e7d32; font-size:13px; margin-bottom:8px; }
+.login-alt { margin-top:14px; font-size:13px; }
+.login-alt a { color:#1a5276; text-decoration:underline; cursor:pointer; }
 
 /* Add-penguin dialog */
 .add-penguin-card { width:440px; padding:24px; text-align:left; max-height:92vh; overflow-y:auto; }

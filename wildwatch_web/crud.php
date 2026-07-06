@@ -37,6 +37,10 @@ $action = $_GET['action'] ?? '';
 
 if ($action === 'login') { handleLogin($pdo); exit; }
 if ($action === 'register') { handleRegister($pdo); exit; }
+// Set-password flow (unauthenticated by design: the emailed token IS the credential)
+if ($action === 'request_password_reset') { handleRequestPasswordReset($pdo); exit; }
+if ($action === 'check_reset_token') { handleCheckResetToken($pdo); exit; }
+if ($action === 'reset_password') { handleResetPassword($pdo); exit; }
 
 $observer = authenticate($pdo);
 if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
@@ -222,6 +226,75 @@ function handleRegister($pdo) {
     } catch (Exception $e) {
         http_response_code(409); echo json_encode(['error'=>'Name or email already exists']);
     }
+}
+
+/** Forgot password: email a 1-hour set-password link. Always answers success so the
+ *  endpoint can't be used to probe which emails have accounts. */
+function handleRequestPasswordReset($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $email = trim($input['email'] ?? '');
+    if ($email !== '') {
+        $stmt = $pdo->prepare("SELECT * FROM observers WHERE email = ?");
+        $stmt->execute([$email]);
+        foreach ($stmt->fetchAll() as $observer) {
+            // Replace any outstanding reset links (invites keep their longer validity)
+            $pdo->prepare("DELETE FROM password_resets WHERE observer_id = ? AND purpose = 'reset' AND used_at IS NULL")
+                ->execute([$observer['observer_id']]);
+            sendPasswordSetupEmail($pdo, $observer, 'reset');
+        }
+    }
+    echo json_encode(['success' => true, 'message' => 'If that email has an account, a reset link has been sent.']);
+}
+
+/** Look up a live (unused, unexpired) set-password token. */
+function findResetToken($pdo, $token) {
+    if ($token === '') return null;
+    $stmt = $pdo->prepare("SELECT pr.*, o.observer_name, o.email FROM password_resets pr
+        JOIN observers o ON o.observer_id = pr.observer_id
+        WHERE pr.token_hash = ? AND pr.used_at IS NULL AND pr.expires_at > NOW()");
+    $stmt->execute([hash('sha256', $token)]);
+    return $stmt->fetch() ?: null;
+}
+
+/** Validate an emailed token so the set-password page can greet the user. */
+function handleCheckResetToken($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $row = findResetToken($pdo, (string)($input['token'] ?? ''));
+    if (!$row) { http_response_code(400); echo json_encode(['error' => 'This link is invalid or has expired.']); return; }
+    echo json_encode(['valid' => true, 'observer_name' => $row['observer_name'], 'purpose' => $row['purpose']]);
+}
+
+/** Set a new password via an emailed token, then log the user straight in. All other
+ *  sessions are dropped (a reset must lock out whoever had the old password). */
+function handleResetPassword($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $row = findResetToken($pdo, (string)($input['token'] ?? ''));
+    $newPass = (string)($input['password'] ?? '');
+    if (!$row) { http_response_code(400); echo json_encode(['error' => 'This link is invalid or has expired.']); return; }
+    if (strlen($newPass) < 6) { http_response_code(400); echo json_encode(['error' => 'Password must be at least 6 characters']); return; }
+
+    $hash = password_hash($newPass, PASSWORD_BCRYPT);
+    $pdo->prepare("UPDATE observers SET passphrase_hash = ? WHERE observer_id = ?")->execute([$hash, $row['observer_id']]);
+    $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE token_hash = ?")->execute([$row['token_hash']]);
+    $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$row['observer_id']]);
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
+        ->execute([$row['observer_id'], $row['observer_id'], json_encode(['passphrase_hash' => '(set via ' . $row['purpose'] . ' link)'])]);
+
+    $stmt = $pdo->prepare("SELECT * FROM observers WHERE observer_id = ?");
+    $stmt->execute([$row['observer_id']]);
+    $observer = $stmt->fetch();
+    $token = bin2hex(random_bytes(32));
+    $expires = date('Y-m-d H:i:s', time() + 86400 * 30);
+    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
+        ->execute([$token, $observer['observer_id'], $expires]);
+    echo json_encode([
+        'token' => $token,
+        'observer_id' => $observer['observer_id'],
+        'name' => $observer['observer_name'],
+        'email' => $observer['email'],
+        'role' => $observer['role'] ?? 'viewer',
+        'expires' => $expires
+    ]);
 }
 
 function authenticate($pdo) {
