@@ -2955,6 +2955,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
   const entryRows = [...existingObs.map((o: any) => o), ...entryChips]
     .sort((a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc));
+  const todayNz = toNzDateStr(new Date().toISOString()); // highlight an observation dated today (NZ)
 
   return (
     <div className={`entry-page${sideBird && sideBirdData?.penguin ? ' entry-page-docked' : ''}`}>
@@ -3097,7 +3098,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
             </div>
           ) : (
-            <div key={i} className="entry-existing-row">
+            <div key={i} className="entry-existing-row" style={toNzDateStr(o.observation_time_utc) === todayNz ? {background:'#FFF9C4', boxShadow:'inset 0 0 0 2px #FDD835', borderRadius:4} : undefined}>
+              {(() => { const fm = dateMappings.find((m: any) => m.actual_date === toNzDateStr(o.observation_time_utc)); return fm ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span> : null; })()}
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatusOrPrev(o, box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
@@ -3113,6 +3115,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
                 <span key={`ns${k}`} className="scan no-scan">No scan</span>
               ))}
+              {o.notes && <span className="muted" style={{fontStyle:'italic', fontSize:12}}>"{o.notes}"</span>}
               <span style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:6}}>
                 {o.monitor_filename?.startsWith('web-entry') && o.observation_id && (
                   <button className="remove-scan" onClick={async () => {
