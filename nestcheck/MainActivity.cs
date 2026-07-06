@@ -281,6 +281,9 @@ namespace PenguinMonitor
                     CreateBoxSetsDictionary();
                     if (_isBoxLocked)
                         DrawPageLayouts();
+                    // Refresh the previous-obs card explicitly — a locked redraw can skip the
+                    // box-card content path, leaving the breeding string / summary stale.
+                    UpdatePreviousObsSummary();
                     UpdateStatusText();
                 });
             }
@@ -844,7 +847,7 @@ namespace PenguinMonitor
                     else if (_bluetoothManager?.IsConnected == true)
                         _statusText.SetTextColor(UIFactory.WARNING_YELLOW);
                     else
-                        _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
+                        _statusText.SetTextColor(Color.Black);
                 }
             });
         }
@@ -1233,6 +1236,9 @@ namespace PenguinMonitor
                     }
                     CreateBoxSetsDictionary();
                     DrawPageLayouts();
+                    // Refresh the previous-obs card explicitly so an updated breeding string
+                    // (or summary) from this sync shows without a manual collapse/expand.
+                    UpdatePreviousObsSummary();
 
                     if (_colonyState.GetTodayForBox(_currentBoxName) != null)
                         buildScannedIdsLayout(_colonyState.GetTodayForBox(_currentBoxName).ScannedIds);
@@ -1549,7 +1555,7 @@ namespace PenguinMonitor
                 TextSize = 14,
                 Gravity = GravityFlags.Center
             };
-            _statusText.SetTextColor(UIFactory.TEXT_SECONDARY);
+            _statusText.SetTextColor(Color.Black);
             var statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             statusParams.SetMargins(0, -12, 0, 0);
             _statusText.LayoutParameters = statusParams;
@@ -4144,7 +4150,7 @@ namespace PenguinMonitor
             prevAndStickyRow.LayoutParameters = prevAndStickyParams;
 
             // Prev obs compact summary (left-aligned)
-            _prevObsHeaderText = new TextView(this) { TextSize = 11 };
+            _prevObsHeaderText = new TextView(this) { TextSize = 14 };
             _prevObsHeaderText.SetTextColor(Color.Black);
             _prevObsHeaderText.SetPadding(8, 4, 8, 4);
             _prevObsHeaderText.Background = _uiFactory.CreateRoundedBackground(Color.ParseColor("#FFF3E0"), 6); // light orange
@@ -4187,7 +4193,7 @@ namespace PenguinMonitor
             _singleBoxDataOuterLayout.AddView(_dupPenguinWarningView);
 
             // Today miniview (right-aligned, black border)
-            _todayMiniView = new TextView(this) { TextSize = 11 };
+            _todayMiniView = new TextView(this) { TextSize = 14 };
             _todayMiniView.SetTextColor(Color.Black);
             _todayMiniView.SetPadding(8, 4, 8, 4);
             var todayMiniViewBg = new Android.Graphics.Drawables.GradientDrawable();
