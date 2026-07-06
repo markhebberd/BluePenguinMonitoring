@@ -3667,7 +3667,7 @@ function DistinctAdultsChart() {
   );
 }
 
-function PeakAdultsChart() {
+function PeakAdultsChart({ onDayClick }: { onDayClick?: (day: string) => void }) {
   const data = usePeakAdults();
 
   if (data.length === 0) return <div className="report-card"><p className="muted">No observation data available</p></div>;
@@ -3706,7 +3706,10 @@ function PeakAdultsChart() {
             </rect>
             <text x={xScale(i)} y={yScale(d.adults) - 6} textAnchor="middle" fontSize="11" fill="#333" fontWeight="600">{d.adults}</text>
             <text x={xScale(i)} y={PAD.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#666">{d.season}</text>
-            <text x={xScale(i)} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="9" fill="#999">{shortDate(d.date)}</text>
+            <text x={xScale(i)} y={PAD.top + plotH + 30} textAnchor="middle" fontSize="9"
+              fill={onDayClick ? '#1565c0' : '#999'}
+              style={onDayClick ? { cursor: 'pointer', textDecoration: 'underline' } : undefined}
+              onClick={onDayClick ? () => onDayClick(d.date) : undefined}>{shortDate(d.date)}</text>
           </Fragment>
         ))}
         <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + plotH} stroke="#ccc" strokeWidth="1" />
@@ -7498,7 +7501,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <MissedScansReport />
           <UnsexedByGuessesReport />
           <DistinctAdultsChart />
-          <PeakAdultsChart />
+          <PeakAdultsChart onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
           <EggArrivalChart />
           <ChickReturnChart />
           <ChickSexChart />
