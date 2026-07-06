@@ -5680,6 +5680,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
   const impCommit = async () => {
     if (!impAnalysis || impCommitting) return;
+    // Adults not accounted for by bird cells are recorded as "no scan" — confirm before writing.
+    const nsc = impAnalysis.totals?.noscan_confirm || 0;
+    if (nsc > 0 && !confirm(`${nsc} observation(s) have more adults than birds entered. Record each surplus adult as a "no scan"?\n\n(Cancel to fix the sheet and re-analyze.)`)) return;
     setImpCommitting(true); setImpError('');
     try {
       const r = await fetch('/api/admin.php?action=import_csv_commit', {
@@ -5966,7 +5969,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         {impResult && (
           <div style={{ border: '1px solid #b7e0b7', background: '#f2fbf2', borderRadius: 6, padding: 12, fontSize: 13 }}>
             <strong>✓ Imported into {impResult.colony_name}.</strong>{' '}
-            {impResult.imported} observation(s), {impResult.scans} scan(s) written.
+            {impResult.imported} observation(s), {impResult.scans} scan(s){impResult.biometrics ? `, ${impResult.biometrics} biometric(s)` : ''} written.
             {impResult.skipped_duplicates > 0 && <> {impResult.skipped_duplicates} duplicate row(s) skipped.</>}
             {impResult.skipped_errors > 0 && <> {impResult.skipped_errors} error row(s) skipped.</>}
             {impResult.unmatched_chips?.length > 0 && (
@@ -5987,6 +5990,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             ['Errors (skip)', t.error_rows, t.error_rows ? '#c0392b' : undefined],
             ['Boxes', t.boxes], ['Not in sheet', t.boxes_missing, t.boxes_missing ? '#8a6d3b' : undefined], ['Decom→DCM', t.decom],
             ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks], ['No-scan', t.no_scan],
+            ['Biometrics', t.biometrics, t.biometrics ? '#1a7a1a' : undefined],
+            ['Confirm no-scan', t.noscan_confirm, t.noscan_confirm ? '#8a6d3b' : undefined],
             ['Scans matched', t.scans_matched, '#1a7a1a'],
             ['Chips unresolved', t.scans_unmatched, t.scans_unmatched ? '#c0392b' : undefined],
           ];
@@ -6050,7 +6055,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
               <div style={{ overflow: 'auto', maxHeight: 380, border: '1px solid #eee' }}>
                 <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
-                  <thead><tr>{['Line', 'Box', 'Date', 'A', 'E', 'C', 'NS', 'Status', 'Scans', 'Notes'].map(h => (
+                  <thead><tr>{['Line', 'Box', 'Date', 'A', 'E', 'C', 'NS', 'Bio', 'Status', 'Scans', 'Notes'].map(h => (
                     <th key={h} style={{ position: 'sticky', top: 0, background: '#f5f5f5', padding: '3px 6px', textAlign: 'left', borderBottom: '1px solid #ccc', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}</tr></thead>
                   <tbody>
@@ -6069,7 +6074,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                           <td style={{ padding: '2px 6px' }}>{r.is_decom ? 'Decom' : r.adults}</td>
                           <td style={{ padding: '2px 6px' }}>{r.eggs}</td>
                           <td style={{ padding: '2px 6px' }}>{r.chicks}</td>
-                          <td style={{ padding: '2px 6px' }}>{r.no_scan}</td>
+                          <td style={{ padding: '2px 6px' }}>{r.no_scan}{r.confirm_no_scan ? <span style={{ color: '#8a6d3b' }}> ?</span> : ''}</td>
+                          <td style={{ padding: '2px 6px', color: '#1a7a1a' }}>{r.bios?.length ? r.bios.map((b: any) => b.observed_sex).join(',') : ''}</td>
                           <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
                             {r.status === 'error' ? <span style={{ color: '#c0392b' }}>error</span>
                               : r.status === 'duplicate' ? <span style={{ color: '#b8860b' }}>duplicate</span>

@@ -903,9 +903,14 @@ if ($action === 'save_colony_permission') {
 // ============ Monitor CSV import ============
 // Two-phase: analyze (no writes) then commit. Both call ww_parseImportCsv so the
 // analysis page reflects exactly what the import will write. Row shape from the
-// monitor sheet: Date, Box, Adults, Eggs, Chicks, [No scan], Bird-1..Bird-N, Notes.
+// monitor sheet: Date, Box, Adults, Eggs, Chicks, Bird-1, Sex-1, .. Bird-N, Sex-N, Notes.
 //   - "Decom" in the Adults cell => observation with breeding_status DCM, zero counts.
 //   - Bird cells hold chip/PIT numbers; matched last-8 against penguin_chips.pit_id.
+//     A bird cell reading "no scan" is an unscanned adult (counts toward no_scan).
+//   - Each Sex-N pairs with Bird-N: a chick size code (BC/LC/SC, validated against a
+//     chick chipped in this box on this date) and/or an observed sex (M/UM/UF/F -> a
+//     penguin_biometric_data sighting). penguins.sex is never modified.
+//   - Adults exceeding entered birds implies no-scans, confirmed by the user at commit.
 //   - Unmatched chips are reported, never auto-created; their scan is skipped.
 
 function ww_normHeader($h) { return preg_replace('/[^a-z0-9]/', '', strtolower(trim((string)$h))); }
@@ -948,6 +953,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             'decom' => 0, 'boxes' => 0, 'boxes_in_colony' => 0, 'boxes_missing' => 0,
             'adults' => 0, 'eggs' => 0, 'chicks' => 0,
             'no_scan' => 0, 'scans_matched' => 0, 'scans_unmatched' => 0,
+            'biometrics' => 0, 'noscan_confirm' => 0,
         ],
     ];
 
@@ -968,7 +974,12 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 
     $header = array_shift($records);
     $headerCount = count($header);
+    // Column layout: Date, Box, Adults, Eggs, Chicks, Bird-1, Sex-1, Bird-2, Sex-2, ..., Notes.
+    // Each Bird-N carries a chip / "no scan" / (empty); its paired Sex-N holds either a chick
+    // size code (BC/LC/SC[+sex]) or an observed sex (M/UM/UF/F). No standalone "No scan" column
+    // any more — an unscanned adult is a bird cell reading "no scan".
     $idx = []; $birdCols = []; $ignoredCols = [];
+    $birdColByNum = []; $sexColByNum = [];
     foreach ($header as $i => $h) {
         $n = ww_normHeader($h);
         if ($n === 'date') $idx['date'] = $i;
@@ -976,11 +987,15 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         elseif ($n === 'adults' || $n === 'adult') $idx['adults'] = $i;
         elseif ($n === 'eggs' || $n === 'egg') $idx['eggs'] = $i;
         elseif ($n === 'chicks' || $n === 'chick') $idx['chicks'] = $i;
-        elseif ($n === 'noscan' || $n === 'noscans' || $n === 'notscanned') $idx['no_scan'] = $i;
         elseif ($n === 'notes' || $n === 'note') $idx['notes'] = $i;
-        elseif (strpos($n, 'bird') === 0) $birdCols[] = $i;
+        elseif (preg_match('/^sex(\d+)$/', $n, $m)) $sexColByNum[(int)$m[1]] = $i;
+        elseif (preg_match('/^bird(\d+)$/', $n, $m)) { $birdColByNum[(int)$m[1]] = $i; $birdCols[] = $i; }
+        elseif (strpos($n, 'bird') === 0) $birdCols[] = $i; // unnumbered bird column
         elseif ($n !== '') $ignoredCols[] = trim((string)$h);
     }
+    // Pair each numbered bird column with its like-numbered sex column: birdColIndex => sexColIndex.
+    $sexColByBird = [];
+    foreach ($birdColByNum as $num => $bi) if (isset($sexColByNum[$num])) $sexColByBird[$bi] = $sexColByNum[$num];
     $missing = [];
     foreach (['date', 'box', 'adults'] as $req) if (!isset($idx[$req])) $missing[] = $req;
     if ($missing) { $R['ok'] = false; $R['error'] = 'Missing required column(s): ' . implode(', ', $missing); return $R; }
@@ -1007,7 +1022,9 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     $pengMeta = [];      // peng_num => ['sex'=>M/F/'', 'dead'=>bool]  (this colony)
     $pengFirstChip = []; // peng_num => earliest chip_date (YYYY-MM-DD)
     $pengActiveKey = []; // peng_num => last-8 of its active chip (to spot retired-tag scans)
-    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, pc.chip_date, p.colony_id, p.sex, p.is_dead
+    $pengChickSize = []; // peng_num => recorded chick_size_code (BC/LC/SC or '')
+    $pengChips = [];     // peng_num => [['date'=>YYYY-MM-DD, 'box'=>UPPER], ...]  (chipping events)
+    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, pc.chip_date, pc.chip_box, p.colony_id, p.sex, p.is_dead, p.chick_size_code
         FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num")->fetchAll() as $c) {
         $k = ww_chipKey($c['pit_id']);
         $byKeyAny[$k][$c['peng_num']] = (int)$c['colony_id'];
@@ -1017,8 +1034,12 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         if ($byKeyColony[$k]['pit'] === null) $byKeyColony[$k]['pit'] = $c['pit_id'];
         if ($c['is_active']) { if ($byKeyColony[$k]['active'] === null) $byKeyColony[$k]['active'] = $c['pit_id']; $pengActiveKey[$c['peng_num']] = $k; }
         $pengMeta[$c['peng_num']] = ['sex' => strtoupper((string)($c['sex'] ?? '')), 'dead' => !empty($c['is_dead'])];
-        if (!empty($c['chip_date']) && (!isset($pengFirstChip[$c['peng_num']]) || $c['chip_date'] < $pengFirstChip[$c['peng_num']]))
-            $pengFirstChip[$c['peng_num']] = substr($c['chip_date'], 0, 10);
+        $pengChickSize[$c['peng_num']] = strtoupper((string)($c['chick_size_code'] ?? ''));
+        if (!empty($c['chip_date'])) {
+            $pengChips[$c['peng_num']][] = ['date' => substr($c['chip_date'], 0, 10), 'box' => strtoupper(trim((string)($c['chip_box'] ?? '')))];
+            if (!isset($pengFirstChip[$c['peng_num']]) || $c['chip_date'] < $pengFirstChip[$c['peng_num']])
+                $pengFirstChip[$c['peng_num']] = substr($c['chip_date'], 0, 10);
+        }
     }
     $prefix = getColonyPrefix($pdo, $colonyId);
 
@@ -1067,6 +1088,20 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         if ($v === '') return [0, true];
         if (!preg_match('/^-?\d+$/', $v)) return [0, false];
         return [(int)$v, true];
+    };
+
+    // Parse a Sex-N cell into [sizeCode, observedSex, unknownToken].
+    //   - Optional leading chick size code BC/LC/SC  -> validated against chick_size_code.
+    //   - Remaining token is an observed sex, mapped to the biometric encoding:
+    //       M->M, F->F (confirmed/legacy), UM->MM (maybe male), UF->MF (maybe female), U->U.
+    //   observedSex '' = none; null = an unrecognised token (flagged, not stored).
+    $parseSexCell = function ($raw) {
+        $s = strtoupper(preg_replace('/[^A-Za-z]/', '', (string)$raw));
+        $size = '';
+        if (preg_match('/^(BC|LC|SC)(.*)$/', $s, $m)) { $size = $m[1]; $s = $m[2]; }
+        static $sexMap = ['M' => 'M', 'F' => 'F', 'UM' => 'MM', 'UF' => 'MF', 'U' => 'U'];
+        $obs = $s === '' ? '' : ($sexMap[$s] ?? null);
+        return [$size, $obs, $s];
     };
 
     $unmatched = [];      // chipKey => ['chip'=>original, 'reason'=>why, 'count'=>n, 'boxes'=>[...]]
@@ -1136,13 +1171,11 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             if (!$aOk) { $errors[] = "Adults '$adultsRaw' is not a number"; $countsOk = false; }
             if (isset($idx['eggs'])) { list($eggs, $ok) = $parseInt($rec[$idx['eggs']] ?? ''); if (!$ok) { $errors[] = 'Eggs is not a number'; $countsOk = false; } }
             if (isset($idx['chicks'])) { list($chicks, $ok) = $parseInt($rec[$idx['chicks']] ?? ''); if (!$ok) { $errors[] = 'Chicks is not a number'; $countsOk = false; } }
-            if (isset($idx['no_scan'])) { list($noScan, $ok) = $parseInt($rec[$idx['no_scan']] ?? ''); if (!$ok) { $errors[] = 'No-scan is not a number'; $countsOk = false; } }
             if ($countsOk && $adults < 0) { $errors[] = 'Adults is negative'; $countsOk = false; }
-            if ($countsOk && $noScan < 0) { $errors[] = 'No-scan is negative'; $countsOk = false; }
         }
 
         // Column shift: an 8-digit chip-like value where a count/note belongs — the row slid sideways.
-        foreach (['eggs' => 'Eggs', 'chicks' => 'Chicks', 'no_scan' => 'No scan', 'notes' => 'Notes'] as $ck => $lbl) {
+        foreach (['eggs' => 'Eggs', 'chicks' => 'Chicks', 'notes' => 'Notes'] as $ck => $lbl) {
             if (!isset($idx[$ck])) continue;
             $cell = trim((string)($rec[$idx[$ck]] ?? ''));
             if (preg_match('/^\d{8}$/', $cell)) $warnings[] = "$lbl column has a chip-like value ($cell) — shifted row?";
@@ -1150,7 +1183,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 
         // Bird cells -> scans. A filled cell is a scan regardless of whether the chip resolves.
         // $miniPengs collects display peng_nums a flag refers to, so the report can show their minis.
-        $scans = []; $unmatchedHere = []; $rowKeys = []; $rowSeen = []; $miniPengs = [];
+        $scans = []; $unmatchedHere = []; $rowKeys = []; $rowSeen = []; $miniPengs = []; $bios = [];
         $addMini = function ($peng) use (&$miniPengs, $prefix) {
             $d = displayPengNum($peng, $prefix);
             if (!in_array($d, $miniPengs, true)) $miniPengs[] = $d;
@@ -1158,7 +1191,11 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         if (!$isDecom) {
             foreach ($birdCols as $bi) {
                 $val = trim((string)($rec[$bi] ?? ''));
+                $sexRaw = isset($sexColByBird[$bi]) ? trim((string)($rec[$sexColByBird[$bi]] ?? '')) : '';
                 if ($val === '') continue;
+                // Inline "no scan" marker: an adult present but not scanned this visit. Its paired
+                // Sex cell can't be attached to a bird, so it's ignored.
+                if (preg_replace('/[^a-z]/', '', strtolower($val)) === 'noscan') { $noScan++; continue; }
                 $key = ww_chipKey($val);
                 // Same chip listed twice in one box — almost always a copy-paste. Flag, scan once.
                 if (isset($rowSeen[$key])) {
@@ -1171,7 +1208,28 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 $col = $byKeyColony[$key] ?? null;
                 $nPeng = $col ? count($col['pengs']) : 0;
                 if ($nPeng === 1) {
-                    $scans[] = ['pit_id' => $col['active'] ?? $col['pit'], 'chip' => $val, 'key' => $key, 'peng_num' => array_key_first($col['pengs'])];
+                    $pgR = array_key_first($col['pengs']);
+                    $scans[] = ['pit_id' => $col['active'] ?? $col['pit'], 'chip' => $val, 'key' => $key, 'peng_num' => $pgR];
+                    // Paired Sex cell: a chick size code (validated) and/or an observed sex (biometric).
+                    if ($sexRaw !== '') {
+                        list($size, $obsSex) = $parseSexCell($sexRaw);
+                        if ($size !== '') {
+                            // A size code is only valid for a chick chipped in THIS box on THIS date.
+                            $chippedHere = false;
+                            foreach ($pengChips[$pgR] ?? [] as $ce)
+                                if ($ce['date'] === $obsDate && $ce['box'] === strtoupper($box)) { $chippedHere = true; break; }
+                            $recorded = $pengChickSize[$pgR] ?? '';
+                            if (!$chippedHere)
+                                $warnings[] = "size $size on #" . displayPengNum($pgR, $prefix) . ' — not a chick chipped in box ' . $box . ' on ' . ($obsDate ?: '?');
+                            elseif ($recorded === '')
+                                $warnings[] = "size $size for #" . displayPengNum($pgR, $prefix) . ' but no chick size recorded';
+                            elseif ($recorded !== $size)
+                                $warnings[] = "size $size ≠ recorded $recorded for #" . displayPengNum($pgR, $prefix);
+                            $addMini($pgR);
+                        }
+                        if ($obsSex === null) { $warnings[] = "unrecognised sex '$sexRaw' for #" . displayPengNum($pgR, $prefix); $addMini($pgR); }
+                        elseif ($obsSex !== '') $bios[] = ['peng_num' => $pgR, 'observed_sex' => $obsSex];
+                    }
                 } else {
                     if ($nPeng > 1) $reason = "last-8 matches $nPeng birds in $colonyName";
                     elseif (isset($byKeyAny[$key])) $reason = 'belongs to another colony';
@@ -1193,14 +1251,22 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         // ---- Flags: interesting/problematic but still importable (never exclude the row) ----
-        $birdsListed = count($scans) + count($unmatchedHere); // "#scans" = every filled Bird cell
+        $birdsListed = count($scans) + count($unmatchedHere); // "#scans" = every chip Bird cell
+        $needNoScanConfirm = 0; // implied no-scans (adults not accounted for) awaiting confirmation
         if (!$isDecom) {
             // 1. Improbable counts for a little-penguin box.
             if ($adults > 2) $warnings[] = "adults = $adults (>2)";
             if (($eggs + $chicks) > 2) $warnings[] = 'eggs + chicks = ' . ($eggs + $chicks) . ' (>2)';
-            // 2. Balance: adults must equal scans + no-scan.
-            if ($countsOk && ($adults - $birdsListed - $noScan) !== 0)
-                $warnings[] = "adults ($adults) ≠ scans ($birdsListed) + no-scan ($noScan)";
+            // 2. Balance: adults should equal birds entered (chips + unmatched) + no-scan cells.
+            //    Extra adults with no bird cell are unscanned — recorded as no-scans, but only after
+            //    the user confirms at commit ($needNoScanConfirm carries the implied count).
+            if ($countsOk && $adults > $birdsListed + $noScan) {
+                $needNoScanConfirm = $adults - $birdsListed - $noScan;
+                $noScan += $needNoScanConfirm;
+                $warnings[] = "adults ($adults) > birds entered ($birdsListed) — confirm $needNoScanConfirm no-scan(s)";
+            } elseif ($countsOk && $adults < $birdsListed + $noScan) {
+                $warnings[] = "adults ($adults) < entered (" . ($birdsListed + $noScan) . ') — more entered than present';
+            }
         }
         // 5. Chips that didn't resolve to exactly one colony bird (with a "did you mean" near-match).
         foreach ($unmatchedHere as $u) {
@@ -1298,6 +1364,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         $R['rows'][] = [
             'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
             'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks, 'no_scan' => $noScan,
+            'confirm_no_scan' => $needNoScanConfirm, 'bios' => $bios,
             'breeding_status' => $breeding, 'is_decom' => $isDecom, 'notes' => $notes,
             'obs_time' => $obsTime, 'prev_obs' => $prevObs, 'scans' => $scans, 'unmatched' => $unmatchedHere,
             'errors' => $errors, 'warnings' => $warnings, 'mini_pengs' => $miniPengs, 'status' => $status,
@@ -1317,6 +1384,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         $R['totals']['adults'] += $adults; $R['totals']['eggs'] += $eggs; $R['totals']['chicks'] += $chicks;
         $R['totals']['no_scan'] += $noScan; $R['totals']['scans_matched'] += count($scans);
         $R['totals']['scans_unmatched'] += count($unmatchedHere);
+        $R['totals']['biometrics'] += count($bios);
+        if ($needNoScanConfirm > 0) $R['totals']['noscan_confirm']++;
     }
 
     if (count($distinctDates) > 1) {
@@ -1391,11 +1460,14 @@ if ($action === 'import_csv_commit') {
     $A = ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename);
     if (!$A['ok']) { http_response_code(400); echo json_encode(['error' => $A['error']]); exit; }
 
-    $imported = 0; $scans = 0; $skippedDup = 0; $skippedErr = 0;
+    $imported = 0; $scans = 0; $bios = 0; $skippedDup = 0; $skippedErr = 0;
     try {
         $pdo->beginTransaction();
         $insObs = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, no_scan, breeding_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
         $insScan = $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)");
+        $insBio = $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex) VALUES (?,?,?,?)");
+        // Skip a biometric if this bird already has a live one on this date (idempotent re-imports).
+        $dupBio = $pdo->prepare("SELECT 1 FROM penguin_biometric_data WHERE peng_num = ? AND observation_date = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1");
         foreach ($A['rows'] as $row) {
             if ($row['status'] === 'error') { $skippedErr++; continue; }
             if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
@@ -1410,6 +1482,12 @@ if ($action === 'import_csv_commit') {
                 $insScan->execute([$obsId, $sc['pit_id'], $row['obs_time']]);
                 $scans++;
             }
+            foreach ($row['bios'] ?? [] as $b) {
+                $dupBio->execute([$b['peng_num'], $row['date']]);
+                if ($dupBio->fetchColumn()) continue;
+                $insBio->execute([$b['peng_num'], $obsId, $row['date'], $b['observed_sex']]);
+                $bios++;
+            }
         }
         $pdo->commit();
     } catch (Exception $e) {
@@ -1421,7 +1499,7 @@ if ($action === 'import_csv_commit') {
 
     echo json_encode([
         'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
-        'imported' => $imported, 'scans' => $scans, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
+        'imported' => $imported, 'scans' => $scans, 'biometrics' => $bios, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
         'unmatched_chips' => $A['unmatched_chips'],
     ]);
     exit;
