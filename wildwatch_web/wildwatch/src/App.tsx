@@ -597,7 +597,7 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, onClick)}>
       {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
   );
@@ -1801,6 +1801,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const activeChip = chips.find((c: any) => c.is_active == 1) || chips[0];
 
   const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
+
+  // When the panel opens or switches bird, briefly wiggle every OTHER mini of this bird
+  // on the page so the user sees at a glance where else it's referenced.
+  useEffect(() => {
+    const keys = [p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))].filter(Boolean);
+    if (keys.length === 0) return;
+    const els = Array.from(document.querySelectorAll(keys.map(k => `[data-peng="${CSS.escape(String(k))}"]`).join(',')))
+      .filter(el => !el.closest('.bird-detail'));
+    els.forEach(el => el.classList.add('peng-wiggle'));
+    const t = setTimeout(() => els.forEach(el => el.classList.remove('peng-wiggle')), 1000);
+    return () => { clearTimeout(t); els.forEach(el => el.classList.remove('peng-wiggle')); };
+  }, [p.peng_num]);
 
   // Peng-centric breeding family: run the SAME nest family detection (computeBoxFamilies)
   // over every box this bird was seen/chipped in, then keep the clutches where this bird

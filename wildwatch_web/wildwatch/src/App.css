@@ -240,6 +240,9 @@ header h1:hover { opacity:.8; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
 .scan { border: 0.1em solid #333; }
+/* Peng panel opened: other minis of the same bird wiggle briefly (subtle) */
+@keyframes peng-wiggle { 0%,100% { transform:rotate(0deg); } 25% { transform:rotate(-1.5deg); } 75% { transform:rotate(1.5deg); } }
+.peng-wiggle { display:inline-block; animation:peng-wiggle .3s ease-in-out 3; }
 .scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 85%, #FDD835 85%); }
 .scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 85%, #FDD835 85%); }
 .scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF 85%, #FDD835 85%); }
