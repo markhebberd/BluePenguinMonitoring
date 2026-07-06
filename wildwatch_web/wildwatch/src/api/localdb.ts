@@ -553,6 +553,9 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     console.timeEnd('storeSnapshot');
     onProgress?.(`Loaded ${data.observations.length} observations, ${data.penguins.length} penguins`);
   }
+
+  // Integrity-check dismissals ride alongside the colony sync (separate tiny endpoint).
+  await syncDismissals();
 }
 
 // Prevent concurrent syncs
@@ -1083,6 +1086,90 @@ export function computeAdultCountMismatches(): { total: number; rows: any[] } {
 
 // ============ Data-integrity checks (computed from the colony cache) ============
 // Client-side versions of the admin SQL checks — instant, scoped to the active colony.
+
+// ---- Dismissals: mark a specific integrity-check error as reviewed / valid ----
+// Kept separate from the observation cache (its own tiny endpoint, no IndexedDB store,
+// no CACHE_VERSION bump / full re-sync). A dismissal holds only while the flagged row's
+// content is unchanged (content_hash) — edit any value the error shows and it re-surfaces.
+export interface Dismissal {
+  error_type: string; error_key: string; content_hash: string;
+  reason?: string | null; dismissed_by?: number | null; dismissed_by_name?: string | null; dismissed_at?: string;
+}
+// Which computed-row fields identify one error instance, per check (stable identity, not content).
+const ERROR_KEY_FIELDS: Record<string, string[]> = {
+  duplicate_observations: ['obs_date', 'box_name'],
+  duplicate_scans: ['obs_date', 'box_name', 'peng_num', 'dup_type'],
+  same_gender_conflicts: ['obs_date', 'box_name', 'sex'],
+  bird_two_boxes: ['peng_num', 'obs_date'],
+  scan_before_chip: ['peng_num', 'obs_date'],
+  dead_scanned: ['peng_num'],
+  improbable_counts: ['obs_date', 'box_name'],
+  future_observations: ['obs_date', 'box_name'],
+  retired_tag_scans: ['peng_num', 'pit_id', 'obs_date'],
+  chicks_no_scan: ['obs_date', 'box_name'],
+};
+let dismissals: Dismissal[] = [];
+let dismissalIndex = new Map<string, Dismissal>(); // `${type}::${key}` -> dismissal
+
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+/** Fingerprint of a computed error row (all non-internal fields, order-independent). */
+function rowContentHash(row: any): string {
+  const keys = Object.keys(row).filter(k => !k.startsWith('_')).sort();
+  return fnv1a(JSON.stringify(keys.map(k => [k, row[k]])));
+}
+/** Stable identity string for one error instance. */
+function rowErrorKey(errorType: string, row: any): string {
+  const fields = ERROR_KEY_FIELDS[errorType] || Object.keys(row).filter(k => !k.startsWith('_')).sort();
+  return fields.map(f => String(row[f] ?? '')).join('|');
+}
+const dmKey = (type: string, key: string) => type + '::' + key;
+
+/** The active dismissal for a row — only if the row's content still matches what was approved. */
+function dismissalFor(errorType: string, row: any): Dismissal | undefined {
+  const d = dismissalIndex.get(dmKey(errorType, rowErrorKey(errorType, row)));
+  return d && d.content_hash === rowContentHash(row) ? d : undefined;
+}
+/** Split a check's rows into still-active errors and reviewed/dismissed ones. */
+export function splitDismissed(errorType: string, rows: any[]): { active: any[]; dismissed: any[] } {
+  const active: any[] = [], dismissed: any[] = [];
+  for (const r of rows) {
+    const d = dismissalFor(errorType, r);
+    if (d) dismissed.push({ ...r, _dismissal: d }); else active.push(r);
+  }
+  return { active, dismissed };
+}
+
+/** Pull the colony's dismissals; called at the end of each sync and after any change. */
+export async function syncDismissals(): Promise<void> {
+  try {
+    const resp = await fetch(`/api/integrity.php?${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    dismissals = Array.isArray(data.dismissals) ? data.dismissals : [];
+    dismissalIndex = new Map(dismissals.map((d): [string, Dismissal] => [dmKey(d.error_type, d.error_key), d]));
+    notifySubscribers();
+  } catch { /* offline / not authed — keep existing dismissals */ }
+}
+export async function dismissError(errorType: string, row: any, reason: string): Promise<void> {
+  const resp = await fetch(`/api/integrity.php?action=dismiss&${colonyQS()}`, {
+    method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ error_type: errorType, error_key: rowErrorKey(errorType, row), content_hash: rowContentHash(row), reason }),
+  });
+  if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Could not dismiss');
+  await syncDismissals();
+}
+export async function undismissError(errorType: string, row: any): Promise<void> {
+  const resp = await fetch(`/api/integrity.php?action=undismiss&${colonyQS()}`, {
+    method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ error_type: errorType, error_key: rowErrorKey(errorType, row) }),
+  });
+  if (!resp.ok) throw new Error('Could not restore');
+  await syncDismissals();
+}
 
 const byDateDesc = (a: any, b: any) => b.obs_date.localeCompare(a.obs_date);
 /** Deep-link that opens a box and highlights one observation (obsAnchor). */

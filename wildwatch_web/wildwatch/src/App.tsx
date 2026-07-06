@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -6306,37 +6306,37 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
         <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
-        <IntegrityCheck rows={iDupObs} title="Duplicate observations"
+        <IntegrityCheck rows={iDupObs} errorType="duplicate_observations" title="Duplicate observations"
           desc="More than one observation for a box on the same day." empty="No duplicate observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'cnt', label: 'Count' }, { key: 'monitors', label: 'Monitors' }]} />
-        <IntegrityCheck rows={iDupScans} title="Duplicate scans"
+        <IntegrityCheck rows={iDupScans} errorType="duplicate_scans" title="Duplicate scans"
           desc="The same bird scanned more than once in one observation — kept as evidence of a data-entry error." empty="No duplicate scans"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'cnt', label: 'Count' }, { key: 'dup_type', label: 'Type' }]} />
-        <IntegrityCheck rows={iSameGender} title="Same-gender conflicts"
+        <IntegrityCheck rows={iSameGender} errorType="same_gender_conflicts" title="Same-gender conflicts"
           desc="Two+ penguins of the same sex scanned at one box on one day — a sex-assignment error or a genuine multi-bird visit." empty="No same-gender conflicts"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'sex', label: 'Sex', render: (v: string) => v === 'M' ? 'Male' : v === 'F' ? 'Female' : v }, { key: 'cnt', label: 'Count' }, { key: 'peng_nums', label: 'Penguins', render: (v: string) => (v || '').split(',').map((n: string, i: number) => <Fragment key={i}>{i > 0 ? ' ' : ''}{pengCell(n.trim())}</Fragment>) }]} />
-        <IntegrityCheck rows={iBirdTwoBoxes} title="Bird in two boxes same day"
+        <IntegrityCheck rows={iBirdTwoBoxes} errorType="bird_two_boxes" title="Bird in two boxes same day"
           desc="A penguin scanned at two different boxes on one day — can't be two places at once." empty="No birds in two boxes"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'boxes', label: 'Boxes', render: boxesCell }, { key: 'box_count', label: '#' }]} />
-        <IntegrityCheck rows={iScanBeforeChip} title="Scan before chip date"
+        <IntegrityCheck rows={iScanBeforeChip} errorType="scan_before_chip" title="Scan before chip date"
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
-        <IntegrityCheck rows={iDeadScanned} title="Dead birds still scanned"
+        <IntegrityCheck rows={iDeadScanned} errorType="dead_scanned" title="Dead birds still scanned"
           desc="Birds marked dead but scanned in the last year — the death flag or the scan is wrong." empty="No dead birds recently scanned"
           columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
-        <IntegrityCheck rows={iImprobable} title="Improbable counts"
+        <IntegrityCheck rows={iImprobable} errorType="improbable_counts" title="Improbable counts"
           desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell },
             { key: 'adults', label: 'Adults', render: (v: any) => Number(v) > 2 ? redNum(v) : v },
             { key: 'eggs', label: 'Eggs', render: (v: any, r: any) => (Number(r.eggs) + Number(r.chicks) > 3 && Number(v) > 0) ? redNum(v) : v },
             { key: 'chicks', label: 'Chicks', render: (v: any, r: any) => (Number(r.eggs) + Number(r.chicks) > 3 && Number(v) > 0) ? redNum(v) : v }]} />
-        <IntegrityCheck rows={iFuture} title="Future-dated observations"
+        <IntegrityCheck rows={iFuture} errorType="future_observations" title="Future-dated observations"
           desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'monitor', label: 'Monitor' }]} />
-        <IntegrityCheck rows={iRetired} title="Retired-tag scans"
+        <IntegrityCheck rows={iRetired} errorType="retired_tag_scans" title="Retired-tag scans"
           desc="Scanned via an old (inactive) chip after the bird was rechipped." empty="No retired-tag scans"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'pit_id', label: 'Tag', render: (v: string) => String(v || '').slice(-8) }, { key: 'active_chip_date', label: 'Rechipped' }]} />
-        <IntegrityCheck rows={iChicksNoScan} title="Chicks present but not scanned"
+        <IntegrityCheck rows={iChicksNoScan} errorType="chicks_no_scan" title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />
 
@@ -6744,30 +6744,77 @@ function RemovePenguin({ token }: { token: string }) {
 }
 
 // Presentational integrity check: renders rows (computed locally) — 5 by default + "show all".
-function IntegrityCheck({ title, desc, rows, empty, columns }: {
+function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   title: string; desc?: string; rows: any[]; empty?: string;
   columns: { key: string; label: string; render?: (v: any, row: any) => React.ReactNode }[];
+  errorType?: string;   // when set, rows can be marked "valid" (reviewed & dismissed)
 }) {
   const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? rows : rows.slice(0, 5);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { active, dismissed } = errorType ? splitDismissed(errorType, rows) : { active: rows, dismissed: [] as any[] };
+  const shown = showAll ? active : active.slice(0, 5);
+
+  const doDismiss = async (row: any) => {
+    if (!errorType) return;
+    const reason = window.prompt(`Mark this "${title}" item as reviewed & valid?\n\nOptional note (why it's fine):`, '');
+    if (reason === null) return; // cancelled
+    setBusy(true);
+    try { await dismissError(errorType, row, reason.trim()); }
+    catch (e: any) { alert(e?.message || 'Could not dismiss'); }
+    finally { setBusy(false); }
+  };
+  const doRestore = async (row: any) => {
+    if (!errorType) return;
+    setBusy(true);
+    try { await undismissError(errorType, row); }
+    catch (e: any) { alert(e?.message || 'Could not restore'); }
+    finally { setBusy(false); }
+  };
+  const cellNav = (row: any) => row._href ? () => { window.location.href = row._href; } : undefined;
+
   return (
     <div style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8 }}>
       <h3 style={{ margin: '0 0 4px' }}>{title}</h3>
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
-      {rows.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
-        <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{rows.length} found{rows.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
+      {active.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
+        <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
         <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
-          <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}</tr></thead>
+          <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
-            <tr key={i} style={{ borderBottom: '1px solid #eee', cursor: row._href ? 'pointer' : 'default' }}
-              onClick={row._href ? () => { window.location.href = row._href; } : undefined}
-              title={row._href ? 'Go to the observation' : undefined}>
-              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px', cursor: row._href ? 'pointer' : 'default' }}
+                onClick={cellNav(row)} title={row._href ? 'Go to the observation' : undefined}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+              {errorType && <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                <button className="edit-btn" disabled={busy} onClick={() => doDismiss(row)} title="Reviewed — mark valid and hide from this list">✓ Valid</button>
+              </td>}
             </tr>
           ))}</tbody>
         </table>
-        {rows.length > 5 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all (${rows.length})`}</button>}
+        {active.length > 5 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all (${active.length})`}</button>}
       </>)}
+      {errorType && dismissed.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button className="edit-btn" onClick={() => setShowDismissed(s => !s)}>{showDismissed ? 'Hide' : 'Show'} {dismissed.length} dismissed</button>
+          {showDismissed && (
+            <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%', marginTop: 6, opacity: 0.65 }}>
+              <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}<th style={{ textAlign: 'left', padding: '2px 6px' }}>Reviewed by</th><th></th></tr></thead>
+              <tbody>{dismissed.map((row: any, i: number) => (
+                <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                  {columns.map(c => <td key={c.key} style={{ padding: '2px 6px', cursor: row._href ? 'pointer' : 'default' }}
+                    onClick={cellNav(row)}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+                  <td style={{ padding: '2px 6px', fontSize: 11, color: '#666' }} title={row._dismissal?.dismissed_at || ''}>
+                    {row._dismissal?.dismissed_by_name || '—'}{row._dismissal?.reason ? `: ${row._dismissal.reason}` : ''}
+                  </td>
+                  <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                    <button className="edit-btn" disabled={busy} onClick={() => doRestore(row)} title="Move back to the error list">Restore</button>
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
