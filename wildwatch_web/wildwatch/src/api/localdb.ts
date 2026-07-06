@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 1;
-const CACHE_VERSION = 9; // Bump to force all clients to full re-sync (v9: biometrics carry is_deleted)
+const CACHE_VERSION = 10; // Bump to force all clients to full re-sync (v10: full biometric column set)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics', 'meta'] as const;
 
 // Locations excluded from Full Monitor detection. Now configured per-colony (colonies.fm_excluded_boxes,

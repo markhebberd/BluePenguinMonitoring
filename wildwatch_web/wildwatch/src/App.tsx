@@ -1660,7 +1660,12 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   const [showBio, setShowBio] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
   const [adding, setAdding] = useState(false);
-  const emptyForm = { observation_date: toNzDateStr(new Date().toISOString()), observed_sex: '', weight: '', right_flipper_length: '', is_moulting: false, condition_ticks: false, notes: '' };
+  // Every biometric field the DB carries, so nothing is hidden.
+  const MEASURES: [string, string, string][] = [['weight', 'Weight', 'g'], ['right_flipper_length', 'R flipper', 'mm'], ['left_flipper_length', 'L flipper', 'mm'], ['body_length', 'Body', 'mm'], ['beak_length', 'Beak', 'mm']];
+  const FLAGS: [string, string][] = [['is_moulting', 'Moulting'], ['condition_ticks', 'Ticks'], ['condition_healthy', 'Healthy'], ['disposition_aggressive', 'Aggressive'], ['disposition_passive', 'Passive']];
+  const emptyForm: any = { observation_date: toNzDateStr(new Date().toISOString()), observed_sex: '', sex: '', notes: '' };
+  MEASURES.forEach(([k]) => emptyForm[k] = '');
+  FLAGS.forEach(([k]) => emptyForm[k] = false);
   const [form, setForm] = useState<any>(emptyForm);
   const [busy, setBusy] = useState(false);
   const SEX_OPTS = ['', 'PM', 'MM', 'U', 'MF', 'PF'];
@@ -1678,10 +1683,9 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
     if (!token || busy) return;
     if (!form.observation_date) { alert('Date is required'); return; }
     setBusy(true);
-    const rec: any = { peng_num: pengNum, observation_date: form.observation_date, observed_sex: form.observed_sex || null,
-      is_moulting: form.is_moulting ? 1 : 0, condition_ticks: form.condition_ticks ? 1 : 0, notes: form.notes.trim() || null };
-    if (String(form.weight).trim()) rec.weight = parseFloat(form.weight);
-    if (String(form.right_flipper_length).trim()) rec.right_flipper_length = parseFloat(form.right_flipper_length);
+    const rec: any = { peng_num: pengNum, observation_date: form.observation_date, observed_sex: form.observed_sex || null, sex: form.sex || null, notes: form.notes.trim() || null };
+    MEASURES.forEach(([k]) => { if (String(form[k]).trim() !== '') rec[k] = parseFloat(form[k]); });
+    FLAGS.forEach(([k]) => { rec[k] = form[k] ? 1 : 0; });
     await createRecord(token, 'penguin_biometric_data', rec);
     setBusy(false); setAdding(false); setForm(emptyForm);
   };
@@ -1696,7 +1700,7 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   const summary = [sexSummary, range(weights, 'g'), range(flippers, 'mm'), lastComment ? `"${lastComment.slice(0, 40)}"` : ''].filter(Boolean).join(' · ');
 
   const record = (b: any, i: number, removed: boolean) => {
-    const flags = [b.is_moulting && 'Moulting', b.condition_ticks && 'Ticks', b.disposition_aggressive && 'Aggressive', b.disposition_passive && 'Passive'].filter(Boolean);
+    const flags = FLAGS.filter(([k]) => b[k]).map(([, label]) => label);
     const ed = editing && !removed;
     return (<Fragment key={`${removed ? 'del' : 'bio'}${b.biometric_id ?? i}`}>
       <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 4, fontSize: 11 }}>
@@ -1706,10 +1710,12 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
         {ed && <button className="edit-btn" style={{ marginLeft: 8 }} onClick={() => remove(b)}>Remove</button>}
       </td></tr>
       <tr><td className="muted">Sex</td><td>{ed ? <EditableField value={b.observed_sex} type="select" options={SEX_OPTS} onSave={saveField(b.biometric_id, 'observed_sex')} canEdit={true} placeholder="-" /> : (observedSexLabel(b.observed_sex, false) || <span className="muted">-</span>)}</td></tr>
-      <tr><td className="muted">Weight</td><td>{ed ? <><EditableField value={b.weight ? parseFloat(b.weight).toFixed(0) : ''} type="number" onSave={saveField(b.biometric_id, 'weight')} placeholder="weight" canEdit={true} /><span>g</span></> : (b.weight ? `${parseFloat(b.weight).toFixed(0)}g` : <span className="muted">-</span>)}</td></tr>
-      <tr><td className="muted">Flipper</td><td>{ed ? <><EditableField value={b.right_flipper_length ? parseFloat(b.right_flipper_length).toFixed(0) : ''} type="number" onSave={saveField(b.biometric_id, 'right_flipper_length')} placeholder="mm" canEdit={true} /><span>mm</span></> : (b.right_flipper_length ? `${parseFloat(b.right_flipper_length).toFixed(0)}mm` : <span className="muted">-</span>)}</td></tr>
+      {(ed || b.sex) && <tr><td className="muted">Sex (legacy)</td><td>{ed ? <EditableField value={b.sex} onSave={saveField(b.biometric_id, 'sex')} placeholder="-" canEdit={true} /> : b.sex}</td></tr>}
+      {MEASURES.map(([k, label, unit]) => (
+        (ed || b[k]) ? <tr key={k}><td className="muted">{label}</td><td>{ed ? <><EditableField value={b[k] ? parseFloat(b[k]).toFixed(0) : ''} type="number" onSave={saveField(b.biometric_id, k)} placeholder={unit} canEdit={true} /><span>{unit}</span></> : (b[k] ? `${parseFloat(b[k]).toFixed(0)}${unit}` : <span className="muted">-</span>)}</td></tr> : null
+      ))}
       {ed
-        ? <tr><td className="muted">Flags</td><td><label style={{ marginRight: 8 }}><input type="checkbox" checked={!!b.is_moulting} onChange={e => toggle(b, 'is_moulting', e.target.checked)} /> Moult</label><label><input type="checkbox" checked={!!b.condition_ticks} onChange={e => toggle(b, 'condition_ticks', e.target.checked)} /> Ticks</label></td></tr>
+        ? <tr><td className="muted">Flags</td><td>{FLAGS.map(([k, label]) => <label key={k} style={{ marginRight: 8 }}><input type="checkbox" checked={!!b[k]} onChange={e => toggle(b, k, e.target.checked)} /> {label}</label>)}</td></tr>
         : (flags.length > 0 ? <tr><td className="muted">Flags</td><td>{flags.join(', ')}</td></tr> : null)}
       <tr><td className="muted">Note</td><td style={{ fontSize: 11 }}>{ed ? <EditableField value={b.notes} onSave={saveField(b.biometric_id, 'notes')} placeholder="-" canEdit={true} multiline /> : (b.notes || <span className="muted">-</span>)}</td></tr>
     </Fragment>);
@@ -1724,9 +1730,8 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
         <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 6, fontSize: 11 }}>New biometric</td></tr>
         <tr><td className="muted">Date</td><td><input type="date" value={form.observation_date} onChange={e => setF('observation_date', e.target.value)} /></td></tr>
         <tr><td className="muted">Sex</td><td><select value={form.observed_sex} onChange={e => setF('observed_sex', e.target.value)}>{SEX_OPTS.map(s => <option key={s} value={s}>{s ? observedSexLabel(s, false) : '-'}</option>)}</select></td></tr>
-        <tr><td className="muted">Weight</td><td><input type="number" value={form.weight} onChange={e => setF('weight', e.target.value)} placeholder="g" style={{ width: 80 }} /> g</td></tr>
-        <tr><td className="muted">Flipper</td><td><input type="number" value={form.right_flipper_length} onChange={e => setF('right_flipper_length', e.target.value)} placeholder="mm" style={{ width: 80 }} /> mm</td></tr>
-        <tr><td className="muted">Flags</td><td><label style={{ marginRight: 8 }}><input type="checkbox" checked={form.is_moulting} onChange={e => setF('is_moulting', e.target.checked)} /> Moult</label><label><input type="checkbox" checked={form.condition_ticks} onChange={e => setF('condition_ticks', e.target.checked)} /> Ticks</label></td></tr>
+        {MEASURES.map(([k, label, unit]) => <tr key={k}><td className="muted">{label}</td><td><input type="number" value={form[k]} onChange={e => setF(k, e.target.value)} placeholder={unit} style={{ width: 80 }} /> {unit}</td></tr>)}
+        <tr><td className="muted">Flags</td><td>{FLAGS.map(([k, label]) => <label key={k} style={{ marginRight: 8 }}><input type="checkbox" checked={form[k]} onChange={e => setF(k, e.target.checked)} /> {label}</label>)}</td></tr>
         <tr><td className="muted">Note</td><td><input type="text" value={form.notes} onChange={e => setF('notes', e.target.value)} placeholder="-" /></td></tr>
         <tr><td></td><td><button className="edit-btn done-btn" disabled={busy} onClick={submitAdd}>{busy ? 'Saving…' : 'Save'}</button> <button className="edit-btn" onClick={() => { setAdding(false); setForm(emptyForm); }}>Cancel</button></td></tr>
       </>}
