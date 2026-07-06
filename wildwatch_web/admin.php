@@ -1024,7 +1024,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
     $pengActiveKey = []; // peng_num => last-8 of its active chip (to spot retired-tag scans)
     $pengChickSize = []; // peng_num => recorded chick_size_code (BC/LC/SC or '')
     $pengChips = [];     // peng_num => [['date'=>YYYY-MM-DD, 'box'=>UPPER], ...]  (chipping events)
-    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, pc.chip_date, pc.chip_box, p.colony_id, p.sex, p.is_dead, p.chick_size_code
+    $pengAdult = [];     // peng_num => chipped_as_adult (bool)
+    foreach ($pdo->query("SELECT pc.pit_id, pc.peng_num, pc.is_active, pc.chip_date, pc.chip_box, p.colony_id, p.sex, p.is_dead, p.chick_size_code, p.chipped_as_adult
         FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num")->fetchAll() as $c) {
         $k = ww_chipKey($c['pit_id']);
         $byKeyAny[$k][$c['peng_num']] = (int)$c['colony_id'];
@@ -1035,6 +1036,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         if ($c['is_active']) { if ($byKeyColony[$k]['active'] === null) $byKeyColony[$k]['active'] = $c['pit_id']; $pengActiveKey[$c['peng_num']] = $k; }
         $pengMeta[$c['peng_num']] = ['sex' => strtoupper((string)($c['sex'] ?? '')), 'dead' => !empty($c['is_dead'])];
         $pengChickSize[$c['peng_num']] = strtoupper((string)($c['chick_size_code'] ?? ''));
+        $pengAdult[$c['peng_num']] = !empty($c['chipped_as_adult']);
         if (!empty($c['chip_date'])) {
             $pengChips[$c['peng_num']][] = ['date' => substr($c['chip_date'], 0, 10), 'box' => strtoupper(trim((string)($c['chip_box'] ?? '')))];
             if (!isset($pengFirstChip[$c['peng_num']]) || $c['chip_date'] < $pengFirstChip[$c['peng_num']])
@@ -1102,6 +1104,16 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         static $sexMap = ['M' => 'M', 'F' => 'F', 'UM' => 'MM', 'UF' => 'MF', 'U' => 'U'];
         $obs = $s === '' ? '' : ($sexMap[$s] ?? null);
         return [$size, $obs, $s];
+    };
+
+    // A scanned bird counts as a chick (against the Chicks column, not Adults) if it was chipped
+    // as a chick and this observation is within ~3 months of that chipping — i.e. still a chick.
+    $isChick = function ($peng, $obsDate) use ($pengAdult, $pengFirstChip) {
+        if ($peng === null || $peng === '' || $obsDate === null) return false;
+        if (!empty($pengAdult[$peng])) return false;      // chipped as an adult
+        $cd = $pengFirstChip[$peng] ?? null;
+        if ($cd === null) return false;
+        return $obsDate >= $cd && $obsDate <= date('Y-m-d', strtotime($cd . ' +3 months'));
     };
 
     $unmatched = [];      // chipKey => ['chip'=>original, 'reason'=>why, 'count'=>n, 'boxes'=>[...]]
@@ -1247,21 +1259,26 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         // ---- Flags: interesting/problematic but still importable (never exclude the row) ----
-        $birdsListed = count($scans) + count($unmatchedHere); // "#scans" = every chip Bird cell
+        // Split scanned birds into adults vs chicks (a chick is chipped-as-chick and still <3 months
+        // old) so chicks count against the Chicks column, not the adult balance.
+        $chickBirds = 0; $adultBirds = count($unmatchedHere); // unmatched -> assume adult
+        foreach ($scans as $sc) { if ($isChick($sc['peng_num'], $obsDate)) $chickBirds++; else $adultBirds++; }
+        $birdsListed = count($scans) + count($unmatchedHere);
         $needNoScanConfirm = 0; // implied no-scans (adults not accounted for) — created automatically
         if (!$isDecom) {
             // 1. Improbable counts for a little-penguin box.
             if ($adults > 2) $warnings[] = "adults = $adults (>2)";
             if (($eggs + $chicks) > 2) $warnings[] = 'eggs + chicks = ' . ($eggs + $chicks) . ' (>2)';
-            // 2. Balance: adults should equal birds entered (chips + unmatched) + no-scan cells.
-            //    Extra adults with no bird cell are unscanned — a no-scan is created automatically
-            //    for the difference on import; the row is flagged so the reviewer sees it.
-            if ($countsOk && $adults > $birdsListed + $noScan) {
-                $needNoScanConfirm = $adults - $birdsListed - $noScan;
+            // 2. Adult balance: adult scans (+ no-scan cells) should equal the Adults count. Extra
+            //    adults with no bird cell are unscanned — a no-scan is created automatically for the
+            //    difference on import; the row is flagged so the reviewer sees it. Chicks excluded.
+            if ($countsOk && $adults > $adultBirds + $noScan) {
+                $needNoScanConfirm = $adults - $adultBirds - $noScan;
                 $noScan += $needNoScanConfirm;
-                $warnings[] = "adults ($adults) > scanned ($birdsListed) — $needNoScanConfirm no-scan(s) will be created for this date";
-            } elseif ($countsOk && $adults < $birdsListed + $noScan) {
-                $warnings[] = "adults ($adults) < entered (" . ($birdsListed + $noScan) . ') — more entered than present';
+                $warnings[] = "adults ($adults) > scanned ($adultBirds) — $needNoScanConfirm no-scan(s) will be created for this date";
+            } elseif ($countsOk && $adults < $adultBirds + $noScan) {
+                $warnings[] = "adults ($adults) < entered (" . ($adultBirds + $noScan) . ') — more entered than present';
+                foreach ($scans as $sc) $addMini($sc['peng_num']);
             }
         }
         // 5. Chips that didn't resolve to exactly one colony bird (with a "did you mean" near-match).
@@ -1360,6 +1377,8 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         if ($sheetDupOf !== null) $warnings[] = "duplicate of line $sheetDupOf in this sheet (same box + date)";
+        // Flagged row: show the scanned birds' minis so the reviewer can see who was recorded.
+        if (count($warnings)) foreach ($scans as $sc) $addMini($sc['peng_num']);
         $status = count($errors) ? 'error' : (($duplicate || $sheetDupOf !== null) ? 'duplicate' : 'ok');
         $R['rows'][] = [
             'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
