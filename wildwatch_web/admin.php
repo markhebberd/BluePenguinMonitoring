@@ -1248,18 +1248,18 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 
         // ---- Flags: interesting/problematic but still importable (never exclude the row) ----
         $birdsListed = count($scans) + count($unmatchedHere); // "#scans" = every chip Bird cell
-        $needNoScanConfirm = 0; // implied no-scans (adults not accounted for) awaiting confirmation
+        $needNoScanConfirm = 0; // implied no-scans (adults not accounted for) — created automatically
         if (!$isDecom) {
             // 1. Improbable counts for a little-penguin box.
             if ($adults > 2) $warnings[] = "adults = $adults (>2)";
             if (($eggs + $chicks) > 2) $warnings[] = 'eggs + chicks = ' . ($eggs + $chicks) . ' (>2)';
             // 2. Balance: adults should equal birds entered (chips + unmatched) + no-scan cells.
-            //    Extra adults with no bird cell are unscanned — recorded as no-scans, but only after
-            //    the user confirms at commit ($needNoScanConfirm carries the implied count).
+            //    Extra adults with no bird cell are unscanned — a no-scan is created automatically
+            //    for the difference on import; the row is flagged so the reviewer sees it.
             if ($countsOk && $adults > $birdsListed + $noScan) {
                 $needNoScanConfirm = $adults - $birdsListed - $noScan;
                 $noScan += $needNoScanConfirm;
-                $warnings[] = "adults ($adults) > birds entered ($birdsListed) — confirm $needNoScanConfirm no-scan(s)";
+                $warnings[] = "adults ($adults) > scanned ($birdsListed) — $needNoScanConfirm no-scan(s) will be created for this date";
             } elseif ($countsOk && $adults < $birdsListed + $noScan) {
                 $warnings[] = "adults ($adults) < entered (" . ($birdsListed + $noScan) . ') — more entered than present';
             }

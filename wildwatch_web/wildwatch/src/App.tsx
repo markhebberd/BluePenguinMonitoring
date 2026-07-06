@@ -5684,9 +5684,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
   const impCommit = async () => {
     if (!impAnalysis || impCommitting) return;
-    // Adults not accounted for by bird cells are recorded as "no scan" — confirm before writing.
-    const nsc = impAnalysis.totals?.noscan_confirm || 0;
-    if (nsc > 0 && !confirm(`${nsc} observation(s) have more adults than birds entered. Record each surplus adult as a "no scan"?\n\n(Cancel to fix the sheet and re-analyze.)`)) return;
     setImpCommitting(true); setImpError('');
     try {
       const r = await fetch('/api/admin.php?action=import_csv_commit', {
@@ -5996,7 +5993,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             ['Boxes', t.boxes], ['Not in sheet', t.boxes_missing, t.boxes_missing ? '#8a6d3b' : undefined], ['Decom→DCM', t.decom],
             ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks], ['No-scan', t.no_scan],
             ['Biometrics', t.biometrics, t.biometrics ? '#1a7a1a' : undefined],
-            ['Confirm no-scan', t.noscan_confirm, t.noscan_confirm ? '#8a6d3b' : undefined],
+            ['No-scans created', t.noscan_confirm, t.noscan_confirm ? '#8a6d3b' : undefined],
             ['Scans matched', t.scans_matched, '#1a7a1a'],
             ['Chips unresolved', t.scans_unmatched, t.scans_unmatched ? '#c0392b' : undefined],
           ];
