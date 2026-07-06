@@ -4376,20 +4376,20 @@ function BreedingAgeHistograms() {
             if (!key) continue;
             const born = parseDate(parent.chip_date).getTime();
             const mo = (t: number) => Math.round((t - born) / (1000 * 60 * 60 * 24 * 30.44));
-            // Every clutch from segmentClutches is a real breeding attempt — it starts at egg
-            // appearance (or the season's first brood, where the egg phase was missed) — so a bird
-            // parenting it had an egg. Defer to the same breeding-window the box view shows rather
-            // than re-checking egg counts; this also keeps first-egg age <= first-chick age.
-            {
+            // Both graphs read the SAME breeding windows the box view computes (segmentClutches via
+            // computeBoxFamilies) — nothing about the window is recomputed here.
+            const chipDates = fam.chicks.map((ck: any) => ck.chip_date).filter(Boolean).map((d: string) => parseDate(d).getTime());
+            const producedChick = chipDates.length > 0;                 // window produced a chipped chick
+            const producedEgg = fam.clutch.maxEggs >= 1 || producedChick; // …and any chick implies an egg
+            // Graph 1: age when this window produced an egg (its estimated laid date).
+            if (producedEgg) {
               const t = fam.clutch.laid ?? fam.clutch.windowStart;
-              if (t) {
-                const m = mo(t);
-                if (m > 0 && (!firstEgg.has(key) || m < firstEgg.get(key)!)) firstEgg.set(key, m);
-              }
+              if (t) { const m = mo(t); if (m > 0 && (!firstEgg.has(key) || m < firstEgg.get(key)!)) firstEgg.set(key, m); }
             }
-            for (const ck of fam.chicks) {
-              if (!ck.chip_date) continue;
-              const m = mo(parseDate(ck.chip_date).getTime());
+            // Graph 2: age when this window produced its first chipped chick — a strict subset of
+            // graph 1 (a chick can't exist without an egg), trailing it by the egg→chip interval.
+            if (producedChick) {
+              const m = mo(Math.min(...chipDates));
               if (m > 0 && (!firstChick.has(key) || m < firstChick.get(key)!)) firstChick.set(key, m);
             }
           }
@@ -4401,8 +4401,8 @@ function BreedingAgeHistograms() {
 
   return (
     <>
-      <AgeHistogramCard title="Age at First Egg" blurb={`How old chick-chipped penguins were when first detected as a parent of a clutch (using the box view's breeding-window detection) (n=${eggMonths.length}, age measured from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
-      <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`How old chick-chipped penguins were when their first chick was chipped (n=${chickMonths.length}, age measured from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
+      <AgeHistogramCard title="Age at First Egg" blurb={`Age of chick-chipped birds the first time they were a parent in a breeding window that produced an egg — using the box view's breeding-window detection (n=${eggMonths.length}, from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
+      <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`Age of chick-chipped birds the first time a breeding window they parented produced a chipped chick — a subset of the first-egg birds (n=${chickMonths.length}, from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
     </>
   );
 }
