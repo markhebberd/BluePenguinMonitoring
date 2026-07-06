@@ -632,6 +632,7 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
  *  appearance after an empty check is a SECOND clutch with its own family. */
 interface Clutch {
   laid: number | null;      // estimated laid time; null when un-estimable
+  laidUncertainty: number | null; // ± days on the laid estimate (half the empty→found gap)
   laidFailed: boolean;      // eggs already present at first check — data needs fixing
   start: number;            // first obs with offspring present (egg appearance)
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
@@ -671,12 +672,13 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
       // Exception: the season's FIRST attempt may start on chicks (egg phase missed).
       // Laid estimate (C# midpoint): halfway between last empty check and discovery,
       // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
-      let laid: number | null = null;
+      let laid: number | null = null, laidUncertainty: number | null = null;
       if (prevEmpty !== null && !abn) {
         const found = (o.eggs || 0) > 1 ? t - 2 * DAY : t;
         laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
+        laidUncertainty = Math.floor((found - prevEmpty) / 2 / DAY); // matches reports.php uncertaintyDays
       }
-      current = { laid, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, end: null,
+      current = { laid, laidUncertainty, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
       if (abn) { current.end = t; current = null; awaitingEmpty = true; }
@@ -789,7 +791,9 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
     `Chip ~${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`,
     `Fledge ~${d(BREEDING_OFFSETS.fledge)}`,
   ];
-  return <span className="clutch-predictions">{parts.join(', ')}</span>;
+  const unc = clutch.laidUncertainty !== null && clutch.laidUncertainty > 0
+    ? ` ± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
+  return <span className="clutch-predictions">{parts.join(', ') + unc}</span>;
 }
 
 
