@@ -1661,7 +1661,7 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   const [showRemoved, setShowRemoved] = useState(false);
   const [adding, setAdding] = useState(false);
   // Every biometric field the DB carries, so nothing is hidden.
-  const MEASURES: [string, string, string][] = [['weight', 'Weight', 'g'], ['right_flipper_length', 'R flipper', 'mm'], ['left_flipper_length', 'L flipper', 'mm'], ['body_length', 'Body', 'mm'], ['beak_length', 'Beak', 'mm']];
+  const MEASURES: [string, string, string][] = [['weight', 'Weight', 'g'], ['flipper_length', 'Flipper', 'mm'], ['body_length', 'Body', 'mm'], ['beak_length', 'Beak', 'mm']];
   const FLAGS: [string, string][] = [['is_moulting', 'Moulting'], ['condition_ticks', 'Ticks'], ['condition_healthy', 'Healthy'], ['disposition_aggressive', 'Aggressive'], ['disposition_passive', 'Passive']];
   const emptyForm: any = { observation_date: toNzDateStr(new Date().toISOString()), observed_sex: '', sex: '', notes: '' };
   MEASURES.forEach(([k]) => emptyForm[k] = '');
@@ -1693,7 +1693,7 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   const sexCounts: Record<string, number> = {};
   const lastComment = biometrics.find((b: any) => b.notes)?.notes;
   const weights = biometrics.filter((b: any) => b.weight).map((b: any) => parseFloat(b.weight));
-  const flippers = biometrics.filter((b: any) => b.right_flipper_length).map((b: any) => parseFloat(b.right_flipper_length));
+  const flippers = biometrics.filter((b: any) => b.flipper_length).map((b: any) => parseFloat(b.flipper_length));
   biometrics.forEach((b: any) => { if (b.observed_sex) sexCounts[b.observed_sex] = (sexCounts[b.observed_sex] || 0) + 1; });
   const sexSummary = Object.entries(sexCounts).map(([s, n]) => `sexed ${observedSexLabel(s, true)} ${n}x`).join(', ');
   const range = (vals: number[], unit: string) => { if (!vals.length) return ''; const lo = Math.round(Math.min(...vals)), hi = Math.round(Math.max(...vals)); return `${lo === hi ? lo : `${lo}-${hi}`}${unit}${vals.length > 1 ? ` (${vals.length}x)` : ''}`; };
@@ -5366,7 +5366,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         notes: notes.trim() || null,
       };
       if (weight.trim()) bio.weight = parseFloat(weight);
-      if (flipper.trim()) bio.right_flipper_length = parseFloat(flipper);
+      if (flipper.trim()) bio.flipper_length = parseFloat(flipper);
       await createRecord(token, 'penguin_biometric_data', bio);
 
       onAdded(pengNum);

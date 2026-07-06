@@ -80,7 +80,7 @@ if ($since) {
     $locations = $pdo->prepare("SELECT location_id, location_name, persistent_notes, pit_id, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND updated_at >= ?");
     $locations->execute([$colonyId, $ts]);
 
-    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, left_flipper_length, right_flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
+    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
     $bio->execute([$ts]);
 
     $obsRows = $obs->fetchAll();
