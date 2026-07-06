@@ -3093,6 +3093,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {entryRows.map((o: any, i: number) => o._chip ? (
             <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
+              {(() => { const fm = dateMappings.find((m: any) => m.actual_date === String(o.chip_date).slice(0, 10)); return fm ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span> : null; })()}
               <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <PenguinMini scan={o} onClick={() => o.peng_num && setSideBird(o.peng_num)} observationDate={o.chip_date} />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
