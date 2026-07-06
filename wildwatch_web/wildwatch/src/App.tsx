@@ -6312,7 +6312,10 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           columns={[{ key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
         <IntegrityCheck rows={iImprobable} title="Improbable counts"
           desc="Adults > 2, or eggs + chicks > 2 — unusual for a little-penguin box." empty="No improbable counts"
-          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'adults', label: 'Adults', render: bigCountCell }, { key: 'eggs', label: 'Eggs', render: bigCountCell }, { key: 'chicks', label: 'Chicks', render: bigCountCell }]} />
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell },
+            { key: 'adults', label: 'Adults', render: (v: any) => Number(v) > 2 ? redNum(v) : v },
+            { key: 'eggs', label: 'Eggs', render: (v: any, r: any) => (Number(r.eggs) + Number(r.chicks) > 3 && Number(v) > 0) ? redNum(v) : v },
+            { key: 'chicks', label: 'Chicks', render: (v: any, r: any) => (Number(r.eggs) + Number(r.chicks) > 3 && Number(v) > 0) ? redNum(v) : v }]} />
         <IntegrityCheck rows={iFuture} title="Future-dated observations"
           desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'monitor', label: 'Monitor' }]} />
@@ -6756,14 +6759,14 @@ function IntegrityCheck({ title, desc, rows, empty, columns }: {
 }
 
 // Cell renderers for integrity tables — clickable box/day/penguin links. stopPropagation so a
-// link click goes to its own target rather than the row's "go to observation" handler.
-const stop = (e: React.MouseEvent) => e.stopPropagation();
-const dayCell = (d: string) => d ? <a className="clickable" href={`/day/${d}`} onClick={stop}>{d}</a> : '';
-const boxCell = (b: string) => b ? <a className="clickable" href={`/box/${b}`} onClick={stop}>Box {b}</a> : '';
-const pengCell = (n: string) => n ? <a className="clickable" href={`/penguin/${n}`} onClick={stop}>#{n}</a> : '';
-const bigCountCell = (v: any) => Number(v) > 3 ? <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span> : v;
+// styled plain text (not links) so a click anywhere in the row triggers the row's navigation
+// (its _href → the exact observation/date, highlighted) rather than a naked /day or /box.
+const dayCell = (d: string) => d ? <span className="clickable">{d}</span> : '';
+const boxCell = (b: string) => b ? <span className="clickable">Box {b}</span> : '';
+const pengCell = (n: string) => n ? <span className="clickable">#{n}</span> : '';
+const redNum = (v: any) => <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span>;
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
-  <Fragment key={i}>{i > 0 ? ', ' : ''}<a className="clickable" href={`/box/${b.trim()}`} onClick={stop}>{b.trim()}</a></Fragment>
+  <Fragment key={i}>{i > 0 ? ', ' : ''}<span className="clickable">{b.trim()}</span></Fragment>
 ));
 
 // One-off record of exceptions from the 6 Jul 2026 flipper-length import (chip spreadsheet).

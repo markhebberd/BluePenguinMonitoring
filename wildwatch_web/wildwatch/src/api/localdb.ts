@@ -1089,6 +1089,8 @@ const byDateDesc = (a: any, b: any) => b.obs_date.localeCompare(a.obs_date);
 const obsHref = (box: string, time: string) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`;
 /** Deep-link to a whole day (all boxes) — for issues that span boxes, not one observation. */
 const dayHref = (date: string) => `/?day=${encodeURIComponent(date)}`;
+/** Like obsHref, but also opens the bird panel — for bird-specific checks. */
+const obsBirdHref = (box: string, time: string, peng: string) => `${obsHref(box, time)}&bird=${encodeURIComponent(peng)}`;
 
 /** A penguin scanned at two different boxes on the same NZ day. */
 export function computeBirdTwoBoxes(): any[] {
@@ -1132,7 +1134,7 @@ export function computeScanBeforeChip(): any[] {
     const obs_date = utcToNzDate(obs.observation_time_utc);
     if (obs_date < chip.chip_date.slice(0, 10)) {
       const box_name = c.locById.get(obs.location_id)?.location_name || '';
-      rows.push({ obs_date, chip_date: chip.chip_date.slice(0, 10), box_name, peng_num: chip.peng_num, _href: obsHref(box_name, obs.observation_time_utc) });
+      rows.push({ obs_date, chip_date: chip.chip_date.slice(0, 10), box_name, peng_num: chip.peng_num, _href: obsBirdHref(box_name, obs.observation_time_utc, chip.peng_num) });
     }
   }
   return rows.sort(byDateDesc);
@@ -1157,7 +1159,7 @@ export function computeDeadScanned(): any[] {
         if (t > lastTime) { lastTime = t; last = utcToNzDate(t); lastBox = c.locById.get(obs.location_id)?.location_name || ''; }
       }
     }
-    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count, _href: obsHref(lastBox, lastTime) });
+    if (count > 0 && last >= cutoff) rows.push({ peng_num: p.peng_num, last_scan: last, scan_count: count, _href: obsBirdHref(lastBox, lastTime, p.peng_num) });
   }
   return rows.sort((a, b) => b.last_scan.localeCompare(a.last_scan));
 }
@@ -1211,7 +1213,7 @@ export function computeRetiredTagScans(): any[] {
     const obs_date = utcToNzDate(obs.observation_time_utc);
     if (obs_date > active.chip_date.slice(0, 10)) {
       const box_name = c.locById.get(obs.location_id)?.location_name || '';
-      rows.push({ obs_date, box_name, peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10), _href: obsHref(box_name, obs.observation_time_utc) });
+      rows.push({ obs_date, box_name, peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10), _href: obsBirdHref(box_name, obs.observation_time_utc, chip.peng_num) });
     }
   }
   return rows.sort(byDateDesc);
