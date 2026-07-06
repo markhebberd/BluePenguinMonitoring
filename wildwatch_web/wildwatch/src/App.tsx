@@ -782,6 +782,20 @@ const windowRange = (c: { windowStart: number; windowEnd: number; end: number | 
 /** Active window only: ALL upcoming stage dates predicted from the laid estimate — same
  *  offsets as the nestcheck Next Breeding Dates card. Hatch is shown only while the
  *  clutch is still in the egg phase; the chip window runs to fledge. */
+/** Unchipped offspring in a family box. Once the clutch has ENDED these are final
+ *  stages — egg that never hatched / chick never chipped — and get the red ✕. While
+ *  the clutch is still active they're simply in progress, so no failure mark. */
+function OffspringFinal({ kind, active }: { kind: 'egg' | 'chick'; active: boolean }) {
+  const title = kind === 'egg'
+    ? (active ? 'Egg in the nest' : 'Egg did not hatch')
+    : (active ? 'Unchipped chick in the nest' : 'Chick was not chipped in the nest');
+  return (
+    <span className={`offspring-final${active ? '' : ' offspring-failed'}`} title={title}>
+      {kind === 'egg' ? '🥚' : '🐣'}{!active && <span className="fail-x">{'✕'}</span>}
+    </span>
+  );
+}
+
 function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!clutchActive(clutch) || clutch.laid === null) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
@@ -1171,10 +1185,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                         {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
                         {Array.from({ length: failedEggs }).map((_, i) => (
-                          <span key={`fe${i}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'🥚'}<span className="fail-x">{'✕'}</span></span>
+                          <OffspringFinal key={`fe${i}`} kind="egg" active={clutchActive(clutch)} />
                         ))}
                         {Array.from({ length: plainChicks }).map((_, i) => (
-                          <span key={`pc${i}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'🐣'}<span className="fail-x">{'✕'}</span></span>
+                          <OffspringFinal key={`pc${i}`} kind="chick" active={clutchActive(clutch)} />
                         ))}
                         {Array.from({ length: fledgedUnchipped }).map((_, i) => (
                           <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
@@ -2053,10 +2067,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                         ))}
                         {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
-                          <span key={`fe${j}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'\uD83E\uDD5A'}<span className="fail-x">{'\u2715'}</span></span>
+                          <OffspringFinal key={`fe${j}`} kind="egg" active={clutchActive(c)} />
                         ))}
                         {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
-                          <span key={`pc${j}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'\uD83D\uDC23'}<span className="fail-x">{'\u2715'}</span></span>
+                          <OffspringFinal key={`pc${j}`} kind="chick" active={clutchActive(c)} />
                         ))}
                       </div>
                     )}
@@ -2179,10 +2193,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={ck.chip_date ? chickContextDate(ck.chip_date) : undefined} />
                               ))}
                               {Array.from({ length: fam.plainChicks }).map((_, j) => (
-                                <span key={`pc${j}`} className="offspring-final offspring-failed" title="Chick was not chipped in the nest">{'🐣'}<span className="fail-x">{'✕'}</span></span>
+                                <OffspringFinal key={`pc${j}`} kind="chick" active={clutchActive(fam.clutch)} />
                               ))}
                               {Array.from({ length: fam.failedEggs }).map((_, j) => (
-                                <span key={`fe${j}`} className="offspring-final offspring-failed" title="Egg did not hatch">{'🥚'}<span className="fail-x">{'✕'}</span></span>
+                                <OffspringFinal key={`fe${j}`} kind="egg" active={clutchActive(fam.clutch)} />
                               ))}
                             </span>
                             <a className="partner-window-dates clickable" href={`/box/${g.rows[0].box}`}
