@@ -2292,7 +2292,7 @@ namespace PenguinMonitor
                 Gravity = GravityFlags.Center,
                 TextSize = 14
             };
-            gate_and_notes.SetTextColor(Color.DarkGray);
+            gate_and_notes.SetTextColor(Color.Black);
 
             if(!string.IsNullOrEmpty(summary.Text)) boxOverviewCard.AddView(summary);
             if(!string.IsNullOrEmpty(gate_and_notes.Text)) boxOverviewCard.AddView(gate_and_notes);
@@ -3561,7 +3561,7 @@ namespace PenguinMonitor
                 var nsPadV = (int)(3 * textSize / 10);
                 nsb.SetPadding(nsPadH, nsPadV, nsPadH, nsPadV);
                 nsb.Background = _uiFactory.CreateRoundedBackground(SCAN_CHIPPED_TODAY_BG, 4);
-                nsb.SetTextColor(Color.DarkGray);
+                nsb.SetTextColor(Color.Black);
                 nsb.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 return nsb;
             }
@@ -3638,11 +3638,11 @@ namespace PenguinMonitor
         /// <summary>
         /// Build the observation detail as a View (not just text) so scans can be styled badges.
         /// </summary>
-        private View BuildObsDetailView(BoxObservation obs, bool showBoxLink = true)
+        private View BuildObsDetailView(BoxObservation obs, bool showBoxLink = true, bool showDate = false)
         {
             var layout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
 
-            // Status row: breeding% | icons | gate — evenly spaced
+            // Status row: breeding% | icons | gate — evenly spaced; date on the right
             var statusItems = new List<(string text, int size)>();
             if (!string.IsNullOrEmpty(obs.BreedingStatus)) statusItems.Add((obs.BreedingStatus, 13));
             var icons = string.Concat(Enumerable.Repeat("🐧", obs.Adults)) +
@@ -3651,7 +3651,7 @@ namespace PenguinMonitor
             if (!string.IsNullOrEmpty(icons)) statusItems.Add((icons, 14));
             if (!string.IsNullOrEmpty(obs.GateStatus)) statusItems.Add((obs.GateStatus, 13));
 
-            if (statusItems.Count > 0)
+            if (statusItems.Count > 0 || showDate)
             {
                 var statusRow = new LinearLayout(this);
                 statusRow.SetGravity(GravityFlags.CenterVertical);
@@ -3662,12 +3662,22 @@ namespace PenguinMonitor
                 {
                     statusRow.AddView(new View(this) { LayoutParameters = spacerParams });
                     var tv = new TextView(this) { Text = text, TextSize = size };
-                    tv.SetTextColor(Color.DarkGray);
+                    tv.SetTextColor(Color.Black);
                     tv.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                     tv.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
                     statusRow.AddView(tv);
                 }
                 statusRow.AddView(new View(this) { LayoutParameters = spacerParams });
+
+                // Date on the right — same styling as the CON/POT status items
+                if (showDate)
+                {
+                    var dateTv = new TextView(this) { Text = ToNzTime(obs.WhenDataCollectedUtc).ToString("d MMM"), TextSize = 13 };
+                    dateTv.SetTextColor(Color.Black);
+                    dateTv.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                    dateTv.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                    statusRow.AddView(dateTv);
+                }
 
                 layout.AddView(statusRow);
             }
@@ -3676,7 +3686,7 @@ namespace PenguinMonitor
             if (!string.IsNullOrEmpty(obs.Notes))
             {
                 var notesText = new TextView(this) { Text = obs.Notes, TextSize = 11 };
-                notesText.SetTextColor(Color.DarkGray);
+                notesText.SetTextColor(Color.Black);
                 notesText.SetPadding(0, 4, 0, 0);
                 layout.AddView(notesText);
             }
@@ -3691,7 +3701,7 @@ namespace PenguinMonitor
             if (showBoxLink && !string.IsNullOrEmpty(obs.BoxName))
             {
                 var boxName = obs.BoxName;
-                var boxBadge = new TextView(this) { Text = $"Box {boxName} →", TextSize = 10 };
+                var boxBadge = new TextView(this) { Text = $"Box {boxName}", TextSize = 14 };
                 boxBadge.SetPadding(8, 3, 8, 3);
                 boxBadge.LayoutParameters = flowParams;
                 boxBadge.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 4);
@@ -3705,7 +3715,7 @@ namespace PenguinMonitor
             foreach (var s in obs.ScannedIds)
             {
                 var badgeBirdId = s.BirdId;
-                var badge = CreateScanBadge(badgeBirdId, () => ShowBirdPanel(badgeBirdId), textSize: 10);
+                var badge = CreateScanBadge(badgeBirdId, () => ShowBirdPanel(badgeBirdId), textSize: 14);
                 badge.LayoutParameters = flowParams;
                 scansRow.AddView(badge);
             }
@@ -3726,10 +3736,20 @@ namespace PenguinMonitor
             string byWhom = !string.IsNullOrEmpty(obs.ObserverName) ? $" by {obs.ObserverName}" : "";
             string arrow = expanded ? "▾" : "▸";
             string boxStr = !string.IsNullOrEmpty(obs.BoxName) ? $"Box {obs.BoxName} " : "";
+            // Local (unsynced) data also carries a "saved" time. Show it when it differs from
+            // the observation time — this is what distinguishes a local edit from server data.
+            string savedStr = "";
+            if (obs.PendingUploadSinceUtc.HasValue)
+            {
+                var savedNz = ToNzTime(obs.PendingUploadSinceUtc.Value);
+                if (Math.Abs((savedNz - nzDate).TotalMinutes) >= 1)
+                    savedStr = $", saved {savedNz:d MMM HH:mm}";
+            }
+            string obsPrefix = string.IsNullOrEmpty(savedStr) ? "" : "obs ";
             if (expanded)
-                return $"{arrow} {boxStr}{label}: {nzDate:d MMM HH:mm}{byWhom}";
+                return $"{arrow} {boxStr}{label}: {obsPrefix}{nzDate:d MMM HH:mm}{savedStr}{byWhom}";
             string status = !string.IsNullOrEmpty(obs.BreedingStatus) ? $" {obs.BreedingStatus}" : "";
-            return $"{arrow} {boxStr}{label}: {nzDate:d MMM HH:mm}{byWhom} — " +
+            return $"{arrow} {boxStr}{label}: {obsPrefix}{nzDate:d MMM HH:mm}{savedStr}{byWhom} — " +
                 $"{string.Concat(Enumerable.Repeat("🐧", obs.Adults))}" +
                 $"{string.Concat(Enumerable.Repeat("🥚", obs.Eggs))}" +
                 $"{string.Concat(Enumerable.Repeat("🐣", obs.Chicks))}" +
@@ -3768,14 +3788,24 @@ namespace PenguinMonitor
             {
                 _prevObsSummaryLayout.Visibility = ViewStates.Visible;
                 _prevObsDetailLayout.RemoveAllViews();
-                _prevObsDetailLayout.AddView(BuildObsDetailView(prev));
+                _prevObsDetailLayout.AddView(BuildObsDetailView(prev, showDate: true));
 
-                // Date label bottom-right
-                var dateLabel = new TextView(this) { Text = nzDate.ToString("d MMM"), TextSize = 11 };
-                dateLabel.SetTextColor(Color.Gray);
-                dateLabel.Gravity = GravityFlags.Right;
-                dateLabel.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                _prevObsDetailLayout.AddView(dateLabel);
+                // 3rd row: breeding string sourced from wildwatch (the website owns the
+                // estimator, so fixing it there fixes it here too). Only shows for boxes
+                // wildwatch reports as currently breeding.
+                if (_remoteBreedingDates != null
+                    && _remoteBreedingDates.TryGetValue(_currentBoxName, out var breedingDates))
+                {
+                    var breedingStr = breedingDates.breedingDateStatus();
+                    if (!string.IsNullOrEmpty(breedingStr))
+                    {
+                        var breedingText = new TextView(this) { Text = breedingStr, TextSize = 13 };
+                        breedingText.SetTextColor(Color.Black);
+                        breedingText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                        breedingText.SetPadding(0, 6, 0, 0);
+                        _prevObsDetailLayout.AddView(breedingText);
+                    }
+                }
             }
 
             // Update today miniview
@@ -3832,6 +3862,54 @@ namespace PenguinMonitor
                 headerText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                 headerText.Text = BuildObsHeaderText(obs, "Unsynced", false);
                 card.AddView(headerText);
+
+                // Resolve actions — the server only auto-flags a conflict for TODAY's data,
+                // so stale pending like this never surfaces the normal conflict dialog. Offer
+                // the same "replace on server" (force-upload) resolution here, plus discard.
+                var stuckObs = obs;
+                var stuckBox = obs.BoxName ?? "";
+                var actionRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+                actionRow.SetPadding(0, 8, 0, 4);
+
+                var replaceBtn = _uiFactory.CreateStyledButton("Replace on server", UIFactory.PRIMARY_BLUE);
+                replaceBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                replaceBtn.Click += (s, e) =>
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        var n = await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings, new List<string> { stuckBox });
+                        new Handler(Looper.MainLooper).Post(() =>
+                        {
+                            DataStorageService.SaveColonyState(this, _colonyState);
+                            UpdateSyncButtonLabel();
+                            DrawPageLayouts();
+                            Toast.MakeText(this, n > 0 ? $"Box {stuckBox} synced" : $"Box {stuckBox}: sync failed — try again", ToastLength.Short)?.Show();
+                        });
+                    });
+                };
+                actionRow.AddView(replaceBtn);
+
+                var discardBtn = _uiFactory.CreateStyledButton("Discard", UIFactory.DANGER_RED);
+                var discardParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                discardParams.SetMargins(8, 0, 0, 0);
+                discardBtn.LayoutParameters = discardParams;
+                discardBtn.Click += (s, e) =>
+                {
+                    new AlertDialog.Builder(this)
+                        .SetTitle("Discard unsynced?")
+                        .SetMessage($"Discard this unsynced observation for Box {stuckBox}? This can't be undone.")
+                        .SetPositiveButton("Discard", (s2, e2) =>
+                        {
+                            _colonyState.PendingObservations.Remove(stuckObs);
+                            DataStorageService.SaveColonyState(this, _colonyState);
+                            UpdateSyncButtonLabel();
+                            DrawPageLayouts();
+                        })
+                        .SetNegativeButton("Cancel", (s2, e2) => { })
+                        .Show();
+                };
+                actionRow.AddView(discardBtn);
+                card.AddView(actionRow);
 
                 var detailLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
                 detailLayout.Visibility = ViewStates.Gone;
@@ -4067,7 +4145,7 @@ namespace PenguinMonitor
 
             // Prev obs compact summary (left-aligned)
             _prevObsHeaderText = new TextView(this) { TextSize = 11 };
-            _prevObsHeaderText.SetTextColor(Color.DarkGray);
+            _prevObsHeaderText.SetTextColor(Color.Black);
             _prevObsHeaderText.SetPadding(8, 4, 8, 4);
             _prevObsHeaderText.Background = _uiFactory.CreateRoundedBackground(Color.ParseColor("#FFF3E0"), 6); // light orange
             var prevCompactParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -4810,7 +4888,7 @@ namespace PenguinMonitor
                 Text = (chippedToday ? "🆕 " : "") + $"{ToNzTime(scan.Timestamp):HH:mm}",
                 TextSize = 12
             };
-            timeText.SetTextColor(UIFactory.TEXT_SECONDARY);
+            timeText.SetTextColor(Color.Black);
             timeText.SetPadding(10, 0, 10, 0);
             timeText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
             scanLayout.AddView(timeText);
