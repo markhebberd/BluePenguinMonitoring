@@ -436,7 +436,7 @@ h3.collapsible:hover { color:#1a5276; }
 /* Box breeding overview — year spine (left) + lightweight outcome cards (right). Replaces the
    heavy black-box rows: the year anchors on the left, each clutch is a light card whose left
    edge encodes the outcome, and non-breeding visitors drop to an "also seen" row below. */
-.all-birds .season-birds { display:grid; grid-template-columns:112px 1fr; gap:18px; align-items:start; padding:22px 0; margin:0; }
+.all-birds .season-birds { display:grid; grid-template-columns:100px 1fr; gap:10px; align-items:start; padding:22px 0; margin:0; }
 .all-birds .season-birds + .season-birds { border-top:1px solid #d5dce3; }
 .season-year { position:relative; }
 .season-yr { font-size:17px; font-weight:800; letter-spacing:-.02em; color:#1b2a38; font-variant-numeric:tabular-nums; line-height:1.15; }
