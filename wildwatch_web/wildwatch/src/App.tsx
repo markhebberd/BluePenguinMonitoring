@@ -1182,6 +1182,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                   ))}
                 </div>
               )}
+              {/* Reverse-chronological: after-breeding above, clutches (newest on top), before-breeding below */}
+              {visitorRow('Post-breeding', postBirds)}
               {clutches.length === 0 ? (
                 <div className="clutch-card none"><span className="muted">No breeding observed</span></div>
               ) : clutches.map((_, i) => clutches.length - 1 - i).map((ci) => {
@@ -1225,7 +1227,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               })}
               {clutches.length === 0
                 ? visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
-                : <>{visitorRow('Pre-breeding', preBirds)}{visitorRow('Post-breeding', postBirds)}</>}
+                : visitorRow('Pre-breeding', preBirds)}
             </div>
           </div>
         );
