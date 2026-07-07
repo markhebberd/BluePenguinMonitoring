@@ -1061,7 +1061,7 @@ function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick, children }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void; children?: React.ReactNode }) {
   const seasonData = computeBoxFamilies(observations, allPenguinsInBox);
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
   const [prevExpanded, setPrevExpanded] = useState(false);
@@ -1245,9 +1245,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           <div className="season-divider clickable" onClick={() => setPrevExpanded(!prevExpanded)}>
             <hr/><span>Previous seasons ({prevCount}) {prevExpanded ? '\u25B2' : '\u25BC'}</span><hr/>
           </div>
-          {prevExpanded && previousSeasons}
+          {prevExpanded && <>{previousSeasons}{children}</>}
         </>
-      ) : previousSeasons}
+      ) : <>{previousSeasons}{children}</>}
     </div>
   );
 }
@@ -1720,29 +1720,29 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
       <div className="obs-columns">
         <div className="obs-col obs-col-overview">
           <AllScannedBirds observations={data.observations} onBirdClick={onBirdClick} allPenguinsInBox={data.all_penguins}
-            onSeasonClick={(t: string) => onScrollToObs(t)} />
-          {(() => {
-            const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
-            if (chipped.length === 0 && !canEdit) return null;
-            return (
-              <div className="chipped-here">
-                <div className="muted">Chipped in this box: {chipped.length}</div>
-                <div className="bird-row">
-                  {chipped.map((c: any) => {
-                    // hasReturned (size-code U suffix) is computed client-side, so merge it in from allPenguins.
-                    const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
-                    return (
-                    <span key={c.pit_id} className="bird-with-count">
-                      <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => onBirdClick(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
-                      <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
-                    </span>
-                    );
-                  })}
-                  {canEdit && onAddPenguin && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => onAddPenguin(boxName)}>+ 🐧</button>}
+            onSeasonClick={(t: string) => onScrollToObs(t)}>
+            {(() => {
+              const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
+              if (chipped.length === 0 && !canEdit) return null;
+              return (
+                <div className="chipped-here">
+                  <div className="muted">Chipped in this box: {chipped.length}</div>
+                  <div className="bird-row">
+                    {chipped.map((c: any) => {
+                      const cur = allPenguins?.find((p: any) => p.peng_num === c.peng_num);
+                      return (
+                      <span key={c.pit_id} className="bird-with-count">
+                        <PenguinMini scan={cur ? {...c, hasReturned: cur.hasReturned} : c} onClick={() => onBirdClick(c.peng_num)} observationDate={c.chip_date ? chickContextDate(c.chip_date) : undefined} />
+                        <span className="scan-count">{c.chip_date ? getSeasonLabel(parseDate(c.chip_date)) : ''}{c.chip_by ? ` ${c.chip_by}` : ''}</span>
+                      </span>
+                      );
+                    })}
+                    {canEdit && onAddPenguin && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => onAddPenguin(boxName)}>+ 🐧</button>}
+                  </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
+          </AllScannedBirds>
         </div>
         <div className="obs-col obs-col-observations">
           {(() => {
