@@ -2216,7 +2216,7 @@ namespace PenguinMonitor
                 }
                 else
                 {
-                    boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: Color.Black, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
+                    boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
                 }
             }
             else if (thisBoxData != null)
