@@ -5989,13 +5989,14 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const fmCompleteness = useMemo(() => {
     const today = toNzDateStr(new Date().toISOString());
-    const rows: { day: string; number: number; missing: number }[] = [];
+    const rows: { day: string; number: number; missing: number; boxes: string[] }[] = [];
     for (const [day, fm] of registeredFmDates) {
       if (day > today) continue;
       const st = computeDateStats(day);
       if (!st) continue;
       if (st.isFullMonitor) continue; // complete days aren't actionable — hide them
-      rows.push({ day, number: fm.number, missing: st.missingBoxes?.length ?? 0 });
+      const boxes: string[] = st.missingBoxes || [];
+      rows.push({ day, number: fm.number, missing: boxes.length, boxes });
     }
     return rows;
   }, [registeredFmDates, dbVersion]);
@@ -6559,6 +6560,24 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         })()}
       </div>
 
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <h3>FM completeness</h3>
+        <p className="muted">Incomplete registered book FM days and how many box observations each still needs to be a complete full monitor</p>
+        {fmCompleteness.length === 0 ? <p className="muted">All registered FM days are complete</p> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {fmCompleteness.map(r => (
+              <div key={r.day} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <a className="date-link" href={`/day/${r.day}`} style={{ minWidth: 90 }}>{formatDate(r.day)}</a>
+                <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
+                <span style={{ color: '#E65100' }}>{r.missing < 5
+                  ? `Missing box${r.missing !== 1 ? 'es' : ''} ${r.boxes.join(', ')}`
+                  : `${r.missing} more needed`}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {canSql && (
       <div className="admin-section" style={{ display: adminTab === 'database' ? undefined : 'none', width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
@@ -6781,22 +6800,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <RemovePenguin token={token} />
-      </div>
-
-      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
-        <h3>FM completeness</h3>
-        <p className="muted">Incomplete registered book FM days and how many box observations each still needs to be a complete full monitor</p>
-        {fmCompleteness.length === 0 ? <p className="muted">All registered FM days are complete</p> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {fmCompleteness.map(r => (
-              <div key={r.day} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <a className="date-link" href={`/day/${r.day}`} style={{ minWidth: 90 }}>{formatDate(r.day)}</a>
-                <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
-                <span style={{ color: '#E65100' }}>{r.missing} more needed</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
