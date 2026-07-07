@@ -1012,68 +1012,64 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
   return result;
 }
 
-function SeasonBirdsSection({ label, isCurrent, birds, seasonStatus, statusLabel, latestObs,
+function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs,
   onSeasonClick, issueBadges, dayToObsTime, clutches, visitorBirds, visitorRow, aggSlots, renderClutch }: any) {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
-  const collapsible = !isCurrent && isMobile;
-  const [expanded, setExpanded] = useState(!collapsible);
   return (
     <div className="season-birds">
-      <div className="season-year" onClick={collapsible ? () => setExpanded(!expanded) : undefined}
-        style={collapsible ? { cursor: 'pointer' } : undefined}>
-        <div className={`season-yr${!collapsible && latestObs ? ' clickable' : ''}`}
-          onClick={!collapsible && latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
-          {seasonRange(label)}{collapsible ? (expanded ? ' \u25B2' : ' \u25BC') : ''}
+      <div className="season-year">
+        <div className={`season-yr${latestObs ? ' clickable' : ''}`}
+          onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>
+          {seasonRange(label)}
         </div>
         <div className="season-birdcount">{birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
         <span className={`season-status st-${seasonStatus}`}><span className="ss-dot" />{statusLabel}</span>
       </div>
-      {expanded && (
-        <div className="season-content">
-          {issueBadges.length > 0 && (
-            <div className="season-issues">
-              {issueBadges.map((b: any) => (
-                <span key={b.key} className="issue-badge">
-                  {'\u26A0'} {b.detail.length} {b.label}{b.detail.length !== 1 ? 's' : ''}
-                  <span className="issue-tip">
-                    {b.detail.map((d: any, i: number) => {
-                      const t = dayToObsTime.get(d.day);
-                      return (
-                        <a key={i} className={`issue-row${t ? ' clickable' : ''}`} onClick={t ? () => onSeasonClick?.(t) : undefined}>{d.text}</a>
-                      );
-                    })}
-                  </span>
+      <div className="season-content">
+        {issueBadges.length > 0 && (
+          <div className="season-issues">
+            {issueBadges.map((b: any) => (
+              <span key={b.key} className="issue-badge">
+                {'\u26A0'} {b.detail.length} {b.label}{b.detail.length !== 1 ? 's' : ''}
+                <span className="issue-tip">
+                  {b.detail.map((d: any, i: number) => {
+                    const t = dayToObsTime.get(d.day);
+                    return (
+                      <a key={i} className={`issue-row${t ? ' clickable' : ''}`} onClick={t ? () => onSeasonClick?.(t) : undefined}>{d.text}</a>
+                    );
+                  })}
                 </span>
-              ))}
-            </div>
-          )}
-          {clutches.length === 0 ? (
-            visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
-          ) : (() => {
-            const nodes: React.ReactNode[] = [];
-            const post = visitorRow('Post-breeding', aggSlots([`g${clutches.length}`]));
-            if (post) nodes.push(post);
-            for (let ci = clutches.length - 1; ci >= 0; ci--) {
-              nodes.push(renderClutch(ci));
-              if (ci > 0) { const between = visitorRow(`Between ${ordinal(ci)} & ${ordinal(ci + 1)} clutch`, aggSlots([`g${ci}`])); if (between) nodes.push(between); }
-            }
-            const pre = visitorRow('Pre-breeding', aggSlots(['g0']));
-            if (pre) nodes.push(pre);
-            return nodes;
-          })()}
-        </div>
-      )}
+              </span>
+            ))}
+          </div>
+        )}
+        {clutches.length === 0 ? (
+          visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
+        ) : (() => {
+          const nodes: React.ReactNode[] = [];
+          const post = visitorRow('Post-breeding', aggSlots([`g${clutches.length}`]));
+          if (post) nodes.push(post);
+          for (let ci = clutches.length - 1; ci >= 0; ci--) {
+            nodes.push(renderClutch(ci));
+            if (ci > 0) { const between = visitorRow(`Between ${ordinal(ci)} & ${ordinal(ci + 1)} clutch`, aggSlots([`g${ci}`])); if (between) nodes.push(between); }
+          }
+          const pre = visitorRow('Pre-breeding', aggSlots(['g0']));
+          if (pre) nodes.push(pre);
+          return nodes;
+        })()}
+      </div>
     </div>
   );
 }
 
 function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void }) {
   const seasonData = computeBoxFamilies(observations, allPenguinsInBox);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
+  const [prevExpanded, setPrevExpanded] = useState(false);
+  const currentSeasons: React.ReactNode[] = [];
+  const previousSeasons: React.ReactNode[] = [];
 
-  return (
-    <div className="all-birds">
-      {seasonData.map(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
-        if (birds.length === 0 && sObsChrono.length === 0 && !isCurrent) return null;
+  seasonData.forEach(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
+        if (birds.length === 0 && sObsChrono.length === 0 && !isCurrent) return;
         const sorted = birds;
 
         // Every non-family sighting is placed in a slot by WHEN it happened: inside a
@@ -1229,14 +1225,29 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           );
         };
 
-        return (
-          <SeasonBirdsSection key={label} label={label} isCurrent={isCurrent} birds={birds}
+        const node = (
+          <SeasonBirdsSection key={label} label={label} birds={birds}
             seasonStatus={seasonStatus} statusLabel={statusLabel} latestObs={latestObs}
             onSeasonClick={onSeasonClick} issueBadges={issueBadges} dayToObsTime={dayToObsTime}
             clutches={clutches} visitorBirds={visitorBirds} visitorRow={visitorRow}
             aggSlots={aggSlots} renderClutch={renderClutch} />
         );
-      })}
+        if (isCurrent) currentSeasons.push(node);
+        else previousSeasons.push(node);
+      });
+
+  const prevCount = previousSeasons.length;
+  return (
+    <div className="all-birds">
+      {currentSeasons}
+      {prevCount > 0 && isMobile ? (
+        <>
+          <div className="season-divider clickable" onClick={() => setPrevExpanded(!prevExpanded)}>
+            <hr/><span>Previous seasons ({prevCount}) {prevExpanded ? '\u25B2' : '\u25BC'}</span><hr/>
+          </div>
+          {prevExpanded && previousSeasons}
+        </>
+      ) : previousSeasons}
     </div>
   );
 }
