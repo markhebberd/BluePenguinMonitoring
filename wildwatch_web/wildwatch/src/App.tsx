@@ -6997,11 +6997,21 @@ function Migration20240508Panel({ token }: { token: string }) {
         }
       }
 
+      // Only biometric rows belonging to a moved observation follow it; anything else
+      // dated 8 May (no observation link, or linked elsewhere) is flagged, not moved.
+      const movedObsIds = new Set(observations.map((o: any) => o.observation_id));
       const biometrics = await api(`action=list&table=penguin_biometric_data&observation_date=${FROM_DATE}`);
-      add(`Biometric rows dated ${FROM_DATE}: ${biometrics.length}`);
-      for (const bio of biometrics) {
-        add(`  biometric ${bio.biometric_id} (obs ${bio.observation_id ?? '-'}): ${FROM_DATE} -> ${TO_DATE}`);
+      const [linked, orphaned] = [
+        biometrics.filter((b: any) => movedObsIds.has(b.observation_id)),
+        biometrics.filter((b: any) => !movedObsIds.has(b.observation_id)),
+      ];
+      add(`Biometric rows dated ${FROM_DATE}: ${biometrics.length} (${linked.length} linked to moved observations)`);
+      for (const bio of linked) {
+        add(`  biometric ${bio.biometric_id} (obs ${bio.observation_id}): ${FROM_DATE} -> ${TO_DATE}`);
         if (apply) await api(`action=update&table=penguin_biometric_data&id=${bio.biometric_id}`, { observation_date: TO_DATE, _reason: REASON });
+      }
+      for (const bio of orphaned) {
+        add(`  SKIPPED biometric ${bio.biometric_id} (obs ${bio.observation_id ?? 'none'}): not linked to a moved observation`);
       }
 
       const fmDates = await api('action=all_fm_dates');
@@ -7020,7 +7030,7 @@ function Migration20240508Panel({ token }: { token: string }) {
         add(`No FM date mapping registered for ${FROM_DATE}.`);
       }
 
-      add(`${apply ? 'Done' : 'Dry run complete'}: ${observations.length} observations, ${scanCount} scans, ${biometrics.length} biometric rows${hit ? ', 1 FM date mapping' : ''}.`);
+      add(`${apply ? 'Done' : 'Dry run complete'}: ${observations.length} observations, ${scanCount} scans, ${linked.length} biometric rows${orphaned.length ? ` (${orphaned.length} skipped)` : ''}${hit ? ', 1 FM date mapping' : ''}.`);
     } catch (e: any) {
       add(`FAILED: ${e.message}`);
     } finally {
