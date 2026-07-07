@@ -4981,14 +4981,16 @@ namespace PenguinMonitor
         // (document.title = "wwready:...") — used by the sync modal's web-cache line.
         private Action? _onEmbedReady;
 
-        // Manual Sync: wipe the embed's web storage (IndexedDB colony cache + HTTP cache)
-        // and reboot it so its data is freshly pulled. Must run on the UI thread.
+        // Manual Sync: clear the HTTP cache and reboot the embed so it re-syncs. The IndexedDB
+        // colony cache is deliberately KEPT — the embed's boot sync is incremental (?since=
+        // watermark) and self-healing (server row counts ride along on every incremental
+        // response; any mismatch triggers an automatic full re-download). Wiping web storage
+        // here forced a full gzipped-DB download on every manual sync. Must run on the UI thread.
         private void RefreshEmbedWebView(Action<string> onStatus)
         {
             try
             {
                 _embedWebView?.ClearCache(true);
-                Android.Webkit.WebStorage.Instance?.DeleteAllData();
                 if (string.IsNullOrEmpty(_appSettings?.AuthToken)) { onStatus("Web view: cleared"); return; }
                 var colonyId = CurrentColonyIdOrDefault();
                 var webView = GetOrCreateEmbedWebView();
