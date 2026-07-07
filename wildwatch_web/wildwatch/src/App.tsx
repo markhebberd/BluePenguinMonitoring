@@ -5834,8 +5834,6 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
 
 function AdminPanel({ token, observationDates }: { token: string; observationDates?: string[] }) {
   const [users, setUsers] = useState<any[]>([]);
-  const [syncResult, setSyncResult] = useState<any>(null);
-  const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [diskTest, setDiskTest] = useState<any>(null);
   const [diskTesting, setDiskTesting] = useState(false);
@@ -6600,68 +6598,6 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
               }}>Delete {datePreview.totals.boxes} observations</button>
               <button className="edit-btn" onClick={() => setDatePreview(null)}>Cancel</button>
             </div>
-          </div>
-        )}
-      </div>
-
-      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
-        <h3>Sync Monitors (TCP Server)</h3>
-        <p className="muted">Pull from TCP server (210.54.37.120). Query first, then import individual monitors.</p>
-        <div>
-          <button className="edit-btn" onClick={async () => {
-            setSyncing(true); setSyncResult(null);
-            try {
-              const r = await fetch('/api/admin.php?action=query_server', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-              setSyncResult(await r.json());
-            } catch (e: any) { setSyncResult({ error: e.message }); }
-            setSyncing(false);
-          }} disabled={syncing}>
-            {syncing ? 'Querying...' : 'Query Server'}
-          </button>
-        </div>
-        {syncResult && (
-          <div style={{marginTop:8}}>
-            {syncResult.error ? (
-              <div style={{color:'#F44336'}}>{syncResult.error}</div>
-            ) : (
-              <>
-                <div className="muted" style={{marginBottom:6}}>{syncResult.monitors?.filter((m: any) => m.status !== 'deleted').length || 0} monitors on server</div>
-                {(syncResult.monitors || []).filter((m: any) => m.status !== 'deleted').map((m: any, i: number) => (
-                  <div key={i} className="obs-card" style={{marginBottom:4, opacity: m.status === 'exists' ? 0.6 : 1}}>
-                    <div className="obs-top" style={{flexWrap:'wrap', gap:4}}>
-                      <b>{m.filename}</b>
-                      <span className="badge" style={{
-                        background: m.status === 'deleted' ? '#F44336' : m.status === 'imported' ? '#4CAF50' : m.status === 'new' ? '#FF9800' : '#E0E0E0',
-                        color: m.status === 'exists' || m.status === 'empty' ? '#333' : '#fff'
-                      }}>{m.status === 'new' ? `${m.new} new` : m.status}</span>
-                      {m.status === 'new' && (
-                        <button className="edit-btn done-btn" style={{padding:'1px 8px', fontSize:11}} onClick={async () => {
-                          const r = await fetch('/api/admin.php?action=import_monitor', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ index: m.index })
-                          });
-                          const d = await r.json();
-                          if (d.success) {
-                            setSyncResult((prev: any) => ({...prev, monitors: prev.monitors.map((mon: any) => mon.index === m.index ? {...mon, status: 'imported', new: d.imported} : mon)}));
-                          } else { alert(d.error || 'Import failed'); }
-                        }}>Import</button>
-                      )}
-                    </div>
-                    <div className="obs-nums" style={{fontSize:11}}>
-                      <span>{m.date ? formatDate(m.date) : ''}</span>
-                      <span>{m.boxes} boxes ({m.new || 0} new, {m.exists || 0} exist)</span>
-                      {m.scans > 0 && <span>{m.scans} scanned</span>}
-                      {m.adults > 0 && <span>🐧{m.adults}</span>}
-                      {m.eggs > 0 && <span>🥚{m.eggs}</span>}
-                      {m.chicks > 0 && <span>🐣{m.chicks}</span>}
-                    </div>
-                    {m.breeding_statuses && Object.keys(m.breeding_statuses).length > 0 && (
-                      <div className="muted" style={{fontSize:10}}>{Object.entries(m.breeding_statuses).map(([k, v]) => `${k}:${v}`).join(' · ')}</div>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
           </div>
         )}
       </div>

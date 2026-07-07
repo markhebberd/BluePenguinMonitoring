@@ -5,7 +5,6 @@
  *
  * GET  ?action=users           - list all observers
  * POST ?action=update_user     - update observer {observer_id, role, observer_name, email}
- * POST ?action=sync_monitors   - pull latest from old TCP server and import
  */
 require_once 'config.php';
 header('Content-Type: application/json');
@@ -384,6 +383,20 @@ if ($action === 'create_user') {
     exit;
 }
 
+// Backup inventory: nightly offsite job status (written by offsite-backup.sh) plus
+// the local staged dumps it keeps for 14 days on this server.
+if ($action === 'backups') {
+    $out = ['status' => null, 'local' => []];
+    $statusFile = '/var/backups/offsite/status.json';
+    if (is_readable($statusFile)) $out['status'] = json_decode((string)file_get_contents($statusFile), true);
+    foreach (glob('/var/backups/offsite/db/*.sql.gz') ?: [] as $f) {
+        $out['local'][] = ['name' => basename($f), 'bytes' => filesize($f), 'mtime' => gmdate('Y-m-d H:i:s', filemtime($f))];
+    }
+    usort($out['local'], fn($a, $b) => strcmp($b['name'], $a['name']));
+    echo json_encode($out);
+    exit;
+}
+
 // Email a set-password link to an existing user (invite resend / reset on their behalf)
 if ($action === 'send_reset') {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -482,154 +495,6 @@ if ($action === 'preview_date' || $action === 'delete_date') {
     exit;
 }
 
-// Re-sync a specific monitor: delete its observations and re-import from TCP
-// List monitor filenames that have data on a given NZ date
-// Preview or delete all data from a specific monitor filename
-// Shared: fetch monitors from TCP server
-function fetchTcpMonitors() {
-    $host = '210.54.37.120'; $port = 8080; $passphrase = 'bbnmdsfhsecureafdgsadsadff';
-    $sock = @fsockopen($host, $port, $errno, $errstr, 5);
-    if (!$sock) throw new Exception("Cannot connect: $errstr");
-    stream_set_timeout($sock, 10);
-    $rsa = openssl_pkey_new(['private_key_bits'=>1024, 'private_key_type'=>OPENSSL_KEYTYPE_RSA]);
-    $details = openssl_pkey_get_details($rsa);
-    fwrite($sock, base64_encode($details['rsa']['n']) . "\r\n");
-    fwrite($sock, base64_encode($details['rsa']['e']) . "\r\n");
-    $encKey = base64_decode(trim(fgets($sock))); $encIv = base64_decode(trim(fgets($sock)));
-    openssl_private_decrypt($encKey, $aesKey, $rsa); openssl_private_decrypt($encIv, $aesIv, $rsa);
-    $passBytes = mb_convert_encoding($passphrase, 'UTF-16LE', 'UTF-8');
-    fwrite($sock, base64_encode(openssl_encrypt($passBytes, 'aes-256-cbc', $aesKey, OPENSSL_RAW_DATA, $aesIv)) . "\r\n");
-    $qBytes = mb_convert_encoding('PenguinRequest-Saved:', 'UTF-16LE', 'UTF-8');
-    fwrite($sock, base64_encode(openssl_encrypt($qBytes, 'aes-256-cbc', $aesKey, OPENSSL_RAW_DATA, $aesIv)) . "\r\n");
-    $encResp = base64_decode(trim(fgets($sock, 1048576 * 4))); fclose($sock);
-    $decResp = openssl_decrypt($encResp, 'aes-256-cbc', $aesKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $aesIv);
-    $decResp = substr($decResp, 0, -ord($decResp[strlen($decResp) - 1]));
-    $reply = mb_convert_encoding($decResp, 'UTF-8', 'UTF-16LE');
-    $monitors = [];
-    foreach (explode('~~~~', $reply) as $part) { $part = trim($part); if ($part && ($m = json_decode($part, true))) $monitors[] = $m; }
-    usort($monitors, function($a, $b) { return strcmp($b['LastSaved'] ?? '', $a['LastSaved'] ?? ''); });
-    return $monitors;
-}
-
-// Shared: summarise a monitor and check import status
-function summariseMonitor($pdo, $monitor, $colonyId = 1, $observerId = 1) {
-    $filename = $monitor['filename'] ?? 'unknown';
-    $lastSaved = $monitor['LastSaved'] ?? null;
-    $boxCount = count($monitor['BoxData'] ?? []);
-    if ($monitor['IsDeleted'] ?? false) {
-        // Check if data from this monitor still exists in our DB
-        $dbCheck = $pdo->prepare("SELECT COUNT(*) FROM observations WHERE monitor_filename = ? AND is_deleted = FALSE");
-        $dbCheck->execute([$filename]);
-        $dbCount = (int)$dbCheck->fetchColumn();
-        return ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'status'=>'deleted', 'db_exists'=>$dbCount, 'scans'=>0, 'adults'=>0, 'eggs'=>0, 'chicks'=>0, 'breeding_statuses'=>[]];
-    }
-
-    $adults = 0; $eggs = 0; $chicks = 0; $scans = 0; $new = 0; $exists = 0;
-    $breedingCounts = [];
-    foreach ($monitor['BoxData'] ?? [] as $boxName => $boxData) {
-        $adults += (int)($boxData['Adults'] ?? 0); $eggs += (int)($boxData['Eggs'] ?? 0); $chicks += (int)($boxData['Chicks'] ?? 0);
-        $scans += count($boxData['ScannedIds'] ?? []);
-        $bc = $boxData['BreedingChance'] ?? ''; $key = ($bc === '' || $bc === null) ? '(empty)' : $bc;
-        $breedingCounts[$key] = ($breedingCounts[$key] ?? 0) + 1;
-
-        $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-        $stmt->execute([$colonyId, $boxName]); $locId = $stmt->fetchColumn();
-        if ($locId) {
-            $obsTime = date('Y-m-d H:i:s', strtotime($boxData['whenDataCollectedUtc'] ?? $lastSaved ?? 'now'));
-            $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ? AND is_deleted = FALSE");
-            $dup->execute([$locId, $obsTime, $observerId]);
-            if ($dup->fetchColumn()) $exists++; else $new++;
-        } else { $new++; }
-    }
-    $status = $new > 0 ? 'new' : ($exists > 0 ? 'exists' : 'empty');
-    return ['filename'=>$filename, 'date'=>$lastSaved, 'boxes'=>$boxCount, 'new'=>$new, 'exists'=>$exists, 'status'=>$status, 'scans'=>$scans, 'adults'=>$adults, 'eggs'=>$eggs, 'chicks'=>$chicks, 'breeding_statuses'=>$breedingCounts];
-}
-
-// Shared: import one monitor
-function importMonitor($pdo, $monitor, $colonyId = 1, $observerId = 1) {
-    $chipLookup = [];
-    foreach ($pdo->query("SELECT pit_id FROM penguin_chips")->fetchAll() as $c)
-        $chipLookup[strtoupper(substr($c['pit_id'], -8))] = $c['pit_id'];
-
-    $filename = $monitor['filename'] ?? 'unknown';
-    $imported = 0; $skipped = 0; $scans = 0;
-    foreach ($monitor['BoxData'] ?? [] as $boxName => $boxData) {
-        $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $boxName]);
-        $stmt = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-        $stmt->execute([$colonyId, $boxName]); $locationId = $stmt->fetchColumn();
-        if (!$locationId) continue;
-
-        $obsTime = date('Y-m-d H:i:s', strtotime($boxData['whenDataCollectedUtc'] ?? $monitor['LastSaved'] ?? 'now'));
-        $dup = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ? AND is_deleted = FALSE");
-        $dup->execute([$locationId, $obsTime, $observerId]);
-        if ($dup->fetchColumn()) { $skipped++; continue; }
-
-        $stmt = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
-        $stmt->execute([$locationId, $observerId, $obsTime,
-            $boxData['Adults'] ?? 0, $boxData['Eggs'] ?? 0, $boxData['Chicks'] ?? 0,
-            !empty($boxData['BreedingChance']) ? $boxData['BreedingChance'] : null,
-            !empty($boxData['GateStatus']) ? $boxData['GateStatus'] : null,
-            $boxData['Notes'] ?? '', $filename]);
-        $observationId = $pdo->lastInsertId();
-        $imported++;
-
-        foreach ($boxData['ScannedIds'] ?? [] as $scan) {
-            $birdId = $scan['BirdId'] ?? ''; if (empty($birdId)) continue;
-            $short8 = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $birdId), -8));
-            if (substr($short8, 0, 4) === '9130') continue;
-            if (isset($chipLookup[$short8])) {
-                $scanTime = $scan['Timestamp'] ?? $obsTime;
-                $lat = isset($scan['Latitude']) && $scan['Latitude'] != 0 ? $scan['Latitude'] : null;
-                $lon = isset($scan['Longitude']) && $scan['Longitude'] != 0 ? $scan['Longitude'] : null;
-                $acc = isset($scan['Accuracy']) && $scan['Accuracy'] > 0 ? $scan['Accuracy'] : null;
-                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
-                    ->execute([$observationId, $chipLookup[$short8], date('Y-m-d H:i:s', strtotime($scanTime)), $lat, $lon, $acc]);
-                $scans++;
-
-                // Update box GPS if null or >50% more accurate
-                if ($lat && $lon && $acc) {
-                    $pdo->prepare("UPDATE observation_locations SET latitude = ?, longitude = ?, accuracy = ?, scan_time_utc = ?
-                        WHERE location_id = ? AND (latitude IS NULL OR accuracy > ? * 2)")
-                        ->execute([$lat, $lon, $acc, date('Y-m-d H:i:s', strtotime($scanTime)), $locationId, $acc]);
-                }
-            }
-        }
-    }
-    return ['imported'=>$imported, 'skipped'=>$skipped, 'scans'=>$scans];
-}
-
-// Query TCP server — fetch, cache, return summaries
-if ($action === 'query_server') {
-    try {
-        $monitors = fetchTcpMonitors();
-        // Cache for subsequent import_monitor calls
-        $cachePath = sys_get_temp_dir() . '/ww_tcp_cache_' . $observer['observer_id'] . '.json';
-        file_put_contents($cachePath, json_encode($monitors));
-
-        $results = [];
-        foreach ($monitors as $i => $m) {
-            $summary = summariseMonitor($pdo, $m);
-            $summary['index'] = $i;
-            $results[] = $summary;
-        }
-        echo json_encode(['success'=>true, 'monitors'=>$results]);
-    } catch (Exception $e) { echo json_encode(['error'=>$e->getMessage()]); }
-    exit;
-}
-
-// Import a single monitor by index from cache
-if ($action === 'import_monitor') {
-    $index = (int)($_POST['index'] ?? json_decode(file_get_contents('php://input'), true)['index'] ?? -1);
-    $cachePath = sys_get_temp_dir() . '/ww_tcp_cache_' . $observer['observer_id'] . '.json';
-    if (!file_exists($cachePath)) { echo json_encode(['error'=>'No cached data. Query server first.']); exit; }
-    $monitors = json_decode(file_get_contents($cachePath), true);
-    if (!isset($monitors[$index])) { echo json_encode(['error'=>"Monitor index $index not found"]); exit; }
-    $result = importMonitor($pdo, $monitors[$index]);
-    echo json_encode(['success'=>true, ...$result, 'filename'=>$monitors[$index]['filename'] ?? 'unknown']);
-    exit;
-}
-
-// Legacy sync (import all) and trial
 
 if ($action === 'export_nestcheck_zip') {
     $colonyId = $_GET['colony'] ?? 1;
