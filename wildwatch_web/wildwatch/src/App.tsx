@@ -6862,6 +6862,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <BackupsPanel token={token} />
+        <Migration20240508Panel token={token} />
         <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
           <DiskHistoryChart token={token} />
         </Suspense>
@@ -6934,6 +6935,113 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
     )}
     </>
+  );
+}
+
+/** Admin → System: one-time migration moving everything recorded on NZ day 8 May 2024
+ *  to 8 Apr 2024, all timestamps set to 2pm NZ (02:00 UTC NZST, the death_date
+ *  convention). Runs entirely through the audited CRUD API with the logged-in session,
+ *  so every change lands in audit_log under this user with a change_reason. Remove the
+ *  panel once the migration has been applied. */
+function Migration20240508Panel({ token }: { token: string }) {
+  const FROM_DATE = '2024-05-08', TO_DATE = '2024-04-08';
+  const TO_DATETIME_UTC = '2024-04-08 02:00:00';
+  const REASON = 'One-time migration: data recorded on 8 May 2024 moved to 8 Apr 2024';
+  const [log, setLog] = useState<string[]>([]);
+  const [running, setRunning] = useState(false);
+
+  const api = async (path: string, body?: any) => {
+    const r = await fetch(`/api/crud.php?${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(`${path}: ${data.error || r.status}`);
+    return data;
+  };
+
+  const run = async (apply: boolean) => {
+    if (apply && !confirm('Move all data on 8 May 2024 to 8 Apr 2024 (2pm NZ)? This writes to the database.')) return;
+    setRunning(true);
+    const lines: string[] = [];
+    const add = (s: string) => { lines.push(s); setLog([...lines]); };
+    try {
+      add(apply ? 'APPLYING — writing changes…' : 'Dry run — nothing written.');
+
+      const observations = await api(`action=list&table=observations&nz_date=${FROM_DATE}`);
+      if (observations.length >= 5000) throw new Error('Result truncated at 5000 rows — aborting');
+
+      const existingOnTarget = await api(`action=list&table=observations&nz_date=${TO_DATE}`);
+      if (existingOnTarget.length > 0) {
+        add(`NOTE: ${TO_DATE} already has ${existingOnTarget.length} observation(s); moved rows will join them.`);
+        const clash = new Set(existingOnTarget.map((o: any) => o.location_id));
+        const dup = observations.filter((o: any) => clash.has(o.location_id));
+        if (dup.length) add(`WARNING: ${dup.length} moved observation(s) share a box with an existing ${TO_DATE} observation: ids ${dup.map((o: any) => o.observation_id).join(', ')}`);
+      }
+
+      add(`Observations on ${FROM_DATE}: ${observations.length}`);
+      let scanCount = 0;
+      for (const obs of observations) {
+        if (toNzDateStr(obs.observation_time_utc) !== FROM_DATE)
+          throw new Error(`Observation ${obs.observation_id} not on ${FROM_DATE}: ${obs.observation_time_utc}`);
+        const flags = obs.is_deleted && Number(obs.is_deleted) ? ' [soft-deleted]' : '';
+        add(`  obs ${obs.observation_id} (loc ${obs.location_id})${flags}: ${obs.observation_time_utc} -> ${TO_DATETIME_UTC}`);
+        if (apply) await api(`action=update&table=observations&id=${obs.observation_id}`, { observation_time_utc: TO_DATETIME_UTC, _reason: REASON });
+
+        const scans = await api(`action=list&table=penguin_scans&observation_id=${obs.observation_id}`);
+        for (const scan of scans) {
+          add(`    scan ${scan.scan_id}: ${scan.scan_time_utc} -> ${TO_DATETIME_UTC}`);
+          if (apply) await api(`action=update&table=penguin_scans&id=${scan.scan_id}`, { scan_time_utc: TO_DATETIME_UTC, _reason: REASON });
+          scanCount++;
+        }
+      }
+
+      const biometrics = await api(`action=list&table=penguin_biometric_data&observation_date=${FROM_DATE}`);
+      add(`Biometric rows dated ${FROM_DATE}: ${biometrics.length}`);
+      for (const bio of biometrics) {
+        add(`  biometric ${bio.biometric_id} (obs ${bio.observation_id ?? '-'}): ${FROM_DATE} -> ${TO_DATE}`);
+        if (apply) await api(`action=update&table=penguin_biometric_data&id=${bio.biometric_id}`, { observation_date: TO_DATE, _reason: REASON });
+      }
+
+      const fmDates = await api('action=all_fm_dates');
+      const hit = fmDates.find((d: any) => String(d.actual_date).slice(0, 10) === FROM_DATE);
+      if (hit) {
+        add(`FM date mapping: season ${hit.season_year} day ${hit.date_number} is ${FROM_DATE} -> ${TO_DATE}`);
+        if (apply) {
+          const season = await api(`action=season_fm_dates&season=${hit.season_year}`);
+          const rows = season.map((r: any) => ({
+            n: r.date_number,
+            date: String(r.actual_date).slice(0, 10) === FROM_DATE ? TO_DATE : String(r.actual_date).slice(0, 10),
+          })).sort((a: any, b: any) => a.date.localeCompare(b.date)).map((r: any, i: number) => ({ n: i + 1, date: r.date }));
+          await api(`action=season_fm_dates&season=${hit.season_year}`, rows);
+        }
+      } else {
+        add(`No FM date mapping registered for ${FROM_DATE}.`);
+      }
+
+      add(`${apply ? 'Done' : 'Dry run complete'}: ${observations.length} observations, ${scanCount} scans, ${biometrics.length} biometric rows${hit ? ', 1 FM date mapping' : ''}.`);
+    } catch (e: any) {
+      add(`FAILED: ${e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="admin-section">
+      <h3>One-time migration: 8 May 2024 → 8 Apr 2024</h3>
+      <p className="muted">Moves all observations, scans and biometrics recorded on 8 May 2024 to 8 Apr 2024, timestamps set to 2pm NZ. Audited under your login. Dry run first.</p>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="edit-btn" disabled={running} onClick={() => run(false)}>Dry run</button>
+        <button className="edit-btn" disabled={running} style={{ background: '#c62828', color: '#fff' }} onClick={() => run(true)}>Apply</button>
+      </div>
+      {log.length > 0 && (
+        <pre style={{ marginTop: 8, maxHeight: 300, overflow: 'auto', background: '#f7f9fa', border: '1px solid #e8ecef', borderRadius: 4, padding: 8, fontSize: 12 }}>
+          {log.join('\n')}
+        </pre>
+      )}
+    </div>
   );
 }
 
