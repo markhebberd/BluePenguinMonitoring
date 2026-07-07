@@ -393,6 +393,33 @@ if ($action === 'backups') {
         $out['local'][] = ['name' => basename($f), 'bytes' => filesize($f), 'mtime' => gmdate('Y-m-d H:i:s', filemtime($f))];
     }
     usort($out['local'], fn($a, $b) => strcmp($b['name'], $a['name']));
+
+    // Live offsite verification: list devian's backup dir over ssh on every load, so
+    // the panel proves the remote copies exist NOW (status.json is only a snapshot
+    // from the last run — a dead cron would keep it saying "success" forever). The
+    // key is restricted on devian to a forced find-listing command; it can't do
+    // anything else.
+    $out['remote'] = ['ok' => false, 'error' => '', 'files' => [], 'checked_at' => gmdate('Y-m-d H:i:s')];
+    $lines = []; $rc = 1;
+    exec('ssh -i /var/www/wildwatch/shared/ssh/id_devian_check -p 43322'
+        . ' -o BatchMode=yes -o ConnectTimeout=8'
+        . ' -o UserKnownHostsFile=/var/www/wildwatch/shared/ssh/known_hosts -o StrictHostKeyChecking=accept-new'
+        . ' mark@baluga.myqnapcloud.com list 2>&1', $lines, $rc);
+    if ($rc === 0) {
+        foreach ($lines as $ln) {
+            $p = explode("\t", trim($ln));
+            if (count($p) !== 3) continue;
+            $out['remote']['files'][] = [
+                'name' => basename($p[0]),
+                'kind' => (strpos($p[0], '/monthly/') !== false) ? 'monthly' : 'daily',
+                'bytes' => (int)$p[1],
+                'mtime' => gmdate('Y-m-d H:i:s', (int)(float)$p[2]),
+            ];
+        }
+        $out['remote']['ok'] = true;
+    } else {
+        $out['remote']['error'] = 'ssh exit ' . $rc . ': ' . implode(' ', array_slice($lines, 0, 2));
+    }
     echo json_encode($out);
     exit;
 }
