@@ -1130,10 +1130,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           if (!prev || o.observation_time_utc > prev) dayToObsTime.set(day, o.observation_time_utc);
         }
 
-        // Season outcome from its clutches: bred (raised a chick) > failed (laid, none fledged) > none.
-        const seasonBred = families.some((f: any) => (f.chicks.length + f.plainChicks + f.fledgedUnchipped) > 0);
-        const seasonStatus = clutches.length === 0 ? 'none' : seasonBred ? 'bred' : 'fail';
-        const statusLabel = seasonStatus === 'none' ? 'No breeding' : seasonStatus === 'bred' ? 'Bred' : 'Failed';
+        // Season outcome colour: grey = no eggs, green = a chipped chick, blue = eggs still active,
+        // red = eggs but concluded with no chipped chick.
+        const seasonHasChick = families.some((f: any) => f.chicks.length > 0);
+        const seasonActive = families.some((f: any) => clutchActive(f.clutch));
+        const seasonStatus = clutches.length === 0 ? 'none' : seasonHasChick ? 'bred' : seasonActive ? 'active' : 'fail';
+        const statusLabel = seasonStatus === 'none' ? 'No breeding' : seasonStatus === 'bred' ? 'Bred' : seasonStatus === 'active' ? 'Active' : 'Failed';
         // Everything not part of a detected clutch is a visitor, shown once with its season total.
         const visitorBirds = sorted.filter((b: any) => { const k = b.pit_id.slice(-8); return !parentKeys.has(k) && !chickFamily.has(k); });
         // Split visitors by timing: before the first breeding window (pre-breeding) vs from the
@@ -1185,8 +1187,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               ) : clutches.map((_, i) => clutches.length - 1 - i).map((ci) => {
                 const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
                 const active = clutchActive(clutch);
-                const bred = (famChicks.length + plainChicks + fledgedUnchipped) > 0;
-                const cardStatus = active ? 'active' : bred ? 'bred' : 'fail';
+                // green = a chipped chick; blue = eggs still active; red = eggs, no chipped chick.
+                const cardStatus = famChicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
                 return (
                   <div key={`cl${ci}`} className={`clutch-card ${cardStatus}`}>
                     {clutches.length > 1 && (

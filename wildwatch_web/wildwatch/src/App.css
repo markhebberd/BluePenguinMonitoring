@@ -448,12 +448,12 @@ h3.collapsible:hover { color:#1a5276; }
 .st-bred { background:#eaf5ee; color:#1f6b41; } .st-bred .ss-dot { background:#2f8f5b; }
 .st-fail { background:#fbeceb; color:#a4362d; } .st-fail .ss-dot { background:#c0453a; }
 .st-none { background:#eef1f4; color:#5f6c78; } .st-none .ss-dot { background:#93a0ac; }
-.st-active { background:#fdf3e0; color:#8a5b12; } .st-active .ss-dot { background:#e0a020; }
+.st-active { background:#e9f2fb; color:#215a94; } .st-active .ss-dot { background:#2f6fb0; }
 .season-content { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .clutch-card { background:#fff; border:1px solid #dbe2e9; border-left:4px solid #93a0ac; border-radius:10px; padding:9px 12px; }
 .clutch-card.bred { border-left-color:#2f8f5b; }
 .clutch-card.fail { border-left-color:#c0453a; }
-.clutch-card.active { border-left-color:#e0a020; }
+.clutch-card.active { border-left-color:#2f6fb0; }
 .clutch-card.none { border-left-color:#d5dbe1; color:#98a4b0; font-style:italic; }
 .clutch-card .clutch-label { color:#98a4b0; text-transform:uppercase; letter-spacing:.06em; font-size:10px; font-weight:600; margin-bottom:6px; }
 .clutch-card .clutch-label.clickable { cursor:pointer; }
