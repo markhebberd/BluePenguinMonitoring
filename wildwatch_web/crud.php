@@ -407,14 +407,9 @@ function handleCreate($pdo, $table, $pk, $observer) {
         if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data']) && isset($input['peng_num'])) {
             $input['peng_num'] = dbPengNum($pdo, $cid, $input['peng_num']);
         }
-        $cols = array_keys($input);
-        $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
-        $pdo->prepare($sql)->execute(array_values($input));
-        $newId = $pdo->lastInsertId();
+        $newId = wwAuditedInsert($pdo, $table, $input, $observer['observer_id']);
         // For penguins, use peng_num as the ID since it's not auto-increment
         $recordId = ($table === 'penguins' && isset($input['peng_num'])) ? $input['peng_num'] : $newId;
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'INSERT', ?, ?)")
-            ->execute([$table, $recordId, $observer['observer_id'], json_encode($input)]);
         $pdo->commit();
         $result = ['success'=>true, 'id'=>$recordId];
         // Return the full inserted row so callers get auto-generated fields (e.g. peng_num)

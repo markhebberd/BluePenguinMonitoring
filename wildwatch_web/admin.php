@@ -1369,39 +1369,28 @@ if ($action === 'import_csv_commit') {
     $imported = 0; $scans = 0; $bios = 0; $skippedDup = 0; $skippedErr = 0;
     try {
         $pdo->beginTransaction();
-        $insObs = $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, no_scan, breeding_status, notes, monitor_filename) VALUES (?,?,?,?,?,?,?,?,?,?)");
-        $insScan = $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc) VALUES (?,?,?)");
-        $insBio = $pdo->prepare("INSERT INTO penguin_biometric_data (peng_num, observation_id, observation_date, observed_sex) VALUES (?,?,?,?)");
         // Skip a biometric if this bird already has a live one on this date (idempotent re-imports).
         $dupBio = $pdo->prepare("SELECT 1 FROM penguin_biometric_data WHERE peng_num = ? AND observation_date = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1");
         foreach ($A['rows'] as $row) {
             if ($row['status'] === 'error') { $skippedErr++; continue; }
             if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
-            $insObs->execute([
-                $row['location_id'], $observerId, $row['obs_time'],
-                $row['adults'], $row['eggs'], $row['chicks'], $row['no_scan'],
-                $row['breeding_status'], $row['notes'], $A['filename'],
-            ]);
-            $obsId = $pdo->lastInsertId();
+            // Every insert goes through the same audited path as a manual crud write.
+            $obsId = wwAuditedInsert($pdo, 'observations', [
+                'location_id' => $row['location_id'], 'observer_id' => $observerId, 'observation_time_utc' => $row['obs_time'],
+                'adults' => $row['adults'], 'eggs' => $row['eggs'], 'chicks' => $row['chicks'], 'no_scan' => $row['no_scan'],
+                'breeding_status' => $row['breeding_status'], 'notes' => $row['notes'], 'monitor_filename' => $A['filename'],
+            ], $observerId);
             $imported++;
             foreach ($row['scans'] as $sc) {
-                $insScan->execute([$obsId, $sc['pit_id'], $row['obs_time']]);
+                wwAuditedInsert($pdo, 'penguin_scans', ['observation_id' => $obsId, 'pit_id' => $sc['pit_id'], 'scan_time_utc' => $row['obs_time']], $observerId);
                 $scans++;
             }
             foreach ($row['bios'] ?? [] as $b) {
                 $dupBio->execute([$b['peng_num'], $row['date']]);
                 if ($dupBio->fetchColumn()) continue;
-                $insBio->execute([$b['peng_num'], $obsId, $row['date'], $b['observed_sex']]);
+                wwAuditedInsert($pdo, 'penguin_biometric_data', ['peng_num' => $b['peng_num'], 'observation_id' => $obsId, 'observation_date' => $row['date'], 'observed_sex' => $b['observed_sex']], $observerId);
                 $bios++;
             }
-        }
-        // One summary audit entry per imported file (the per-row inserts aren't individually audited).
-        if ($imported > 0) {
-            $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('__import', ?, 'IMPORT', ?, ?)")
-                ->execute([$colonyId, $observerId, json_encode([
-                    'filename' => $A['filename'], 'colony' => $A['colony_name'],
-                    'observations' => $imported, 'scans' => $scans, 'biometrics' => $bios,
-                ], JSON_UNESCAPED_SLASHES)]);
         }
         $pdo->commit();
     } catch (Exception $e) {

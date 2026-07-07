@@ -714,4 +714,21 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     foreach ($sightArr as &$s) { if (!empty($s['seen_with'])) stripPengPrefix($s['seen_with'], $viewPrefix); }
     return ['penguins' => $pengArr, 'sightings' => $sightArr];
 }
+
+/**
+ * The single audited INSERT path. Write endpoints (crud edits, CSV import) insert through here so
+ * every new row lands in the audit log identically — action INSERT with the row's fields as
+ * changed_fields. $row is column => value. Returns the new auto-increment id.
+ */
+function wwAuditedInsert($pdo, $table, $row, $observerId) {
+    $cols = array_keys($row);
+    $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
+    $pdo->prepare($sql)->execute(array_values($row));
+    $newId = $pdo->lastInsertId();
+    // penguins use peng_num as their key (not auto-increment).
+    $recordId = ($table === 'penguins' && isset($row['peng_num'])) ? $row['peng_num'] : $newId;
+    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES (?, ?, 'INSERT', ?, ?)")
+        ->execute([$table, $recordId, $observerId, json_encode($row)]);
+    return $newId;
+}
 ?>
