@@ -457,8 +457,9 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
 .clutch-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; }
 .clutch-card .clutch-label.clickable { cursor:pointer; }
-/* Peng-panel breeding history reuses the clutch cards; this head row carries the box link. */
-.clutch-box-row { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+/* Peng-panel breeding history reuses the clutch cards; this head row carries the
+   partner/parents and the box link ("with <mini> in Box 63"). */
+.clutch-box-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-bottom:6px; }
 .clutch-box-row .clutch-label { margin-bottom:0; }
 .clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
 .clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; }

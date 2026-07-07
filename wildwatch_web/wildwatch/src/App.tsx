@@ -2090,6 +2090,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                       return (
                         <div key={`${e.seasonYear}-${e.box}-${e.clutchIndex}`} className={`clutch-card ${cardStatus}`}>
                           <div className="clutch-box-row">
+                            {e.role === 'parent' ? (<>
+                              <span className="muted">with</span>
+                              {e.partner
+                                ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
+                                : <span className="muted">partner not identified</span>}
+                            </>) : (<>
+                              <span className="muted">parents</span>
+                              {e.parents.length > 0
+                                ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                                : <span className="muted">not identified</span>}
+                            </>)}
+                            <span className="muted">in</span>
                             <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
                             {e.clutchCount > 1 && <span className="clutch-label">{ordinal(e.clutchIndex + 1)} clutch</span>}
                           </div>
@@ -2103,10 +2115,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           <div className="clutch-body">
                             <span className="clutch-birds">
                               {e.role === 'parent' ? (<>
-                                <span className="muted">with</span>
-                                {e.partner
-                                  ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
-                                  : <span className="muted">partner not identified</span>}
                                 {e.fam.chicks.map((ck: any) => (
                                   <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                                 ))}
@@ -2119,18 +2127,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 {Array.from({ length: e.fam.fledgedUnchipped }).map((_, j) => (
                                   <span key={`fu${j}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                                 ))}
-                              </>) : (<>
-                                <span className="muted">parents</span>
-                                {e.parents.length > 0
-                                  ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
-                                  : <span className="muted">not identified</span>}
-                                {e.siblings.length > 0 && <>
-                                  <span className="muted">siblings</span>
-                                  {e.siblings.map((sb: any) => (
-                                    <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
-                                  ))}
-                                </>}
-                              </>)}
+                              </>) : e.siblings.length > 0 && <>
+                                <span className="muted">siblings</span>
+                                {e.siblings.map((sb: any) => (
+                                  <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
+                                ))}
+                              </>}
                             </span>
                             <span className="clutch-meta">
                               <ClutchPredictions clutch={c} />
