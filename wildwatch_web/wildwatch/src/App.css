@@ -135,12 +135,12 @@ header h1:hover { opacity:.8; }
   .obs-columns { flex-direction:row; gap:24px; align-items:stretch; overflow:visible; }
   .obs-col { flex:1 1 0; min-height:0; overflow-y:auto; }
 }
-.detail-bird { width:clamp(320px, 40vw, 520px); flex-shrink:0; overflow-y:auto; height:100%; border-left:1px solid #ddd; padding:0 12px 12px; background:#fafafa; }
+.detail-bird { width:clamp(320px, 40vw, 520px); flex-shrink:0; overflow-y:auto; height:100%; border-left:1px solid #ddd; padding:0 12px 12px; background:#fff; }
 /* Only the title row (bird mini + action buttons) sizes the panel; everything below
    fills that width and wraps rather than widening it. width:0 makes a child contribute
    nothing to the panel's intrinsic width; min-width:100% then stretches it back to fit. */
 .detail-bird .bird-detail > :not(.bird-title-row) { width:0; min-width:100%; }
-.detail-bird .bird-title-row { position:sticky; top:0; z-index:2; background:#fafafa; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
+.detail-bird .bird-title-row { position:sticky; top:0; z-index:2; background:#fff; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
 
 /* All birds row */
 .all-birds { margin:8px 0 12px; }
