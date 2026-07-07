@@ -735,6 +735,7 @@ select.ef-input.ef-placeholder { color:#888; }
 /* Entry page prev/next box steppers beside the box field */
 .entry-box-nav { padding:4px 10px; font-size:16px; line-height:1; background:#fff; border:1px solid #ccc; border-radius:4px; cursor:pointer; color:#1a5276; }
 .entry-box-nav:hover { background:#e3f2fd; }
+.entry-box-nav:disabled { opacity:.4; cursor:default; }
 
 /* Penguin groups report method toggle + threshold slider */
 .group-method-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:8px 0; }

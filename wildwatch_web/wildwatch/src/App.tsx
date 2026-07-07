@@ -3040,6 +3040,23 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const crossBefore = crossSeasonDates.filter(m => m._season < season);
   const crossAfter = crossSeasonDates.filter(m => m._season > season);
   const toDmy = (d: string) => `${parseInt(d.slice(8, 10))}/${parseInt(d.slice(5, 7))}/${d.slice(2, 4)}`;
+  // Left/right date arrows: all registered FM dates in this book's window (this season plus
+  // the neighbouring-season dates already surfaced), sorted, so the picker can step to the
+  // previous/next FM date. Setting a this-season date uses its number; cross-season uses d/m/y.
+  const fmStepDates = [
+    ...dateMappings.map(m => ({ date: m.actual_date, num: m.date_number, thisSeason: true })),
+    ...crossSeasonDates.map(m => ({ date: m.actual_date, num: m.date_number, thisSeason: false })),
+  ].filter(x => x.date).sort((a, b) => a.date.localeCompare(b.date));
+  const stepFm = (dir: number) => {
+    if (!fmStepDates.length) return;
+    const cur = parsedDate || '';
+    const idx = fmStepDates.findIndex(x => x.date === cur);
+    const target = idx !== -1
+      ? fmStepDates[Math.min(fmStepDates.length - 1, Math.max(0, idx + dir))]
+      : dir > 0 ? (fmStepDates.find(x => x.date > cur) ?? fmStepDates[fmStepDates.length - 1])
+                : ([...fmStepDates].reverse().find(x => x.date < cur) ?? fmStepDates[0]);
+    if (target) setDateInput(target.thisSeason ? String(target.num) : toDmy(target.date));
+  };
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
   );
@@ -3263,7 +3280,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         <h3>New observation</h3>
         <div className="entry-row">
           <label>Date (# or d/m/yy)</label>
-          <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} />
+          <div style={{display:'flex', alignItems:'center', gap:4}}>
+            <button type="button" className="entry-box-nav" title="Previous FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(-1)}>‹</button>
+            <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} style={{flex:1, minWidth:0}} />
+            <button type="button" className="entry-box-nav" title="Next FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(1)}>›</button>
+          </div>
           {parsedDate && <span className="date-preview"><DateLink date={parsedDate} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
           {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
           {parsedDate && box && (() => {
