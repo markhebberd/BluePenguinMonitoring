@@ -315,6 +315,14 @@ function handleList($pdo, $table) {
     $where = []; $params = [];
     foreach ($_GET as $k => $v) {
         if (in_array($k, ['action','table','colony_id'])) continue;
+        // nz_date=YYYY-MM-DD on observations: rows whose NZ day (fixed +12,
+        // matching the app's toNzDateStr bucketing) is that date.
+        if ($k === 'nz_date' && $table === 'observations') {
+            $dayStartUtc = strtotime($v . ' 00:00:00 UTC') - 12 * 3600;
+            $where[] = "observation_time_utc >= ?"; $params[] = gmdate('Y-m-d H:i:s', $dayStartUtc);
+            $where[] = "observation_time_utc < ?";  $params[] = gmdate('Y-m-d H:i:s', $dayStartUtc + 24 * 3600);
+            continue;
+        }
         if ($k === 'peng_num' && !preg_match('/^[A-Z]/', $v)) {
             $cid = (int)($_GET['colony_id'] ?? 1);
             $v = dbPengNum($pdo, $cid, $v);
@@ -323,7 +331,7 @@ function handleList($pdo, $table) {
     }
     $sql = "SELECT * FROM $table";
     if ($where) $sql .= " WHERE " . implode(' AND ', $where);
-    $limit = ($table === 'observation_locations' || $table === 'penguins' || $table === 'penguin_chips' || $table === 'penguin_biometric_data') ? 5000 : 100;
+    $limit = ($table === 'observation_locations' || $table === 'penguins' || $table === 'penguin_chips' || $table === 'penguin_biometric_data' || isset($_GET['nz_date'])) ? 5000 : 100;
     $sql .= " ORDER BY 1 DESC LIMIT $limit";
     $stmt = $pdo->prepare($sql); $stmt->execute($params);
     $rows = $stmt->fetchAll();
