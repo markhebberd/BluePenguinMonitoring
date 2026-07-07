@@ -1705,11 +1705,16 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
   token?: string; canEdit?: boolean; onDataChange?: () => void;
   showDeleted?: boolean; deletedObs?: any[]; onToggleDeleted?: () => void; onAddPenguin?: (box: string) => void;
 }) {
+  const [curSeasonOpen, setCurSeasonOpen] = useState(true);
+  // Re-open the current season if a link targets one of its observations.
+  useEffect(() => {
+    const target = scrollToObs || highlightObs;
+    if (target && target >= getSeasonStart().toISOString()) setCurSeasonOpen(true);
+  }, [scrollToObs, highlightObs]);
   return (
     <div className="detail-obs">
       <div className="obs-columns">
         <div className="obs-col obs-col-overview">
-          <h3 className="obs-section-head">Breeding history</h3>
           <AllScannedBirds observations={data.observations} onBirdClick={onBirdClick} allPenguinsInBox={data.all_penguins}
             onSeasonClick={(t: string) => onScrollToObs(t)} />
           {(() => {
@@ -1736,7 +1741,6 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
           })()}
         </div>
         <div className="obs-col obs-col-observations">
-          <h3 className="obs-section-head">Observations</h3>
           {(() => {
             const thisSeasonStart = getSeasonStart().toISOString();
             const thisLabel = getSeasonLabel();
@@ -1767,9 +1771,10 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
                 .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
               : thisSeason;
             return (<>
-              <h3 className="season-heading">{seasonRange(thisLabel)} ({thisSeason.length})
-                {deletedCount > 0 && onToggleDeleted && <span className="deleted-indicator clickable" onClick={onToggleDeleted}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
+              <h3 className="season-heading clickable" onClick={() => setCurSeasonOpen(o => !o)}>{seasonRange(thisLabel)} ({thisSeason.length}) {curSeasonOpen ? '▲' : '▼'}
+                {deletedCount > 0 && onToggleDeleted && <span className="deleted-indicator clickable" onClick={(e) => { e.stopPropagation(); onToggleDeleted(); }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
               </h3>
+              {curSeasonOpen && <>
               {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
               {mergeSameDayChips(mergedObs).map((obs: any, i: number) => obs._deleted ? (
                 <div key={`del${obs.observation_id}`} className="obs-card deleted-obs">
@@ -1791,6 +1796,7 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
               ) : (
                 <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
               ))}
+              </>}
               {sortedPrev.map(([label, obs]) => (
                 <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
               ))}
