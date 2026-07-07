@@ -2775,6 +2775,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [birdSearch, setBirdSearch] = useState('');
   const [dateMappings, setDateMappings] = useState<{date_number:number; actual_date:string}[]>([]);
   const [prevSeasonMappings, setPrevSeasonMappings] = useState<{date_number:number; actual_date:string}[]>([]);
+  const [nextSeasonMappings, setNextSeasonMappings] = useState<{date_number:number; actual_date:string}[]>([]);
   const [showDateEditor, setShowDateEditor] = useState(false);
   const [dateEditorText, setDateEditorText] = useState('');
   const [scannedBirds, setScannedBirds] = useState<string[]>([]);
@@ -2800,6 +2801,12 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       .then(r => r.json())
       .then(d => setPrevSeasonMappings(Array.isArray(d) ? d : []))
       .catch(() => setPrevSeasonMappings([]));
+    // The next season's book can start before 1 Apr (like this one); its early dates land in
+    // this season's widened window too, so surface them as cross-season dates as well.
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season + 1}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setNextSeasonMappings(Array.isArray(d) ? d : []))
+      .catch(() => setNextSeasonMappings([]));
   }, [season]);
 
   useEffect(() => {
@@ -2966,10 +2973,26 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     return () => { stale = true; };
   }, [box, saving]);
 
-  const seasonStart = `${season}-04-01`;
-  const seasonEnd = `${season + 1}-03-31`;
-  // Previous-season date-table entries whose actual date lands inside this season's window.
-  const crossSeasonDates = prevSeasonMappings.filter(m => m.actual_date >= seasonStart && m.actual_date <= seasonEnd);
+  const wwStart = `${season}-04-01`;
+  const wwEnd = `${season + 1}-03-31`;
+  // The "book" season is this season's FM date table; observers' old books can start it well
+  // before 1 Apr (e.g. Dec of the prior year). Show the union of the book span and the wildwatch
+  // Apr–Mar season: earliest of (book start, ww start) … latest of (book finish, ww finish).
+  const bookDates = dateMappings.map(m => m.actual_date).filter(Boolean).sort();
+  const bookStart = bookDates[0];
+  const bookEnd = bookDates[bookDates.length - 1];
+  const seasonStart = bookStart && bookStart < wwStart ? bookStart : wwStart;
+  const seasonEnd = bookEnd && bookEnd > wwEnd ? bookEnd : wwEnd;
+  // Dates from the neighbouring book seasons (prev/next) that fall inside this widened window and
+  // aren't part of this book's own table — surfaced as pale-yellow "before/after" dates.
+  const thisDateSet = new Set(dateMappings.map(m => m.actual_date));
+  const crossSeasonDates = [
+    ...prevSeasonMappings.map(m => ({ ...m, _season: season - 1 })),
+    ...nextSeasonMappings.map(m => ({ ...m, _season: season + 1 })),
+  ].filter(m => m.actual_date >= seasonStart && m.actual_date <= seasonEnd && !thisDateSet.has(m.actual_date))
+   .sort((a, b) => a.actual_date.localeCompare(b.actual_date));
+  const crossDateMap = new Map<string, { n: number; season: number }>();
+  for (const m of crossSeasonDates) crossDateMap.set(m.actual_date, { n: m.date_number, season: m._season });
   const toDmy = (d: string) => `${parseInt(d.slice(8, 10))}/${parseInt(d.slice(5, 7))}/${d.slice(2, 4)}`;
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
@@ -3065,11 +3088,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         </div>
         {crossSeasonDates.length > 0 && (
           <div style={{marginBottom:'6px', paddingBottom:'6px', borderBottom:'1px dashed #ffb74d'}}>
-            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From season {String(season - 1).slice(-2)}'s table, but dated in this season:</div>
+            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From neighbouring seasons' tables, dated within this book season's span:</div>
             <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
               {crossSeasonDates.map(m => (
-                <span key={`prev${m.date_number}`} title={`Season ${String(season - 1).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
-                  <b>{m.date_number}</b> = {formatDate(m.actual_date)}
+                <span key={`x${m._season}-${m.date_number}`} title={`Season ${String(m._season).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
+                  <b>S{String(m._season).slice(-2)}·{m.date_number}</b> = {formatDate(m.actual_date)}
                 </span>
               ))}
             </div>
@@ -3127,15 +3150,30 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         <div className="entry-existing">
           <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {entryRows.map((o: any, i: number) => o._chip ? (
-            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row">
-              {(() => { const fm = dateMappings.find((m: any) => m.actual_date === String(o.chip_date).slice(0, 10)); return fm ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span> : null; })()}
+            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row" style={crossDateMap.has(String(o.chip_date).slice(0, 10)) ? {background:'#FEFCE8', borderRadius:4} : undefined}>
+              {(() => {
+                const d = String(o.chip_date).slice(0, 10);
+                const fm = dateMappings.find((m: any) => m.actual_date === d);
+                if (fm) return <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span>;
+                const x = crossDateMap.get(d);
+                return x ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}} title={`Season ${String(x.season).slice(-2)}`}>S{String(x.season).slice(-2)} FM {x.n},</span> : null;
+              })()}
               <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <PenguinMini scan={o} onClick={() => o.peng_num && setSideBird(o.peng_num)} observationDate={o.chip_date} />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
             </div>
           ) : (
-            <div key={i} className="entry-existing-row" style={toNzDateStr(o.observation_time_utc) === todayNz ? {background:'#FFF9C4', boxShadow:'inset 0 0 0 2px #FDD835', borderRadius:4} : undefined}>
-              {(() => { const fm = dateMappings.find((m: any) => m.actual_date === toNzDateStr(o.observation_time_utc)); return fm ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span> : null; })()}
+            <div key={i} className="entry-existing-row" style={
+              toNzDateStr(o.observation_time_utc) === todayNz ? {background:'#FFF9C4', boxShadow:'inset 0 0 0 2px #FDD835', borderRadius:4}
+              : crossDateMap.has(toNzDateStr(o.observation_time_utc)) ? {background:'#FEFCE8', borderRadius:4}
+              : undefined}>
+              {(() => {
+                const d = toNzDateStr(o.observation_time_utc);
+                const fm = dateMappings.find((m: any) => m.actual_date === d);
+                if (fm) return <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span>;
+                const x = crossDateMap.get(d);
+                return x ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}} title={`Season ${String(x.season).slice(-2)}`}>S{String(x.season).slice(-2)} FM {x.n},</span> : null;
+              })()}
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatusOrPrev(o, box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
@@ -6739,8 +6777,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 }
 
 /** Admin → System: backup inventory. Local = the dated dumps the nightly job stages on
- *  this server (kept 14 days); remote = the newest copies on devian, as recorded in
- *  status.json by offsite-backup.sh each run. */
+ *  this server (kept 14 days) — listed live. Remote = devian, verified LIVE on every
+ *  load via a restricted ssh listing; the status.json snapshot from the last run is
+ *  only the fallback when the live check fails. */
 function BackupsPanel({ token }: { token: string }) {
   const [data, setData] = useState<any | null>(null);
   const [err, setErr] = useState('');
@@ -6753,16 +6792,31 @@ function BackupsPanel({ token }: { token: string }) {
   useEffect(load, [token]);
   const fmtBytes = (b: number) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`;
   const s = data?.status;
+  const remote = data?.remote; // live ssh listing of devian, run server-side on every load
   // Newest local dump per database (names are <db>_<YYYYMMDD>.sql.gz, list arrives newest-first)
   const newestLocal = new Map<string, any>();
   for (const f of (data?.local || [])) {
     const m = f.name.match(/^(.+)_(\d{8})\.sql\.gz$/);
     if (m && !newestLocal.has(m[1])) newestLocal.set(m[1], { ...f, day: `${m[2].slice(0,4)}-${m[2].slice(4,6)}-${m[2].slice(6)}` });
   }
+  // Newest verified remote daily/monthly per database, from the live listing
+  const remoteLatest = new Map<string, { daily?: any; monthly?: any }>();
+  if (remote?.ok) for (const f of remote.files) {
+    const m = f.name.match(/^(.+)_\d{6,8}\.sql\.gz$/);
+    if (!m) continue;
+    const e: any = remoteLatest.get(m[1]) || {};
+    const k = f.kind as 'daily' | 'monthly';
+    if (!e[k] || f.name > e[k].name) e[k] = f;
+    remoteLatest.set(m[1], e);
+  }
   const stateLabel = s?.state === 'success' ? <span style={{color:'#2e7d32', fontWeight:600}}>✓ OK</span>
     : s?.state === 'failed' ? <span style={{color:'#c0392b', fontWeight:600}}>✗ FAILED: {s.error}</span>
     : s?.state === 'running' ? <span style={{color:'#a15c00', fontWeight:600}}>⏳ running — {s.phase}</span>
     : <span className="muted">unknown</span>;
+  const remoteCell = (live: any, snapshot: string | undefined) =>
+    live ? <>{live.name} <span className="muted">({fmtBytes(live.bytes)})</span></>
+    : snapshot ? <>{snapshot} <span style={{color:'#a15c00'}}>(unverified — from last run)</span></>
+    : <span className="muted">—</span>;
   return (
     <div className="admin-section">
       <h3>Backups <button className="edit-btn" style={{marginLeft:8}} onClick={load}>Refresh</button></h3>
@@ -6770,21 +6824,26 @@ function BackupsPanel({ token }: { token: string }) {
       {!data && !err && <p className="muted">Loading...</p>}
       {data && (
         <>
-          <p style={{marginBottom:8}}>Nightly offsite job: {stateLabel}
+          <p style={{marginBottom:4}}>Nightly offsite job: {stateLabel}
             {s?.last_success_at && <span className="muted"> · last success {formatDate(s.last_success_at)}</span>}
+          </p>
+          <p style={{marginBottom:8}}>Offsite (devian): {remote?.ok
+            ? <span style={{color:'#2e7d32', fontWeight:600}}>✓ verified just now — {remote.files.length} file{remote.files.length !== 1 ? 's' : ''} present</span>
+            : <span style={{color:'#c0392b', fontWeight:600}}>✗ live check failed ({remote?.error || 'no response'}) — showing last-run snapshot</span>}
           </p>
           <table className="bird-table" style={{marginBottom:6}}>
             <thead><tr><th>Database</th><th>Local (this server, 14 days)</th><th>Remote daily (devian)</th><th>Remote monthly (devian)</th></tr></thead>
             <tbody>
-              {Array.from(new Set([...newestLocal.keys(), ...Object.keys(s?.offsite_latest || {})])).sort().map(db => {
+              {Array.from(new Set([...newestLocal.keys(), ...remoteLatest.keys(), ...Object.keys(s?.offsite_latest || {})])).sort().map(db => {
                 const l = newestLocal.get(db);
-                const r = s?.offsite_latest?.[db];
+                const r = remoteLatest.get(db);
+                const snap = s?.offsite_latest?.[db];
                 return (
                   <tr key={db}>
                     <td>{db}</td>
                     <td>{l ? <>{l.day} <span className="muted">({fmtBytes(l.bytes)})</span></> : <span className="muted">—</span>}</td>
-                    <td>{r?.daily || <span className="muted">not recorded yet</span>}</td>
-                    <td>{r?.monthly || <span className="muted">not recorded yet</span>}</td>
+                    <td>{remoteCell(r?.daily, snap?.daily)}</td>
+                    <td>{remoteCell(r?.monthly, snap?.monthly)}</td>
                   </tr>
                 );
               })}
@@ -6792,7 +6851,10 @@ function BackupsPanel({ token }: { token: string }) {
           </table>
           <p className="muted" style={{fontSize:12}}>
             {data.local.length} staged dump{data.local.length !== 1 ? 's' : ''} on this server
-            {s?.offsite && <> · devian holds {s.offsite.daily_count} dail{s.offsite.daily_count === 1 ? 'y' : 'ies'} + {s.offsite.monthly_count} monthl{s.offsite.monthly_count === 1 ? 'y' : 'ies'} · media mirror {s.offsite.media}</>}
+            {remote?.ok
+              ? <> · devian holds {remote.files.filter((f: any) => f.kind === 'daily').length} dailies + {remote.files.filter((f: any) => f.kind === 'monthly').length} monthlies (verified live)</>
+              : s?.offsite && <> · devian held {s.offsite.daily_count} dailies + {s.offsite.monthly_count} monthlies at last run</>}
+            {s?.offsite?.media && <> · media mirror {s.offsite.media}</>}
           </p>
         </>
       )}
