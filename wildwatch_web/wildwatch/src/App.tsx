@@ -512,11 +512,10 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
   const { show, hide, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
   const fm = registeredFmDates.get(day);
   const stats = statsCache.get(day);
-  // Same "full monitor" (complete observation set) test the calendar uses (statsCache.isFullMonitor).
-  // Green when the day is complete; orange when there are observations (or it's a registered FM
-  // date) but the set is incomplete — a cue that the day still needs finishing. FM number shown
-  // after the date wherever the day matches a book FM date.
-  const cls = stats?.isFullMonitor ? ' fm-date' : (stats || fm ? ' fm-partial' : '');
+  const complete = !!stats?.isFullMonitor; // full monitor = complete box set (same test as the calendar)
+  // Orange only for a registered season FM date whose observations are incomplete — a cue that data
+  // is missing for that FM day. Green for a complete full monitor. Ordinary partial days stay plain.
+  const cls = fm && !complete ? ' fm-partial' : complete ? ' fm-date' : '';
   return <a className={`date-link${cls}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> (FM {fm.number})</span> : ''}</a>;
 }
@@ -5883,6 +5882,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [impAnalysis, setImpAnalysis] = useState<any>(null);
   const [impAnalyzing, setImpAnalyzing] = useState(false);
   const [impCommitting, setImpCommitting] = useState(false);
+  // Override: import rows that conflict with same-day existing data as second observations.
+  const [impConflicts, setImpConflicts] = useState(false);
   const [impResult, setImpResult] = useState<any>(null);
   const [impError, setImpError] = useState('');
   const [impRowFilter, setImpRowFilter] = useState<'issues' | 'all'>('issues');
@@ -5909,7 +5910,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const iDupScans = useDuplicateScans();
   const iSameGender = useSameGenderConflicts();
 
-  const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); };
+  const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); setImpConflicts(false); };
 
   // Analyze immediately (from args, since state updates are async on file pick / colony change).
   const impAnalyze = async (csv = impCsv, filename = impFile, colony = impColony) => {
@@ -5942,7 +5943,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     try {
       const r = await fetch('/api/admin.php?action=import_csv_commit', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ csv: impCsv, filename: impFile, colony_id: impColony }),
+        body: JSON.stringify({ csv: impCsv, filename: impFile, colony_id: impColony, import_conflicts: impConflicts }),
       });
       const d = await r.json();
       if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
@@ -6251,6 +6252,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             <strong>✓ Imported into {impResult.colony_name}.</strong>{' '}
             {impResult.imported} observation(s), {impResult.scans} scan(s){impResult.biometrics ? `, ${impResult.biometrics} biometric(s)` : ''} written.
             {impResult.skipped_duplicates > 0 && <> {impResult.skipped_duplicates} duplicate row(s) skipped.</>}
+            {impResult.imported_conflicts > 0 && <> <span style={{ color: '#d35400' }}>{impResult.imported_conflicts} conflicting row(s) imported as second observations.</span></>}
+            {impResult.skipped_conflicts > 0 && <> {impResult.skipped_conflicts} conflicting row(s) skipped.</>}
             {impResult.skipped_errors > 0 && <> {impResult.skipped_errors} error row(s) skipped.</>}
             {impResult.unmatched_chips?.length > 0 && (
               <div style={{ marginTop: 6 }}>
@@ -6267,6 +6270,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
             ['Rows', t.rows], ['Will import', t.importable, '#1a7a1a'],
             ['Flagged', t.flagged, t.flagged ? '#8a6d3b' : undefined],
             ['Duplicates (skip)', t.duplicates, t.duplicates ? '#b8860b' : undefined],
+            ['Conflicts', t.conflicts || 0, t.conflicts ? '#c0392b' : undefined],
             ['Errors (skip)', t.error_rows, t.error_rows ? '#c0392b' : undefined],
             ['Boxes', t.boxes], ['Not in sheet', t.boxes_missing, t.boxes_missing ? '#8a6d3b' : undefined], ['Decom→DCM', t.decom],
             ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks], ['No-scan', t.no_scan],
@@ -6279,7 +6283,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
           const shown = impRowFilter === 'issues'
             ? rows.filter((r: any) => r.status !== 'ok' || r.warnings?.length)
             : rows;
-          const canImport = t.importable > 0 && !impCommitting;
+          const conflictCount = t.conflicts || 0;
+          const willImport = t.importable + (impConflicts ? conflictCount : 0);
+          const canImport = willImport > 0 && !impCommitting;
           return (
             <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
               <div style={{ fontSize: 13, marginBottom: 8 }}>
@@ -6340,7 +6346,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                   ))}</tr></thead>
                   <tbody>
                     {shown.map((r: any) => {
-                      const bg = r.status === 'error' ? '#fdecea' : r.status === 'duplicate' ? '#fff6e0' : r.warnings?.length ? '#fffbe6' : 'transparent';
+                      const bg = r.status === 'error' ? '#fdecea' : r.status === 'conflict' ? '#ffe9d6' : r.status === 'duplicate' ? '#fff6e0' : r.warnings?.length ? '#fffbe6' : 'transparent';
                       // Click a row (incl. errors) to investigate: the box anchored at this row's own
                       // date/observation, or — if the box is unknown — the whole day.
                       const invHref = r.location_id
@@ -6361,6 +6367,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                           <td style={{ padding: '2px 6px', color: '#1a7a1a' }}>{r.bios?.length ? r.bios.map((b: any) => b.observed_sex).join(',') : ''}</td>
                           <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
                             {r.status === 'error' ? <span style={{ color: '#c0392b' }}>error</span>
+                              : r.status === 'conflict' ? <span style={{ color: '#d35400', fontWeight: 600 }}>conflict{impConflicts ? ' → import' : ''}</span>
                               : r.status === 'duplicate' ? <span style={{ color: '#b8860b' }}>duplicate</span>
                               : r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>flag</span>
                               : r.breeding_status === 'DCM' ? <span style={{ color: '#8a6d3b' }}>DCM</span>
@@ -6372,7 +6379,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                           </td>
                           <td style={{ padding: '2px 6px', color: '#c0392b' }}>
                             {(r.errors || []).join('; ')}
-                            {r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>{r.errors?.length ? ' · ' : ''}{r.warnings.join('; ')}</span> : ''}
+                            {r.conflict ? <span style={{ color: '#d35400' }}>{r.errors?.length ? ' · ' : ''}{r.conflict}</span> : ''}
+                            {r.warnings?.length ? <span style={{ color: '#8a6d3b' }}>{(r.errors?.length || r.conflict) ? ' · ' : ''}{r.warnings.join('; ')}</span> : ''}
                             {r.notes ? <span className="muted" style={{ fontStyle: 'italic' }}>{(r.errors?.length || r.warnings?.length) ? ' · ' : ''}“{r.notes}”</span> : ''}
                             {r.mini_pengs?.length > 0 && (
                               <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', marginLeft: 6, verticalAlign: 'middle' }}>
@@ -6393,14 +6401,21 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                 </table>
               </div>
 
+              {conflictCount > 0 && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 13, color: '#d35400' }}>
+                  <input type="checkbox" checked={impConflicts} onChange={e => setImpConflicts(e.target.checked)} />
+                  Import {conflictCount} conflicting row(s) anyway — each becomes a second observation for that box+day
+                </label>
+              )}
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
                 <button className="action-btn" disabled={!canImport}
                   style={{ background: canImport ? '#1a7a1a' : undefined, color: canImport ? '#fff' : undefined }}
                   onClick={impCommit}>
-                  {impCommitting ? 'Importing…' : `Confirm import of ${t.importable} observation(s)`}
+                  {impCommitting ? 'Importing…' : `Confirm import of ${willImport} observation(s)`}
                 </button>
                 <button className="action-btn" disabled={impCommitting} onClick={impReset}>Cancel</button>
                 {t.error_rows > 0 && <span className="muted" style={{ fontSize: 12 }}>{t.error_rows} error row(s) will be skipped.</span>}
+                {conflictCount > 0 && !impConflicts && <span className="muted" style={{ fontSize: 12 }}>{conflictCount} conflicting row(s) will be skipped.</span>}
               </div>
             </div>
           );

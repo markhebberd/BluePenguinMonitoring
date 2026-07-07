@@ -863,7 +863,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         'unmatched_chips' => [], 'unknown_boxes' => [],
         'date_min' => null, 'date_max' => null,
         'totals' => [
-            'rows' => 0, 'importable' => 0, 'flagged' => 0, 'duplicates' => 0, 'error_rows' => 0,
+            'rows' => 0, 'importable' => 0, 'flagged' => 0, 'duplicates' => 0, 'conflicts' => 0, 'error_rows' => 0,
             'decom' => 0, 'boxes' => 0, 'boxes_in_colony' => 0, 'boxes_missing' => 0,
             'adults' => 0, 'eggs' => 0, 'chicks' => 0,
             'no_scan' => 0, 'scans_matched' => 0, 'scans_unmatched' => 0,
@@ -1275,9 +1275,10 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 
         // Existing-data check: any observation for this box on this NZ day (any observer,
         // any time). If the sheet row MATCHES it (counts, status, scanned birds) it's a
-        // duplicate — warned and auto-skipped. If it DIFFERS, the row is an error and the
-        // sheet must be fixed until it matches; the diff below says exactly what disagrees.
-        $duplicate = false;
+        // duplicate — warned and auto-skipped. If it DIFFERS, the row is a conflict:
+        // skipped by default (fix the sheet or the stored observation until they agree),
+        // or imported as a SECOND observation when the user ticks the override.
+        $duplicate = false; $conflict = null;
         if ($locId !== null && $obsDate !== null) {
             $dayStart = new DateTime($obsDate . ' 00:00:00', $tzNz);
             $dayStartUtc = (clone $dayStart)->setTimezone($tzUtc)->format('Y-m-d H:i:s');
@@ -1300,10 +1301,11 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 if ($onlyExisting) $diffs[] = 'birds only in existing: ' . implode(', ', $onlyExisting);
                 if ($onlySheet) $diffs[] = 'birds only in sheet: ' . implode(', ', $onlySheet);
                 if ($diffs) {
-                    $errors[] = "Box already has data on $obsDate and the sheet DIFFERS — fix the sheet to match (row skipped): " . implode('; ', $diffs);
+                    $conflict = "Box already has data on $obsDate and the sheet DIFFERS: " . implode('; ', $diffs)
+                        . ". Fix the sheet (or edit the stored observation) until they match — or tick “Import conflicting rows” to add this as a second observation.";
                 } else {
                     $duplicate = true;
-                    $warnings[] = "Box already has a matching observation on $obsDate — skipped";
+                    $warnings[] = "Box already has a matching observation on $obsDate — skipped (already recorded)";
                 }
             }
         }
@@ -1324,14 +1326,16 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         if ($sheetDupOf !== null) $warnings[] = "duplicate of line $sheetDupOf in this sheet (same box + date)";
-        $status = count($errors) ? 'error' : (($duplicate || $sheetDupOf !== null) ? 'duplicate' : 'ok');
+        $status = count($errors) ? 'error'
+            : ($conflict !== null ? 'conflict'
+            : (($duplicate || $sheetDupOf !== null) ? 'duplicate' : 'ok'));
         $R['rows'][] = [
             'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
             'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks, 'no_scan' => $noScan,
             'confirm_no_scan' => $needNoScanConfirm, 'bios' => $bios,
             'breeding_status' => $breeding, 'is_decom' => $isDecom, 'notes' => $notes,
             'obs_time' => $obsTime, 'prev_obs' => $prevObs, 'scans' => $scans, 'unmatched' => $unmatchedHere,
-            'errors' => $errors, 'warnings' => $warnings, 'mini_pengs' => $miniPengs, 'status' => $status,
+            'errors' => $errors, 'warnings' => $warnings, 'conflict' => $conflict, 'mini_pengs' => $miniPengs, 'status' => $status,
         ];
         // Track each scanned chip's box per day so we can flag a bird appearing in two boxes.
         if ($obsDate && $rowKeys) {
@@ -1340,6 +1344,7 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         if ($status === 'error') { $R['totals']['error_rows']++; continue; }
+        if ($status === 'conflict') { $R['totals']['conflicts']++; continue; }
         if ($status === 'duplicate') { $R['totals']['duplicates']++; continue; }
         // Importable row — tally what would actually be written.
         $R['totals']['importable']++;
@@ -1419,12 +1424,16 @@ if ($action === 'import_csv_commit') {
     if ($csv === '') { http_response_code(400); echo json_encode(['error' => 'No CSV supplied']); exit; }
     if (!$colonyId) { http_response_code(400); echo json_encode(['error' => 'colony_id required']); exit; }
     $observerId = (int)$observer['observer_id'];
+    // User override: also import rows that CONFLICT with same-day existing data, as
+    // second observations for that box+day. Off by default.
+    $inBody = json_decode(file_get_contents('php://input'), true) ?? [];
+    $importConflicts = !empty($inBody['import_conflicts']);
 
     // Re-parse so what we write is exactly what was validated (DB may have shifted since analyze).
     $A = ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename);
     if (!$A['ok']) { http_response_code(400); echo json_encode(['error' => $A['error']]); exit; }
 
-    $imported = 0; $scans = 0; $bios = 0; $skippedDup = 0; $skippedErr = 0;
+    $imported = 0; $scans = 0; $bios = 0; $skippedDup = 0; $skippedErr = 0; $skippedConflicts = 0; $importedConflicts = 0;
     try {
         $pdo->beginTransaction();
         // Skip a biometric if this bird already has a live one on this date (idempotent re-imports).
@@ -1432,6 +1441,10 @@ if ($action === 'import_csv_commit') {
         foreach ($A['rows'] as $row) {
             if ($row['status'] === 'error') { $skippedErr++; continue; }
             if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
+            if ($row['status'] === 'conflict') {
+                if (!$importConflicts) { $skippedConflicts++; continue; }
+                $importedConflicts++;
+            }
             // Every insert goes through the same audited path as a manual crud write.
             $obsId = wwAuditedInsert($pdo, 'observations', [
                 'location_id' => $row['location_id'], 'observer_id' => $observerId, 'observation_time_utc' => $row['obs_time'],
@@ -1461,6 +1474,7 @@ if ($action === 'import_csv_commit') {
     echo json_encode([
         'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
         'imported' => $imported, 'scans' => $scans, 'biometrics' => $bios, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
+        'skipped_conflicts' => $skippedConflicts, 'imported_conflicts' => $importedConflicts,
         'unmatched_chips' => $A['unmatched_chips'],
     ]);
     exit;
