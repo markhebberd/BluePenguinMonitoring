@@ -1188,16 +1188,14 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             // 1. Improbable counts for a little-penguin box.
             if ($adults > 2) $warnings[] = "adults = $adults (>2)";
             if (($eggs + $chicks) > 2) $warnings[] = 'eggs + chicks = ' . ($eggs + $chicks) . ' (>2)';
-            // 2. Adult balance: adult scans (+ no-scan cells) should equal the Adults count. Extra
-            //    adults with no bird cell are unscanned — a no-scan is created automatically for the
-            //    difference on import; the row is flagged so the reviewer sees it. Chicks excluded.
+            // 2. Adult balance: extra adults with no bird cell are unscanned — a no-scan is
+            //    created automatically for the difference on import; the row is flagged so the
+            //    reviewer sees it. Chicks excluded. (The reverse — more birds entered than the
+            //    Adults count — is common and harmless, so it isn't flagged.)
             if ($countsOk && $adults > $adultBirds + $noScan) {
                 $needNoScanConfirm = $adults - $adultBirds - $noScan;
                 $noScan += $needNoScanConfirm;
                 $warnings[] = "adults ($adults) > scanned ($adultBirds) — $needNoScanConfirm no-scan(s) will be created for this date";
-            } elseif ($countsOk && $adults < $adultBirds + $noScan) {
-                $warnings[] = "adults ($adults) < entered (" . ($adultBirds + $noScan) . ') — more entered than present';
-                foreach ($scans as $sc) $addMini($sc['peng_num']);
             }
         }
         // 5. Chips that didn't resolve to exactly one colony bird (with a "did you mean" near-match).
@@ -1214,9 +1212,9 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
                 $warnings[] = "chip {$sc['chip']} is a retired tag for #" . displayPengNum($pg, $prefix) . " (active {$pengActiveKey[$pg]})";
                 $addMini($pg);
             }
-            // Scan dated before the bird was chipped.
+            // Scan dated before the bird was chipped — impossible, so the row is an error (skipped).
             if ($obsDate && isset($pengFirstChip[$pg]) && $obsDate < $pengFirstChip[$pg]) {
-                $warnings[] = "scanned $obsDate, before #" . displayPengNum($pg, $prefix) . " was chipped ({$pengFirstChip[$pg]})";
+                $errors[] = "scanned $obsDate, before #" . displayPengNum($pg, $prefix) . " was chipped ({$pengFirstChip[$pg]})";
                 $addMini($pg);
             }
             // Bird recorded dead in the database.
