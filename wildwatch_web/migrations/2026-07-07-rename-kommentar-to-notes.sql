@@ -1,0 +1,1 @@
+ALTER TABLE penguins CHANGE kommentar notes TEXT NULL DEFAULT NULL;

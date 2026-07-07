@@ -116,7 +116,7 @@ namespace PenguinMonitor.Services
                         RechipDate = columns[34],
                         FullIso15Digits = columns[35],
                         Solo = columns.Count > 36 ? columns[36] : "",
-                        Kommentar = columns.Count > 37 ? columns[37] : ""
+                        Notes = columns.Count > 37 ? columns[37] : ""
                     };
 
                     result.Add(csvRow);

@@ -39,6 +39,6 @@ namespace PenguinMonitor.Models
         public string RechipDate { get; set; } = "";
         public string FullIso15Digits { get; set; } = "";
         public string Solo { get; set; } = "";
-        public string Kommentar { get; set; } = "";
+        public string Notes { get; set; } = "";
     }
 }

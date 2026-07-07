@@ -2060,7 +2060,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
               : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
                   onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="death date" canEdit={true} />}</td></tr>}
-            {(editing || !!p.kommentar) && <tr><td className="muted">Notes</td><td>{!editing ? p.kommentar : <EditableField value={p.kommentar} onSave={savePenguin('kommentar')} placeholder="-" canEdit={true} />}</td></tr>}
+            {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td>{!editing ? p.notes : <EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={true} />}</td></tr>}
             <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
           </tbody>
         </table>
