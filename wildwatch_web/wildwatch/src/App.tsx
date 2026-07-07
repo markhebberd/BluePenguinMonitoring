@@ -5791,13 +5791,21 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
         return (
           <div key={i} className="obs-card" style={{marginBottom:2, padding:'4px 10px', marginLeft:8}}>
             <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
-              <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
-              <span>{e.table_name === '__sql_console' ? 'SQL console' : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
+              <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : e.action === 'IMPORT' ? '#00897b' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
+              <span>{e.table_name === '__sql_console' ? 'SQL console' : e.table_name === '__import' ? (fields?.filename || 'Import') : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
               <span className="muted">{e.observer_name || ''}</span>
               {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
             </div>
             {e.table_name === '__sql_console' && fields?.sql && (
               <div style={{fontSize:11, marginTop:2, fontFamily:'monospace', color:'#555', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{fields.sql}</div>
+            )}
+            {e.table_name === '__import' && fields && (
+              <div className="muted" style={{fontSize:11, marginTop:2}}>
+                {fields.observations} observation{fields.observations !== 1 ? 's' : ''}
+                {fields.scans ? `, ${fields.scans} scan${fields.scans !== 1 ? 's' : ''}` : ''}
+                {fields.biometrics ? `, ${fields.biometrics} biometric${fields.biometrics !== 1 ? 's' : ''}` : ''}
+                {fields.colony ? ` · ${fields.colony}` : ''}
+              </div>
             )}
             {e.action === 'UPDATE' && fields && (
               <div style={{fontSize:11, marginTop:2}}>

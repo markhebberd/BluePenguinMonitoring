@@ -1530,6 +1530,14 @@ if ($action === 'import_csv_commit') {
                 $bios++;
             }
         }
+        // One summary audit entry per imported file (the per-row inserts aren't individually audited).
+        if ($imported > 0) {
+            $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('__import', ?, 'IMPORT', ?, ?)")
+                ->execute([$colonyId, $observerId, json_encode([
+                    'filename' => $A['filename'], 'colony' => $A['colony_name'],
+                    'observations' => $imported, 'scans' => $scans, 'biometrics' => $bios,
+                ], JSON_UNESCAPED_SLASHES)]);
+        }
         $pdo->commit();
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
