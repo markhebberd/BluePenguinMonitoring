@@ -6862,7 +6862,8 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <BackupsPanel token={token} />
-        <Migration20240508Panel token={token} />
+        <DayMoveMigrationPanel token={token} fromDate="2024-05-08" toDate="2024-04-08" />
+        <DayMoveMigrationPanel token={token} fromDate="2023-10-10" toDate="2023-10-09" />
         <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
           <DiskHistoryChart token={token} />
         </Suspense>
@@ -6938,15 +6939,16 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   );
 }
 
-/** Admin → System: one-time migration moving everything recorded on NZ day 8 May 2024
- *  to 8 Apr 2024, all timestamps set to 2pm NZ (02:00 UTC NZST, the death_date
- *  convention). Runs entirely through the audited CRUD API with the logged-in session,
- *  so every change lands in audit_log under this user with a change_reason. Remove the
- *  panel once the migration has been applied. */
-function Migration20240508Panel({ token }: { token: string }) {
-  const FROM_DATE = '2024-05-08', TO_DATE = '2024-04-08';
-  const TO_DATETIME_UTC = '2024-04-08 02:00:00';
-  const REASON = 'One-time migration: data recorded on 8 May 2024 moved to 8 Apr 2024';
+/** Admin → System: one-time migration moving everything recorded on one NZ day to
+ *  another, all timestamps set to 2pm NZ (02:00 UTC NZST, the death_date convention).
+ *  Runs entirely through the audited CRUD API with the logged-in session, so every
+ *  change lands in audit_log under this user with a change_reason. Remove each panel
+ *  once its migration has been applied. */
+function DayMoveMigrationPanel({ token, fromDate, toDate }: { token: string; fromDate: string; toDate: string }) {
+  const FROM_DATE = fromDate, TO_DATE = toDate;
+  const TO_DATETIME_UTC = `${toDate} 02:00:00`;
+  const nice = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const REASON = `One-time migration: data recorded on ${nice(FROM_DATE)} moved to ${nice(TO_DATE)}`;
   const [log, setLog] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
 
@@ -6962,7 +6964,7 @@ function Migration20240508Panel({ token }: { token: string }) {
   };
 
   const run = async (apply: boolean) => {
-    if (apply && !confirm('Move all data on 8 May 2024 to 8 Apr 2024 (2pm NZ)? This writes to the database.')) return;
+    if (apply && !confirm(`Move all data on ${nice(FROM_DATE)} to ${nice(TO_DATE)} (2pm NZ)? This writes to the database.`)) return;
     setRunning(true);
     const lines: string[] = [];
     const add = (s: string) => { lines.push(s); setLog([...lines]); };
@@ -7040,8 +7042,8 @@ function Migration20240508Panel({ token }: { token: string }) {
 
   return (
     <div className="admin-section">
-      <h3>One-time migration: 8 May 2024 → 8 Apr 2024</h3>
-      <p className="muted">Moves all observations, scans and biometrics recorded on 8 May 2024 to 8 Apr 2024, timestamps set to 2pm NZ. Audited under your login. Dry run first.</p>
+      <h3>One-time migration: {nice(FROM_DATE)} → {nice(TO_DATE)}</h3>
+      <p className="muted">Moves all observations, scans and biometrics recorded on {nice(FROM_DATE)} to {nice(TO_DATE)}, timestamps set to 2pm NZ. Audited under your login. Dry run first.</p>
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="edit-btn" disabled={running} onClick={() => run(false)}>Dry run</button>
         <button className="edit-btn" disabled={running} style={{ background: '#c62828', color: '#fff' }} onClick={() => run(true)}>Apply</button>
