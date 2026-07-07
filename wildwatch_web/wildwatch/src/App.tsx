@@ -5985,7 +5985,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
   // FM completeness: every incomplete registered book FM day up to today, in the order
   // the book tables list them, with the number of box observations still needed for it
-  // to count as a full monitor. Grouped by season, newest season first.
+  // to count as a full monitor. Grouped by season, oldest season first.
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const fmCompleteness = useMemo(() => {
     const today = toNzDateStr(new Date().toISOString());
@@ -6001,7 +6001,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       bySeason.get(fm.season)!.push({ day, number: fm.number, missing: boxes.length, boxes });
       total++;
     }
-    const seasons = Array.from(bySeason.entries()).sort((a, b) => b[0] - a[0]);
+    const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
   const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
