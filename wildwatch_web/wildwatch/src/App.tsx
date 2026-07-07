@@ -1211,10 +1211,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 rows.push(clutchRow(ci));
                 rows.push(gapRow(ci));
               }
-              // No clutch detected this season — say so explicitly.
+              // No clutch detected this season — say so in the same bordered box as a real window.
               if (clutches.length === 0) rows.push(
-                <div key="nobreeding" className="obs-card breeding-none">
-                  <div className="obs-top"><span className="muted">No breeding observed</span></div>
+                <div key="nobreeding" className="bird-row">
+                  <span className="breeding-pair"><span className="muted">No breeding observed</span></span>
                 </div>
               );
               return rows;
