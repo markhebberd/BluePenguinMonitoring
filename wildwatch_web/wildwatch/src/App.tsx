@@ -533,12 +533,14 @@ function DateTooltipPortal({ tip, statsCache }: { tip: { date: string; x: number
 function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: string) => void }) {
   const day = date.length > 10 ? toNzDateStr(date) : date;
   const { show, hide, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
-  // Green when the day was a full monitor (computed, same as the calendar) or was
-  // registered as an FM date for its season in the enter-date workflow. When it matches a
-  // book FM date, print "(FM n)" after the date so the book number is visible everywhere.
   const fm = registeredFmDates.get(day);
-  const isFm = statsCache.get(day)?.isFullMonitor || !!fm;
-  return <a className={`date-link${isFm ? ' fm-date' : ''}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
+  const stats = statsCache.get(day);
+  // Same "full monitor" (complete observation set) test the calendar uses (statsCache.isFullMonitor).
+  // Green when the day is complete; orange when there are observations (or it's a registered FM
+  // date) but the set is incomplete — a cue that the day still needs finishing. FM number shown
+  // after the date wherever the day matches a book FM date.
+  const cls = stats?.isFullMonitor ? ' fm-date' : (stats || fm ? ' fm-partial' : '');
+  return <a className={`date-link${cls}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> (FM {fm.number})</span> : ''}</a>;
 }
 
