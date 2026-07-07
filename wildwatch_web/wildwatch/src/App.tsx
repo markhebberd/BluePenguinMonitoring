@@ -1188,7 +1188,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                 </span>
               </div>
               {inNest.length > 0 && (
-                <div className="clutch-visitors"><span className="visitors-lbl">In nest</span><span className="visitors-list">{inNest.map(x => birdWithCount(x.b, x.n))}</span></div>
+                <div className="clutch-visitors"><span className="visitors-lbl">Also in nest</span><span className="visitors-list">{inNest.map(x => birdWithCount(x.b, x.n))}</span></div>
               )}
             </div>
           );
