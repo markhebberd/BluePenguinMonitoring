@@ -1291,8 +1291,6 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         }
 
         if ($sheetDupOf !== null) $warnings[] = "duplicate of line $sheetDupOf in this sheet (same box + date)";
-        // Flagged row: show the scanned birds' minis so the reviewer can see who was recorded.
-        if (count($warnings)) foreach ($scans as $sc) $addMini($sc['peng_num']);
         $status = count($errors) ? 'error' : (($duplicate || $sheetDupOf !== null) ? 'duplicate' : 'ok');
         $R['rows'][] = [
             'line' => $lineNo, 'box' => $box, 'date' => $obsDate, 'location_id' => $locId,
