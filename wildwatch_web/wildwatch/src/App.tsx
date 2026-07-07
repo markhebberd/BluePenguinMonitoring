@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryDay, queryCarryForward, getDcmBoxes, getFmExcusedBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, getFmExcluded, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -469,29 +469,6 @@ function useDateTooltip() {
 // registeredFmDates: NZ date (YYYY-MM-DD) -> the season + date-number it was registered as
 // in the enter-date workflow. Used, alongside a computed full monitor, to flag FM dates green.
 const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any>; registeredFmDates: Map<string, { season: number; number: number }> }>({ show: () => {}, hide: () => {}, statsCache: new Map(), registeredFmDates: new Map() });
-
-function computeDateStats(date: string) {
-  const day = queryDay(date);
-  const obs = day.observations || [];
-  const boxes = new Set(obs.map((o: any) => o.box_name));
-  const totalAdults = obs.reduce((s: number, o: any) => s + (o.adults || 0), 0);
-  const totalEggs = obs.reduce((s: number, o: any) => s + (o.eggs || 0), 0);
-  const totalChicks = obs.reduce((s: number, o: any) => s + (o.chicks || 0), 0);
-  const allScans = obs.flatMap((o: any) => o.scans || []);
-  const uniquePenguins = new Set(allScans.filter((s: any) => s.peng_num).map((s: any) => s.peng_num));
-  const chippings = day.chippings || [];
-  const nameCounts: Record<string, number> = {};
-  for (const o of obs) { if (o.monitor_filename) nameCounts[o.monitor_filename] = (nameCounts[o.monitor_filename] || 0) + 1; }
-  const topName = Object.entries(nameCounts).sort((a, b) => b[1] - a[1])[0];
-  const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
-  const allLocs = queryAllLocations();
-  const excusedBoxes = getFmExcusedBoxes(date);
-  const excluded = getFmExcluded();
-  const requiredBoxes = allLocs.filter(l => !excusedBoxes.has(l.location_name) && !excluded.has(l.location_name.toUpperCase())).map(l => l.location_name);
-  const isFullMonitor = requiredBoxes.length > 0 && requiredBoxes.every(b => boxes.has(b));
-  const missingBoxes = requiredBoxes.filter(b => !boxes.has(b)).sort((a, b) => { const na = parseInt(a), nb = parseInt(b); return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b); });
-  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippings.length, label, isFullMonitor, missingBoxes, totalLocations: allLocs.length };
-}
 
 function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
   const multiObs = stats.obs > stats.boxes;

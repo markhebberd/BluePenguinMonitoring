@@ -157,6 +157,12 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, missingBoxes: missingNames, totalLocations: c.locations.length };
 }
 
+/** Single-date stats computed on demand from the current cache — the one place this logic lives,
+ *  shared by the calendar's precomputed statsCache and any on-the-fly lookups (e.g. tooltips). */
+export function computeDateStats(nzDate: string): any | null {
+  return mem ? computeDateStatsFromCache(nzDate, mem) : null;
+}
+
 function buildDateStats(c: MemCache): void {
   c.obsByNzDate = new Map();
   c.dateStats = new Map();
