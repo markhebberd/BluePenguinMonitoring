@@ -6032,6 +6032,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     let total = 0;
     for (const [day, fm] of registeredFmDates) {
       if (day > today) continue;
+      if (fm.partial) continue; // Partial Monitor days are deliberately incomplete — not actionable
       const st = computeDateStats(day);
       if (!st) continue;
       if (st.isFullMonitor) continue; // complete days aren't actionable — hide them
