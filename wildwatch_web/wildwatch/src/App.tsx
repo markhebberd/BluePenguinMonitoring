@@ -5983,6 +5983,20 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
+  // FM completeness: every registered book FM day up to today (oldest first) with the
+  // number of box observations still needed for that day to count as a full monitor.
+  const { registeredFmDates } = useContext(DateTooltipCtx);
+  const fmCompleteness = useMemo(() => {
+    const today = toNzDateStr(new Date().toISOString());
+    const rows: { day: string; number: number; missing: number }[] = [];
+    for (const [day, fm] of registeredFmDates) {
+      if (day > today) continue;
+      const st = computeDateStats(day);
+      if (!st) continue;
+      rows.push({ day, number: fm.number, missing: st.isFullMonitor ? 0 : (st.missingBoxes?.length ?? 0) });
+    }
+    return rows.sort((a, b) => a.day.localeCompare(b.day));
+  }, [registeredFmDates, dbVersion]);
   const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
   const [adminTab, setAdminTab] = useState<AdminTab>(() => {
@@ -6765,6 +6779,24 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <RemovePenguin token={token} />
+      </div>
+
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <h3>FM completeness</h3>
+        <p className="muted">Registered book FM days and how many box observations each still needs to be a complete full monitor</p>
+        {fmCompleteness.length === 0 ? <p className="muted">No registered FM dates</p> : (
+          <div ref={el => { if (el) el.scrollTop = el.scrollHeight; }} style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 320, overflowY: 'auto' }}>
+            {fmCompleteness.map(r => (
+              <div key={r.day} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <a className="date-link" href={`/day/${r.day}`} style={{ minWidth: 90 }}>{formatDate(r.day)}</a>
+                <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
+                {r.missing === 0
+                  ? <span style={{ color: '#2e7d32' }}>{'✓'} complete</span>
+                  : <span style={{ color: '#E65100' }}>{r.missing} more needed</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
