@@ -6037,8 +6037,11 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       if (!st) continue;
       if (st.isFullMonitor) continue; // complete days aren't actionable — hide them
       const boxes: string[] = st.missingBoxes || [];
-      if (!bySeason.has(fm.season)) bySeason.set(fm.season, []);
-      bySeason.get(fm.season)!.push({ day, number: fm.number, missing: boxes.length, boxes });
+      // Group by the Apr 1 – Mar 31 season the date actually falls in, not the book's
+      // season_year label (a book can number dates past 1 Apr into the next season).
+      const seasonYear = Number(day.slice(0, 4)) - (Number(day.slice(5, 7)) >= 4 ? 0 : 1);
+      if (!bySeason.has(seasonYear)) bySeason.set(seasonYear, []);
+      bySeason.get(seasonYear)!.push({ day, number: fm.number, missing: boxes.length, boxes });
       total++;
     }
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
