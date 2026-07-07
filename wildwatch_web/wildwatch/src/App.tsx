@@ -2404,9 +2404,29 @@ function parseDateInput(input: string): string | null {
 function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string) => void }) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const { registeredFmDates } = useContext(DateTooltipCtx);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return [];
+
+    // FM query against the book lookup tables: "FM3" / "FM 3" lists every season's Full
+    // Monitor #3; adding a season year ("FM 3 24", "FM 24 3", "FM 2024 3", "FM 3 2024")
+    // narrows to that single monitor. A token ≥ 20 reads as a year, the other as the number.
+    const fmQ = search.trim().match(/^fm[\s\/\-\.]*(\d{1,4})(?:[\s\/\-\.]+(\d{1,4}))?$/i);
+    if (fmQ) {
+      const a = parseInt(fmQ[1]);
+      const b = fmQ[2] !== undefined ? parseInt(fmQ[2]) : null;
+      const toYear = (n: number) => n >= 2000 ? n : (n >= 20 && n < 100 ? n + 2000 : null);
+      const hits: string[] = [];
+      for (const [day, fm] of registeredFmDates) {
+        const ok = b === null
+          ? fm.number === a
+          : (toYear(a) === fm.season && fm.number === b) || (toYear(b) === fm.season && fm.number === a);
+        if (ok) hits.push(day);
+      }
+      return hits.sort((x, y) => y.localeCompare(x)).slice(0, 12);
+    }
+
     const parsed = parseDateInput(search);
     const MONTHS: Record<string, number> = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
     const matchMonths = (s: string): number[] => {
@@ -2512,7 +2532,7 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
       }
       return b.localeCompare(a);
     }).slice(0, 12);
-  }, [dates, search]);
+  }, [dates, search, registeredFmDates]);
 
   const go = (day: string) => {
     onDayClick(day);
@@ -2555,11 +2575,14 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
       />
       {open && filtered.length > 0 && (
         <div className="date-results">
-          {filtered.map((d, i) => (
-            <div key={d} className={`date-result clickable${i === 0 ? ' focused' : ''}`} onClick={() => go(d)}>
-              {formatDate(d)}
-            </div>
-          ))}
+          {filtered.map((d, i) => {
+            const fm = registeredFmDates.get(d);
+            return (
+              <div key={d} className={`date-result clickable${i === 0 ? ' focused' : ''}`} onClick={() => go(d)}>
+                {formatDate(d)}{fm ? <span className="fm-tag"> (FM {fm.number})</span> : null}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
