@@ -1134,9 +1134,24 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         const seasonBred = families.some((f: any) => (f.chicks.length + f.plainChicks + f.fledgedUnchipped) > 0);
         const seasonStatus = clutches.length === 0 ? 'none' : seasonBred ? 'bred' : 'fail';
         const statusLabel = seasonStatus === 'none' ? 'No breeding' : seasonStatus === 'bred' ? 'Bred' : 'Failed';
-        const statusText = clutches.length > 1 ? `${statusLabel} · ${clutches.length} clutches` : statusLabel;
         // Everything not part of a detected clutch is a visitor, shown once with its season total.
         const visitorBirds = sorted.filter((b: any) => { const k = b.pit_id.slice(-8); return !parentKeys.has(k) && !chickFamily.has(k); });
+        // Split visitors by timing: before the first breeding window (pre-breeding) vs from the
+        // first window onward (during/after — post-breeding). g0 is the pre-window gap.
+        const aggSlots = (slots: string[]) => sorted
+          .map((b: any) => { const k = b.pit_id.slice(-8); let n = 0; for (const s of slots) n += slotCounts.get(k)?.get(s) || 0; return { b, n }; })
+          .filter((x: any) => x.n > 0);
+        const postSlots: string[] = [];
+        for (let gi = 1; gi <= clutches.length; gi++) postSlots.push(`g${gi}`);
+        for (let wi = 0; wi < clutches.length; wi++) postSlots.push(`w${wi}`);
+        const preBirds = clutches.length ? aggSlots(['g0']) : [];
+        const postBirds = clutches.length ? aggSlots(postSlots) : [];
+        const visitorRow = (label: string, list: { b: any; n: number }[]) => list.length > 0 ? (
+          <div className="season-visitors" key={label}>
+            <span className="visitors-lbl">{label}</span>
+            <span className="visitors-list">{list.map(x => birdWithCount(x.b, x.n))}</span>
+          </div>
+        ) : null;
 
         return (
           <div key={label} className="season-birds">
@@ -1144,7 +1159,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             <div className="season-year">
               <div className={`season-yr${latestObs ? ' clickable' : ''}`} onClick={latestObs ? () => onSeasonClick?.(latestObs) : undefined}>{seasonRange(label)}</div>
               <div className="season-birdcount">{birds.length} bird{birds.length !== 1 ? 's' : ''}</div>
-              <span className={`season-status st-${seasonStatus}`}><span className="ss-dot" />{statusText}</span>
+              <span className={`season-status st-${seasonStatus}`}><span className="ss-dot" />{statusLabel}</span>
             </div>
             {/* Right: clutch card(s), 1st on top, then visitors */}
             <div className="season-content">
@@ -1167,7 +1182,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               )}
               {clutches.length === 0 ? (
                 <div className="clutch-card none"><span className="muted">No breeding observed</span></div>
-              ) : clutches.map((_, ci) => {
+              ) : clutches.map((_, i) => clutches.length - 1 - i).map((ci) => {
                 const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
                 const active = clutchActive(clutch);
                 const bred = (famChicks.length + plainChicks + fledgedUnchipped) > 0;
@@ -1206,12 +1221,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                   </div>
                 );
               })}
-              {visitorBirds.length > 0 && (
-                <div className="season-visitors">
-                  <span className="visitors-lbl">Also seen</span>
-                  <span className="visitors-list">{visitorBirds.map((b: any) => birdWithCount(b, b.scanCount))}</span>
-                </div>
-              )}
+              {clutches.length === 0
+                ? visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
+                : <>{visitorRow('Pre-breeding', preBirds)}{visitorRow('Post-breeding', postBirds)}</>}
             </div>
           </div>
         );
