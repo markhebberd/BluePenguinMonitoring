@@ -2064,75 +2064,89 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {sightings.length === 0 && <p className="muted">Loading sighting history...</p>}
 
       {/* Breeding family — this bird's role in each detected nest family, from the same
-          detection (computeBoxFamilies) the box breeding overview uses. */}
+          detection (computeBoxFamilies) the box breeding overview uses, rendered in the
+          same year-spine + outcome-card layout as the box view. */}
       {pengFamilies.length > 0 && (
         <div className="bird-section">
           <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history ({pengFamilies.length})</h3>
-          {expandedSections.breeding && breedingSeasons.map(season => season.entries.length === 0 ? (
-            <div key={`nb${season.seasonYear}`} className="obs-card breeding-none">
-              <div className="obs-top"><b>{seasonRange(String(season.seasonYear))}</b> <span className="muted">No breeding</span></div>
-            </div>
-          ) : season.entries.map((e) => {
-            const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
-            const c = e.fam.clutch;
-            const dateRange = (
-              <span className="clutch-dates clickable" title="Go to where the eggs/chicks first appeared"
-                onClick={() => onSightingClick(e.box, c.startObsTime)}>{windowRange(c)}</span>
-            );
-            return (
-              <div key={`${e.seasonYear}-${e.box}-${e.clutchIndex}`} className="obs-card">
-                <div className="obs-top">
-                  <b>{seasonRange(e.season)}</b>
-                  <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
-                  {e.clutchCount > 1 && <span className="clutch-label muted">{ordinal(e.clutchIndex + 1)} clutch</span>}
+          {expandedSections.breeding && <div className="all-birds">
+            {breedingSeasons.map(season => {
+              const hasChick = season.entries.some(e => e.fam.chicks.length > 0);
+              const anyActive = season.entries.some(e => clutchActive(e.fam.clutch));
+              const st = season.entries.length === 0 ? 'none' : hasChick ? 'bred' : anyActive ? 'active' : 'fail';
+              const stLabel = st === 'none' ? 'No breeding' : st === 'bred' ? 'Bred' : st === 'active' ? 'Active' : 'Failed';
+              return (
+                <div key={season.seasonYear} className="season-birds">
+                  <div className="season-year">
+                    <div className="season-yr">{seasonRange(String(season.seasonYear))}</div>
+                    <span className={`season-status st-${st}`}><span className="ss-dot" />{stLabel}</span>
+                  </div>
+                  <div className="season-content">
+                    {season.entries.map((e) => {
+                      const offspringDate = (b: any) => b.chip_date ? chickContextDate(b.chip_date) : undefined;
+                      const c = e.fam.clutch;
+                      const active = clutchActive(c);
+                      const cardStatus = e.fam.chicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
+                      return (
+                        <div key={`${e.seasonYear}-${e.box}-${e.clutchIndex}`} className={`clutch-card ${cardStatus}`}>
+                          <div className="clutch-box-row">
+                            <a className="bird-chip clickable" href={`/box/${e.box}`} onClick={ev => navClick(ev, () => onBoxClick(e.box))}>Box {e.box}</a>
+                            {e.clutchCount > 1 && <span className="clutch-label">{ordinal(e.clutchIndex + 1)} clutch</span>}
+                          </div>
+                          {c.laidFailed && (
+                            <div className="season-issues">
+                              <span className={`issue-badge${c.startObsTime ? ' clickable' : ''}`}
+                                title="Go to where the egg/chick was first detected"
+                                onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
+                            </div>
+                          )}
+                          <div className="clutch-body">
+                            <span className="clutch-birds">
+                              {e.role === 'parent' ? (<>
+                                <span className="muted">with</span>
+                                {e.partner
+                                  ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
+                                  : <span className="muted">partner not identified</span>}
+                                {e.fam.chicks.map((ck: any) => (
+                                  <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
+                                ))}
+                                {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
+                                  <OffspringFinal key={`fe${j}`} kind="egg" active={active} />
+                                ))}
+                                {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
+                                  <OffspringFinal key={`pc${j}`} kind="chick" active={active} />
+                                ))}
+                                {Array.from({ length: e.fam.fledgedUnchipped }).map((_, j) => (
+                                  <span key={`fu${j}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
+                                ))}
+                              </>) : (<>
+                                <span className="muted">parents</span>
+                                {e.parents.length > 0
+                                  ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                                  : <span className="muted">not identified</span>}
+                                {e.siblings.length > 0 && <>
+                                  <span className="muted">siblings</span>
+                                  {e.siblings.map((sb: any) => (
+                                    <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
+                                  ))}
+                                </>}
+                              </>)}
+                            </span>
+                            <span className="clutch-meta">
+                              <ClutchPredictions clutch={c} />
+                              <span className={`clutch-dates${c.startObsTime ? ' clickable' : ''}`}
+                                title="Go to where the eggs/chicks first appeared"
+                                onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>{windowRange(c)}</span>
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                {e.role === 'parent' ? (
-                  <div className="family-box">
-                    <div className="family-head">
-                      <span className="muted">with</span>
-                      {e.partner
-                        ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
-                        : <span className="muted">partner not identified</span>}
-                      {dateRange}
-                    </div>
-                    {(e.fam.chicks.length > 0 || e.fam.failedEggs > 0 || e.fam.plainChicks > 0) && (
-                      <div className="offspring-group">
-                        {e.fam.chicks.map((ck: any) => (
-                          <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
-                        ))}
-                        {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
-                          <OffspringFinal key={`fe${j}`} kind="egg" active={clutchActive(c)} />
-                        ))}
-                        {Array.from({ length: e.fam.plainChicks }).map((_, j) => (
-                          <OffspringFinal key={`pc${j}`} kind="chick" active={clutchActive(c)} />
-                        ))}
-                      </div>
-                    )}
-                    <ClutchPredictions clutch={c} />
-                  </div>
-                ) : (
-                  <div className="family-box">
-                    <div className="family-head">
-                      <span className="muted">parents</span>
-                      {e.parents.length > 0
-                        ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
-                        : <span className="muted">not identified</span>}
-                      {dateRange}
-                    </div>
-                    {e.siblings.length > 0 && (
-                      <div className="offspring-group">
-                        <span className="muted">siblings</span>
-                        {e.siblings.map((sb: any) => (
-                          <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
-                        ))}
-                      </div>
-                    )}
-                    <ClutchPredictions clutch={c} />
-                  </div>
-                )}
-              </div>
-            );
-          }))}
+              );
+            })}
+          </div>}
         </div>
       )}
 

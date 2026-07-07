@@ -199,9 +199,6 @@ header h1:hover { opacity:.8; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
 .obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
-/* Gap-year row in a bird's breeding history — a season with no detected pairing. */
-.obs-card.breeding-none { background:#fafafa; border-left-color:#d0d0d0; }
-.obs-card.breeding-none .obs-top b { color:#999; font-weight:600; }
 .obs-card.chip-card { border-left-color:#4CAF50; } /* chipping event, not an observation */
 /* Breeding history: offspring that did not progress (egg never hatched, chick never
    chipped) — red ✕ overlay */
@@ -415,13 +412,7 @@ h3.collapsible:hover { color:#1a5276; }
 /* Inside the box-page pair row, push the line below the pair. */
 .breeding-pair .clutch-predictions { flex-basis:100%; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
-.breeding-pair .offspring-final, .family-box .offspring-final, .clutch-birds .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
-/* Bird-page breeding history: black box holding partner/parents, offspring and the date
-   range. Offspring stay grouped and wrap together when the box runs out of width. */
-.family-box { display:flex; flex-direction:column; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-top:4px; }
-.family-head { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; }
-.family-head .clutch-dates { margin-left:auto; padding-left:6px; }
-.family-box .offspring-group { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.breeding-pair .offspring-final, .clutch-birds .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
 .obs-section-head { font-size:15px; color:#1a5276; font-weight:600; margin:16px 0 8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
 .obs-section-head:first-child { margin-top:0; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
@@ -465,6 +456,9 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
 .clutch-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; }
 .clutch-card .clutch-label.clickable { cursor:pointer; }
+/* Peng-panel breeding history reuses the clutch cards; this head row carries the box link. */
+.clutch-box-row { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+.clutch-box-row .clutch-label { margin-bottom:0; }
 .clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
 .clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; }
 .clutch-meta { margin-left:auto; display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
