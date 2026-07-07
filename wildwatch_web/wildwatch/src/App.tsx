@@ -6662,6 +6662,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
+        <BackupsPanel token={token} />
         <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
           <DiskHistoryChart token={token} />
         </Suspense>
@@ -6734,6 +6735,68 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
     )}
     </>
+  );
+}
+
+/** Admin → System: backup inventory. Local = the dated dumps the nightly job stages on
+ *  this server (kept 14 days); remote = the newest copies on devian, as recorded in
+ *  status.json by offsite-backup.sh each run. */
+function BackupsPanel({ token }: { token: string }) {
+  const [data, setData] = useState<any | null>(null);
+  const [err, setErr] = useState('');
+  const load = () => {
+    setErr('');
+    fetch('/api/admin.php?action=backups', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => d.error ? setErr(d.error) : setData(d))
+      .catch(e => setErr(String(e.message || e)));
+  };
+  useEffect(load, [token]);
+  const fmtBytes = (b: number) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`;
+  const s = data?.status;
+  // Newest local dump per database (names are <db>_<YYYYMMDD>.sql.gz, list arrives newest-first)
+  const newestLocal = new Map<string, any>();
+  for (const f of (data?.local || [])) {
+    const m = f.name.match(/^(.+)_(\d{8})\.sql\.gz$/);
+    if (m && !newestLocal.has(m[1])) newestLocal.set(m[1], { ...f, day: `${m[2].slice(0,4)}-${m[2].slice(4,6)}-${m[2].slice(6)}` });
+  }
+  const stateLabel = s?.state === 'success' ? <span style={{color:'#2e7d32', fontWeight:600}}>✓ OK</span>
+    : s?.state === 'failed' ? <span style={{color:'#c0392b', fontWeight:600}}>✗ FAILED: {s.error}</span>
+    : s?.state === 'running' ? <span style={{color:'#a15c00', fontWeight:600}}>⏳ running — {s.phase}</span>
+    : <span className="muted">unknown</span>;
+  return (
+    <div className="admin-section">
+      <h3>Backups <button className="edit-btn" style={{marginLeft:8}} onClick={load}>Refresh</button></h3>
+      {err && <p style={{color:'#c0392b'}}>{err}</p>}
+      {!data && !err && <p className="muted">Loading...</p>}
+      {data && (
+        <>
+          <p style={{marginBottom:8}}>Nightly offsite job: {stateLabel}
+            {s?.last_success_at && <span className="muted"> · last success {formatDate(s.last_success_at)}</span>}
+          </p>
+          <table className="bird-table" style={{marginBottom:6}}>
+            <thead><tr><th>Database</th><th>Local (this server, 14 days)</th><th>Remote daily (devian)</th><th>Remote monthly (devian)</th></tr></thead>
+            <tbody>
+              {Array.from(new Set([...newestLocal.keys(), ...Object.keys(s?.offsite_latest || {})])).sort().map(db => {
+                const l = newestLocal.get(db);
+                const r = s?.offsite_latest?.[db];
+                return (
+                  <tr key={db}>
+                    <td>{db}</td>
+                    <td>{l ? <>{l.day} <span className="muted">({fmtBytes(l.bytes)})</span></> : <span className="muted">—</span>}</td>
+                    <td>{r?.daily || <span className="muted">not recorded yet</span>}</td>
+                    <td>{r?.monthly || <span className="muted">not recorded yet</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="muted" style={{fontSize:12}}>
+            {data.local.length} staged dump{data.local.length !== 1 ? 's' : ''} on this server
+            {s?.offsite && <> · devian holds {s.offsite.daily_count} dail{s.offsite.daily_count === 1 ? 'y' : 'ies'} + {s.offsite.monthly_count} monthl{s.offsite.monthly_count === 1 ? 'y' : 'ies'} · media mirror {s.offsite.media}</>}
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
