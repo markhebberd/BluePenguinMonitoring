@@ -1138,22 +1138,61 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         const statusLabel = seasonStatus === 'none' ? 'No breeding' : seasonStatus === 'bred' ? 'Bred' : seasonStatus === 'active' ? 'Active' : 'Failed';
         // Everything not part of a detected clutch is a visitor, shown once with its season total.
         const visitorBirds = sorted.filter((b: any) => { const k = b.pit_id.slice(-8); return !parentKeys.has(k) && !chickFamily.has(k); });
-        // Split visitors by timing: before the first breeding window (pre-breeding) vs from the
-        // first window onward (during/after — post-breeding). g0 is the pre-window gap.
+        // Visitors sit in gap slots by WHEN they were seen: g0 = before the first window (pre),
+        // g<ci> = between clutch ci-1 and ci, g<n> = after the last window (post). Birds seen inside
+        // a window show in that clutch's card. Rendered reverse-chronological (newest on top).
         const aggSlots = (slots: string[]) => sorted
           .map((b: any) => { const k = b.pit_id.slice(-8); let n = 0; for (const s of slots) n += slotCounts.get(k)?.get(s) || 0; return { b, n }; })
           .filter((x: any) => x.n > 0);
-        const postSlots: string[] = [];
-        for (let gi = 1; gi <= clutches.length; gi++) postSlots.push(`g${gi}`);
-        for (let wi = 0; wi < clutches.length; wi++) postSlots.push(`w${wi}`);
-        const preBirds = clutches.length ? aggSlots(['g0']) : [];
-        const postBirds = clutches.length ? aggSlots(postSlots) : [];
         const visitorRow = (label: string, list: { b: any; n: number }[]) => list.length > 0 ? (
           <div className="season-visitors" key={label}>
             <span className="visitors-lbl">{label}</span>
             <span className="visitors-list">{list.map(x => birdWithCount(x.b, x.n))}</span>
           </div>
         ) : null;
+        const renderClutch = (ci: number) => {
+          const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
+          const active = clutchActive(clutch);
+          // green = a chipped chick; blue = eggs still active; red = eggs, no chipped chick.
+          const cardStatus = famChicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
+          const inNest = aggSlots([`w${ci}`]); // non-pair birds seen inside this window
+          return (
+            <div key={`cl${ci}`} className={`clutch-card ${cardStatus}`}>
+              {clutches.length > 1 && (
+                <div className={`clutch-label${clutch.startObsTime ? ' clickable' : ''}`}
+                  title="Go to where the egg/chick was first detected"
+                  onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{ordinal(ci + 1)} clutch</div>
+              )}
+              {clutch.laidFailed && (
+                <div className="season-issues">
+                  <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
+                    title="Go to where the egg/chick was first detected"
+                    onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
+                </div>
+              )}
+              <div className="clutch-body">
+                <span className="clutch-birds">
+                  {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                  {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                  {Array.from({ length: failedEggs }).map((_, i) => <OffspringFinal key={`fe${i}`} kind="egg" active={active} />)}
+                  {Array.from({ length: plainChicks }).map((_, i) => <OffspringFinal key={`pc${i}`} kind="chick" active={active} />)}
+                  {Array.from({ length: fledgedUnchipped }).map((_, i) => (
+                    <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
+                  ))}
+                </span>
+                <span className="clutch-meta">
+                  <ClutchPredictions clutch={clutch} />
+                  <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
+                    title="Go to where the egg/chick was first detected"
+                    onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
+                </span>
+              </div>
+              {inNest.length > 0 && (
+                <div className="clutch-visitors"><span className="visitors-lbl">In nest</span><span className="visitors-list">{inNest.map(x => birdWithCount(x.b, x.n))}</span></div>
+              )}
+            </div>
+          );
+        };
 
         return (
           <div key={label} className="season-birds">
@@ -1182,52 +1221,25 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                   ))}
                 </div>
               )}
-              {/* Reverse-chronological: after-breeding above, clutches (newest on top), before-breeding below */}
-              {visitorRow('Post-breeding', postBirds)}
               {clutches.length === 0 ? (
-                <div className="clutch-card none"><span className="muted">No breeding observed</span></div>
-              ) : clutches.map((_, i) => clutches.length - 1 - i).map((ci) => {
-                const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
-                const active = clutchActive(clutch);
-                // green = a chipped chick; blue = eggs still active; red = eggs, no chipped chick.
-                const cardStatus = famChicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
-                return (
-                  <div key={`cl${ci}`} className={`clutch-card ${cardStatus}`}>
-                    {clutches.length > 1 && (
-                      <div className={`clutch-label${clutch.startObsTime ? ' clickable' : ''}`}
-                        title="Go to where the egg/chick was first detected"
-                        onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{ordinal(ci + 1)} clutch</div>
-                    )}
-                    {clutch.laidFailed && (
-                      <div className="season-issues">
-                        <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
-                          title="Go to where the egg/chick was first detected"
-                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
-                      </div>
-                    )}
-                    <div className="clutch-body">
-                      <span className="clutch-birds">
-                        {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
-                        {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
-                        {Array.from({ length: failedEggs }).map((_, i) => <OffspringFinal key={`fe${i}`} kind="egg" active={active} />)}
-                        {Array.from({ length: plainChicks }).map((_, i) => <OffspringFinal key={`pc${i}`} kind="chick" active={active} />)}
-                        {Array.from({ length: fledgedUnchipped }).map((_, i) => (
-                          <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
-                        ))}
-                      </span>
-                      <span className="clutch-meta">
-                        <ClutchPredictions clutch={clutch} />
-                        <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
-                          title="Go to where the egg/chick was first detected"
-                          onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-              {clutches.length === 0
-                ? visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
-                : visitorRow('Pre-breeding', preBirds)}
+                <>
+                  <div className="clutch-card none"><span className="muted">No breeding observed</span></div>
+                  {visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))}
+                </>
+              ) : (() => {
+                // Reverse-chronological: post-breeding on top, clutches newest-first, between-clutch
+                // visitors interleaved in the middle, pre-breeding at the bottom.
+                const nodes: React.ReactNode[] = [];
+                const post = visitorRow('Post-breeding', aggSlots([`g${clutches.length}`]));
+                if (post) nodes.push(post);
+                for (let ci = clutches.length - 1; ci >= 0; ci--) {
+                  nodes.push(renderClutch(ci));
+                  if (ci > 0) { const between = visitorRow(`Between ${ordinal(ci)} & ${ordinal(ci + 1)} clutch`, aggSlots([`g${ci}`])); if (between) nodes.push(between); }
+                }
+                const pre = visitorRow('Pre-breeding', aggSlots(['g0']));
+                if (pre) nodes.push(pre);
+                return nodes;
+              })()}
             </div>
           </div>
         );
