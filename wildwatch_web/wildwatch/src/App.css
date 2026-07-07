@@ -199,7 +199,7 @@ header h1:hover { opacity:.8; }
 .obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
-.obs-card { background:#f8f9fa; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
+.obs-card { background:#fff; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
 .obs-card.chip-card { border-left-color:#4CAF50; } /* chipping event, not an observation */
 /* Breeding history: offspring that did not progress (egg never hatched, chick never
    chipped) — red ✕ overlay */
@@ -482,7 +482,7 @@ h3.collapsible:hover { color:#1a5276; }
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
 .bird-section h3 { font-size:15px; color:#1a5276; margin-bottom:8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
-.partner-card { background:#f8f9fa; border-radius:6px; padding:10px; margin-bottom:8px; }
+.partner-card { background:#fff; border-radius:6px; padding:10px; margin-bottom:8px; }
 .partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .partner-sightings { padding-left:8px; }
 .partner-row { display:flex; gap:10px; align-items:center; font-size:12px; padding:2px 0; }
