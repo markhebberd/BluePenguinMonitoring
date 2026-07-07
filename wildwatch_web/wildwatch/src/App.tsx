@@ -2993,6 +2993,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
    .sort((a, b) => a.actual_date.localeCompare(b.actual_date));
   const crossDateMap = new Map<string, { n: number; season: number }>();
   for (const m of crossSeasonDates) crossDateMap.set(m.actual_date, { n: m.date_number, season: m._season });
+  // Earlier (prev-season) dates sit above the table, later (next-season) dates below it.
+  const crossBefore = crossSeasonDates.filter(m => m._season < season);
+  const crossAfter = crossSeasonDates.filter(m => m._season > season);
   const toDmy = (d: string) => `${parseInt(d.slice(8, 10))}/${parseInt(d.slice(5, 7))}/${d.slice(2, 4)}`;
   const existingObs = allBoxObs.filter(o =>
     o.observation_time_utc >= seasonStart && o.observation_time_utc <= seasonEnd + ' 23:59:59'
@@ -3086,11 +3089,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
           </button>
         </div>
-        {crossSeasonDates.length > 0 && (
+        {crossBefore.length > 0 && (
           <div style={{marginBottom:'6px', paddingBottom:'6px', borderBottom:'1px dashed #ffb74d'}}>
-            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>From neighbouring seasons' tables, dated within this book season's span:</div>
+            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>Earlier, from the previous season's table:</div>
             <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
-              {crossSeasonDates.map(m => (
+              {crossBefore.map(m => (
                 <span key={`x${m._season}-${m.date_number}`} title={`Season ${String(m._season).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
                   <b>S{String(m._season).slice(-2)}·{m.date_number}</b> = {formatDate(m.actual_date)}
                 </span>
@@ -3108,6 +3111,18 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           </div>
         ) : (
           <p style={{fontSize:'12px', color:'#888', margin:0}}>No date mappings. Click "Edit dates" to define: 1 = 26/7/25, 2 = 3/8/25...</p>
+        )}
+        {crossAfter.length > 0 && (
+          <div style={{marginTop:'6px', paddingTop:'6px', borderTop:'1px dashed #ffb74d'}}>
+            <div style={{fontSize:'11px', color:'#a15c00', marginBottom:'3px'}}>Later, from the next season's table:</div>
+            <div style={{display:'flex', flexWrap:'wrap', gap:'3px'}}>
+              {crossAfter.map(m => (
+                <span key={`x${m._season}-${m.date_number}`} title={`Season ${String(m._season).slice(-2)} #${m.date_number}`} style={{background:'#fff3e0', border:'1px solid #ffcc80', padding:'3px 8px', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => setDateInput(toDmy(m.actual_date))}>
+                  <b>S{String(m._season).slice(-2)}·{m.date_number}</b> = {formatDate(m.actual_date)}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
         {showDateEditor && (
           <div style={{marginTop:'8px', padding:'8px', background:'#f8f9fa', borderRadius:'6px', border:'1px solid #ddd'}}>
