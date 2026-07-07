@@ -3055,10 +3055,11 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       <div className="entry-context">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px'}}>
           <span style={{fontSize:'13px', fontWeight:600, color:'#1a5276'}}>Date table (season {String(season).slice(-2)})</span>
-          <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m => {
-                const d = m.actual_date;
-                return `${m.date_number} ${formatDate(d)}`;
-              }).join('\n')); setShowDateEditor(true); }}>
+          <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m =>
+                // Seed as dd/mm/yyyy — the format the editor parses back, so lines
+                // round-trip. A display format (month name) reads back as invalid.
+                `${m.date_number} ${m.actual_date.slice(8, 10)}/${m.actual_date.slice(5, 7)}/${m.actual_date.slice(0, 4)}`
+              ).join('\n')); setShowDateEditor(true); }}>
             {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
           </button>
         </div>
@@ -3094,7 +3095,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                 const first = l.trim().split(/[\s]+/)[0];
                 const rest = l.trim().slice(first.length).trim();
                 const parsed = parseDateFlex(rest);
-                const dd = parsed ? `${parseInt(parsed.slice(8))}/${parseInt(parsed.slice(5,7))}/${parsed.slice(2,4)}` : null;
+                const dd = parsed ? `${parsed.slice(8, 10)}/${parsed.slice(5, 7)}/${parsed.slice(0, 4)}` : null;
                 return <div key={i} style={{color: parsed ? '#4CAF50' : '#F44336'}}>{first} → {dd || 'invalid'}</div>;
               })}
             </div>
