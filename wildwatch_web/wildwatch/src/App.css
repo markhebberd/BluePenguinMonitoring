@@ -411,7 +411,7 @@ h3.collapsible:hover { color:#1a5276; }
 /* Inside the box-page pair row, push the line below the pair. */
 .breeding-pair .clutch-predictions { flex-basis:100%; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
-.breeding-pair .offspring-final, .family-box .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
+.breeding-pair .offspring-final, .family-box .offspring-final, .clutch-birds .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
 /* Bird-page breeding history: black box holding partner/parents, offspring and the date
    range. Offspring stay grouped and wrap together when the box runs out of width. */
 .family-box { display:flex; flex-direction:column; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-top:4px; }
@@ -432,6 +432,39 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-row { margin:6px 0; }
 .clutch-label { font-size:11px; font-weight:600; margin-bottom:2px; }
 .clutch-dates { align-self:center; font-size:10px; color:#666; margin-right:2px; }
+
+/* Box breeding overview — year spine (left) + lightweight outcome cards (right). Replaces the
+   heavy black-box rows: the year anchors on the left, each clutch is a light card whose left
+   edge encodes the outcome, and non-breeding visitors drop to an "also seen" row below. */
+.all-birds .season-birds { display:grid; grid-template-columns:112px 1fr; gap:18px; align-items:start; padding:14px 0; margin:0; }
+.all-birds .season-birds + .season-birds { border-top:1px solid #eef1f4; }
+.season-year { position:relative; }
+.season-yr { font-size:17px; font-weight:800; letter-spacing:-.02em; color:#1b2a38; font-variant-numeric:tabular-nums; line-height:1.15; }
+.season-yr.clickable { cursor:pointer; }
+.season-yr.clickable:hover { color:#1a5276; }
+.season-birdcount { font-size:11px; color:#98a4b0; margin-top:1px; }
+.season-status { display:inline-flex; align-items:center; gap:5px; margin-top:8px; padding:2px 8px 2px 6px; border-radius:999px; font-size:10.5px; font-weight:600; white-space:nowrap; }
+.season-status .ss-dot { width:6px; height:6px; border-radius:50%; flex:none; }
+.st-bred { background:#eaf5ee; color:#1f6b41; } .st-bred .ss-dot { background:#2f8f5b; }
+.st-fail { background:#fbeceb; color:#a4362d; } .st-fail .ss-dot { background:#c0453a; }
+.st-none { background:#eef1f4; color:#5f6c78; } .st-none .ss-dot { background:#93a0ac; }
+.st-active { background:#fdf3e0; color:#8a5b12; } .st-active .ss-dot { background:#e0a020; }
+.season-content { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.clutch-card { background:#fff; border:1px solid #dbe2e9; border-left:4px solid #93a0ac; border-radius:10px; padding:9px 12px; }
+.clutch-card.bred { border-left-color:#2f8f5b; }
+.clutch-card.fail { border-left-color:#c0453a; }
+.clutch-card.active { border-left-color:#e0a020; }
+.clutch-card.none { border-left-color:#d5dbe1; color:#98a4b0; font-style:italic; }
+.clutch-card .clutch-label { color:#98a4b0; text-transform:uppercase; letter-spacing:.06em; font-size:10px; font-weight:600; margin-bottom:6px; }
+.clutch-card .clutch-label.clickable { cursor:pointer; }
+.clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+.clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; }
+.clutch-meta { margin-left:auto; display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.clutch-meta .clutch-dates { margin:0; }
+.season-visitors { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding-left:2px; }
+.season-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
+.season-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; align-items:flex-start; }
+@media (max-width:560px) { .all-birds .season-birds { grid-template-columns:1fr; gap:8px; } }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
