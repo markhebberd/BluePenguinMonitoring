@@ -5983,8 +5983,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
-  // FM completeness: every registered book FM day up to today with the number of box
-  // observations still needed for that day to count as a full monitor. Most-needed first.
+  // FM completeness: every incomplete registered book FM day up to today, in the order
+  // the book tables list them, with the number of box observations still needed for it
+  // to count as a full monitor.
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const fmCompleteness = useMemo(() => {
     const today = toNzDateStr(new Date().toISOString());
@@ -5996,7 +5997,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       if (st.isFullMonitor) continue; // complete days aren't actionable — hide them
       rows.push({ day, number: fm.number, missing: st.missingBoxes?.length ?? 0 });
     }
-    return rows.sort((a, b) => b.missing - a.missing || b.day.localeCompare(a.day));
+    return rows;
   }, [registeredFmDates, dbVersion]);
   const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
@@ -6786,7 +6787,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         <h3>FM completeness</h3>
         <p className="muted">Incomplete registered book FM days and how many box observations each still needs to be a complete full monitor</p>
         {fmCompleteness.length === 0 ? <p className="muted">All registered FM days are complete</p> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 320, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {fmCompleteness.map(r => (
               <div key={r.day} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
                 <a className="date-link" href={`/day/${r.day}`} style={{ minWidth: 90 }}>{formatDate(r.day)}</a>
