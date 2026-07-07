@@ -6566,13 +6566,12 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
         {fmCompleteness.length === 0 ? <p className="muted">All registered FM days are complete</p> : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {fmCompleteness.map(r => (
-              <div key={r.day} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <a className="date-link" href={`/day/${r.day}`} style={{ minWidth: 90 }}>{formatDate(r.day)}</a>
+              <a key={r.day} href={`/day/${r.day}`} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline', textDecoration: 'none', color: 'inherit' }}>
+                <span className="date-link" style={{ minWidth: 90 }}>{formatDate(r.day)}</span>
                 <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
-                <span style={{ color: '#E65100' }}>{r.missing < 5
-                  ? `Missing box${r.missing !== 1 ? 'es' : ''} ${r.boxes.join(', ')}`
-                  : `${r.missing} more needed`}</span>
-              </div>
+                <span style={{ color: '#E65100' }}>{r.missing} more needed{r.missing < 5
+                  ? `, box${r.missing !== 1 ? 'es' : ''} ${r.boxes.join(', ')}` : ''}</span>
+              </a>
             ))}
           </div>
         )}
