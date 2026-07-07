@@ -995,7 +995,12 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
         else { if ($nz < $seenInBox[$key]['min']) $seenInBox[$key]['min'] = $nz; if ($nz > $seenInBox[$key]['max']) $seenInBox[$key]['max'] = $nz; }
     }
 
-    $dupStmt = $pdo->prepare("SELECT observation_id FROM observations WHERE location_id = ? AND observation_time_utc = ? AND observer_id = ? AND is_deleted = FALSE");
+    // Existing data on the same NZ day for a box (ANY observer, any time that day) —
+    // used to auto-skip matching rows and to block conflicting ones with a field diff.
+    $dayObsStmt = $pdo->prepare("SELECT observation_id, adults, eggs, chicks, no_scan, breeding_status
+        FROM observations WHERE location_id = ? AND observation_time_utc >= ? AND observation_time_utc < ? AND is_deleted = FALSE
+        ORDER BY observation_time_utc LIMIT 1");
+    $dayScansStmt = $pdo->prepare("SELECT pit_id FROM penguin_scans WHERE observation_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)");
     // Most recent existing observation in a box before the import instant — the row-click target.
     $prevStmt = $pdo->prepare("SELECT observation_time_utc FROM observations WHERE location_id = ? AND is_deleted = FALSE AND observation_time_utc < ? ORDER BY observation_time_utc DESC LIMIT 1");
 
@@ -1268,11 +1273,39 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
             elseif ($obsDate !== $refDate) $warnings[] = "date $obsDate differs from $refDate";
         }
 
-        // Duplicate check (same box + date + this observer, not deleted)
+        // Existing-data check: any observation for this box on this NZ day (any observer,
+        // any time). If the sheet row MATCHES it (counts, status, scanned birds) it's a
+        // duplicate — warned and auto-skipped. If it DIFFERS, the row is an error and the
+        // sheet must be fixed until it matches; the diff below says exactly what disagrees.
         $duplicate = false;
-        if ($locId !== null && $obsTime !== null) {
-            $dupStmt->execute([$locId, $obsTime, $observerId]);
-            if ($dupStmt->fetchColumn()) $duplicate = true;
+        if ($locId !== null && $obsDate !== null) {
+            $dayStart = new DateTime($obsDate . ' 00:00:00', $tzNz);
+            $dayStartUtc = (clone $dayStart)->setTimezone($tzUtc)->format('Y-m-d H:i:s');
+            $dayEndUtc = $dayStart->modify('+1 day')->setTimezone($tzUtc)->format('Y-m-d H:i:s');
+            $dayObsStmt->execute([$locId, $dayStartUtc, $dayEndUtc]);
+            $ex = $dayObsStmt->fetch();
+            if ($ex) {
+                $diffs = [];
+                foreach ([['adults', $adults], ['eggs', $eggs], ['chicks', $chicks], ['no_scan', $noScan]] as $pair) {
+                    if ((int)$ex[$pair[0]] !== (int)$pair[1]) $diffs[] = "{$pair[0]}: sheet {$pair[1]} ≠ existing " . (int)$ex[$pair[0]];
+                }
+                $exBs = strtoupper(trim((string)($ex['breeding_status'] ?? '')));
+                $shBs = strtoupper(trim((string)($breeding ?? '')));
+                if ($exBs !== $shBs) $diffs[] = 'status: sheet ' . ($shBs !== '' ? $shBs : '(none)') . ' ≠ existing ' . ($exBs !== '' ? $exBs : '(none)');
+                $dayScansStmt->execute([$ex['observation_id']]);
+                $exPits = array_map(fn($p) => substr($p, -8), $dayScansStmt->fetchAll(PDO::FETCH_COLUMN));
+                $shPits = array_map(fn($sc) => substr($sc['pit_id'], -8), $scans);
+                $onlyExisting = array_diff($exPits, $shPits);
+                $onlySheet = array_diff($shPits, $exPits);
+                if ($onlyExisting) $diffs[] = 'birds only in existing: ' . implode(', ', $onlyExisting);
+                if ($onlySheet) $diffs[] = 'birds only in sheet: ' . implode(', ', $onlySheet);
+                if ($diffs) {
+                    $errors[] = "Box already has data on $obsDate and the sheet DIFFERS — fix the sheet to match (row skipped): " . implode('; ', $diffs);
+                } else {
+                    $duplicate = true;
+                    $warnings[] = "Box already has a matching observation on $obsDate — skipped";
+                }
+            }
         }
         // Within-sheet duplicate: same box+date appears earlier in THIS file. Skip the repeat
         // (the DB check can't catch it — neither row is in the DB yet at analyse time).
