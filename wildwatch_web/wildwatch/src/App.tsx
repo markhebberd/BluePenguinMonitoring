@@ -1116,11 +1116,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++;
           bump(k, `g${gi}`, Math.max(1, b.scanCount || 0));
         }
-        // Birds (in sorted order) with a sighting in a given slot, with that slot's count
-        const slotBirds = (slot: string) => sorted
-          .map(b => ({ b, n: slotCounts.get(b.pit_id.slice(-8))?.get(slot) || 0 }))
-          .filter(x => x.n > 0);
-
         // Season context: a bird chipped as a chick during the listed season renders
         // as a chick (pale yellow) — we're looking at it during its chick time. The
         // context date is the day AFTER chipping so the same-day chipped-here (green)
@@ -1142,7 +1137,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             </span>
           );
         };
-        const slotRow = (slot: string) => slotBirds(slot).map(x => birdWithCount(x.b, x.n));
 
         // Newest observation in this season — the scroll/expand target for the matching
         // season section in the observation list lower on the page.
@@ -2997,8 +2991,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
     ...nextSeasonMappings.map(m => ({ ...m, _season: season + 1 })),
   ].filter(m => m.actual_date >= seasonStart && m.actual_date <= seasonEnd && !thisDateSet.has(m.actual_date))
    .sort((a, b) => a.actual_date.localeCompare(b.actual_date));
-  const crossDateMap = new Map<string, { n: number; season: number }>();
-  for (const m of crossSeasonDates) crossDateMap.set(m.actual_date, { n: m.date_number, season: m._season });
+  const crossDateSet = new Set(crossSeasonDates.map(m => m.actual_date));
   // Earlier (prev-season) dates sit above the table, later (next-season) dates below it.
   const crossBefore = crossSeasonDates.filter(m => m._season < season);
   const crossAfter = crossSeasonDates.filter(m => m._season > season);
@@ -3171,7 +3164,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         <div className="entry-existing">
           <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {entryRows.map((o: any, i: number) => o._chip ? (
-            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row" style={crossDateMap.has(String(o.chip_date).slice(0, 10)) ? {background:'#FEFCE8', borderRadius:4} : undefined}>
+            <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row" style={crossDateSet.has(String(o.chip_date).slice(0, 10)) ? {background:'#FEFCE8', borderRadius:4} : undefined}>
               <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <PenguinMini scan={o} onClick={() => o.peng_num && setSideBird(o.peng_num)} observationDate={o.chip_date} />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
@@ -3179,7 +3172,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           ) : (
             <div key={i} className="entry-existing-row" style={
               toNzDateStr(o.observation_time_utc) === todayNz ? {background:'#FFF9C4', boxShadow:'inset 0 0 0 2px #FDD835', borderRadius:4}
-              : crossDateMap.has(toNzDateStr(o.observation_time_utc)) ? {background:'#FEFCE8', borderRadius:4}
+              : crossDateSet.has(toNzDateStr(o.observation_time_utc)) ? {background:'#FEFCE8', borderRadius:4}
               : undefined}>
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
