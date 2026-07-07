@@ -5910,6 +5910,68 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
   </div>;
 }
 
+/** Reports page body: the report cards grouped into tabs (mirrors AdminPanel's tab bar).
+ *  The active tab is persisted to the URL's ?tab= param, just like the admin page. */
+function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void }) {
+  const REPORT_TABS = ['colony', 'breeding', 'population', 'social', 'quality'] as const;
+  type ReportTab = typeof REPORT_TABS[number];
+  const [tab, setTab] = useState<ReportTab>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return (REPORT_TABS as readonly string[]).includes(t || '') ? (t as ReportTab) : 'colony';
+  });
+  const selectTab = (id: ReportTab) => {
+    setTab(id);
+    const u = new URL(window.location.href);
+    if (id === 'colony') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
+    window.history.replaceState(null, '', u.pathname + u.search);
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
+        {(([['colony', 'Colony'], ['breeding', 'Breeding & chicks'], ['population', 'Population'], ['social', 'Pairs & groups'], ['quality', 'Data quality']]) as const).map(([id, label]) => (
+          <button key={id} onClick={() => selectTab(id)}
+            style={{ padding: '8px 14px', border: 'none', borderBottom: tab === id ? '2px solid #1a6b8f' : '2px solid transparent',
+              background: 'none', cursor: 'pointer', fontWeight: tab === id ? 600 : 400, color: tab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: tab === 'colony' ? undefined : 'none' }}>
+        <DistinctAdultsChart />
+        <PeakAdultsChart onDayClick={onDayClick} />
+        <FirstEggReport onDayClick={onDayClick} />
+        <EggArrivalChart />
+      </div>
+
+      <div style={{ display: tab === 'breeding' ? undefined : 'none' }}>
+        <ChickReturnChart />
+        <ChickSexChart />
+        <ChickSexBothReturnedChart />
+        <TopChickParentsReport onOpenBird={onOpenBird} />
+        <UnproductiveParentsReport onOpenBird={onOpenBird} />
+      </div>
+
+      <div style={{ display: tab === 'population' ? undefined : 'none' }}>
+        <PenguinAgeCharts />
+        <SurvivalPredictionReport />
+      </div>
+
+      <div style={{ display: tab === 'social' ? undefined : 'none' }}>
+        <PairBondReport onOpenBird={onOpenBird} />
+        <FloaterReport onOpenBird={onOpenBird} />
+        <PenguinGroupsReport onOpenBird={onOpenBird} />
+      </div>
+
+      <div style={{ display: tab === 'quality' ? undefined : 'none' }}>
+        <MissedScansReport />
+        <UnsexedByGuessesReport />
+      </div>
+    </>
+  );
+}
+
 function AdminPanel({ token, observationDates }: { token: string; observationDates?: string[] }) {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -7401,7 +7463,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   useEffect(() => {
     let path = '/';
     if (showAdmin) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?admin=1' + (t ? `&tab=${t}` : ''); }
-    else if (showReports) path = '/?reports=1';
+    else if (showReports) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?reports=1' + (t ? `&tab=${t}` : ''); }
     else if (showEntry) path = '/?enter=1';
     else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}${dayBox ? `&box=${encodeURIComponent(dayBox)}` : ''}`;
     else {
@@ -7676,6 +7738,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
 
   const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter') => {
+    // Drop any ?tab from the previous section so admin/reports don't inherit each other's tab.
+    { const u = new URL(window.location.href); u.searchParams.delete('tab'); window.history.replaceState(null, '', u.pathname + u.search); }
     setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
     setShowAdmin(section === 'admin');
     setShowReports(section === 'reports');
@@ -7875,22 +7939,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className={`reports-page${reportsBird && reportsBirdData?.penguin ? ' reports-page-docked' : ''}`}>
           <h2 className="reports-title">Reports</h2>
-          <TopChickParentsReport onOpenBird={setReportsBird} />
-          <UnproductiveParentsReport onOpenBird={setReportsBird} />
-          <PenguinGroupsReport onOpenBird={setReportsBird} />
-          <MissedScansReport />
-          <UnsexedByGuessesReport />
-          <DistinctAdultsChart />
-          <PeakAdultsChart onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
-          <FirstEggReport onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
-          <EggArrivalChart />
-          <ChickReturnChart />
-          <ChickSexChart />
-          <ChickSexBothReturnedChart />
-          <PenguinAgeCharts />
-          <SurvivalPredictionReport />
-          <PairBondReport onOpenBird={setReportsBird} />
-          <FloaterReport onOpenBird={setReportsBird} />
+          <ReportsPage onOpenBird={setReportsBird}
+            onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
         </div>
         {reportsBird && reportsBirdData?.penguin && (
           <div className="day-bird-dock entry-bird-dock">
