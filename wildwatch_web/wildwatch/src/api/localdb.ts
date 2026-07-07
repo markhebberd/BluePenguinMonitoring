@@ -1035,6 +1035,18 @@ export function computeMissedScans(): any[] {
   const c = mem;
   const cutoff = utcToNzDate(new Date(Date.now() - 30 * 86400000).toISOString());
 
+  // Birds chipped in each box within the window. Context for reading a missed scan:
+  // adults unscanned in a box with no recent chipping are stronger unchipped candidates,
+  // whereas a freshly-chipped box may just have a bird not yet scanned on a later visit.
+  const chippedByBox: Record<string, Set<string>> = {};
+  for (const ch of c.chips) {
+    const cd = (ch.chip_date || '').slice(0, 10);
+    if (!cd || cd < cutoff || !ch.peng_num) continue;
+    const box = c.locById.get(ch.location_id)?.location_name ?? ch.chip_box;
+    if (!box) continue;
+    (chippedByBox[box] ||= new Set()).add(ch.peng_num);
+  }
+
   // Distinct adult scans per observation (same adult rule as distinct-adults report)
   const scansByObs: Record<string, Set<string>> = {};
   for (const s of c.scans) {
@@ -1077,7 +1089,7 @@ export function computeMissedScans(): any[] {
   }
   return Object.values(byBox)
     .filter(b => b.missed.length > 0)
-    .map(b => ({ ...b, missed: b.missed.sort((a: any, x: any) => x.date.localeCompare(a.date)) }))
+    .map(b => ({ ...b, chipped: chippedByBox[b.box]?.size || 0, missed: b.missed.sort((a: any, x: any) => x.date.localeCompare(a.date)) }))
     .sort((a, b) => b.missed.length - a.missed.length
       || (b.missed.length / b.observedDays) - (a.missed.length / a.observedDays)
       || a.box.localeCompare(b.box, undefined, { numeric: true }));
