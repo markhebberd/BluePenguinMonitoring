@@ -316,6 +316,7 @@ if ($action === 'recent_changes') {
         FROM audit_log a
         LEFT JOIN observers o ON a.observer_id = o.observer_id
         WHERE a.change_timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)
+          AND a.action <> 'SELECT' AND a.table_name <> '__sql_console'
         ORDER BY a.change_timestamp DESC");
     $stmt->execute([$days]);
     echo json_encode($stmt->fetchAll());
