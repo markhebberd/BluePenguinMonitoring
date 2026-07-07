@@ -5835,6 +5835,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
   const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
   const [adminTab, setAdminTab] = useState<AdminTab>(() => {
@@ -6050,6 +6051,9 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     setRecentChanges(await r.json());
     setChangesLoading(false);
   };
+  // Auto-load, and re-fetch whenever the local DB syncs (a sync means the server data — and so
+  // the audit log — has changed).
+  useEffect(() => { loadRecentChanges(); }, [dbVersion]);
 
   const previewDate = async (date: string) => {
     setDatePreview({ loading: true, date });
