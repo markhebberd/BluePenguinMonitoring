@@ -534,10 +534,12 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
   const day = date.length > 10 ? toNzDateStr(date) : date;
   const { show, hide, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
   // Green when the day was a full monitor (computed, same as the calendar) or was
-  // registered as an FM date for its season in the enter-date workflow.
-  const isFm = statsCache.get(day)?.isFullMonitor || registeredFmDates.has(day);
+  // registered as an FM date for its season in the enter-date workflow. When it matches a
+  // book FM date, print "(FM n)" after the date so the book number is visible everywhere.
+  const fm = registeredFmDates.get(day);
+  const isFm = statsCache.get(day)?.isFullMonitor || !!fm;
   return <a className={`date-link${isFm ? ' fm-date' : ''}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
-    onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}</a>;
+    onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> (FM {fm.number})</span> : ''}</a>;
 }
 
 /** Peng_num of the bird whose peng panel is currently open (null when none). Lets a
@@ -3166,13 +3168,6 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <h3>{existingObs.length} existing observation{existingObs.length !== 1 ? 's' : ''}{entryChips.length > 0 ? ` + ${entryChips.length} chipping${entryChips.length !== 1 ? 's' : ''}` : ''} for <a className="day-box-link" href={`/box/${box}`}> Box {box}</a> ({season})</h3>
           {entryRows.map((o: any, i: number) => o._chip ? (
             <div key={`chip${o.pit_id}`} className="entry-existing-row entry-chip-row" style={crossDateMap.has(String(o.chip_date).slice(0, 10)) ? {background:'#FEFCE8', borderRadius:4} : undefined}>
-              {(() => {
-                const d = String(o.chip_date).slice(0, 10);
-                const fm = dateMappings.find((m: any) => m.actual_date === d);
-                if (fm) return <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span>;
-                const x = crossDateMap.get(d);
-                return x ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}} title={`Season ${String(x.season).slice(-2)}`}>S{String(x.season).slice(-2)} FM {x.n},</span> : null;
-              })()}
               <DateLink date={o.chip_date} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <PenguinMini scan={o} onClick={() => o.peng_num && setSideBird(o.peng_num)} observationDate={o.chip_date} />
               <span className="muted">Chipped by {o.chip_by || '?'}</span>
@@ -3182,13 +3177,6 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
               toNzDateStr(o.observation_time_utc) === todayNz ? {background:'#FFF9C4', boxShadow:'inset 0 0 0 2px #FDD835', borderRadius:4}
               : crossDateMap.has(toNzDateStr(o.observation_time_utc)) ? {background:'#FEFCE8', borderRadius:4}
               : undefined}>
-              {(() => {
-                const d = toNzDateStr(o.observation_time_utc);
-                const fm = dateMappings.find((m: any) => m.actual_date === d);
-                if (fm) return <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}}>FM {fm.date_number},</span>;
-                const x = crossDateMap.get(d);
-                return x ? <span style={{fontWeight:600, color:'#a15c00', fontSize:12, whiteSpace:'nowrap'}} title={`Season ${String(x.season).slice(-2)}`}>S{String(x.season).slice(-2)} FM {x.n},</span> : null;
-              })()}
               <DateLink date={o.observation_time_utc} onDayClick={(d) => { window.location.href = `/?day=${encodeURIComponent(d)}&box=${encodeURIComponent(box)}`; }} />
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatusOrPrev(o, box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
