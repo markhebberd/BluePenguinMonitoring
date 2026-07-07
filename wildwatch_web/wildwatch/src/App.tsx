@@ -5985,20 +5985,24 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
   // FM completeness: every incomplete registered book FM day up to today, in the order
   // the book tables list them, with the number of box observations still needed for it
-  // to count as a full monitor.
+  // to count as a full monitor. Grouped by season, newest season first.
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const fmCompleteness = useMemo(() => {
     const today = toNzDateStr(new Date().toISOString());
-    const rows: { day: string; number: number; missing: number; boxes: string[] }[] = [];
+    const bySeason = new Map<number, { day: string; number: number; missing: number; boxes: string[] }[]>();
+    let total = 0;
     for (const [day, fm] of registeredFmDates) {
       if (day > today) continue;
       const st = computeDateStats(day);
       if (!st) continue;
       if (st.isFullMonitor) continue; // complete days aren't actionable — hide them
       const boxes: string[] = st.missingBoxes || [];
-      rows.push({ day, number: fm.number, missing: boxes.length, boxes });
+      if (!bySeason.has(fm.season)) bySeason.set(fm.season, []);
+      bySeason.get(fm.season)!.push({ day, number: fm.number, missing: boxes.length, boxes });
+      total++;
     }
-    return rows;
+    const seasons = Array.from(bySeason.entries()).sort((a, b) => b[0] - a[0]);
+    return { seasons, total };
   }, [registeredFmDates, dbVersion]);
   const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
@@ -6561,20 +6565,25 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
-        <h3>FM completeness</h3>
+        <h3>FM completeness{fmCompleteness.total > 0 ? `, ${fmCompleteness.total} missing` : ''}</h3>
         <p className="muted">Incomplete registered book FM days and how many box observations each still needs to be a complete full monitor</p>
-        {fmCompleteness.length === 0 ? <p className="muted">All registered FM days are complete</p> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {fmCompleteness.map(r => (
-              <a key={r.day} href={`/day/${r.day}`} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline', textDecoration: 'none', color: 'inherit' }}>
-                <span className="date-link" style={{ minWidth: 90 }}>{formatDate(r.day)}</span>
-                <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
-                <span style={{ color: '#E65100' }}>{r.missing} more needed{r.missing < 5
-                  ? `, box${r.missing !== 1 ? 'es' : ''} ${r.boxes.join(', ')}` : ''}</span>
-              </a>
-            ))}
-          </div>
-        )}
+        {fmCompleteness.total === 0 ? <p className="muted">All registered FM days are complete</p> : (<>
+          {fmCompleteness.seasons.map(([season, rows]) => (
+            <div key={season} style={{ marginBottom: 10 }}>
+              <div className="season-title">{seasonRange(String(season))} · {rows.length} missing</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 }}>
+                {rows.map(r => (
+                  <a key={r.day} href={`/day/${r.day}`} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline', textDecoration: 'none', color: 'inherit' }}>
+                    <span className="date-link" style={{ minWidth: 90 }}>{formatDate(r.day)}</span>
+                    <span className="fm-tag" style={{ minWidth: 46 }}>(FM {r.number})</span>
+                    <span style={{ color: '#E65100' }}>{r.missing} more needed{r.missing < 5
+                      ? `, box${r.missing !== 1 ? 'es' : ''} ${r.boxes.join(', ')}` : ''}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>)}
       </div>
 
       {canSql && (
