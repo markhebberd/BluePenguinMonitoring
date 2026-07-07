@@ -50,7 +50,7 @@ if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $seasonInput = $_GET['season'] ?? '';
     $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
     if (!$season) { echo json_encode(['error' => 'season required']); exit; }
-    $stmt = $pdo->prepare("SELECT date_number, actual_date FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $stmt = $pdo->prepare("SELECT date_number, actual_date, partial_monitor FROM date_mappings WHERE season_year = ? ORDER BY date_number");
     $stmt->execute([$season]);
     echo json_encode($stmt->fetchAll());
     exit;
@@ -58,7 +58,7 @@ if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
 // All registered FM dates across every season — lets the app flag FM dates app-wide
 if ($action === 'all_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $stmt = $pdo->query("SELECT season_year, date_number, actual_date FROM date_mappings ORDER BY actual_date");
+    $stmt = $pdo->query("SELECT season_year, date_number, actual_date, partial_monitor FROM date_mappings ORDER BY actual_date");
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -92,16 +92,16 @@ if ($action === 'season_fm_dates') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !is_array($input)) { http_response_code(400); echo json_encode(['error'=>'JSON array required']); exit; }
 
-    $oldStmt = $pdo->prepare("SELECT date_number, actual_date FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $oldStmt = $pdo->prepare("SELECT date_number, actual_date, partial_monitor FROM date_mappings WHERE season_year = ? ORDER BY date_number");
     $oldStmt->execute([$season]);
     $oldMappings = $oldStmt->fetchAll();
 
     $pdo->beginTransaction();
     try {
         $pdo->prepare("DELETE FROM date_mappings WHERE season_year = ?")->execute([$season]);
-        $stmt = $pdo->prepare("INSERT INTO date_mappings (season_year, date_number, actual_date) VALUES (?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO date_mappings (season_year, date_number, actual_date, partial_monitor) VALUES (?, ?, ?, ?)");
         foreach ($input as $row) {
-            $stmt->execute([$season, $row['n'], $row['date']]);
+            $stmt->execute([$season, $row['n'], $row['date'], !empty($row['partial']) ? 1 : 0]);
         }
         $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('date_mappings', ?, 'UPDATE', ?, ?)")
             ->execute([$season, $observer['observer_id'], json_encode([

@@ -468,7 +468,7 @@ function useDateTooltip() {
 
 // registeredFmDates: NZ date (YYYY-MM-DD) -> the season + date-number it was registered as
 // in the enter-date workflow. Used, alongside a computed full monitor, to flag FM dates green.
-const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any>; registeredFmDates: Map<string, { season: number; number: number }> }>({ show: () => {}, hide: () => {}, statsCache: new Map(), registeredFmDates: new Map() });
+const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any>; registeredFmDates: Map<string, { season: number; number: number; partial: boolean }> }>({ show: () => {}, hide: () => {}, statsCache: new Map(), registeredFmDates: new Map() });
 
 function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
   const multiObs = stats.obs > stats.boxes;
@@ -482,7 +482,9 @@ function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boole
     {stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
-    {reg && <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : missedSuffix}</span>}
+    {reg && (reg.partial
+      ? <span style={{color:'#2e7d32'}}> <b>PM #{reg.number}</b> (Partial Monitor) from {seasonRange(String(reg.season))}</span>
+      : <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : missedSuffix}</span>)}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}
@@ -513,11 +515,12 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
   const fm = registeredFmDates.get(day);
   const stats = statsCache.get(day);
   const complete = !!stats?.isFullMonitor; // full monitor = complete box set (same test as the calendar)
-  // Orange only for a registered season FM date whose observations are incomplete — a cue that data
-  // is missing for that FM day. Green for a complete full monitor. Ordinary partial days stay plain.
-  const cls = fm && !complete ? ' fm-partial' : complete ? ' fm-date' : '';
+  // A Partial Monitor (PM) date is green on registration alone — it's a deliberate partial round,
+  // so the full box-set check doesn't apply. Otherwise: orange for a registered FM date whose
+  // observations are incomplete (data missing), green for a complete full monitor, plain otherwise.
+  const cls = fm?.partial ? ' fm-date' : fm && !complete ? ' fm-partial' : complete ? ' fm-date' : '';
   return <a className={`date-link${cls}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
-    onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> (FM {fm.number})</span> : ''}</a>;
+    onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> ({fm.partial ? 'PM' : 'FM'} {fm.number})</span> : ''}</a>;
 }
 
 /** Peng_num of the bird whose peng panel is currently open (null when none). Lets a
@@ -2812,9 +2815,9 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   const [breedingStatus, setBreedingStatus] = useState('');
   const [notes, setNotes] = useState('');
   const [birdSearch, setBirdSearch] = useState('');
-  const [dateMappings, setDateMappings] = useState<{date_number:number; actual_date:string}[]>([]);
-  const [prevSeasonMappings, setPrevSeasonMappings] = useState<{date_number:number; actual_date:string}[]>([]);
-  const [nextSeasonMappings, setNextSeasonMappings] = useState<{date_number:number; actual_date:string}[]>([]);
+  const [dateMappings, setDateMappings] = useState<{date_number:number; actual_date:string; partial_monitor?:number}[]>([]);
+  const [prevSeasonMappings, setPrevSeasonMappings] = useState<{date_number:number; actual_date:string; partial_monitor?:number}[]>([]);
+  const [nextSeasonMappings, setNextSeasonMappings] = useState<{date_number:number; actual_date:string; partial_monitor?:number}[]>([]);
   const [showDateEditor, setShowDateEditor] = useState(false);
   const [dateEditorText, setDateEditorText] = useState('');
   const [scannedBirds, setScannedBirds] = useState<string[]>([]);
@@ -3122,7 +3125,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
           <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m =>
                 // Seed as dd/mm/yyyy — the format the editor parses back, so lines
                 // round-trip. A display format (month name) reads back as invalid.
-                `${m.date_number} ${m.actual_date.slice(8, 10)}/${m.actual_date.slice(5, 7)}/${m.actual_date.slice(0, 4)}`
+                // A trailing " PM" marks a Partial Monitor date and round-trips too.
+                `${m.date_number} ${m.actual_date.slice(8, 10)}/${m.actual_date.slice(5, 7)}/${m.actual_date.slice(0, 4)}${m.partial_monitor ? ' PM' : ''}`
               ).join('\n')); setShowDateEditor(true); }}>
             {dateMappings.length > 0 ? 'Edit dates' : 'Set up dates'}
           </button>
@@ -3164,15 +3168,17 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
         )}
         {showDateEditor && (
           <div style={{marginTop:'8px', padding:'8px', background:'#f8f9fa', borderRadius:'6px', border:'1px solid #ddd'}}>
-            <p style={{fontSize:'11px',color:'#888',margin:'0 0 4px'}}>One per line: number d/m/yy (e.g. "1 26/7/25")</p>
+            <p style={{fontSize:'11px',color:'#888',margin:'0 0 4px'}}>One per line: number d/m/yy (e.g. "1 26/7/25"). Add " PM" for a Partial Monitor date (green, no full box-set check).</p>
             <textarea value={dateEditorText} onChange={e => setDateEditorText(e.target.value)} rows={10} style={{width:'100%',fontFamily:'monospace',fontSize:'13px',padding:'6px',border:'1px solid #ddd',borderRadius:'4px'}} />
             <div style={{fontSize:'11px',color:'#888',margin:'4px 0'}}>
               {dateEditorText.trim().split('\n').filter(l => l.trim()).map((l, i) => {
                 const first = l.trim().split(/[\s]+/)[0];
-                const rest = l.trim().slice(first.length).trim();
+                let rest = l.trim().slice(first.length).trim();
+                const partial = /\bPM\b\s*$/i.test(rest);
+                if (partial) rest = rest.replace(/\s*PM\s*$/i, '').trim();
                 const parsed = parseDateFlex(rest);
                 const dd = parsed ? `${parsed.slice(8, 10)}/${parsed.slice(5, 7)}/${parsed.slice(0, 4)}` : null;
-                return <div key={i} style={{color: parsed ? '#4CAF50' : '#F44336'}}>{first} → {dd || 'invalid'}</div>;
+                return <div key={i} style={{color: parsed ? '#4CAF50' : '#F44336'}}>{first} → {dd || 'invalid'}{partial && parsed ? ' · Partial Monitor' : ''}</div>;
               })}
             </div>
             <div style={{display:'flex', gap:'6px'}}>
@@ -3180,16 +3186,18 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                 const lines = dateEditorText.trim().split('\n').filter(l => l.trim());
                 const mappings = lines.map(l => {
                   const first = l.trim().split(/[\s]+/)[0];
-                  const rest = l.trim().slice(first.length).trim();
+                  let rest = l.trim().slice(first.length).trim();
+                  const partial = /\bPM\b\s*$/i.test(rest);
+                  if (partial) rest = rest.replace(/\s*PM\s*$/i, '').trim();
                   const parsed = parseDateFlex(rest);
-                  return { n: parseInt(first), date: parsed };
-                }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string}[];
+                  return { n: parseInt(first), date: parsed, partial };
+                }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string; partial:boolean}[];
                 await fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                   body: JSON.stringify(mappings)
                 });
-                setDateMappings(mappings.map(m => ({ date_number: m.n, actual_date: m.date })));
+                setDateMappings(mappings.map(m => ({ date_number: m.n, actual_date: m.date, partial_monitor: m.partial ? 1 : 0 })));
                 setShowDateEditor(false);
               }}>Save</button>
               <button style={{flex:1,padding:'6px',background:'#fff',color:'#666',border:'1px solid #ddd',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}} onClick={() => setShowDateEditor(false)}>Cancel</button>
@@ -7670,14 +7678,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const dateStatsCache = useDateStats();
 
   // FM dates registered in the enter-date workflow (all seasons), keyed by NZ date.
-  const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number }>>(new Map());
+  const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
   useEffect(() => {
     if (!token) return;
     fetch('/api/crud.php?action=all_fm_dates', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(rows => {
-        const m = new Map<string, { season: number; number: number }>();
-        if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number) });
+        const m = new Map<string, { season: number; number: number; partial: boolean }>();
+        if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number), partial: !!Number(r.partial_monitor) });
         setRegisteredFmDates(m);
       })
       .catch(() => {});
