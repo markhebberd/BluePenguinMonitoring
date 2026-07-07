@@ -479,11 +479,13 @@ function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boole
   const missedSuffix = missing.length > 0 && missing.length < 4 ? ` — missed "${missing.join(', ')}"` : ` — missed (${missing.length})`;
   return (<>
     {showDate && date && <b className="date-stats-date">{formatDate(date)}</b>}
-    {stats.isFullMonitor
+    {reg?.partial
+      ? <span style={{color:'#00796b'}}> <b>Partial Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
+      : stats.isFullMonitor
       ? <span style={{color:'#2e7d32'}}> <b>Full Monitor</b> ({stats.boxes}/{stats.totalLocations})</span>
       : <span> {stats.boxes}/{stats.totalLocations} boxes</span>}
     {reg && (reg.partial
-      ? <span style={{color:'#2e7d32'}}> <b>PM #{reg.number}</b> (Partial Monitor) from {seasonRange(String(reg.season))}</span>
+      ? <span style={{color:'#00796b'}}> <b>PM #{reg.number}</b> from {seasonRange(String(reg.season))}</span>
       : <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : missedSuffix}</span>)}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
@@ -518,7 +520,7 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
   // A Partial Monitor (PM) date is green on registration alone — it's a deliberate partial round,
   // so the full box-set check doesn't apply. Otherwise: orange for a registered FM date whose
   // observations are incomplete (data missing), green for a complete full monitor, plain otherwise.
-  const cls = fm?.partial ? ' fm-date' : fm && !complete ? ' fm-partial' : complete ? ' fm-date' : '';
+  const cls = fm?.partial ? ' fm-pm' : fm && !complete ? ' fm-partial' : complete ? ' fm-date' : '';
   return <a className={`date-link${cls}`} href={`/day/${day}`} onClick={e => navClick(e, () => onDayClick?.(day))}
     onMouseEnter={e => show(day, e)} onMouseLeave={hide}>{formatDate(date)}{fm ? <span className="fm-tag"> ({fm.partial ? 'PM' : 'FM'} {fm.number})</span> : ''}</a>;
 }
@@ -5052,18 +5054,26 @@ function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
 function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[]; onDayClick: (day: string) => void }) {
   const { show: showTip, hide: hideTip, statsCache, registeredFmDates } = useContext(DateTooltipCtx);
   const dateSet = useMemo(() => new Set(dates), [dates]);
+  // Partial Monitor dates: registered as PM in the enter-date workflow. Teal, and always
+  // teal — they're a deliberate partial round, so they never read as full (green) or missed
+  // (orange) regardless of how many boxes were observed.
+  const partialMonitorDates = useMemo(() => {
+    const s = new Set<string>();
+    for (const [d, r] of registeredFmDates) { if (r.partial) s.add(d); }
+    return s;
+  }, [registeredFmDates]);
   const fullMonitorDates = useMemo(() => {
     const fm = new Set<string>();
-    for (const d of dates) { const s = statsCache.get(d); if (s?.isFullMonitor) fm.add(d); }
+    for (const d of dates) { const s = statsCache.get(d); if (s?.isFullMonitor && !partialMonitorDates.has(d)) fm.add(d); }
     return fm;
-  }, [dates, statsCache]);
+  }, [dates, statsCache, partialMonitorDates]);
   // Dates registered as FM in the enter-date workflow but not achieved (missing
-  // observations) — flagged red so a skipped monitor day is obvious.
+  // observations) — flagged red so a skipped monitor day is obvious. PM dates are excluded.
   const missedFmDates = useMemo(() => {
     const s = new Set<string>();
-    for (const d of registeredFmDates.keys()) { if (!statsCache.get(d)?.isFullMonitor) s.add(d); }
+    for (const d of registeredFmDates.keys()) { if (!statsCache.get(d)?.isFullMonitor && !partialMonitorDates.has(d)) s.add(d); }
     return s;
-  }, [registeredFmDates, statsCache]);
+  }, [registeredFmDates, statsCache, partialMonitorDates]);
 
   // Group dates by month, show months around current date. With no date (e.g. a brand-new
   // colony with no observations) fall back to today so the calendar still renders.
@@ -5137,13 +5147,14 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
                     const hasData = dateSet.has(d);
                     const isActive = d === date;
                     const isMissedFm = missedFmDates.has(d);
-                    // A missed FM date is interactive even with no observations, so its
-                    // red cell can be hovered/opened to see why it wasn't a full monitor.
-                    const interactive = hasData || isMissedFm;
+                    const isPartialFm = partialMonitorDates.has(d);
+                    // A missed or partial-monitor FM date is interactive even with no observations,
+                    // so its cell can be hovered/opened to see the registered FM/PM detail.
+                    const interactive = hasData || isMissedFm || isPartialFm;
                     return (
                       <span
                         key={di}
-                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}${fullMonitorDates.has(d) ? ' full-monitor' : ''}${isMissedFm ? ' fm-missed' : ''}`}
+                        className={`cal-day${hasData ? ' has-data' : ''}${isActive ? ' active' : ''}${isPartialFm ? ' pm-monitor' : fullMonitorDates.has(d) ? ' full-monitor' : ''}${isMissedFm ? ' fm-missed' : ''}`}
                         onClick={interactive ? () => onDayClick(d) : undefined}
                         onMouseEnter={interactive ? e => showTip(d, e) : undefined}
                         onMouseLeave={interactive ? hideTip : undefined}
@@ -5879,7 +5890,7 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
           <div key={i} className="obs-card" style={{marginBottom:2, padding:'4px 10px', marginLeft:8}}>
             <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
               <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : e.action === 'IMPORT' ? '#00897b' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
-              <span>{e.table_name === '__sql_console' ? 'SQL console' : e.table_name === '__import' ? (fields?.filename || 'Import') : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
+              <span>{e.table_name === '__sql_console' ? 'SQL console' : e.table_name === '__import' ? (fields?.filename || 'Import') : e.table_name === 'date_mappings' ? `Date table · season ${String(e.record_id).slice(-2)}` : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
               <span className="muted">{e.observer_name || ''}</span>
               {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
             </div>
@@ -5894,7 +5905,27 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
                 {fields.colony ? ` · ${fields.colony}` : ''}
               </div>
             )}
-            {e.action === 'UPDATE' && fields && (
+            {/* Date-table edits store old/new as arrays of date rows — render a per-number diff, not [object Object]. */}
+            {e.action === 'UPDATE' && e.table_name === 'date_mappings' && fields && (() => {
+              const norm = (r: any) => ({ n: Number(r.n ?? r.date_number), date: String(r.date ?? r.actual_date ?? '').slice(0, 10), pm: !!(r.partial ?? Number(r.partial_monitor)) });
+              const oldRows: any[] = Array.isArray(fields.old) ? fields.old.map(norm) : [];
+              const newRows: any[] = Array.isArray(fields.new) ? fields.new.map(norm) : [];
+              const oldByN = new Map(oldRows.map(r => [r.n, r]));
+              const newByN = new Map(newRows.map(r => [r.n, r]));
+              const fmt = (r: any) => r ? `${r.date.slice(8, 10)}/${r.date.slice(5, 7)}/${r.date.slice(0, 4)}${r.pm ? ' PM' : ''}` : '—';
+              const nums = Array.from(new Set([...oldByN.keys(), ...newByN.keys()])).sort((a, b) => a - b);
+              const changes = nums.map(n => ({ n, o: oldByN.get(n), nw: newByN.get(n) }))
+                .filter(c => !c.o || !c.nw || c.o.date !== c.nw.date || c.o.pm !== c.nw.pm);
+              return <div style={{fontSize:11, marginTop:2}}>
+                <span className="muted">{oldRows.length} → {newRows.length} dates{changes.length === 0 ? ' · no per-date changes' : ''}</span>
+                {changes.length > 0 && <div style={{marginTop:2}}>
+                  {changes.map(c => (
+                    <span key={c.n} className="muted" style={{marginRight:8}}>#{c.n}: {c.o && c.nw ? <><s>{fmt(c.o)}</s> → {fmt(c.nw)}</> : c.nw ? <>+ {fmt(c.nw)}</> : <>− {fmt(c.o)}</>}</span>
+                  ))}
+                </div>}
+              </div>;
+            })()}
+            {e.action === 'UPDATE' && e.table_name !== 'date_mappings' && fields && (
               <div style={{fontSize:11, marginTop:2}}>
                 {Object.entries(fields).map(([k, v]: [string, any]) => (
                   <span key={k} className="muted" style={{marginRight:8}}>{k}: {v && typeof v === 'object' && 'old' in v ? <><s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</> : String(v ?? '')}</span>
@@ -7994,12 +8025,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
                 <div ref={el => { if (el) el.scrollLeft = el.scrollWidth; }} style={{display:'flex', gap:4, overflowX:'auto', marginTop:6, paddingBottom:2}}>
                   {dates.map((d: string) => {
                     const ds = dateStatsCache.get(d);
-                    const fm = ds?.isFullMonitor;
+                    const pm = registeredFmDates.get(d)?.partial;
+                    const fm = ds?.isFullMonitor && !pm;
                     const [,m,day] = d.split('-');
                     const label = `${parseInt(day)} ${months[parseInt(m) - 1]}`;
                     return (
                       <span key={d} className="scan clickable" onClick={() => { goToDay(d); closeMenu(); }}
-                        style={{fontSize:10, whiteSpace:'nowrap', background: fm ? '#c8e6c9' : '#e3f2fd', color: fm ? '#2e7d32' : '#1a5276', borderColor: fm ? '#81c784' : '#90caf9', display:'inline-flex', flexDirection:'column', alignItems:'center', gap:1, padding:'2px 5px', lineHeight:1.3}}>
+                        style={{fontSize:10, whiteSpace:'nowrap', background: pm ? '#b2dfdb' : fm ? '#c8e6c9' : '#e3f2fd', color: pm ? '#00695c' : fm ? '#2e7d32' : '#1a5276', borderColor: pm ? '#4db6ac' : fm ? '#81c784' : '#90caf9', display:'inline-flex', flexDirection:'column', alignItems:'center', gap:1, padding:'2px 5px', lineHeight:1.3}}>
                         <span style={{fontWeight:600}}>{label}</span>
                         {ds && <span style={{fontSize:8, opacity:0.8}}>
                           {'\uD83D\uDCE6'}{ds.boxes}{ds.penguins ? ` \uD83D\uDC27${ds.penguins}` : ''}{ds.eggs ? ` \uD83E\uDD5A${ds.eggs}` : ''}{ds.chicks ? ` \uD83D\uDC23${ds.chicks}` : ''}

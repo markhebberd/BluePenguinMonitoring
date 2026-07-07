@@ -289,6 +289,9 @@ h3.collapsible:hover { color:#1a5276; }
 .date-link:hover { color:#1a5276; }
 .date-link.fm-date { color:#2e7d32; font-weight:600; }
 .date-link.fm-date:hover { color:#1b5e20; }
+/* Partial Monitor date — teal, distinct from full-monitor green and missed orange. */
+.date-link.fm-pm { color:#00796b; font-weight:600; }
+.date-link.fm-pm:hover { color:#004d40; }
 /* Registered FM date with an incomplete box set — same orange the calendar uses for fm-missed. */
 .date-link.fm-partial { color:#e65100; font-weight:600; }
 .date-link.fm-partial:hover { color:#bf360c; }
@@ -348,9 +351,12 @@ h3.collapsible:hover { color:#1a5276; }
 /* Registered as an FM date but not achieved (missing observations) */
 .cal-day.fm-missed { background:#ffe0b2; color:#e65100; cursor:pointer; font-weight:500; }
 .cal-day.fm-missed:hover { background:#ffcc80; }
+.cal-day.pm-monitor { background:#b2dfdb; color:#00695c; cursor:pointer; font-weight:500; }
+.cal-day.pm-monitor:hover { background:#80cbc4; }
 .cal-day.active { background:#1a5276; color:#fff; font-weight:700; }
 .cal-day.active.full-monitor { background:#2e7d32; }
 .cal-day.active.fm-missed { background:#ef6c00; color:#fff; }
+.cal-day.active.pm-monitor { background:#00796b; color:#fff; }
 
 .cal-toggle { width:20px; height:20px; border-radius:50%; border:2px solid #ccc; background:#fff; color:#888; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; flex-shrink:0; z-index:501; }
 .cal-toggle:hover { background:#e3f2fd; color:#1a5276; border-color:#90caf9; }
