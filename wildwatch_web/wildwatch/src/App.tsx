@@ -3846,7 +3846,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
         </div>
         <div className="table-scroll">
         <table className="guess-rank-table">
-          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th>Notes</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th className="notes-cell">Notes</th><th></th></tr></thead>
           <tbody>
             {shown.map((r: any, i: number) => {
               const href = hrefFor(r.box, r.time);
@@ -3863,8 +3863,8 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                   {/* Uncapped, unlike the summary rows elsewhere — here the icons ARE the count. */}
                   <td title={`${r.adults} adult${r.adults === 1 ? '' : 's'}`}>{link(r.adults > 0 ? '🐧'.repeat(r.adults) : '—')}</td>
                   {/* Not wrapped in link() — PenguinMini renders its own anchor. */}
-                  <td>
-                    <span className="scans" style={{ marginTop: 0 }}>
+                  <td className="minis-cell">
+                    <span className="scans">
                       {r.scans.map((s: any) => (
                         <PenguinMini key={s.pit_id} scan={s} observationDate={r.time}
                           onClick={() => _adminOpenBird?.(String(s.peng_num))} />
@@ -3875,7 +3875,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                       {r.scans.length === 0 && r.noScan === 0 && <span className="muted">none</span>}
                     </span>
                   </td>
-                  <td className="muted" title={r.notes || undefined}>{r.notes}</td>
+                  <td className="muted notes-cell" title={r.notes || undefined}>{r.notes}</td>
                   <td>
                     {r.missing > 0 && (
                       <button className="edit-btn" disabled={busyObs === r.obsId} onClick={() => addNoScan(r)}

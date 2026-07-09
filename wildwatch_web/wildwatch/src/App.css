@@ -336,6 +336,11 @@ h3.collapsible:hover { color:#1a5276; }
 .report-card.wide { width:min(1400px, calc(100vw - 32px)); margin-left:50%; transform:translateX(-50%); }
 /* Last resort below ~1400px of content: scroll the table, not the page. */
 .table-scroll { overflow-x:auto; }
+/* Data cells size to their content; Notes soaks up the remaining width. Without this the
+   minis cell gets squeezed and a single chip wraps its own text. */
+.report-card.wide .guess-rank-table td, .report-card.wide .guess-rank-table th { white-space:nowrap; width:1%; }
+.report-card.wide .guess-rank-table td.notes-cell, .report-card.wide .guess-rank-table th.notes-cell { white-space:normal; width:auto; }
+.minis-cell .scans { flex-wrap:nowrap; margin-top:0; }
 .guess-rank-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
 .guess-rank-table th { text-align:left; color:#888; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #e8ecef; padding:4px 8px; }
 .guess-rank-table td { padding:5px 8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
