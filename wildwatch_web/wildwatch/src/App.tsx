@@ -1655,6 +1655,20 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
         <div className="history-entries">
           {entries.map((e: any, i: number) => {
             const fields = typeof e.changed_fields === 'string' ? JSON.parse(e.changed_fields) : e.changed_fields;
+            // Field values recorded with the entry. INSERTs from nestcheck sync carry the
+            // full original observation — show it, so an edited observation's initial
+            // values stay visible in the history.
+            const fieldList = fields && Object.keys(fields).length > 0 && (
+              <div className="history-fields">
+                {Object.entries(fields).map(([k, v]: [string, any]) => (
+                  <div key={k} className="history-field">
+                    <span className="muted">{k}:</span> {v && typeof v === 'object' && 'old' in v
+                      ? <><s>{String(v.old ?? '')}</s> &rarr; {String(v.new ?? '')}</>
+                      : <>{String(v ?? '')}</>}
+                  </div>
+                ))}
+              </div>
+            );
             return (
               <div key={i} className="history-entry">
                 <div className="history-meta">
@@ -1663,22 +1677,12 @@ function HistoryPanel({ token, table, id, onClose }: { token: string; table: str
                   <span className="muted">{parseDate(e.change_timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'})}</span>
                   {e.change_reason && <span className="muted" style={{fontStyle:'italic'}}>"{e.change_reason}"</span>}
                 </div>
-                {e.action === 'UPDATE' && (
-                  <div className="history-fields">
-                    {Object.entries(fields).map(([k, v]: [string, any]) => (
-                      <div key={k} className="history-field">
-                        <span className="muted">{k}:</span> {v && typeof v === 'object' && 'old' in v
-                          ? <><s>{String(v.old ?? '')}</s> &rarr; {String(v.new ?? '')}</>
-                          : <>{String(v ?? '')}</>}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {e.action === 'UPDATE' && fieldList}
                 {e.action === 'INSERT' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
                   <div className="history-fields">
                     <PenguinMini scan={e.penguin_info} onClick={() => {}} /> added
                   </div>
-                ) : <div className="history-fields muted">Record created</div>)}
+                ) : fieldList || <div className="history-fields muted">Record created</div>)}
                 {e.action === 'DELETE' && (e.table_name === 'penguin_scans' && e.penguin_info ? (
                   <div className="history-fields">
                     <PenguinMini scan={e.penguin_info} onClick={() => {}} /> removed
