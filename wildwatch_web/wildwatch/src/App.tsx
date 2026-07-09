@@ -3845,7 +3845,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
           ))}
         </div>
         <div className="table-scroll">
-        <table className="guess-rank-table">
+        <table className="guess-rank-table zebra">
           <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th className="notes-cell">Notes</th><th></th></tr></thead>
           <tbody>
             {shown.map((r: any, i: number) => {
@@ -7924,7 +7924,7 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
       {active.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
         <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
-        <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+        <table className="zebra" style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
           <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
             <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
@@ -7941,7 +7941,7 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
         <div style={{ marginTop: 8 }}>
           <button className="edit-btn" onClick={() => setShowDismissed(s => !s)}>{showDismissed ? 'Hide' : 'Show'} {dismissed.length} dismissed</button>
           {showDismissed && (
-            <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%', marginTop: 6, opacity: 0.65 }}>
+            <table className="zebra" style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%', marginTop: 6, opacity: 0.65 }}>
               <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}<th style={{ textAlign: 'left', padding: '2px 6px' }}>Reviewed by</th><th></th></tr></thead>
               <tbody>{dismissed.map((row: any, i: number) => (
                 <tr key={i} style={{ borderBottom: '1px solid #eee' }}>

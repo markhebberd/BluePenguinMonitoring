@@ -336,6 +336,11 @@ h3.collapsible:hover { color:#1a5276; }
 .report-card.wide { width:min(1400px, calc(100vw - 32px)); margin-left:50%; transform:translateX(-50%); }
 /* Last resort below ~1400px of content: scroll the table, not the page. */
 .table-scroll { overflow-x:auto; }
+/* Alternating rows for the data-validation tables. Opt-in, because guess-rank-table is
+   shared with the Reports page. Colours the row itself so cell backgrounds stay unset. */
+.zebra tbody tr:nth-child(even) { background:#eff5fa; }
+.zebra tbody tr:nth-child(odd) { background:#fff; }
+.zebra tbody tr:hover { background:#e2edf6; }
 /* Data cells size to their content; Notes soaks up the remaining width. Without this the
    minis cell gets squeezed and a single chip wraps its own text. */
 .report-card.wide .guess-rank-table td, .report-card.wide .guess-rank-table th { white-space:nowrap; width:1%; }
