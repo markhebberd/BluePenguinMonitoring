@@ -48,14 +48,16 @@ header h1:hover { opacity:.8; }
 .top-row { display:grid; grid-template-columns:1fr 320px; gap:16px; padding:16px 20px; }
 /* Overview: map in the left third (under the calendar); colony stats + nest-box cards
    flex-wrap in the right two-thirds, the cards flowing around the stats panel. */
-.overview-row { display:grid; grid-template-columns:1fr 2fr; gap:16px; padding:16px 20px; align-items:stretch; }
+/* Boxes column is capped to a whole number of card columns (13 × 88px) so the cards just
+   fit with no right-edge gap; the map fills whatever width is left on the left. */
+.overview-row { display:grid; grid-template-columns:1fr minmax(300px, 1144px); gap:16px; padding:16px 20px; align-items:stretch; }
 /* Map fills the whole left column height (absolute so it doesn't drive the row height). */
 .overview-left { position:relative; min-width:0; min-height:400px; }
 .overview-left .map-container, .overview-left .map-empty { position:absolute; inset:0; height:100%; }
-/* Right two-thirds: float the stats so the nest-box cards flow AROUND it — multiple rows
-   beside the stats, then full width below once past it. */
+/* Right column: float the stats top-right so the nest-box cards flow AROUND it — rows to
+   its left, then full width below once past it. */
 .overview-right { display:flow-root; }
-.overview-right .stats-panel { float:left; width:260px; margin:0 8px 8px 0; }
+.overview-right .stats-panel { float:right; width:260px; margin:0 0 8px 8px; }
 .overview-right .box-grid { display:contents; }        /* box cards become flow siblings of the stats */
 .overview-right .box-grid > h3 { display:none; }        /* count already shown in the toolbar */
 .overview-right .box-grid > .grid { display:contents; }
