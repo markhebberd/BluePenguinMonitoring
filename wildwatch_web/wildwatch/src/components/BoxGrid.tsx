@@ -9,6 +9,12 @@ const STATUS_COLORS: Record<string,string> = {
 
 interface BoxInfo { s: string; a: number; e: number; c: number; }
 
+// Status colour at 50% strength, pre-blended over white into a solid colour so only the
+// fill lightens — text, icons and borders keep full strength (an alpha background can
+// wash the whole card depending on what's composited behind it).
+const fade = (hex: string) => '#' + [1, 3, 5].map(i =>
+  Math.round((parseInt(hex.slice(i, i + 2), 16) + 255) / 2).toString(16).padStart(2, '0')).join('');
+
 interface BoxGridProps {
   boxTags: Record<string, BoxTag>;
   selectedBox: string | null;
@@ -64,7 +70,7 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
               key={boxId}
               data-box={boxId}
               className={`box-card ${boxId === selectedBox ? 'selected' : ''} ${boxId === flashBox ? 'flash-highlight' : ''}`}
-              style={{ backgroundColor: sidebar ? `${bg}80` : bg, color: darkText ? '#fff' : undefined }}
+              style={{ backgroundColor: sidebar ? fade(bg) : bg, color: darkText && !sidebar ? '#fff' : undefined }}
               href={`/box/${boxId}`}
               onClick={e => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); onBoxSelect(boxId); }}
             >
