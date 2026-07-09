@@ -1813,9 +1813,9 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
                 .sort((a, b) => b.observation_time_utc.localeCompare(a.observation_time_utc))
               : thisSeason;
             return (<>
-              <h3 className="season-heading clickable" onClick={() => setCurSeasonOpen(o => !o)}>{seasonRange(thisLabel)} ({thisSeason.length}) {curSeasonOpen ? '▲' : '▼'}
-                {deletedCount > 0 && onToggleDeleted && <span className="deleted-indicator clickable" onClick={(e) => { e.stopPropagation(); onToggleDeleted(); }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
-              </h3>
+              <div className="season-divider clickable" onClick={() => setCurSeasonOpen(o => !o)}><hr/><span>{seasonRange(thisLabel)} ({thisSeason.length}) {curSeasonOpen ? '▲' : '▼'}
+                {curSeasonOpen && deletedCount > 0 && onToggleDeleted && <span className="deleted-indicator" onClick={(e) => { e.stopPropagation(); onToggleDeleted(); }}> · {showDeleted ? 'hide' : 'show'} {deletedCount} deleted</span>}
+              </span><hr/></div>
               {curSeasonOpen && <>
               {mergedObs.length === 0 && <p className="muted">No observations this season</p>}
               {mergeSameDayChips(mergedObs).map((obs: any, i: number) => obs._deleted ? (
