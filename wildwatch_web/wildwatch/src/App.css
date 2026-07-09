@@ -36,6 +36,10 @@ header h1:hover { opacity:.8; }
 .pinned-check { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.35); border-radius:4px;
   padding:3px 8px; font-size:13px; color:#fff; text-decoration:none; white-space:nowrap; }
 .pinned-check:hover { background:rgba(255,255,255,.28); }
+/* Remaining (undismissed) errors for the pinned check; green once the check is clean. */
+.pinned-count { display:inline-block; margin-left:6px; background:rgba(0,0,0,.25); border-radius:9px;
+  padding:0 6px; font-size:11px; font-weight:600; line-height:16px; }
+.pinned-count.zero { background:rgba(76,175,80,.85); }
 .check-title:hover { text-decoration:underline; }
 .check-pinned { font-size:12px; }
 .colony-select { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:4px; padding:3px 8px; font-size:13px; cursor:pointer; }

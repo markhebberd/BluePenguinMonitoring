@@ -3802,7 +3802,10 @@ function MissedScansReport() {
   );
 }
 
+const MISSING_NO_SCANS_TITLE = 'Missing no scans';
+
 function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
+  const TITLE = MISSING_NO_SCANS_TITLE;
   const { total, rows } = useMissingNoScans();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
   const recentDay = rows[0]?.date;
@@ -3810,8 +3813,8 @@ function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string
     : mode === 'day' ? rows.filter((r: any) => r.date === recentDay)
     : rows.slice(0, 3);
   return (
-    <div className="report-card">
-      <h3>Missing no scans</h3>
+    <div className="report-card" id={checkSlug(TITLE)} style={{ scrollMarginTop: 70 }}>
+      <PinnableTitle title={TITLE} count={total} />
       <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first.</p>
       {rows.length === 0 ? <p className="muted">No mismatches found</p> : (<>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -7820,13 +7823,6 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   const shown = showAll ? active : active.slice(0, 5);
 
   const slug = checkSlug(title);
-  const pinned = usePinnedChecks().some(p => p.slug === slug);
-  const doTogglePin = () => {
-    const q = pinned
-      ? `Remove "${title}" from the header?`
-      : `Add a link to "${title}" in the header?`;
-    if (window.confirm(q)) togglePinned(slug, title);
-  };
 
   const doDismiss = async (row: any) => {
     if (!errorType) return;
@@ -7855,10 +7851,7 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
 
   return (
     <div id={slug} style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8, scrollMarginTop: 70 }}>
-      <h3 className="clickable check-title" style={{ margin: '0 0 4px' }} onClick={doTogglePin}
-        title={pinned ? 'Pinned to the header — click to remove' : 'Click to add a link to this check in the header'}>
-        {title}{pinned && <span className="check-pinned" aria-label="pinned"> 📌</span>}
-      </h3>
+      <PinnableTitle title={title} count={active.length} />
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
       {active.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
         <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
@@ -7904,7 +7897,10 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
 // Per-browser (localStorage), not per-account: these are a personal working set, and storing
 // them server-side would mean a schema change for something that never needs to travel.
 const PINNED_KEY = 'wildwatch.pinnedChecks';
-type PinnedCheck = { slug: string; title: string };
+// `count` is the check's remaining (undismissed) error count, cached from the last time the
+// validation tab rendered — the header lives on pages where the checks aren't mounted, so it
+// has nothing to recompute from. Absent until the check has been seen at least once.
+type PinnedCheck = { slug: string; title: string; count?: number };
 const checkSlug = (title: string) => 'check-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const checkHref = (slug: string) => `/?admin&tab=validation#${slug}`;
 
@@ -7921,13 +7917,36 @@ const writePinned = (next: PinnedCheck[]) => {
   try { localStorage.setItem(PINNED_KEY, JSON.stringify(next)); } catch { /* quota/private mode — keep the in-memory pins */ }
   _pinnedSubs.forEach(fn => fn());
 };
-const togglePinned = (slug: string, title: string) => {
+const togglePinned = (slug: string, title: string, count?: number) => {
   const has = _pinned.some(p => p.slug === slug);
-  writePinned(has ? _pinned.filter(p => p.slug !== slug) : [..._pinned, { slug, title }]);
+  writePinned(has ? _pinned.filter(p => p.slug !== slug) : [..._pinned, { slug, title, count }]);
   return !has;
+};
+// Refresh a pinned check's cached count. No-op when the check isn't pinned, and when the
+// count is unchanged — otherwise writePinned would notify on every render and loop.
+const publishCount = (slug: string, count: number) => {
+  const cur = _pinned.find(p => p.slug === slug);
+  if (!cur || cur.count === count) return;
+  writePinned(_pinned.map(p => p.slug === slug ? { ...p, count } : p));
 };
 function usePinnedChecks(): PinnedCheck[] {
   return React.useSyncExternalStore(subscribePinned, getPinnedSnapshot);
+}
+
+// An <h3> that pins/unpins its own check. Shared by IntegrityCheck and the standalone reports
+// so every check title behaves the same way.
+function PinnableTitle({ title, count }: { title: string; count: number }) {
+  const slug = checkSlug(title);
+  const pinned = usePinnedChecks().some(p => p.slug === slug);
+  // Keep the header's cached count fresh while the check is on screen.
+  useEffect(() => { publishCount(slug, count); }, [slug, count]);
+  const onClick = () => togglePinned(slug, title, count);
+  return (
+    <h3 className="clickable check-title" style={{ margin: '0 0 4px' }} onClick={onClick}
+      title={pinned ? 'Pinned to the header — click to remove' : 'Click to pin this check to the header'}>
+      {title}{pinned && <span className="check-pinned" aria-label="pinned"> 📌</span>}
+    </h3>
+  );
 }
 
 // Cell renderers for integrity tables — styled plain text (not links), because IntegrityCheck
@@ -8339,7 +8358,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {pinnedChecks.length > 0 && (
           <span className="pinned-checks">
             {pinnedChecks.map(p => (
-              <a key={p.slug} className="pinned-check" href={checkHref(p.slug)} title={`Data validation — ${p.title}`}>{p.title}</a>
+              <a key={p.slug} className="pinned-check" href={checkHref(p.slug)} title={`Data validation — ${p.title}`}>
+                {p.title}
+                {p.count !== undefined && <span className={`pinned-count${p.count === 0 ? ' zero' : ''}`}>{p.count}</span>}
+              </a>
             ))}
           </span>
         )}
@@ -8368,7 +8390,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="mobile-search-group">
               <label className="mobile-label">Pinned checks</label>
               <nav className="mobile-nav">
-                {pinnedChecks.map(p => <a key={p.slug} href={checkHref(p.slug)} onClick={() => closeMenu()}>{p.title}</a>)}
+                {pinnedChecks.map(p => (
+                  <a key={p.slug} href={checkHref(p.slug)} onClick={() => closeMenu()}>
+                    {p.title}{p.count !== undefined ? ` (${p.count})` : ''}
+                  </a>
+                ))}
               </nav>
             </div>
           )}
