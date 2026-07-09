@@ -3658,8 +3658,10 @@ namespace PenguinMonitor
                 string.Concat(Enumerable.Repeat("🐣", obs.Chicks));
             if (!string.IsNullOrEmpty(icons)) statusItems.Add((icons, 14));
             if (!string.IsNullOrEmpty(obs.GateStatus)) statusItems.Add((obs.GateStatus, 13));
+            // Date joins the row as a regular item so spacing stays even between/around all items
+            if (showDate) statusItems.Add((ToNzTime(obs.WhenDataCollectedUtc).ToString("d MMM"), 13));
 
-            if (statusItems.Count > 0 || showDate)
+            if (statusItems.Count > 0)
             {
                 var statusRow = new LinearLayout(this);
                 statusRow.SetGravity(GravityFlags.CenterVertical);
@@ -3676,16 +3678,6 @@ namespace PenguinMonitor
                     statusRow.AddView(tv);
                 }
                 statusRow.AddView(new View(this) { LayoutParameters = spacerParams });
-
-                // Date on the right — same styling as the CON/POT status items
-                if (showDate)
-                {
-                    var dateTv = new TextView(this) { Text = ToNzTime(obs.WhenDataCollectedUtc).ToString("d MMM"), TextSize = 13 };
-                    dateTv.SetTextColor(Color.Black);
-                    dateTv.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-                    dateTv.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-                    statusRow.AddView(dateTv);
-                }
 
                 layout.AddView(statusRow);
             }
@@ -3797,9 +3789,11 @@ namespace PenguinMonitor
                 expanded = false;
             }
 
-            // Hide compact badge when expanded
+            // Hide compact badge when expanded; the sticky bar moves into the expanded card
             _prevObsHeaderText.Text = compact;
             _prevObsHeaderText.Visibility = expanded ? ViewStates.Gone : ViewStates.Visible;
+            if (_stickyNoteBar != null)
+                _stickyNoteBar.Visibility = expanded ? ViewStates.Gone : ViewStates.Visible;
 
             if (expanded)
             {
@@ -3822,6 +3816,17 @@ namespace PenguinMonitor
                         breedingText.SetPadding(0, 6, 0, 0);
                         _prevObsDetailLayout.AddView(breedingText);
                     }
+                }
+
+                // Sticky note moves into the expanded card, below the detail (the top-row
+                // sticky bar is hidden while expanded).
+                if (_boxNotes.TryGetValue(_currentBoxName, out var sticky) && !string.IsNullOrWhiteSpace(sticky.PersistentNotes))
+                {
+                    var stickyText = new TextView(this) { Text = $"💡 {sticky.PersistentNotes}", TextSize = 12 };
+                    stickyText.SetTextColor(UIFactory.PRIMARY_BLUE);
+                    stickyText.SetPadding(0, 6, 0, 0);
+                    stickyText.Click += (s, e) => { if (!_isBoxLocked) ShowBoxNotesDialog(); };
+                    _prevObsDetailLayout.AddView(stickyText);
                 }
             }
 
@@ -4222,7 +4227,7 @@ namespace PenguinMonitor
             // Prev obs expanded detail (full width, below the row)
             _prevObsSummaryLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _prevObsSummaryLayout.SetPadding(12, 8, 12, 8);
-            _prevObsSummaryLayout.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: UIFactory.WARNING_YELLOW);
+            _prevObsSummaryLayout.Background = _uiFactory.CreateRoundedBackground(Color.ParseColor("#FFF3E0"), 6); // same light orange as the collapsed badge, no border
             var prevExpandedParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             prevExpandedParams.SetMargins(0, 0, 0, 8);
             _prevObsSummaryLayout.LayoutParameters = prevExpandedParams;
