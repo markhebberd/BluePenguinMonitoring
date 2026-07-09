@@ -259,6 +259,9 @@ header h1:hover { opacity:.8; }
 /* Clickable */
 .clickable { cursor:pointer; }
 .clickable:hover { filter:brightness(.9); }
+/* Integrity/report table cells are anchors so they support open-in-new-tab, but must look
+   and fill the cell exactly as the plain text did. */
+.cell-link { display:block; color:inherit; text-decoration:none; }
 
 /* Bird page */
 .bird-page { max-width:800px; margin:0 auto; padding:16px 20px; }

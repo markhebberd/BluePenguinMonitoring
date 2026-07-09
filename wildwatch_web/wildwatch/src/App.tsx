@@ -3802,7 +3802,7 @@ function MissedScansReport() {
   );
 }
 
-function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: string) => void }) {
+function AdultCountMismatchReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
   const { total, rows } = useAdultCountMismatches();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
   const recentDay = rows[0]?.date;
@@ -3822,14 +3822,20 @@ function AdultCountMismatchReport({ onOpen }: { onOpen: (box: string, time: stri
         <table className="guess-rank-table">
           <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th></tr></thead>
           <tbody>
-            {shown.map((r: any, i: number) => (
-              <tr key={i} className="clickable" onClick={() => onOpen(r.box, r.time)} title="Go to this observation">
-                <td>{r.date}</td>
-                <td><strong>{r.box}</strong></td>
-                <td>{r.adults}</td>
-                <td>{r.adultScans + r.noScan} <span className="muted">({r.adultScans} scanned + {r.noScan} no-scan)</span></td>
-              </tr>
-            ))}
+            {shown.map((r: any, i: number) => {
+              const href = hrefFor(r.box, r.time);
+              // Anchor per cell (not per row) — a <tr> can't contain an <a>, and this keeps
+              // middle-click / ctrl-click / "open in new tab" working on every cell.
+              const link = (content: React.ReactNode) => <a href={href} className="cell-link" title="Go to this observation">{content}</a>;
+              return (
+                <tr key={i} className="clickable">
+                  <td>{link(r.date)}</td>
+                  <td>{link(<strong>{r.box}</strong>)}</td>
+                  <td>{link(r.adults)}</td>
+                  <td>{link(<>{r.adultScans + r.noScan} <span className="muted">({r.adultScans} scanned + {r.noScan} no-scan)</span></>)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Showing {shown.length} of {total}</p>
@@ -7137,7 +7143,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
-        <AdultCountMismatchReport onOpen={(box, time) => { window.location.href = `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`; }} />
+        <AdultCountMismatchReport hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
         <IntegrityCheck rows={iDupObs} errorType="duplicate_observations" title="Duplicate observations"
           desc="More than one observation for a box on the same day." empty="No duplicate observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'cnt', label: 'Count' }, { key: 'monitors', label: 'Monitors' }]} />
@@ -7821,7 +7827,14 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
     catch (e: any) { alert(e?.message || 'Could not restore'); }
     finally { setBusy(false); }
   };
-  const cellNav = (row: any) => row._href ? () => { window.location.href = row._href; } : undefined;
+  // Cells are real anchors so middle-click / ctrl-click / "open in new tab" work. The <a>
+  // fills the cell, so a click anywhere in the row still navigates as it did before.
+  const cell = (c: typeof columns[number], row: any) => {
+    const content = c.render ? c.render(row[c.key], row) : row[c.key];
+    return row._href
+      ? <a href={row._href} className="cell-link" title="Go to the observation">{content}</a>
+      : content;
+  };
 
   return (
     <div style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8 }}>
@@ -7833,8 +7846,7 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
           <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
             <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px', cursor: row._href ? 'pointer' : 'default' }}
-                onClick={cellNav(row)} title={row._href ? 'Go to the observation' : undefined}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{cell(c, row)}</td>)}
               {errorType && <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
                 <button className="edit-btn" disabled={busy} onClick={() => doDismiss(row)} title="Reviewed — mark valid and hide from this list">✓ Valid</button>
               </td>}
@@ -7851,8 +7863,7 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
               <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}<th style={{ textAlign: 'left', padding: '2px 6px' }}>Reviewed by</th><th></th></tr></thead>
               <tbody>{dismissed.map((row: any, i: number) => (
                 <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-                  {columns.map(c => <td key={c.key} style={{ padding: '2px 6px', cursor: row._href ? 'pointer' : 'default' }}
-                    onClick={cellNav(row)}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+                  {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{cell(c, row)}</td>)}
                   <td style={{ padding: '2px 6px', fontSize: 11, color: '#666' }} title={row._dismissal?.dismissed_at || ''}>
                     {row._dismissal?.dismissed_by_name || '—'}{row._dismissal?.reason ? `: ${row._dismissal.reason}` : ''}
                   </td>
@@ -7869,16 +7880,16 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   );
 }
 
-// Cell renderers for integrity tables — clickable box/day/penguin links. stopPropagation so a
-// styled plain text (not links) so a click anywhere in the row triggers the row's navigation
-// (its _href → the exact observation/date, highlighted) rather than a naked /day or /box.
+// Cell renderers for integrity tables — styled plain text (not links), because IntegrityCheck
+// wraps each cell in an anchor to the row's _href (the exact observation/date, highlighted)
+// rather than a naked /day or /box.
 const dayCell = (d: string) => d ? <span className="clickable">{d}</span> : '';
 const boxCell = (b: string) => b ? <span className="clickable">Box {b}</span> : '';
 // The mounted AdminPanel registers its bird-dock opener here so #peng cells in the integrity
-// tables open the panel on the right (stopPropagation so the row's own nav doesn't also fire).
+// tables open the panel on the right instead of following the enclosing row anchor.
 let _adminOpenBird: ((n: string) => void) | null = null;
 const pengCell = (n: string) => n
-  ? <span className="clickable" onClick={e => { if (_adminOpenBird && n) { e.stopPropagation(); _adminOpenBird(String(n)); } }}>#{n}</span>
+  ? <span className="clickable" onClick={e => { if (_adminOpenBird && n) { e.preventDefault(); e.stopPropagation(); _adminOpenBird(String(n)); } }}>#{n}</span>
   : '';
 const redNum = (v: any) => <span style={{ color: '#F44336', fontWeight: 600 }}>{v}</span>;
 const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: number) => (
