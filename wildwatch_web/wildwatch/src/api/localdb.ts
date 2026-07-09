@@ -1097,7 +1097,7 @@ export function computeMissedScans(): any[] {
 
 /** Observations whose recorded adult count doesn't match the adults actually accounted
  *  for — scanned adult minis + "no scan" minis — a likely data-entry error. Newest first. */
-export function computeAdultCountMismatches(): { total: number; rows: any[] } {
+export function computeMissingNoScans(): { total: number; rows: any[] } {
   if (!mem) return { total: 0, rows: [] };
   const c = mem;
 

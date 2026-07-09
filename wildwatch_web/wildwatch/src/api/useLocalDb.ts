@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeAdultCountMismatches, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -45,8 +45,8 @@ export function useMissedScans(): any[] {
   return useSyncExternalStore(subscribe, () => cached('missedScans', computeMissedScans));
 }
 
-export function useAdultCountMismatches(): { total: number; rows: any[] } {
-  return useSyncExternalStore(subscribe, () => cached('adultCountMismatches', computeAdultCountMismatches));
+export function useMissingNoScans(): { total: number; rows: any[] } {
+  return useSyncExternalStore(subscribe, () => cached('missingNoScans', computeMissingNoScans));
 }
 
 export function useChickReturn(): any {

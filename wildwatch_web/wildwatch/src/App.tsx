@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useAdultCountMismatches, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -3802,8 +3802,8 @@ function MissedScansReport() {
   );
 }
 
-function AdultCountMismatchReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
-  const { total, rows } = useAdultCountMismatches();
+function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
+  const { total, rows } = useMissingNoScans();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
   const recentDay = rows[0]?.date;
   const shown = mode === 'all' ? rows
@@ -3811,7 +3811,7 @@ function AdultCountMismatchReport({ hrefFor }: { hrefFor: (box: string, time: st
     : rows.slice(0, 3);
   return (
     <div className="report-card">
-      <h3>Adult count vs scans mismatch</h3>
+      <h3>Missing no scans</h3>
       <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first.</p>
       {rows.length === 0 ? <p className="muted">No mismatches found</p> : (<>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -7151,7 +7151,7 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
-        <AdultCountMismatchReport hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
+        <MissingNoScansReport hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
         <IntegrityCheck rows={iDupObs} errorType="duplicate_observations" title="Duplicate observations"
           desc="More than one observation for a box on the same day." empty="No duplicate observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'cnt', label: 'Count' }, { key: 'monitors', label: 'Monitors' }]} />
@@ -8074,6 +8074,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuClosing, setMenuClosing] = useState(false);
   const [menuSide, setMenuSide] = useState<'left'|'right'>(() => (localStorage.getItem('ww_menu_side') as 'left'|'right') || 'right');
+  // Must stay above the `if (loading)` early return — a hook below it renders on some passes
+  // and not others (React error 310).
+  const pinnedChecks = usePinnedChecks();
   const closeMenu = useCallback(() => {
     setMenuClosing(true);
     setTimeout(() => { setMenuOpen(false); setMenuClosing(false); }, 300);
@@ -8322,8 +8325,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     const opts = (list: any[]) => list.map((c: any) => <option key={c.colony_id} value={c.colony_id}>{c.colony_name}</option>);
     return regions.length > 1 ? regions.map(r => <optgroup key={r} label={r}>{opts(byRegion[r])}</optgroup>) : opts(colonies);
   })();
-
-  const pinnedChecks = usePinnedChecks();
 
   const siteHeader = (
     <header>
