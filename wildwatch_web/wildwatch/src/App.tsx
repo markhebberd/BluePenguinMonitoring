@@ -1415,9 +1415,10 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     }
     setEditing(false);
     try {
-      if (Object.keys(fields).length > 0) await updateRecord(token, 'observations', obsId, fields, reason || undefined);
-      for (const p of toAdd) await createRecord(token, 'penguin_scans', { observation_id: obsId, pit_id: p.pit_id, scan_time_utc: obs.observation_time_utc });
-      for (const s of toRemove) await deleteRecord(token, 'penguin_scans', s.scan_id!);
+      const why = reason || undefined;
+      if (Object.keys(fields).length > 0) await updateRecord(token, 'observations', obsId, fields, why);
+      for (const p of toAdd) await createRecord(token, 'penguin_scans', { observation_id: obsId, pit_id: p.pit_id, scan_time_utc: obs.observation_time_utc }, why);
+      for (const s of toRemove) await deleteRecord(token, 'penguin_scans', s.scan_id!, why);
       setEditCount(c => c + 1);
     } finally {
       setDraft(null); setDraftScans([]); setBirdSearch('');

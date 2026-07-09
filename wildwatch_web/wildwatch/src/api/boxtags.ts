@@ -57,11 +57,11 @@ export async function updateRecord(token: string, table: string, id: number | st
   return result;
 }
 
-export async function createRecord(token: string, table: string, fields: Record<string, any>) {
+export async function createRecord(token: string, table: string, fields: Record<string, any>, reason?: string) {
   const r = await fetch(`/api/crud.php?action=create&table=${table}&${colonyQS()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify(fields)
+    body: JSON.stringify({ ...fields, ...(reason ? { _reason: reason } : {}) })
   });
   const result = await r.json();
   triggerSync();

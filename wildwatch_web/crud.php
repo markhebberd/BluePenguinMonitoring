@@ -373,6 +373,9 @@ function handleCreate($pdo, $table, $pk, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
     $input = stripRetiredColumns($table, $input);
+    // Must come off before $input is used as the column list, or _reason becomes a column.
+    $reason = $input['_reason'] ?? null;
+    unset($input['_reason']);
 
     $cid = (int)($_GET['colony_id'] ?? 1);
     $viewPrefix = getColonyPrefix($pdo, $cid);
@@ -415,7 +418,7 @@ function handleCreate($pdo, $table, $pk, $observer) {
         if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data']) && isset($input['peng_num'])) {
             $input['peng_num'] = dbPengNum($pdo, $cid, $input['peng_num']);
         }
-        $newId = wwAuditedInsert($pdo, $table, $input, $observer['observer_id']);
+        $newId = wwAuditedInsert($pdo, $table, $input, $observer['observer_id'], $reason);
         // For penguins, use peng_num as the ID since it's not auto-increment
         $recordId = ($table === 'penguins' && isset($input['peng_num'])) ? $input['peng_num'] : $newId;
         $pdo->commit();
