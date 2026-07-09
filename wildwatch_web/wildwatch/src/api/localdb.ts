@@ -1126,7 +1126,10 @@ export function computeMissingNoScans(): { total: number; rows: any[] } {
     const noScan = o.no_scan || 0;
     const adultScans = adultPitsByObs[o.observation_id]?.size || 0;
     if (adults === adultScans + noScan) continue;
-    rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan });
+    // `missing` is negative when more adults are accounted for than were recorded — those
+    // rows are a different error, and adding a no-scan would make them worse.
+    rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan,
+      obsId: o.observation_id, notes: o.notes || '', missing: adults - adultScans - noScan });
   }
   rows.sort((a, b) => b.time.localeCompare(a.time));
   return { total: rows.length, rows };

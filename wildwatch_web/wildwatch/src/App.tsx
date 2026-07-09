@@ -3810,15 +3810,30 @@ function MissedScansReport() {
 
 const MISSING_NO_SCANS_TITLE = 'Missing no scans';
 
-function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
+function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time: string) => string; token: string }) {
   const TITLE = MISSING_NO_SCANS_TITLE;
   const navigate = useContext(CheckNavContext);
   const { total, rows } = useMissingNoScans();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
+  const [busyObs, setBusyObs] = useState<number | null>(null);
   const recentDay = rows[0]?.date;
   const shown = mode === 'all' ? rows
     : mode === 'day' ? rows.filter((r: any) => r.date === recentDay)
     : rows.slice(0, 3);
+
+  // One click = one no-scan marker. A row short by more than one needs a click per bird;
+  // that's deliberate, since each marker stands for a specific unscanned adult.
+  const addNoScan = async (r: any) => {
+    setBusyObs(r.obsId);
+    try {
+      await updateRecord(token, 'observations', r.obsId, { no_scan: r.noScan + 1 },
+        `Added no-scan from the "${TITLE}" report`);
+    } catch (e: any) {
+      alert(e?.message || 'Could not add a no-scan');
+    } finally {
+      setBusyObs(null);
+    }
+  };
   return (
     <div className="report-card" id={checkSlug(TITLE)} style={{ scrollMarginTop: 70 }}>
       <PinnableTitle title={TITLE} count={total} />
@@ -3830,7 +3845,7 @@ function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string
           ))}
         </div>
         <table className="guess-rank-table">
-          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th></tr></thead>
+          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>Scanned + no-scan</th><th>Notes</th><th></th></tr></thead>
           <tbody>
             {shown.map((r: any, i: number) => {
               const href = hrefFor(r.box, r.time);
@@ -3846,6 +3861,15 @@ function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string
                   <td>{link(<strong>{r.box}</strong>)}</td>
                   <td>{link(r.adults)}</td>
                   <td>{link(<>{r.adultScans + r.noScan} <span className="muted">({r.adultScans} scanned + {r.noScan} no-scan)</span></>)}</td>
+                  <td className="muted" title={r.notes || undefined}>{r.notes}</td>
+                  <td>
+                    {r.missing > 0 && (
+                      <button className="edit-btn" disabled={busyObs === r.obsId} onClick={() => addNoScan(r)}
+                        title={`Record an unscanned adult on this observation (short by ${r.missing})`}>
+                        {busyObs === r.obsId ? 'Adding…' : '+ No scan'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -7182,7 +7206,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
-        <MissingNoScansReport hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
+        <MissingNoScansReport token={token} hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
         <IntegrityCheck rows={iDupObs} errorType="duplicate_observations" title="Duplicate observations"
           desc="More than one observation for a box on the same day." empty="No duplicate observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'cnt', label: 'Count' }, { key: 'monitors', label: 'Monitors' }]} />
