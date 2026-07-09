@@ -10,35 +10,29 @@
         public string chipWindowFinish { get; set; }
         public int uncertaintyDays { get; set; }
 
-        // Next upcoming milestone for this box's current clutch, with the laid-date
-        // uncertainty (± days) appended. estHatchDate is blank once chicks are present.
+        // Next two upcoming milestones for this box's current clutch, with the laid-date
+        // uncertainty (± days) appended once. A milestone stays listed until it is past
+        // even at maximum uncertainty. estHatchDate is blank once chicks are present.
         public string breedingDateStatus()
         {
             try
             {
-                string status = null;
-                if (!string.IsNullOrEmpty(estHatchDate))
+                var parts = new List<string>();
+                void consider(string label, string dateStr, bool alwaysShow = false)
                 {
-                    DateTime estHatch = DateTime.Parse(estHatchDate);
-                    if (estHatch.AddDays(3) >= MainActivity.NzToday) status = "Hatch" + getDateString(estHatch);
+                    if (parts.Count >= 2 || string.IsNullOrEmpty(dateStr)) return;
+                    DateTime d = DateTime.Parse(dateStr);
+                    if (alwaysShow || d.AddDays(uncertaintyDays) >= MainActivity.NzToday)
+                        parts.Add(label + getDateString(d));
                 }
-                if (status == null && !string.IsNullOrEmpty(estPGDate))
-                {
-                    DateTime estPG = DateTime.Parse(estPGDate);
-                    if (estPG.AddDays(3) >= MainActivity.NzToday) status = "PG" + getDateString(estPG);
-                }
-                if (status == null && !string.IsNullOrEmpty(chipWindowStart))
-                {
-                    DateTime chipStart = DateTime.Parse(chipWindowStart);
-                    if (chipStart.AddDays(3) >= MainActivity.NzToday) status = "Chip" + getDateString(chipStart);
-                }
-                if (status == null && !string.IsNullOrEmpty(estFledgeDate))
-                {
-                    DateTime estFledge = DateTime.Parse(estFledgeDate);
-                    status = "Fledge" + getDateString(estFledge);
-                }
-                if (status == null) return "";
-                return status + (uncertaintyDays > 1 ? " ±" + uncertaintyDays + "d" : "");
+
+                consider("Hatch", estHatchDate);
+                consider("PG", estPGDate);
+                consider("Chip", chipWindowStart);
+                consider("Fledge", estFledgeDate, alwaysShow: parts.Count == 0);
+
+                if (parts.Count == 0) return "";
+                return string.Join(", ", parts) + (uncertaintyDays > 1 ? " ±" + uncertaintyDays + "d" : "");
             }
             catch { return ""; }
         }
@@ -59,7 +53,7 @@
             }
             if (expectedDate > today)
             {
-                return " " + Math.Ceiling((expectedDate - today).TotalDays) + " days";
+                return " in " + Math.Ceiling((expectedDate - today).TotalDays) + " days";
             }
             return " " + Math.Ceiling((today - expectedDate).TotalDays) + " days ago";
         }
