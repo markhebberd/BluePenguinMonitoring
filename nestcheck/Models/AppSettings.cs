@@ -25,10 +25,10 @@ namespace PenguinMonitor.Models
         {
             this.filesDir = filesDir;
         }
-        private string allBoxSetsString = "{1-150,AA-AC}";
+        private string allBoxSetsString = "";
         public string AllBoxSetsString
         {
-            get => string.IsNullOrWhiteSpace(allBoxSetsString) ? "{1-150,AA-AC}" : allBoxSetsString;
+            get => allBoxSetsString;
             set
             {
                 if (allBoxSetsString != value)

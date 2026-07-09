@@ -129,6 +129,7 @@ namespace PenguinMonitor
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
+        private TextView? _noColonyBanner;   // blocks data entry while no box sets string is loaded
         private ImageButton? _expandButton;
         private LinearLayout? _prevObsSummaryLayout;
         private TextView? _stickyNoteBelowPrev;   // sticky note shown under the expanded prev-obs card
@@ -542,6 +543,13 @@ namespace PenguinMonitor
         private void HandleEidData(string eidData)
         {
             var cleanEid = new String(eidData.Where(char.IsLetterOrDigit).ToArray());
+
+            // Paused: no colony/box list loaded — nothing may be recorded.
+            if (string.IsNullOrWhiteSpace(_appSettings.AllBoxSetsString))
+            {
+                Toast.MakeText(this, "⛔ No colony loaded — log in and sync first", ToastLength.Short)?.Show();
+                return;
+            }
 
             // Guard: only complete 15-char EIDs may be recorded. A partial read (e.g. the
             // scanner waking mid-transmission) would fail the LA9000250 box-tag prefix test
@@ -1618,6 +1626,20 @@ namespace PenguinMonitor
             _breedingDatesCard = _uiFactory.CreateCard();
             _breedingDatesCard.Visibility = ViewStates.Visible;
 
+            // Blocking banner: shown when no colony/box list is loaded — data entry pauses
+            // until login + sync deliver the colony's box sets string.
+            _noColonyBanner = new TextView(this)
+            {
+                Text = "⛔ No colony loaded\n\nLog in and sync to load your colony's boxes.\nData entry is paused until then.",
+                TextSize = 16,
+                Gravity = GravityFlags.Center,
+            };
+            _noColonyBanner.SetTextColor(UIFactory.DANGER_RED);
+            _noColonyBanner.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            _noColonyBanner.SetPadding(24, 48, 24, 48);
+            _noColonyBanner.Visibility = ViewStates.Gone;
+            parentLinearLayout.AddView(_noColonyBanner);
+
             parentLinearLayout.AddView(_singleBoxDataOuterLayout);
             parentLinearLayout.AddView(_multiBoxViewCard);
             parentLinearLayout.AddView(_breedingDatesCard);
@@ -1642,8 +1664,18 @@ namespace PenguinMonitor
             string setString;
             if (string.IsNullOrWhiteSpace(_appSettings.AllBoxSetsString))
             {
-                _appSettings.AllBoxSetsString = "{0-150,AA-AC}";
+                // No sets string (not logged in / colony not resolved yet): no boxes.
+                // Never invent another colony's boxes here.
                 _appSettings.BoxSetString = "All";
+            }
+            // A chosen subset from a previous colony must not survive a colony change
+            // (a stale PT "1-150" on Ngawhiti is how phantom boxes get created). The
+            // selected set must be one of the current colony's sets, else fall back to All.
+            if (!string.IsNullOrWhiteSpace(_appSettings.BoxSetString) && _appSettings.BoxSetString.ToLower() != "all")
+            {
+                var validSets = (_appSettings.AllBoxSetsString ?? "").Split(new string[] { "},{", "{", "}" }, StringSplitOptions.RemoveEmptyEntries);
+                if (!validSets.Contains(_appSettings.BoxSetString))
+                    _appSettings.BoxSetString = "All";
             }
             setString = string.IsNullOrWhiteSpace(_appSettings.BoxSetString) || _appSettings.BoxSetString.ToLower() == "all"
                 ? _appSettings.AllBoxSetsString : _appSettings.BoxSetString;
@@ -1704,6 +1736,15 @@ namespace PenguinMonitor
 
             if (_boxNamesAndIndexes.Count == 0)
                 _boxNamesAndIndexes.Add("fake", 1);
+
+            // Snap the current box into the (possibly rebuilt) list — a box carried over
+            // from another colony/set must not stay current, or scans and tag edits get
+            // recorded against a box this colony doesn't have.
+            if (!_boxNamesAndIndexes.ContainsKey(_currentBoxName))
+            {
+                _currentBoxName = _boxNamesAndIndexes.First().Key;
+                _currentBoxIndex = _boxNamesAndIndexes[_currentBoxName];
+            }
         }
 
         /// <summary>
@@ -3505,6 +3546,23 @@ namespace PenguinMonitor
                         _pendingScanQueueFrozen = false;
                         NavigateToPendingBox(pending!);
                     }
+
+                    // Pause gate: with no box sets string (colony not resolved) data entry is
+                    // blocked outright — never show another colony's boxes. Settings stays
+                    // reachable for login/sync. Runs last so it wins over the per-mode logic above.
+                    bool noColony = string.IsNullOrWhiteSpace(_appSettings.AllBoxSetsString) && !_isHistoricalView;
+                    if (_noColonyBanner != null) _noColonyBanner.Visibility = noColony ? ViewStates.Visible : ViewStates.Gone;
+                    if (noColony)
+                    {
+                        if (_singleBoxDataOuterLayout != null) _singleBoxDataOuterLayout.Visibility = ViewStates.Gone;
+                        if (_multiBoxViewCard != null) _multiBoxViewCard.Visibility = ViewStates.Gone;
+                        if (_breedingDatesCard != null) _breedingDatesCard.Visibility = ViewStates.Gone;
+                        if (_tagModeContentLayout != null) _tagModeContentLayout.Visibility = ViewStates.Gone;
+                    }
+                    else if (_singleBoxDataOuterLayout != null)
+                    {
+                        _singleBoxDataOuterLayout.Visibility = ViewStates.Visible;
+                    }
                 });
         }
         private bool dataCardHasZeroData()
@@ -3836,7 +3894,7 @@ namespace PenguinMonitor
             if (_stickyNoteBelowPrev != null)
             {
                 bool hasSticky = _boxNotes.TryGetValue(_currentBoxName, out var sticky) && !string.IsNullOrWhiteSpace(sticky.PersistentNotes);
-                _stickyNoteBelowPrev.Text = hasSticky ? $"💡 {sticky!.PersistentNotes}" : "";
+                _stickyNoteBelowPrev.Text = hasSticky ? $"💡 {sticky!.PersistentNotes} 💡" : "";
                 _stickyNoteBelowPrev.Visibility = expanded && hasSticky ? ViewStates.Visible : ViewStates.Gone;
             }
 
@@ -4257,9 +4315,10 @@ namespace PenguinMonitor
 
             // Sticky box note shown BELOW the expanded prev-obs card (the top-row sticky bar
             // is hidden while expanded; the note itself doesn't belong inside the orange card).
-            _stickyNoteBelowPrev = new TextView(this) { TextSize = 12 };
+            _stickyNoteBelowPrev = new TextView(this) { TextSize = 12, Gravity = GravityFlags.Center };
             _stickyNoteBelowPrev.SetTextColor(UIFactory.PRIMARY_BLUE);
             _stickyNoteBelowPrev.SetPadding(12, 0, 12, 6);
+            _stickyNoteBelowPrev.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             _stickyNoteBelowPrev.Visibility = ViewStates.Gone;
             _stickyNoteBelowPrev.Click += (s, e) => { if (!_isBoxLocked) ShowBoxNotesDialog(); };
             _singleBoxDataOuterLayout.AddView(_stickyNoteBelowPrev);
@@ -4906,9 +4965,24 @@ namespace PenguinMonitor
             {
                 scanLayout.Background = _uiFactory.CreateRoundedBackground(SCAN_CHIPPED_TODAY_BG, 4);
                 scanLayout.SetPadding(12, 8, 12, 8);
+                scanLayout.SetGravity(GravityFlags.CenterVertical);
                 var noScanText = new TextView(this) { Text = "🐧 No scan", TextSize = 14 };
                 noScanText.SetTextColor(Color.Black);
+                noScanText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
                 scanLayout.AddView(noScanText);
+
+                // Same Delete as a known-penguin row (no-scans were otherwise undeletable)
+                var noScanDelete = new Button(this) { Text = "Delete", TextSize = 12 };
+                noScanDelete.SetTextColor(Color.White);
+                noScanDelete.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                noScanDelete.SetPadding(12, 8, 12, 8);
+                noScanDelete.Background = _uiFactory.CreateRoundedBackground(UIFactory.DANGER_RED, 8);
+                noScanDelete.SetAllCaps(false);
+                var noScanDeleteParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                noScanDeleteParams.SetMargins(4, 0, 0, 0);
+                noScanDelete.LayoutParameters = noScanDeleteParams;
+                noScanDelete.Click += (sender, e) => OnDeleteScanClick(scan);
+                scanLayout.AddView(noScanDelete);
                 return scanLayout;
             }
 
@@ -5671,9 +5745,11 @@ namespace PenguinMonitor
 
         private void OnDeleteScanClick(ScanRecord scanToDelete)
         {
+            bool isNoScan = scanToDelete.BirdId.StartsWith("NOSCAN_");
             ShowConfirmationDialog(
-                "Delete Bird Scan",
-                $"Are you sure you want to delete the scan for bird {scanToDelete.BirdId}?",
+                isNoScan ? "Delete No-Scan" : "Delete Bird Scan",
+                isNoScan ? "Delete this 'No scan' adult? The adult count will go down by 1."
+                         : $"Are you sure you want to delete the scan for bird {scanToDelete.BirdId}?",
                 ("Yes, Delete", () =>
                 {
                     if ((_colonyState.GetTodayForBox(_currentBoxName) != null))
@@ -5686,20 +5762,26 @@ namespace PenguinMonitor
                         if (scanToRemove != null)
                         {
                             boxData.ScannedIds.Remove(scanToRemove);
-                            if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData) && (
+                            if (isNoScan)
+                            {
+                                // Mirror the +1 Adult applied when the no-scan was added
+                                _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                            }
+                            else if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData) && (
                                 LifeStage.Adult == penguinData.LastKnownLifeStage ||
                                 LifeStage.Returnee == penguinData.LastKnownLifeStage ||
                                 NzNow > penguinData.ChipDate.AddMonths(3)))
                             {
                                 _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
                             }
-                            else if (penguinData != null && LifeStage.Chick == penguinData.LastKnownLifeStage)
+                            else if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinChick) && LifeStage.Chick == penguinChick.LastKnownLifeStage)
                             {
                                 _chicksEditText[0].Text = "" + Math.Max(0, int.Parse(_chicksEditText[0].Text ?? "0") - 1);
                             }
                             SaveCurrentBoxData();
                             buildScannedIdsLayout(boxData.ScannedIds);
-                            Toast.MakeText(this, $"🗑️ Bird {scanToDelete.BirdId} deleted from Box {_currentBoxName}", ToastLength.Short)?.Show();
+                            Toast.MakeText(this, isNoScan ? $"🗑️ No-scan adult removed from Box {_currentBoxName} (-1 adult)"
+                                                          : $"🗑️ Bird {scanToDelete.BirdId} deleted from Box {_currentBoxName}", ToastLength.Short)?.Show();
                             DrawPageLayouts();
                         }
                     }

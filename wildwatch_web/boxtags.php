@@ -77,6 +77,43 @@ function auditBoxTag($pdo, $action, $boxId, $changed) {
         ->execute([$boxId, $action, $observerId, json_encode($changed)]);
 }
 
+/**
+ * True if $boxId fits the colony's location_sets_string. Understands both formats
+ * in use — "{1-150,AA-AC}" (braced, multiple sets) and bare "N1-N6" — with parts
+ * that are numeric ranges (1-150), prefixed-numeric ranges (N1-N6), same-length
+ * alpha ranges (AA-AC), or single names. An empty/unset sets string fails open
+ * (an unconfigured colony must not lose tag saves).
+ */
+function boxFitsColonySets($pdo, $colonyId, $boxId) {
+    $stmt = $pdo->prepare("SELECT location_sets_string FROM colonies WHERE colony_id = ?");
+    $stmt->execute([$colonyId]);
+    $sets = trim((string)$stmt->fetchColumn());
+    if ($sets === '') return true;
+    $box = strtoupper(trim($boxId));
+    foreach (preg_split('/\},\{|\{|\}/', $sets, -1, PREG_SPLIT_NO_EMPTY) as $set) {
+        foreach (explode(',', $set) as $part) {
+            $part = strtoupper(trim($part));
+            if ($part === '') continue;
+            if (strpos($part, '-') !== false) {
+                [$a, $b] = array_map('trim', explode('-', $part, 2));
+                if (ctype_digit($a) && ctype_digit($b)) {                       // 1-150
+                    if (ctype_digit($box) && (int)$box >= (int)$a && (int)$box <= (int)$b) return true;
+                } elseif (preg_match('/^([A-Z]+)(\d+)$/', $a, $ma) && preg_match('/^([A-Z]+)(\d+)$/', $b, $mb)
+                          && $ma[1] === $mb[1]) {                               // N1-N6
+                    if (preg_match('/^([A-Z]+)(\d+)$/', $box, $mx) && $mx[1] === $ma[1]
+                        && (int)$mx[2] >= (int)$ma[2] && (int)$mx[2] <= (int)$mb[2]) return true;
+                } elseif (ctype_alpha($a) && ctype_alpha($b) && strlen($a) === strlen($b)) { // AA-AC
+                    if (ctype_alpha($box) && strlen($box) === strlen($a)
+                        && strcmp($box, $a) >= 0 && strcmp($box, $b) <= 0) return true;
+                }
+            } elseif ($part === $box) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 function handlePost($pdo, $colonyId) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'Invalid JSON body']); return; }
@@ -85,6 +122,14 @@ function handlePost($pdo, $colonyId) {
     $tagNumber = $input['TagNumber'] ?? $input['tag_number'] ?? null;
     if ($tagNumber === '') $tagNumber = null;
     if (!$boxId) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'BoxID is required']); return; }
+
+    // Reject box names outside the colony's configured sets — a stale-colony or mistyped
+    // box must not silently create a phantom location (see the accidental Ngawhiti "box 1").
+    if (!boxFitsColonySets($pdo, $colonyId, $boxId)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => "Box '$boxId' is not in this colony's box sets"]);
+        return;
+    }
 
     $scanTime = date('Y-m-d H:i:s', strtotime($input['ScanTimeUTC'] ?? $input['scan_time_utc'] ?? 'now'));
     $latitude = $input['Latitude'] ?? $input['latitude'] ?? null;
