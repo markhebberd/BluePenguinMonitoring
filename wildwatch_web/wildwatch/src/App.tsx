@@ -8464,26 +8464,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       )}
 
       {!selectedBox && (
-        <div className="overview-row">
-          {/* Left third: map, sitting under the calendar */}
-          <div className="overview-left">
+        <>
+          <div className="top-row">
             <ColonyMap boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} />
-          </div>
-          {/* Right two-thirds: colony stats with the nest-box cards flex-wrapping around it */}
-          <div className="overview-right">
             <StatsPanel boxTags={boxTags} selectedBox={selectedBox} stats={stats} />
-            <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
           </div>
-        </div>
+        </>
       )}
 
       <div className={selectedBox ? 'split-view' : ''}>
-        {/* Box grid in sidebar when a box is open; on the overview it lives in overview-right above */}
-        {selectedBox && (
-        <div className="grid-sidebar">
+        {/* Box grid - always visible */}
+        <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
           <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
         </div>
-        )}
 
         {/* Box detail */}
         {selectedBox && (
