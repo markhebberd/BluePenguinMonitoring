@@ -794,7 +794,11 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!clutchActive(clutch) || clutch.laid === null) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
   const t = (off: number) => clutch.laid! + off * DAY;
+  // laid estimates the first egg; the second is laid ~2 days later. Little penguins
+  // almost always lay 2, so show both unless only a single egg was ever recorded.
+  const twoEggs = (clutch.maxEggs || 2) >= 2;
   const parts = [
+    { text: twoEggs ? `Laid ${d(0)} & ${d(2)}` : `Laid ${d(0)}`, t: t(0) },
     ...(clutch.maxChicks === 0 ? [{ text: `Hatch ${d(BREEDING_OFFSETS.hatch)}`, t: t(BREEDING_OFFSETS.hatch) }] : []),
     { text: `Guard ends ${d(BREEDING_OFFSETS.pg)}`, t: t(BREEDING_OFFSETS.pg) },
     { text: `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.chip) },
