@@ -1247,12 +1247,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                   ))}
                 </span>
-                <span className="clutch-meta">
-                  <ClutchPredictions clutch={clutch} />
-                  <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
-                    title="Go to where the egg/chick was first detected"
-                    onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
-                </span>
+                <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
+                  title="Go to where the egg/chick was first detected"
+                  onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
+                <ClutchPredictions clutch={clutch} />
               </div>
               {inNest.length > 0 && (
                 <div className="clutch-visitors"><span className="visitors-lbl">Also in nest</span><span className="visitors-list">{inNest.map(x => birdWithCount(x.b, x.n))}</span></div>
@@ -2178,12 +2176,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 ))}
                               </>}
                             </span>
-                            <span className="clutch-meta">
-                              <ClutchPredictions clutch={c} />
-                              <span className={`clutch-dates${c.startObsTime ? ' clickable' : ''}`}
-                                title="Go to where the eggs/chicks first appeared"
-                                onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>{windowRange(c)}</span>
-                            </span>
+                            <span className={`clutch-dates${c.startObsTime ? ' clickable' : ''}`}
+                              title="Go to where the eggs/chicks first appeared"
+                              onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>{windowRange(c)}</span>
+                            <ClutchPredictions clutch={c} />
                           </div>
                         </div>
                       );

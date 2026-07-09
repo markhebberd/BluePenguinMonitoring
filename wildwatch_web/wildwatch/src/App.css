@@ -414,6 +414,10 @@ h3.collapsible:hover { color:#1a5276; }
 .breeding-pair .clutch-predictions { flex-basis:100%; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */
 .breeding-pair .offspring-final, .clutch-birds .offspring-final { display:inline-flex; align-items:center; font-size:16px; position:relative; }
+/* Bird minis are a column (pill over its Nx count); egg/chick icons and the "Unchipped"
+   tag have no count line, so offset them by the count-line height to center against the
+   pills instead of the taller pill+count column. */
+.clutch-birds .offspring-final, .clutch-birds .offspring-fledged { margin-bottom:13px; }
 .obs-section-head { font-size:15px; color:#1a5276; font-weight:600; margin:16px 0 8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
 .obs-section-head:first-child { margin-top:0; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
@@ -463,11 +467,10 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-box-row .clutch-label { margin-bottom:0; }
 .clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
 .clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; }
-/* Predictions/dates sit on their own full-width row under the birds: prediction text
-   left-aligned, breeding-window dates pinned right. */
-.clutch-meta { flex-basis:100%; display:flex; align-items:baseline; gap:4px 10px; }
-.clutch-meta .clutch-predictions { flex:1 1 auto; min-width:0; text-align:left; }
-.clutch-meta .clutch-dates { margin:0 0 0 auto; flex:0 0 auto; white-space:nowrap; }
+/* Window dates flow on the birds' row, pinned right, wrapping to their own line only
+   when they don't fit. Predictions (active clutches) take a full-width row below, left-aligned. */
+.clutch-body > .clutch-dates { margin-left:auto; align-self:center; white-space:nowrap; }
+.clutch-body > .clutch-predictions { flex-basis:100%; text-align:left; }
 .season-visitors { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding-left:2px; }
 .season-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
 .season-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; align-items:flex-start; }
