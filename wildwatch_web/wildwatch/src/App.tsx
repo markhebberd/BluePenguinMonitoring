@@ -6809,6 +6809,46 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                   </div>
                 </details>
               )}
+              {(() => {
+                // Preview the actual observations that will be written, grouped by date —
+                // same box + counts + status + bird-mini look as the colony day view.
+                const ok = (jsonAnalysis.rows || []).filter((r: any) => r.status === 'ok');
+                const byDate = new Map<string, any[]>();
+                for (const r of ok) { const d = r.date || '?'; if (!byDate.has(d)) byDate.set(d, []); byDate.get(d)!.push(r); }
+                const dates = Array.from(byDate.keys()).sort();
+                if (!dates.length) return null;
+                return (
+                  <details style={{ marginTop: 8 }} open>
+                    <summary style={{ cursor: 'pointer', fontSize: 13 }}>Preview {ok.length} observation(s) to import</summary>
+                    <div style={{ marginTop: 6, maxHeight: 380, overflow: 'auto' }}>
+                      {dates.map(d => (
+                        <div key={d} style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#1a5276', marginBottom: 4 }}>{formatDate(d)} · {byDate.get(d)!.length} box(es)</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {byDate.get(d)!.map((r: any, i: number) => (
+                              <div key={i} className="obs-card" style={{ minWidth: 150, flex: '0 0 auto', padding: '6px 8px' }}>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+                                  <b>Box {r.box}</b>
+                                  <span>{'🐧'.repeat(Math.min(r.adults, 6))}{'🥚'.repeat(Math.min(r.eggs, 6))}{'🐣'.repeat(Math.min(r.chicks, 6))}</span>
+                                  {r.breeding_status && <span className="badge" style={{ background: STATUS_COLORS[r.breeding_status] || '#ccc', color: '#333' }}>{r.breeding_status}</span>}
+                                  {r.gate_status && <span className="gate">{r.gate_status}</span>}
+                                </div>
+                                {r.scans?.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                    {r.scans.map((s: any, j: number) => <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setAdminBird(String(s.peng_num))} />)}
+                                  </div>
+                                )}
+                                {r.notes && <div className="muted" style={{ fontSize: 11, fontStyle: 'italic', marginTop: 3 }}>"{r.notes}"</div>}
+                                {r.unmatched?.length > 0 && <div style={{ fontSize: 11, color: '#c0392b', marginTop: 3 }}>{r.unmatched.length} unresolved: {r.unmatched.join(', ')}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })()}
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
                 <button className="action-btn" disabled={!canImport}
                   style={{ background: canImport ? '#1a7a1a' : undefined, color: canImport ? '#fff' : undefined }}

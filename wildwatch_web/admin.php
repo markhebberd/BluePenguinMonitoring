@@ -1437,13 +1437,17 @@ function ww_parseImportJson($pdo, $jsonText, $colonyId, $observerId, $filename) 
     $lstmt->execute([$colonyId]);
     foreach ($lstmt->fetchAll() as $l) $locLookup[strtoupper($l['location_name'])] = (int)$l['location_id'];
 
-    // Chip resolution scoped to this colony: last-8 of pit_id => active (else first) pit_id.
+    // Chip resolution scoped to this colony: last-8 of pit_id => the bird (active pit preferred).
+    // Carries peng_num/sex/chick_size so the preview can render the same bird minis as the day view.
     $chipMap = [];
-    $chstmt = $pdo->prepare("SELECT pc.pit_id, pc.is_active FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE p.colony_id = ?");
+    $chstmt = $pdo->prepare("SELECT pc.pit_id, pc.is_active, pc.peng_num, p.sex, p.chick_size_code FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE p.colony_id = ?");
     $chstmt->execute([$colonyId]);
     foreach ($chstmt->fetchAll() as $c) {
         $k = ww_chipKey($c['pit_id']);
-        if (!isset($chipMap[$k]) || !empty($c['is_active'])) $chipMap[$k] = $c['pit_id'];
+        if (!isset($chipMap[$k]) || !empty($c['is_active'])) $chipMap[$k] = [
+            'pit_id' => $c['pit_id'], 'peng_num' => $c['peng_num'],
+            'sex' => $c['sex'], 'chick_size_code' => $c['chick_size_code'],
+        ];
     }
 
     $nz = new DateTimeZone('Pacific/Auckland');
@@ -1647,8 +1651,8 @@ if ($action === 'import_json_commit') {
                 'monitor_filename' => $row['monitor_filename'],
             ], $observerId);
             $imported++;
-            foreach ($row['scans'] as $pit) {
-                wwAuditedInsert($pdo, 'penguin_scans', ['observation_id' => $obsId, 'pit_id' => $pit, 'scan_time_utc' => $row['obs_time']], $observerId);
+            foreach ($row['scans'] as $sc) {
+                wwAuditedInsert($pdo, 'penguin_scans', ['observation_id' => $obsId, 'pit_id' => $sc['pit_id'], 'scan_time_utc' => $row['obs_time']], $observerId);
                 $scans++;
             }
         }
