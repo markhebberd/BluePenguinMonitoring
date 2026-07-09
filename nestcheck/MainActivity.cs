@@ -134,6 +134,8 @@ namespace PenguinMonitor
         private TextView? _todayMiniView;
         private TextView? _prevObsHeaderText;
         private LinearLayout? _prevObsDetailLayout;
+        // Which box the expanded previous-obs detail belongs to — auto-collapses on box change.
+        private string _prevObsExpandedForBox = "";
         private LinearLayout? _tagModeContentLayout;
         private TextView? _tagModeInstructionText;
         private LinearLayout? _tagModeTodayCard;
@@ -3786,6 +3788,15 @@ namespace PenguinMonitor
 
             bool expanded = _prevObsDetailLayout.Visibility == ViewStates.Visible;
 
+            // Collapse the expanded detail when the box has changed — the expansion belonged
+            // to the previous box, not this one.
+            if (expanded && _prevObsExpandedForBox != _currentBoxName)
+            {
+                _prevObsDetailLayout.Visibility = ViewStates.Gone;
+                _prevObsSummaryLayout.Visibility = ViewStates.Gone;
+                expanded = false;
+            }
+
             // Hide compact badge when expanded
             _prevObsHeaderText.Text = compact;
             _prevObsHeaderText.Visibility = expanded ? ViewStates.Gone : ViewStates.Visible;
@@ -4159,6 +4170,7 @@ namespace PenguinMonitor
             _prevObsHeaderText.Click += (s, e) =>
             {
                 // Expand: show full-width detail below
+                _prevObsExpandedForBox = _currentBoxName;
                 _prevObsDetailLayout.Visibility = ViewStates.Visible;
                 _prevObsSummaryLayout.Visibility = ViewStates.Visible;
                 UpdatePreviousObsSummary();
