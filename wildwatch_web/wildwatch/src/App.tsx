@@ -553,7 +553,7 @@ function setSelectedPengMinis(keys: (string | null | undefined)[]) {
   if (!selectedPengStyle) selectedPengStyle = document.head.appendChild(document.createElement('style'));
   selectedPengStyle.textContent = ks.length === 0 ? '' :
     ks.map(k => `.scan[data-peng="${CSS.escape(k)}"]`).join(', ') +
-    ' { position: relative; top: -1px; box-shadow: 1px 2px 3px rgba(0,0,0,.4); }';
+    ' { position: relative; top: -2px; box-shadow: 2px 3px 5px rgba(0,0,0,.5); }';
 }
 
 function PenguinMini({ scan, onClick, observationDate, navigateDirectly, currentStatus, title }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean; currentStatus?: boolean; title?: string }) {
