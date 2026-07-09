@@ -6135,6 +6135,16 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
   const [impResult, setImpResult] = useState<any>(null);
   const [impError, setImpError] = useState('');
   const [impRowFilter, setImpRowFilter] = useState<'issues' | 'all'>('issues');
+
+  // --- Old NestCheck monitor JSON import (v37-era penguin_monitors.json) ---
+  const [jsonFile, setJsonFile] = useState('');
+  const [jsonText, setJsonText] = useState('');
+  const [jsonColony, setJsonColony] = useState<number>(getColonyId());
+  const [jsonAnalysis, setJsonAnalysis] = useState<any>(null);
+  const [jsonAnalyzing, setJsonAnalyzing] = useState(false);
+  const [jsonCommitting, setJsonCommitting] = useState(false);
+  const [jsonResult, setJsonResult] = useState<any>(null);
+  const [jsonError, setJsonError] = useState('');
   // Bird panel docked on the right of the admin screen (opened from #peng cells / import minis).
   const [adminBird, setAdminBird] = useState<string|null>(null);
   const adminBirdData = useBirdDetail(adminBird);
@@ -6201,6 +6211,45 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
       if (impColony === getColonyId()) triggerSync();
     } catch (e: any) { setImpError(e.message || 'Import failed'); }
     setImpCommitting(false);
+  };
+
+  // Old NestCheck monitor JSON import — same analyze -> confirm -> commit shape as the CSV flow.
+  const jsonReset = () => { setJsonAnalysis(null); setJsonResult(null); setJsonError(''); };
+  const jsonAnalyze = async (text = jsonText, filename = jsonFile, colony = jsonColony) => {
+    if (!text.trim()) { setJsonError('Choose a JSON file first'); return; }
+    setJsonAnalyzing(true); setJsonError(''); setJsonResult(null); setJsonAnalysis(null);
+    try {
+      const r = await fetch('/api/admin.php?action=import_json_analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ json: text, filename, colony_id: colony }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+      setJsonAnalysis(d);
+    } catch (e: any) { setJsonError(e.message || 'Analysis failed'); }
+    setJsonAnalyzing(false);
+  };
+  const jsonPickFile = async (f: File | null) => {
+    jsonReset();
+    if (!f) { setJsonFile(''); setJsonText(''); return; }
+    const text = await f.text();
+    setJsonFile(f.name); setJsonText(text);
+    jsonAnalyze(text, f.name, jsonColony);
+  };
+  const jsonCommit = async () => {
+    if (!jsonAnalysis || jsonCommitting) return;
+    setJsonCommitting(true); setJsonError('');
+    try {
+      const r = await fetch('/api/admin.php?action=import_json_commit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ json: jsonText, filename: jsonFile, colony_id: jsonColony }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+      setJsonResult(d); setJsonAnalysis(null);
+      if (jsonColony === getColonyId()) triggerSync();
+    } catch (e: any) { setJsonError(e.message || 'Import failed'); }
+    setJsonCommitting(false);
   };
 
   // Read-only DB browser + SQL console. Available to all admins (enforced server-side too).
@@ -6664,6 +6713,109 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
                 <button className="action-btn" disabled={impCommitting} onClick={impReset}>Cancel</button>
                 {t.error_rows > 0 && <span className="muted" style={{ fontSize: 12 }}>{t.error_rows} error row(s) will be skipped.</span>}
                 {conflictCount > 0 && !impConflicts && <span className="muted" style={{ fontSize: 12 }}>{conflictCount} conflicting row(s) will be skipped.</span>}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <h3>Import old NestCheck monitor JSON</h3>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Accepts the legacy <code>penguin_monitors.json</code> export from NestCheck v37 (an array of monitor
+          records, each a <code>BoxData</code> map of box → <code>Adults/Eggs/Chicks/BreedingChance/GateStatus/Notes/ScannedIds</code>).
+          Each box becomes one observation; scans resolve by last-8 chip match within the chosen colony (box tags dropped,
+          unmatched chips reported). Deleted monitors and boxes already having an observation that NZ day are skipped.
+          Nothing is written until you confirm.
+        </p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <label style={{ fontSize: 13 }}>Colony:{' '}
+            <select value={jsonColony} onChange={e => { const cid = Number(e.target.value); setJsonColony(cid); if (jsonText) jsonAnalyze(jsonText, jsonFile, cid); else jsonReset(); }}>
+              {colonies.length === 0 && <option value={jsonColony}>Colony {jsonColony}</option>}
+              {colonies.map((c: any) => (
+                <option key={c.colony_id} value={c.colony_id}>{c.region_name} · {c.colony_name}</option>
+              ))}
+            </select>
+          </label>
+          <input type="file" accept=".json,application/json" onChange={e => jsonPickFile(e.target.files?.[0] ?? null)} />
+          {jsonAnalyzing && <span className="muted" style={{ fontSize: 12 }}>Analyzing…</span>}
+          {jsonFile && !jsonAnalyzing && <span className="muted" style={{ fontSize: 12 }}>{jsonFile}</span>}
+        </div>
+
+        {jsonError && <p style={{ color: '#c0392b', fontSize: 13, whiteSpace: 'pre-wrap' }}>{jsonError}</p>}
+
+        {jsonResult && (
+          <div style={{ border: '1px solid #b7e0b7', background: '#f2fbf2', borderRadius: 6, padding: 12, fontSize: 13 }}>
+            <strong>✓ Imported into {jsonResult.colony_name}.</strong>{' '}
+            {jsonResult.imported} observation(s), {jsonResult.scans} scan(s) written.
+            {jsonResult.skipped_duplicates > 0 && <> {jsonResult.skipped_duplicates} duplicate(s) skipped.</>}
+            {jsonResult.skipped_errors > 0 && <> {jsonResult.skipped_errors} error row(s) skipped.</>}
+            {jsonResult.unmatched_chips?.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <span className="muted">Unmatched chips (no scan written): </span>
+                {jsonResult.unmatched_chips.map((u: any) => `${u.chip}×${u.count}`).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+
+        {jsonAnalysis && (() => {
+          const t = jsonAnalysis.totals;
+          const tiles: [string, any, string?][] = [
+            ['Monitors', t.monitors], ['Observations', t.observations], ['Will import', t.importable, '#1a7a1a'],
+            ['Duplicates (skip)', t.duplicates, t.duplicates ? '#b8860b' : undefined],
+            ['Errors (skip)', t.error_rows, t.error_rows ? '#c0392b' : undefined],
+            ['Adults', t.adults], ['Eggs', t.eggs], ['Chicks', t.chicks],
+            ['Scans matched', t.scans_matched, '#1a7a1a'],
+            ['Chips unresolved', t.scans_unmatched, t.scans_unmatched ? '#c0392b' : undefined],
+            ['Box tags dropped', t.box_tags_skipped],
+          ];
+          const canImport = t.importable > 0 && !jsonCommitting;
+          const problems = (jsonAnalysis.rows || []).filter((r: any) => r.status !== 'ok');
+          return (
+            <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
+              <div style={{ fontSize: 13, marginBottom: 8 }}>
+                <strong>{jsonAnalysis.filename}</strong> → {jsonAnalysis.colony_name}
+                {jsonAnalysis.date_min && <span className="muted"> · {jsonAnalysis.date_min}{jsonAnalysis.date_max !== jsonAnalysis.date_min ? ` – ${jsonAnalysis.date_max}` : ''}</span>}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                {tiles.map(([label, val, color]) => (
+                  <div key={label} style={{ border: '1px solid #eee', borderRadius: 4, padding: '6px 10px', minWidth: 78 }}>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: color || '#222' }}>{val}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              {jsonAnalysis.unknown_boxes?.length > 0 && (
+                <p style={{ color: '#c0392b', fontSize: 13 }}>
+                  <strong>Unknown boxes</strong> (rows skipped — not locations in this colony): {jsonAnalysis.unknown_boxes.join(', ')}
+                </p>
+              )}
+              {jsonAnalysis.unmatched_chips?.length > 0 && (
+                <details style={{ marginBottom: 8 }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13 }}>{jsonAnalysis.unmatched_chips.length} unresolved chip(s)</summary>
+                  <div style={{ fontSize: 12, marginTop: 6, maxHeight: 120, overflow: 'auto' }}>
+                    {jsonAnalysis.unmatched_chips.map((u: any) => `${u.chip}×${u.count}`).join(', ')}
+                  </div>
+                </details>
+              )}
+              {problems.length > 0 && (
+                <details style={{ marginBottom: 8 }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13 }}>{problems.length} skipped row(s)</summary>
+                  <div style={{ fontSize: 12, marginTop: 6, maxHeight: 160, overflow: 'auto' }}>
+                    {problems.map((r: any, i: number) => (
+                      <div key={i}>Box {r.box} {r.date || '?'} — <span style={{ color: r.status === 'error' ? '#c0392b' : '#b8860b' }}>{r.error || r.status}</span></div>
+                    ))}
+                  </div>
+                </details>
+              )}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+                <button className="action-btn" disabled={!canImport}
+                  style={{ background: canImport ? '#1a7a1a' : undefined, color: canImport ? '#fff' : undefined }}
+                  onClick={jsonCommit}>
+                  {jsonCommitting ? 'Importing…' : `Confirm import of ${t.importable} observation(s)`}
+                </button>
+                <button className="action-btn" disabled={jsonCommitting} onClick={jsonReset}>Cancel</button>
               </div>
             </div>
           );

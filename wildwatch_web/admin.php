@@ -1400,6 +1400,145 @@ function ww_parseImportCsv($pdo, $csv, $colonyId, $observerId, $filename) {
 }
 
 // Read {csv, filename, colony_id} from the request body.
+// Parse an OLD NestCheck (v37-era) monitor JSON export into a preview structure the same
+// analyze/commit flow can consume. The file is a JSON array (or single object) of MonitorDetails:
+//   { IsDeleted, LastSaved, filename, BoxData: { "<box>": {
+//        ScannedIds:[{BirdId,Timestamp,...}], Adults, Eggs, Chicks, GateStatus, Notes,
+//        whenDataCollectedUtc, BreedingChance } } }
+// Each box entry becomes one observation; scans resolve by last-8 chip match, colony-scoped.
+function ww_parseImportJson($pdo, $jsonText, $colonyId, $observerId, $filename) {
+    $R = [
+        'ok' => true, 'error' => null,
+        'colony_id' => $colonyId, 'colony_name' => null, 'filename' => $filename,
+        'rows' => [], 'unmatched_chips' => [], 'unknown_boxes' => [],
+        'date_min' => null, 'date_max' => null,
+        'totals' => [
+            'monitors' => 0, 'observations' => 0, 'importable' => 0, 'duplicates' => 0, 'error_rows' => 0,
+            'boxes' => 0, 'adults' => 0, 'eggs' => 0, 'chicks' => 0,
+            'scans_matched' => 0, 'scans_unmatched' => 0, 'box_tags_skipped' => 0,
+        ],
+    ];
+
+    $cstmt = $pdo->prepare("SELECT colony_name FROM colonies WHERE colony_id = ?");
+    $cstmt->execute([$colonyId]);
+    $colonyName = $cstmt->fetchColumn();
+    if ($colonyName === false) { $R['ok'] = false; $R['error'] = "Colony $colonyId not found"; return $R; }
+    $R['colony_name'] = $colonyName;
+
+    $data = json_decode($jsonText, true);
+    if (!is_array($data)) { $R['ok'] = false; $R['error'] = 'Not valid JSON'; return $R; }
+    if (isset($data['BoxData']) || isset($data['filename'])) $data = [$data]; // single monitor object
+    $monitors = array_values(array_filter($data, function ($m) { return is_array($m) && isset($m['BoxData']); }));
+    if (!$monitors) { $R['ok'] = false; $R['error'] = 'No monitor records found (expected objects with a "BoxData" map)'; return $R; }
+
+    // Colony locations: UPPER(name) => location_id.
+    $locLookup = [];
+    $lstmt = $pdo->prepare("SELECT location_id, location_name FROM observation_locations WHERE colony_id = ?");
+    $lstmt->execute([$colonyId]);
+    foreach ($lstmt->fetchAll() as $l) $locLookup[strtoupper($l['location_name'])] = (int)$l['location_id'];
+
+    // Chip resolution scoped to this colony: last-8 of pit_id => active (else first) pit_id.
+    $chipMap = [];
+    $chstmt = $pdo->prepare("SELECT pc.pit_id, pc.is_active FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE p.colony_id = ?");
+    $chstmt->execute([$colonyId]);
+    foreach ($chstmt->fetchAll() as $c) {
+        $k = ww_chipKey($c['pit_id']);
+        if (!isset($chipMap[$k]) || !empty($c['is_active'])) $chipMap[$k] = $c['pit_id'];
+    }
+
+    $nz = new DateTimeZone('Pacific/Auckland');
+    $utc = new DateTimeZone('UTC');
+    $unmatched = []; $unknownBoxes = []; $seen = [];
+    $dupStmt = $pdo->prepare("SELECT 1 FROM observations WHERE location_id = ? AND observation_time_utc >= ? AND observation_time_utc < ? LIMIT 1");
+
+    foreach ($monitors as $monitor) {
+        if (!empty($monitor['IsDeleted'])) continue;
+        $R['totals']['monitors']++;
+        $mfile = basename((string)($monitor['filename'] ?? $filename));
+        $lastSaved = $monitor['LastSaved'] ?? null;
+        foreach (($monitor['BoxData'] ?? []) as $boxName => $bd) {
+            if (!is_array($bd)) continue;
+            $R['totals']['observations']++; $R['totals']['boxes']++;
+            $boxKey = strtoupper(trim((string)$boxName));
+            $locId = $locLookup[$boxKey] ?? null;
+
+            $raw = $bd['whenDataCollectedUtc'] ?? $lastSaved ?? null;
+            $ts = $raw ? strtotime((string)$raw) : false;
+            $obsTime = $ts !== false ? gmdate('Y-m-d H:i:s', $ts) : null;
+            $nzDay = null;
+            if ($ts !== false) { $dt = new DateTime('@' . $ts); $dt->setTimezone($nz); $nzDay = $dt->format('Y-m-d'); }
+
+            $adults = (int)($bd['Adults'] ?? 0);
+            $eggs = (int)($bd['Eggs'] ?? 0);
+            $chicks = (int)($bd['Chicks'] ?? 0);
+            $breeding = trim((string)($bd['BreedingChance'] ?? '')); $breeding = $breeding === '' ? null : $breeding;
+            $gate = trim((string)($bd['GateStatus'] ?? '')); $gate = $gate === '' ? null : $gate;
+            $notes = (string)($bd['Notes'] ?? '');
+
+            // Resolve scans. Box tags (short-8 starts "9130", or the LA9000250 marker) are dropped.
+            $scans = []; $rowUnmatched = []; $boxTags = 0;
+            foreach (($bd['ScannedIds'] ?? []) as $sc) {
+                $bird = (string)($sc['BirdId'] ?? '');
+                if ($bird === '') continue;
+                $clean = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $bird));
+                $short8 = strlen($clean) >= 8 ? substr($clean, -8) : $clean;
+                if (substr($short8, 0, 4) === '9130' || strpos($bird, 'LA9000250') !== false) { $boxTags++; continue; }
+                if (isset($chipMap[$short8])) $scans[] = $chipMap[$short8];
+                else { $rowUnmatched[] = $short8; $unmatched[$short8] = ($unmatched[$short8] ?? 0) + 1; }
+            }
+            $R['totals']['scans_matched'] += count($scans);
+            $R['totals']['scans_unmatched'] += count($rowUnmatched);
+            $R['totals']['box_tags_skipped'] += $boxTags;
+
+            $status = 'ok'; $error = null;
+            if ($locId === null) { $status = 'error'; $error = 'Unknown box'; if (!in_array($boxKey, $unknownBoxes, true)) $unknownBoxes[] = $boxKey; }
+            elseif ($obsTime === null) { $status = 'error'; $error = 'Unreadable date'; }
+            else {
+                $sk = $locId . '|' . $nzDay;
+                if (isset($seen[$sk])) $status = 'duplicate';
+                else {
+                    $startUtc = (new DateTime($nzDay . ' 00:00:00', $nz))->setTimezone($utc)->format('Y-m-d H:i:s');
+                    $endUtc = (new DateTime($nzDay . ' 00:00:00', $nz))->modify('+1 day')->setTimezone($utc)->format('Y-m-d H:i:s');
+                    $dupStmt->execute([$locId, $startUtc, $endUtc]);
+                    if ($dupStmt->fetchColumn()) $status = 'duplicate';
+                }
+                $seen[$sk] = true;
+            }
+
+            if ($status === 'ok') {
+                $R['totals']['importable']++;
+                $R['totals']['adults'] += $adults; $R['totals']['eggs'] += $eggs; $R['totals']['chicks'] += $chicks;
+                if ($nzDay) {
+                    if ($R['date_min'] === null || $nzDay < $R['date_min']) $R['date_min'] = $nzDay;
+                    if ($R['date_max'] === null || $nzDay > $R['date_max']) $R['date_max'] = $nzDay;
+                }
+            } elseif ($status === 'duplicate') $R['totals']['duplicates']++;
+            else $R['totals']['error_rows']++;
+
+            $R['rows'][] = [
+                'monitor' => $mfile, 'box' => (string)$boxName, 'date' => $nzDay, 'obs_time' => $obsTime,
+                'location_id' => $locId, 'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks,
+                'breeding_status' => $breeding, 'gate_status' => $gate, 'notes' => $notes,
+                'scans' => $scans, 'unmatched' => $rowUnmatched, 'box_tags' => $boxTags,
+                'status' => $status, 'error' => $error, 'monitor_filename' => $mfile,
+            ];
+        }
+    }
+
+    ksort($unmatched);
+    foreach ($unmatched as $chip => $count) $R['unmatched_chips'][] = ['chip' => (string)$chip, 'count' => $count];
+    $R['unknown_boxes'] = $unknownBoxes;
+    return $R;
+}
+
+function ww_importJsonInput() {
+    $in = json_decode(file_get_contents('php://input'), true) ?? [];
+    $json = (string)($in['json'] ?? '');
+    $filename = basename(trim((string)($in['filename'] ?? 'import.json')));
+    $colonyId = (int)($in['colony_id'] ?? 0);
+    return [$json, $filename, $colonyId];
+}
+
 function ww_importInput() {
     $in = json_decode(file_get_contents('php://input'), true) ?? [];
     $csv = (string)($in['csv'] ?? '');
@@ -1473,6 +1612,57 @@ if ($action === 'import_csv_commit') {
         'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
         'imported' => $imported, 'scans' => $scans, 'biometrics' => $bios, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
         'skipped_conflicts' => $skippedConflicts, 'imported_conflicts' => $importedConflicts,
+        'unmatched_chips' => $A['unmatched_chips'],
+    ]);
+    exit;
+}
+
+if ($action === 'import_json_analyze') {
+    list($json, $filename, $colonyId) = ww_importJsonInput();
+    if ($json === '') { http_response_code(400); echo json_encode(['error' => 'No JSON supplied']); exit; }
+    if (!$colonyId) { http_response_code(400); echo json_encode(['error' => 'colony_id required']); exit; }
+    echo json_encode(ww_parseImportJson($pdo, $json, $colonyId, (int)$observer['observer_id'], $filename));
+    exit;
+}
+
+if ($action === 'import_json_commit') {
+    list($json, $filename, $colonyId) = ww_importJsonInput();
+    if ($json === '') { http_response_code(400); echo json_encode(['error' => 'No JSON supplied']); exit; }
+    if (!$colonyId) { http_response_code(400); echo json_encode(['error' => 'colony_id required']); exit; }
+    $observerId = (int)$observer['observer_id'];
+    // Re-parse so what we write is exactly what was validated (DB may have shifted since analyze).
+    $A = ww_parseImportJson($pdo, $json, $colonyId, $observerId, $filename);
+    if (!$A['ok']) { http_response_code(400); echo json_encode(['error' => $A['error']]); exit; }
+
+    $imported = 0; $scans = 0; $skippedDup = 0; $skippedErr = 0;
+    try {
+        $pdo->beginTransaction();
+        foreach ($A['rows'] as $row) {
+            if ($row['status'] === 'error') { $skippedErr++; continue; }
+            if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
+            $obsId = wwAuditedInsert($pdo, 'observations', [
+                'location_id' => $row['location_id'], 'observer_id' => $observerId, 'observation_time_utc' => $row['obs_time'],
+                'adults' => $row['adults'], 'eggs' => $row['eggs'], 'chicks' => $row['chicks'],
+                'breeding_status' => $row['breeding_status'], 'gate_status' => $row['gate_status'], 'notes' => $row['notes'],
+                'monitor_filename' => $row['monitor_filename'],
+            ], $observerId);
+            $imported++;
+            foreach ($row['scans'] as $pit) {
+                wwAuditedInsert($pdo, 'penguin_scans', ['observation_id' => $obsId, 'pit_id' => $pit, 'scan_time_utc' => $row['obs_time']], $observerId);
+                $scans++;
+            }
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['error' => 'Import failed: ' . $e->getMessage()]);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
+        'imported' => $imported, 'scans' => $scans, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
         'unmatched_chips' => $A['unmatched_chips'],
     ]);
     exit;
