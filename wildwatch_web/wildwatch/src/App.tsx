@@ -544,7 +544,8 @@ function wigglePengMinis(keys: (string | null | undefined)[]) {
   }
 }
 
-/** While a peng panel is open, every mini of its bird gets a subtle lifted (3D) look.
+/** While a peng panel is open, every mini of its bird gets a subtle lifted (3D) look —
+ *  except the panel's own header mini, which is the selection itself, not a reference.
  *  Done with an injected style rule keyed on data-peng rather than per-element classes,
  *  so minis (re)rendered anywhere on the page while the panel is open still pick it up. */
 let selectedPengStyle: HTMLStyleElement | null = null;
@@ -552,7 +553,7 @@ function setSelectedPengMinis(keys: (string | null | undefined)[]) {
   const ks = keys.filter(Boolean) as string[];
   if (!selectedPengStyle) selectedPengStyle = document.head.appendChild(document.createElement('style'));
   selectedPengStyle.textContent = ks.length === 0 ? '' :
-    ks.map(k => `.scan[data-peng="${CSS.escape(k)}"]`).join(', ') +
+    ks.map(k => `.scan[data-peng="${CSS.escape(k)}"]:not(.bird-title-peng *)`).join(', ') +
     ' { position: relative; top: -2px; box-shadow: 2px 3px 5px rgba(0,0,0,.5); }';
 }
 
