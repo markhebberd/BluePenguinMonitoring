@@ -1126,10 +1126,20 @@ export function computeMissingNoScans(): { total: number; rows: any[] } {
     const noScan = o.no_scan || 0;
     const adultScans = adultPitsByObs[o.observation_id]?.size || 0;
     if (adults === adultScans + noScan) continue;
+    // Every bird scanned at this observation (chicks included), shaped for <PenguinMini>.
+    const scans = (c.scansByObs.get(o.observation_id) || [])
+      .filter((s: any) => !s.scan_deleted)
+      .map((s: any) => {
+        const ch = c.chipByPit.get(s.pit_id);
+        const p = ch ? c.pengByNum.get(ch.peng_num) : null;
+        return { peng_num: ch?.peng_num, pit_id: s.pit_id, sex: p?.sex, chipped_as_adult: p?.chipped_as_adult,
+          chip_date: ch?.chip_date, chick_size_code: p?.chick_size_code, hasReturned: p?.hasReturned || false };
+      })
+      .filter((s: any) => s.peng_num);
     // `missing` is negative when more adults are accounted for than were recorded — those
     // rows are a different error, and adding a no-scan would make them worse.
     rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan,
-      obsId: o.observation_id, notes: o.notes || '', missing: adults - adultScans - noScan });
+      obsId: o.observation_id, notes: o.notes || '', missing: adults - adultScans - noScan, scans });
   }
   rows.sort((a, b) => b.time.localeCompare(a.time));
   return { total: rows.length, rows };
