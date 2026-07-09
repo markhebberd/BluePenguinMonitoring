@@ -6114,7 +6114,12 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
   );
 }
 
-function AdminPanel({ token, observationDates }: { token: string; observationDates?: string[] }) {
+function AdminPanel({ token, observationDates, checkTarget }: {
+  token: string; observationDates?: string[];
+  // A header pin was clicked: jump to the validation tab and scroll to this check. The nonce
+  // makes a repeat click on the same pin re-trigger the effect.
+  checkTarget?: { slug: string; nonce: number } | null;
+}) {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [diskTest, setDiskTest] = useState<any>(null);
@@ -6170,6 +6175,19 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     if (!hash.startsWith('check-')) return;
     document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [adminTab, dbVersion]);
+
+  // In-app arrival from a header pin. selectTab writes ?tab=validation; the scroll waits a
+  // tick because the target section is inside a display:none tab until this render commits,
+  // and scrollIntoView on a hidden element does nothing.
+  const pinSlug = checkTarget?.slug;
+  const pinNonce = checkTarget?.nonce;
+  useEffect(() => {
+    if (!pinSlug) return;
+    selectTab('validation');
+    const t = setTimeout(() => document.getElementById(pinSlug)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinSlug, pinNonce, dbVersion]);
 
   // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
   const [impFile, setImpFile] = useState<string>('');        // filename
@@ -8107,6 +8125,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Must stay above the `if (loading)` early return — a hook below it renders on some passes
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
+  // Header pin → admin/validation, in-app. AdminPanel reads its tab from the URL only at
+  // mount, so an already-mounted panel needs this signal to switch tabs and scroll.
+  const [checkTarget, setCheckTarget] = useState<{ slug: string; nonce: number } | null>(null);
+  const openPinnedCheck = useCallback((slug: string) => {
+    setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
+    setShowReports(false); setShowEntry(false); setShowAdmin(true);
+    setCheckTarget(t => ({ slug, nonce: (t?.nonce ?? 0) + 1 }));
+  }, []);
   // Apply one of the integrity tables' hrefs as in-app state instead of letting the browser
   // navigate. Mirrors the shapes localdb builds: ?box&obs[&bird], ?day[&box].
   const openCheckHref = useCallback((href: string) => {
@@ -8387,7 +8413,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {pinnedChecks.length > 0 && (
           <span className="pinned-checks">
             {pinnedChecks.map(p => (
-              <a key={p.slug} className="pinned-check" href={checkHref(p.slug)} title={`Data validation — ${p.title}`}>
+              <a key={p.slug} className="pinned-check" href={checkHref(p.slug)} title={`Data validation — ${p.title}`}
+                onClick={e => navClick(e, () => openPinnedCheck(p.slug))}>
                 {p.title}
                 {p.count !== undefined && <span className={`pinned-count${p.count === 0 ? ' zero' : ''}`}>{p.count}</span>}
               </a>
@@ -8420,7 +8447,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               <label className="mobile-label">Pinned checks</label>
               <nav className="mobile-nav">
                 {pinnedChecks.map(p => (
-                  <a key={p.slug} href={checkHref(p.slug)} onClick={() => closeMenu()}>
+                  <a key={p.slug} href={checkHref(p.slug)} onClick={e => navClick(e, () => { openPinnedCheck(p.slug); closeMenu(); })}>
                     {p.title}{p.count !== undefined ? ` (${p.count})` : ''}
                   </a>
                 ))}
@@ -8541,7 +8568,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <CheckNavContext.Provider value={openCheckHref}>
-          <AdminPanel token={token} observationDates={stats?.observation_dates} />
+          <AdminPanel token={token} observationDates={stats?.observation_dates} checkTarget={checkTarget} />
         </CheckNavContext.Provider>
         {passwordDialog}
       </div>
