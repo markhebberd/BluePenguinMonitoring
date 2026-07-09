@@ -1122,6 +1122,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             seen.add(k);
             if (parentKeys.has(k) || chickFamily.has(k)) {
               if (wci >= 0) winCount.set(`${wci}|${k}`, (winCount.get(`${wci}|${k}`) || 0) + 1);
+              else if (parentKeys.has(k)) bump(k, slot, 1); // parent seen outside its window → shows in pre/post-breeding
               continue;
             }
             bump(k, slot, 1);
@@ -1163,12 +1164,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           return undefined;
         };
 
-        const birdWithCount = (b: any, count?: number) => {
+        const birdWithCount = (b: any, count?: number, showZero?: boolean) => {
           const n = count ?? b.scanCount;
           return (
             <span key={b.pit_id.slice(-8)} className="bird-with-count">
               <PenguinMini scan={b} onClick={() => onBirdClick(b.peng_num || b.pit_id)} observationDate={seasonObsDate(b)} />
-              {n > 0 && <span className="scan-count">{n}x</span>}
+              {(n > 0 || showZero) && <span className="scan-count">{n}x</span>}
             </span>
           );
         };
@@ -1232,7 +1233,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               )}
               <div className="clutch-body">
                 <span className="clutch-birds">
-                  {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                  {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0, true))}
                   {famChicks.map(b => {
                     const k = b.pit_id.slice(-8);
                     // A chick belongs to exactly one clutch, so credit its full box attendance
