@@ -2084,14 +2084,19 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {chips.map((c: any, i: number) => {
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();
-              // Collapsed: one consolidated line per chip — "date in: box by: chipper".
+              // Collapsed: one consolidated line per chip — "date in: box by: chipper",
+              // plus weight/flipper from the biometric recorded on that chip date.
               // The initial chip is "Chip Info"; each rechip gets its own "Rechip Info" line.
               if (!editing) {
+                const chipDay = c.chip_date ? String(c.chip_date).slice(0, 10) : null;
+                const bio = chipDay ? biometrics.find((b: any) => String(b.observation_date || '').slice(0, 10) === chipDay && (b.weight || b.flipper_length)) : null;
                 return (
                   <tr key={`chip${i}`}><td className="muted">{i === 0 ? 'Chip Info' : `${re}chip Info`}</td><td>
                     {c.chip_date ? <DateLink date={c.chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>}
                     {c.chip_box && <> <span className="muted">in:</span> <a className="clickable" href={`/box/${c.chip_box}`} onClick={e => navClick(e, () => onBoxClick(c.chip_box))}>{c.chip_box}</a></>}
                     {c.chip_by && <> <span className="muted">by:</span> {c.chip_by}</>}
+                    {bio?.weight && <> <span className="muted">weight:</span> {parseFloat(bio.weight).toFixed(0)}g</>}
+                    {bio?.flipper_length && <> <span className="muted">flipper:</span> {parseFloat(bio.flipper_length).toFixed(0)}mm</>}
                   </td></tr>
                 );
               }
@@ -5666,7 +5671,7 @@ export function EmbeddedPanel() {
         <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><StatusLegend /></div></div>
         <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
         <div className="detail-split">
-          <BoxPanel data={boxData} boxName={view.id} allPenguins={allPenguins}
+          <BoxPanel key={view.id} data={boxData} boxName={view.id} allPenguins={allPenguins}
             onBirdClick={goBird} onDayClick={() => {}}
             highlightObs={highlightObs} scrollToObs={scrollToObs} onScrollToObs={scrollObs}
             token={token} canEdit={false} />
@@ -8508,6 +8513,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {!false && boxDetail && (
           <div className="detail-split">
             <BoxPanel
+              key={selectedBox}
               data={boxDetail}
               boxName={selectedBox}
               allPenguins={allPenguins}
