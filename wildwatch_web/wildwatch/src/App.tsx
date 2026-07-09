@@ -1092,8 +1092,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         // `<ci>|<key>` — so a parent shared by both clutches shows its actual sightings
         // in each window, not the season total repeated on every row.
         const winCount = new Map<string, number>();
+        const scannedDayKey = new Set<string>(); // `<key>|<nzDay>` — days a bird was actually scanned here
         for (const o of sObsChrono) {
           const t = parseDate(o.observation_time_utc).getTime();
+          const oDay = toNzDateStr(o.observation_time_utc);
           let slot = '', wci = -1;
           for (let ci = 0; ci < clutches.length; ci++) {
             if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; wci = ci; break; }
@@ -1102,6 +1104,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const seen = new Set<string>();
           for (const s of o.scans) {
             const k = s.pit_id.slice(-8);
+            scannedDayKey.add(`${k}|${oDay}`);
             if (seen.has(k)) continue; // one visit per observation
             seen.add(k);
             if (parentKeys.has(k) || chickFamily.has(k)) {
@@ -1110,6 +1113,20 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             }
             bump(k, slot, 1);
           }
+        }
+        // A family bird (parent/chick) chipped in this box counts as one nest visit on its
+        // chip day even if it was never scanned in an observation — otherwise a chick chipped
+        // here but never scanned lands in its clutch window with a 0 count and no badge.
+        // Deduped against a same-day scan so a bird scanned while being chipped isn't double-counted.
+        for (const b of sorted) {
+          const k = b.pit_id.slice(-8);
+          if (!(parentKeys.has(k) || chickFamily.has(k))) continue;
+          if (!b.is_chipped_here || !b.chip_date) continue;
+          const day = String(b.chip_date).slice(0, 10);
+          if (scannedDayKey.has(`${k}|${day}`)) continue;
+          const t = parseDate(day + ' 00:00:00').getTime();
+          const wci = clutches.findIndex(c => t >= c.windowStart && t <= c.windowEnd);
+          if (wci >= 0) winCount.set(`${wci}|${k}`, (winCount.get(`${wci}|${k}`) || 0) + 1);
         }
         // Birds chipped here but never scanned have no observation to slot — place them
         // by chip date (their lastSeen) in the matching gap.
