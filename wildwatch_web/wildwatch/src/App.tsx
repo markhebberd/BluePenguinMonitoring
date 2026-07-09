@@ -1038,7 +1038,7 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
 }
 
 function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs,
-  onSeasonClick, issueBadges, dayToObsTime, clutches, visitorBirds, visitorRow, aggSlots, renderClutch }: any) {
+  onSeasonClick, issueBadges, dayToObsTime, clutches, visitorBirds, visitorRow, aggSlots, noScanFor, renderClutch }: any) {
   return (
     <div className="season-birds">
       <div className="season-year">
@@ -1068,7 +1068,8 @@ function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs
           </div>
         )}
         {clutches.length === 0 ? (
-          visitorRow('Seen in box', visitorBirds.map((b: any) => ({ b, n: b.scanCount })))
+          // No clutches → every observation lands in slot g0, so that's the season's no-scan total.
+          visitorRow('Seen in box', [...visitorBirds.map((b: any) => ({ b, n: b.scanCount })), ...noScanFor(['g0'])])
         ) : (() => {
           const nodes: React.ReactNode[] = [];
           const post = visitorRow('Post-breeding', aggSlots([`g${clutches.length}`]));
@@ -1108,6 +1109,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const m = slotCounts.get(k)!;
           m.set(slot, (m.get(slot) || 0) + n);
         };
+        // Unscanned birds present ("No scan" on the observation) tracked per slot, so
+        // they show as a grouped stand-in in the window/pre/post/seen-in-box rows.
+        const noScanBySlot = new Map<string, number>();
         // Family-box birds (parents/chicks) get a count PER clutch window, keyed
         // `<ci>|<key>` — so a parent shared by both clutches shows its actual sightings
         // in each window, not the season total repeated on every row.
@@ -1121,6 +1125,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             if (t >= clutches[ci].windowStart && t <= clutches[ci].windowEnd) { slot = `w${ci}`; wci = ci; break; }
           }
           if (!slot) { let gi = 0; while (gi < clutches.length && t >= clutches[gi].windowStart) gi++; slot = `g${gi}`; }
+          const ns = Number(o.no_scan) || 0;
+          if (ns > 0) noScanBySlot.set(slot, (noScanBySlot.get(slot) || 0) + ns);
           const seen = new Set<string>();
           for (const s of o.scans) {
             const k = s.pit_id.slice(-8);
@@ -1172,6 +1178,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         };
 
         const birdWithCount = (b: any, count?: number, showZero?: boolean) => {
+          if (b?.noScan) return (
+            <span key="noscan" className="bird-with-count">
+              <span className="scan no-scan" title="Unscanned birds present">No scan</span>
+              <span className="scan-count">{count}x</span>
+            </span>
+          );
           const n = count ?? b.scanCount;
           return (
             <span key={b.pit_id.slice(-8)} className="bird-with-count">
@@ -1209,9 +1221,15 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         // Visitors sit in gap slots by WHEN they were seen: g0 = before the first window (pre),
         // g<ci> = between clutch ci-1 and ci, g<n> = after the last window (post). Birds seen inside
         // a window show in that clutch's card. Rendered reverse-chronological (newest on top).
+        // Grouped "No scan" stand-in for the given slots — [] when none, so callers can spread it.
+        const noScanFor = (slots: string[]) => {
+          const n = slots.reduce((sum, s) => sum + (noScanBySlot.get(s) || 0), 0);
+          return n > 0 ? [{ b: { noScan: true }, n }] : [];
+        };
         const aggSlots = (slots: string[]) => sorted
           .map((b: any) => { const k = b.pit_id.slice(-8); let n = 0; for (const s of slots) n += slotCounts.get(k)?.get(s) || 0; return { b, n }; })
-          .filter((x: any) => x.n > 0);
+          .filter((x: any) => x.n > 0)
+          .concat(noScanFor(slots));
         const visitorRow = (label: string, list: { b: any; n: number }[]) => list.length > 0 ? (
           <div className="season-visitors" key={label}>
             <span className="visitors-lbl">{label}</span>
@@ -1271,7 +1289,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             seasonStatus={seasonStatus} statusLabel={statusLabel} latestObs={latestObs}
             onSeasonClick={onSeasonClick} issueBadges={issueBadges} dayToObsTime={dayToObsTime}
             clutches={clutches} visitorBirds={visitorBirds} visitorRow={visitorRow}
-            aggSlots={aggSlots} renderClutch={renderClutch} />
+            aggSlots={aggSlots} noScanFor={noScanFor} renderClutch={renderClutch} />
         );
         if (isCurrent) currentSeasons.push(node);
         else previousSeasons.push(node);
