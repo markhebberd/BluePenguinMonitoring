@@ -214,6 +214,8 @@ header h1:hover { opacity:.8; }
 .season-divider { display:flex; align-items:center; gap:10px; margin:20px 0 10px; }
 .season-divider hr { flex:1; border:none; border-top:1px solid #ccc; }
 .season-divider span { font-size:12px; font-weight:700; color:#1a5276; white-space:nowrap; }
+/* Keep the deleted toggle subtle inside the bold divider label */
+.season-divider .deleted-indicator { font-size:10px; font-weight:400; color:#999; }
 .obs-card.highlighted { animation: flash-highlight 0.5s ease-in-out 3; border-left-color:#FDD835; }
 .obs-card.obs-pinned { background:#FFF9C4; border-left-color:#FDD835; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
@@ -503,7 +505,7 @@ h3.collapsible:hover { color:#1a5276; }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
-.bird-section h3 { font-size:15px; color:#1a5276; margin-bottom:8px; border-bottom:1px solid #e8ecef; padding-bottom:4px; }
+.bird-section h3 { font-size:15px; color:#1a5276; font-weight:600; margin-bottom:8px; }
 .partner-card { background:#fff; border-radius:6px; padding:10px; margin-bottom:8px; }
 .partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .partner-sightings { padding-left:8px; }
