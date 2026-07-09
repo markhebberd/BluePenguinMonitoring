@@ -7922,39 +7922,43 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
     <div id={slug} style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8, scrollMarginTop: 70 }}>
       <PinnableTitle title={title} count={active.length} />
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
-      {active.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
-        <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
-        <table className="zebra" style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
-          <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
+      {active.length === 0 ? <span style={{ color: '#4CAF50', fontSize: 13 }}>{empty || 'None found'}</span> : (<>
+        <p style={{ color: '#F44336', fontWeight: 600, fontSize: 13, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}</p>
+        <div className="table-scroll">
+        <table className="guess-rank-table zebra">
+          <thead><tr>{columns.map(c => <th key={c.key}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
-            <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-              {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{cell(c, row)}</td>)}
-              {errorType && <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
+            <tr key={i}>
+              {columns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
+              {errorType && <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                 <button className="edit-btn" disabled={busy} onClick={() => doDismiss(row)} title="Reviewed — mark valid and hide from this list">✓ Valid</button>
               </td>}
             </tr>
           ))}</tbody>
         </table>
+        </div>
         {active.length > 5 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all (${active.length})`}</button>}
       </>)}
       {errorType && dismissed.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <button className="edit-btn" onClick={() => setShowDismissed(s => !s)}>{showDismissed ? 'Hide' : 'Show'} {dismissed.length} dismissed</button>
           {showDismissed && (
-            <table className="zebra" style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%', marginTop: 6, opacity: 0.65 }}>
-              <thead><tr style={{ borderBottom: '1px solid #ddd' }}>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '2px 6px' }}>{c.label}</th>)}<th style={{ textAlign: 'left', padding: '2px 6px' }}>Reviewed by</th><th></th></tr></thead>
+            <div className="table-scroll" style={{ opacity: 0.65 }}>
+            <table className="guess-rank-table zebra">
+              <thead><tr>{columns.map(c => <th key={c.key}>{c.label}</th>)}<th>Reviewed by</th><th></th></tr></thead>
               <tbody>{dismissed.map((row: any, i: number) => (
-                <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-                  {columns.map(c => <td key={c.key} style={{ padding: '2px 6px' }}>{cell(c, row)}</td>)}
-                  <td style={{ padding: '2px 6px', fontSize: 11, color: '#666' }} title={row._dismissal?.dismissed_at || ''}>
+                <tr key={i}>
+                  {columns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
+                  <td style={{ fontSize: 11, color: '#666' }} title={row._dismissal?.dismissed_at || ''}>
                     {row._dismissal?.dismissed_by_name || '—'}{row._dismissal?.reason ? `: ${row._dismissal.reason}` : ''}
                   </td>
-                  <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>
+                  <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                     <button className="edit-btn" disabled={busy} onClick={() => doRestore(row)} title="Move back to the error list">Restore</button>
                   </td>
                 </tr>
               ))}</tbody>
             </table>
+            </div>
           )}
         </div>
       )}
