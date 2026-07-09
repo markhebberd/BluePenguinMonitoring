@@ -9,11 +9,11 @@ const STATUS_COLORS: Record<string,string> = {
 
 interface BoxInfo { s: string; a: number; e: number; c: number; }
 
-// Status colour at 50% strength, pre-blended over white into a solid colour so only the
+// Status colour at 60% strength, pre-blended over white into a solid colour so only the
 // fill lightens — text, icons and borders keep full strength (an alpha background can
 // wash the whole card depending on what's composited behind it).
 const fade = (hex: string) => '#' + [1, 3, 5].map(i =>
-  Math.round((parseInt(hex.slice(i, i + 2), 16) + 255) / 2).toString(16).padStart(2, '0')).join('');
+  Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.6 + 255 * 0.4).toString(16).padStart(2, '0')).join('');
 
 interface BoxGridProps {
   boxTags: Record<string, BoxTag>;
