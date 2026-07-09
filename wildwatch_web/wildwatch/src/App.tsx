@@ -7866,9 +7866,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const boxDetail = useBoxDetail(loading ? null : selectedBox);
 
-  // Leaving box view drops the transient highlight. Box + bird otherwise coexist (the
-  // panel rides along across box changes); "fresh" box navigation that should reset the
-  // panel clears the bird explicitly at its call site (openBox, grid/map/arrows, search).
+  // Leaving box view drops the transient highlight. Box + bird otherwise coexist — the
+  // peng panel rides along across box changes (grid/map, arrows); only the box search
+  // inputs reset it explicitly at their call sites.
   useEffect(() => {
     if (!selectedBox) setHighlightObs(null);
   }, [selectedBox]);
@@ -7929,9 +7929,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (date) setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10);
   };
 
-  // Fresh box navigation (grid, map, arrows): reset the panel — show just the box.
+  // Box navigation (grid, map): the docked peng panel rides along. Narrow screens
+  // can't show box + bird side by side, so there the bird is dismissed.
   const openBox = (box: string) => {
-    setSelectedBird(null);
+    if (window.innerWidth < 900) setSelectedBird(null);
     setPreviousBox(null);
     setSelectedBox(box);
   };
@@ -7966,10 +7967,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     // Box → box: the date-scroll came from a day view link into the old box — it
     // doesn't apply to a different box, so drop it.
     if (e.key === 'ArrowRight' && idx < sortedBoxIds.length - 1) {
-      setHighlightObs(null); setScrollToObs(null); setSelectedBird(null);
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx + 1]);
     } else if (e.key === 'ArrowLeft' && idx > 0) {
-      setHighlightObs(null); setScrollToObs(null); setSelectedBird(null);
+      setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx - 1]);
     } else if (e.key === 'Escape') {
       setSelectedBox(null);
