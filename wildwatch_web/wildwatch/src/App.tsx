@@ -1233,7 +1233,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               <div className="clutch-body">
                 <span className="clutch-birds">
                   {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
-                  {famChicks.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0))}
+                  {famChicks.map(b => {
+                    const k = b.pit_id.slice(-8);
+                    // A chick belongs to exactly one clutch, so credit its full box attendance
+                    // to it rather than window-clipping — chicks are chipped/scanned around
+                    // fledge, which lands at or past windowEnd and would otherwise show 0.
+                    return birdWithCount(b, Math.max(b.scanCount || 0, winCount.get(`${ci}|${k}`) || 0));
+                  })}
                   {Array.from({ length: failedEggs }).map((_, i) => <OffspringFinal key={`fe${i}`} kind="egg" active={active} />)}
                   {Array.from({ length: plainChicks }).map((_, i) => <OffspringFinal key={`pc${i}`} kind="chick" active={active} />)}
                   {Array.from({ length: fledgedUnchipped }).map((_, i) => (
