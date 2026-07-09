@@ -1397,7 +1397,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
 
   // Commit the whole draft on Done: one observations update for changed fields, plus
   // create/delete for added/removed scans. Nothing was written before this point.
-  const commit = async () => {
+  // withNote: ask for a reason and record it against the change. Plain save writes no note.
+  const commit = async (withNote = false) => {
     if (!obsId || !token || !draft) { cancelEdit(); return; }
     const fields: Record<string, any> = {};
     for (const f of ['adults','eggs','chicks','no_scan','fledged_unchipped'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
@@ -1407,8 +1408,11 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     const toRemove = obs.scans.filter((s: any) => s.scan_id && !draftKeys.has(scanKey(s)));
     const changed = Object.keys(fields).length + toAdd.length + toRemove.length;
     if (changed === 0) { cancelEdit(); return; }
-    const reason = prompt(`Save ${changed} change${changed===1?'':'s'} to this observation?\n\nReason (optional):`);
-    if (reason === null) return; // cancelled — stay in edit mode
+    let reason: string | null = null;
+    if (withNote) {
+      reason = prompt(`Save ${changed} change${changed===1?'':'s'} to this observation.\n\nReason for the change:`);
+      if (reason === null) return; // cancelled — stay in edit mode
+    }
     setEditing(false);
     try {
       if (Object.keys(fields).length > 0) await updateRecord(token, 'observations', obsId, fields, reason || undefined);
@@ -1430,7 +1434,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           {canEdit && obsId && !editing && <button className="edit-btn" onClick={startEdit}>Edit</button>}
           {editing && <>
             <button className="edit-btn" onClick={cancelEdit}>Cancel</button>
-            <button className="edit-btn done-btn" onClick={commit}>Done</button>
+            <button className="edit-btn done-btn" onClick={() => commit(false)}>Save</button>
+            <button className="edit-btn done-btn" onClick={() => commit(true)}>Save with note</button>
             <button className="edit-btn" style={{background:'#F44336', color:'#fff'}} onClick={async () => {
               const reason = prompt(`Delete observation from ${formatDate(obs.observation_time_utc)}?\n\nReason for deletion (optional):`);
               if (reason === null) return;
