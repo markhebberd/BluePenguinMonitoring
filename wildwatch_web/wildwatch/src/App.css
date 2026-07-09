@@ -413,6 +413,9 @@ h3.collapsible:hover { color:#1a5276; }
 /* Active breeding window: predicted stage dates (hatch / guard end / chip / fledge).
    Plain flowing text — a flex gap here would open space before the comma separators. */
 .clutch-predictions { font-size:10px; color:#666; }
+/* Emphasised parts (laid date + next upcoming stage) — darker/heavier so they read
+   clearly against the muted grey run of dates. */
+.clutch-predictions b { color:#1a5276; font-weight:700; }
 /* Inside the box-page pair row, push the line below the pair. */
 .breeding-pair .clutch-predictions { flex-basis:100%; }
 /* Offspring shown at final life stage inside the family border (failed egg / unchipped chick) */

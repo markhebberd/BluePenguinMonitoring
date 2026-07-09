@@ -816,7 +816,7 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
     ? `± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
   return (
     <span className="clutch-predictions">
-      {parts.map((p, i) => <span key={i}>{i > 0 ? ', ' : ''}{i === nextIdx ? <b>{p.text}</b> : p.text}</span>)}
+      {parts.map((p, i) => <span key={i}>{i > 0 ? ', ' : ''}{(i === nextIdx || i === 0) ? <b>{p.text}</b> : p.text}</span>)}
       {unc ? `, ${unc}` : ''}
     </span>
   );
