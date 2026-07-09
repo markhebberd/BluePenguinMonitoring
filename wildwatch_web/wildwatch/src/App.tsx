@@ -3835,7 +3835,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
     }
   };
   return (
-    <div className="report-card" id={checkSlug(TITLE)} style={{ scrollMarginTop: 70 }}>
+    <div className="report-card wide" id={checkSlug(TITLE)} style={{ scrollMarginTop: 70 }}>
       <PinnableTitle title={TITLE} count={total} />
       <p className="muted">Observations where the recorded adult count doesn't match scanned adults + "no scan" markers. Newest first.</p>
       {rows.length === 0 ? <p className="muted">No mismatches found</p> : (<>
@@ -3844,6 +3844,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
             <button key={m} className="edit-btn" style={{ opacity: mode === m ? 1 : 0.55 }} onClick={() => setMode(m)}>{label}</button>
           ))}
         </div>
+        <div className="table-scroll">
         <table className="guess-rank-table">
           <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th>Notes</th><th></th></tr></thead>
           <tbody>
@@ -3888,6 +3889,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
             })}
           </tbody>
         </table>
+        </div>
         <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Showing {shown.length} of {total}</p>
       </>)}
     </div>

@@ -331,6 +331,11 @@ h3.collapsible:hover { color:#1a5276; }
   .mini-list-table th:not(:first-child):not(:last-child),
   .mini-list-table td:not(:first-child):not(:last-child) { width:auto; }
 }
+/* Breaks out of .admin-panel's 800px cap — the mini chips need the room. Centred on the
+   panel, clamped to the viewport so it never forces the page to scroll sideways. */
+.report-card.wide { width:min(1400px, calc(100vw - 32px)); margin-left:50%; transform:translateX(-50%); }
+/* Last resort below ~1400px of content: scroll the table, not the page. */
+.table-scroll { overflow-x:auto; }
 .guess-rank-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
 .guess-rank-table th { text-align:left; color:#888; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #e8ecef; padding:4px 8px; }
 .guess-rank-table td { padding:5px 8px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
