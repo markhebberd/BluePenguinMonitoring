@@ -131,6 +131,7 @@ namespace PenguinMonitor
         private TextView? _standaloneDailyLabelWarning;
         private ImageButton? _expandButton;
         private LinearLayout? _prevObsSummaryLayout;
+        private TextView? _stickyNoteBelowPrev;   // sticky note shown under the expanded prev-obs card
         private TextView? _todayMiniView;
         private TextView? _prevObsHeaderText;
         private LinearLayout? _prevObsDetailLayout;
@@ -541,6 +542,15 @@ namespace PenguinMonitor
         private void HandleEidData(string eidData)
         {
             var cleanEid = new String(eidData.Where(char.IsLetterOrDigit).ToArray());
+
+            // Guard: only complete 15-char EIDs may be recorded. A partial read (e.g. the
+            // scanner waking mid-transmission) would fail the LA9000250 box-tag prefix test
+            // and be silently recorded as a penguin scan.
+            if (!BluetoothManager.IsCompleteEid(cleanEid))
+            {
+                Toast.MakeText(this, $"⚠️ Partial scan ignored ({cleanEid.Length} chars) — please scan again", ToastLength.Short)?.Show();
+                return;
+            }
 
             // Box tag mode: route all scans to HandleBoxTagScan
             if (_appSettings.EditBoxTagsMode)
@@ -2510,7 +2520,7 @@ namespace PenguinMonitor
 
             _isBluetoothEnabledCheckBox = new CheckBox(this)
             {
-                Text = "Enable BT & GPS",
+                Text = "Connect scanner",
             };
             _isBluetoothEnabledCheckBox.SetTextColor(Color.Black);
             _isBluetoothEnabledCheckBox.CheckedChange += (s, e) =>
@@ -3765,6 +3775,7 @@ namespace PenguinMonitor
             {
                 _prevObsHeaderText.Visibility = ViewStates.Gone;
                 _prevObsSummaryLayout.Visibility = ViewStates.Gone;
+                if (_stickyNoteBelowPrev != null) _stickyNoteBelowPrev.Visibility = ViewStates.Gone;
                 UpdateUnsyncedCards();
                 return;
             }
@@ -3818,16 +3829,15 @@ namespace PenguinMonitor
                     }
                 }
 
-                // Sticky note moves into the expanded card, below the detail (the top-row
-                // sticky bar is hidden while expanded).
-                if (_boxNotes.TryGetValue(_currentBoxName, out var sticky) && !string.IsNullOrWhiteSpace(sticky.PersistentNotes))
-                {
-                    var stickyText = new TextView(this) { Text = $"💡 {sticky.PersistentNotes}", TextSize = 12 };
-                    stickyText.SetTextColor(UIFactory.PRIMARY_BLUE);
-                    stickyText.SetPadding(0, 6, 0, 0);
-                    stickyText.Click += (s, e) => { if (!_isBoxLocked) ShowBoxNotesDialog(); };
-                    _prevObsDetailLayout.AddView(stickyText);
-                }
+            }
+
+            // Sticky note sits BELOW the expanded card, not inside it (the top-row sticky
+            // bar is hidden while expanded).
+            if (_stickyNoteBelowPrev != null)
+            {
+                bool hasSticky = _boxNotes.TryGetValue(_currentBoxName, out var sticky) && !string.IsNullOrWhiteSpace(sticky.PersistentNotes);
+                _stickyNoteBelowPrev.Text = hasSticky ? $"💡 {sticky!.PersistentNotes}" : "";
+                _stickyNoteBelowPrev.Visibility = expanded && hasSticky ? ViewStates.Visible : ViewStates.Gone;
             }
 
             // Update today miniview
@@ -4244,6 +4254,15 @@ namespace PenguinMonitor
                 UpdatePreviousObsSummary();
             };
             _singleBoxDataOuterLayout.AddView(_prevObsSummaryLayout);
+
+            // Sticky box note shown BELOW the expanded prev-obs card (the top-row sticky bar
+            // is hidden while expanded; the note itself doesn't belong inside the orange card).
+            _stickyNoteBelowPrev = new TextView(this) { TextSize = 12 };
+            _stickyNoteBelowPrev.SetTextColor(UIFactory.PRIMARY_BLUE);
+            _stickyNoteBelowPrev.SetPadding(12, 0, 12, 6);
+            _stickyNoteBelowPrev.Visibility = ViewStates.Gone;
+            _stickyNoteBelowPrev.Click += (s, e) => { if (!_isBoxLocked) ShowBoxNotesDialog(); };
+            _singleBoxDataOuterLayout.AddView(_stickyNoteBelowPrev);
 
             // Container for red unsynced cards (older pending observations)
             _unsyncedCardsContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };

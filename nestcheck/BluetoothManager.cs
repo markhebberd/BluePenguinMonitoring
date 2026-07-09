@@ -241,10 +241,26 @@ namespace PenguinMonitor
             finally { IsConnecting = false; }
         }
 
+        /// <summary>
+        /// A complete EID carries exactly 15 digits: the HR5's ASCII form is
+        /// "LA" + 15 digits (17 chars, e.g. LA123456789012345), or a bare 15-digit
+        /// ISO number if the reader omits the prefix. Anything else is a partial/
+        /// corrupted read — a truncated box tag would otherwise fail the LA9000250
+        /// prefix test and be recorded as a penguin.
+        /// </summary>
+        public static bool IsCompleteEid(string clean)
+        {
+            if (clean.Length == 15) return clean.All(char.IsDigit);
+            if (clean.Length == 17)
+                return char.IsLetter(clean[0]) && char.IsLetter(clean[1]) && clean.Skip(2).All(char.IsDigit);
+            return false;
+        }
+
         private async Task ListenLoop()
         {
             var buffer = new byte[1024];
             var sb = new StringBuilder();
+            var lastDataUtc = DateTime.UtcNow;
 
             try
             {
@@ -254,19 +270,51 @@ namespace PenguinMonitor
                     var n = await _inputStream.ReadAsync(buffer, 0, buffer.Length, _cts?.Token ?? CancellationToken.None);
                     if (n <= 0) continue;
 
-                    sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
-                    var raw = sb.ToString();
-                    var clean = new string(raw.Where(char.IsLetterOrDigit).ToArray());
+                    // A fragment that has sat unterminated through >1.5s of silence is a
+                    // broken transmission (e.g. the scanner slept mid-send). Drop it rather
+                    // than glue it onto the front of the next scan.
+                    if (sb.Length > 0 && (DateTime.UtcNow - lastDataUtc).TotalMilliseconds > 1500)
+                    {
+                        StatusChanged?.Invoke("Ignored partial scan — please scan again");
+                        sb.Clear();
+                    }
+                    lastDataUtc = DateTime.UtcNow;
 
-                    if (clean.Length >= 10)
+                    sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
+
+                    // Frame on CR/LF — the reader terminates each tag with a newline. Only
+                    // complete lines are judged; a partial line stays buffered until its
+                    // remainder arrives (or staleness discards it above).
+                    var text = sb.ToString();
+                    int nl;
+                    while ((nl = text.IndexOfAny(new[] { '\r', '\n' })) >= 0)
                     {
-                        EidDataReceived?.Invoke(clean);
-                        sb.Clear();
+                        var line = text.Substring(0, nl);
+                        text = text.Substring(nl + 1);
+                        var clean = new string(line.Where(char.IsLetterOrDigit).ToArray());
+                        if (clean.Length == 0) continue;
+                        if (IsCompleteEid(clean))
+                            EidDataReceived?.Invoke(clean);
+                        else
+                            StatusChanged?.Invoke($"Ignored partial scan ({clean.Length} chars) — please scan again");
                     }
-                    else if (sb.Length > 1000)
+                    sb.Clear();
+                    sb.Append(text);
+
+                    // No terminator seen (reader configured without CR/LF): emit as soon as
+                    // the buffer holds one complete, valid EID (17-char LA form first, then
+                    // the bare 15-digit form).
+                    var pending = new string(sb.ToString().Where(char.IsLetterOrDigit).ToArray());
+                    var take = pending.Length >= 17 && IsCompleteEid(pending.Substring(0, 17)) ? 17
+                             : pending.Length >= 15 && IsCompleteEid(pending.Substring(0, 15)) ? 15 : 0;
+                    if (take > 0)
                     {
+                        EidDataReceived?.Invoke(pending.Substring(0, take));
                         sb.Clear();
+                        if (pending.Length > take) sb.Append(pending.Substring(take));
                     }
+
+                    if (sb.Length > 1000) sb.Clear();
 
                     await Task.Delay(100, _cts?.Token ?? CancellationToken.None);
                 }
