@@ -797,8 +797,15 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   // laid estimates the first egg; the second is laid ~2 days later. Little penguins
   // almost always lay 2, so show both unless only a single egg was ever recorded.
   const twoEggs = (clutch.maxEggs || 2) >= 2;
+  // Laid date(s): two eggs collapse to "5·7 Jul" (shared month) or "30 Jul·1 Aug"
+  // (crossing months) with a mid-height dot; a single egg is just its date.
+  const laidText = (() => {
+    if (!twoEggs) return d(0);
+    const a = d(0), b = d(2), sp = a.indexOf(' ');
+    return b.endsWith(a.slice(sp + 1)) ? `${a.slice(0, sp)}·${b}` : `${a}·${b}`;
+  })();
   const parts = [
-    { text: twoEggs ? `Laid ${d(0)} & ${d(2)}` : `Laid ${d(0)}`, t: t(0) },
+    { text: laidText, t: t(0) },
     ...(clutch.maxChicks === 0 ? [{ text: `Hatch ${d(BREEDING_OFFSETS.hatch)}`, t: t(BREEDING_OFFSETS.hatch) }] : []),
     { text: `Guard ends ${d(BREEDING_OFFSETS.pg)}`, t: t(BREEDING_OFFSETS.pg) },
     { text: `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.chip) },
