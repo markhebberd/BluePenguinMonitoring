@@ -21,6 +21,9 @@ interface BoxGridProps {
 export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBox, boxNames }: BoxGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [flashBox, setFlashBox] = useState<string|null>(null);
+  // Sidebar mode (a box is open) can collapse to a single narrow column via the title.
+  const sidebar = selectedBox !== null;
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     if (scrollToBox && gridRef.current) {
       const el = gridRef.current.querySelector(`[data-box="${scrollToBox}"]`);
@@ -41,8 +44,10 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
   });
 
   return (
-    <div className="box-grid">
-      <h3>Nest Boxes ({sorted.length})</h3>
+    <div className={`box-grid${sidebar && collapsed ? ' collapsed' : ''}`}>
+      <h3 className={sidebar ? 'clickable' : undefined} onClick={sidebar ? () => setCollapsed(c => !c) : undefined}>
+        {sidebar && collapsed ? 'Nests' : `Nest Boxes (${sorted.length})`}{sidebar ? (collapsed ? ' ▸' : ' ▾') : ''}
+      </h3>
       <div className="grid" ref={gridRef}>
         {sorted.map(boxId => {
           const info = boxInfo?.[boxId];
