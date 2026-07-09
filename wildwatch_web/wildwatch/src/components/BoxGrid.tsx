@@ -62,15 +62,12 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
           const adults = info?.a || 0;
           const eggs = info?.e || 0;
           const chicks = info?.c || 0;
-          const lightBg = ['NO','UNL','POT','CON','I','','BR'].includes(status);
-          const darkText = !lightBg;
-
           return (
             <a
               key={boxId}
               data-box={boxId}
               className={`box-card ${boxId === selectedBox ? 'selected' : ''} ${boxId === flashBox ? 'flash-highlight' : ''}`}
-              style={{ backgroundColor: sidebar ? fade(bg) : bg, color: darkText && !sidebar ? '#fff' : undefined }}
+              style={{ backgroundColor: fade(bg) }}
               href={`/box/${boxId}`}
               onClick={e => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); onBoxSelect(boxId); }}
             >
