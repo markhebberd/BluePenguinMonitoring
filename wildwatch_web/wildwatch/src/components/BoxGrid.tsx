@@ -64,7 +64,7 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
               key={boxId}
               data-box={boxId}
               className={`box-card ${boxId === selectedBox ? 'selected' : ''} ${boxId === flashBox ? 'flash-highlight' : ''}`}
-              style={{ backgroundColor: bg, color: darkText ? '#fff' : undefined }}
+              style={{ backgroundColor: sidebar ? `${bg}80` : bg, color: darkText ? '#fff' : undefined }}
               href={`/box/${boxId}`}
               onClick={e => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); onBoxSelect(boxId); }}
             >
