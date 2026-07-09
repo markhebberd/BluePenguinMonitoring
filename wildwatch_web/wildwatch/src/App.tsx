@@ -544,6 +544,18 @@ function wigglePengMinis(keys: (string | null | undefined)[]) {
   }
 }
 
+/** While a peng panel is open, every mini of its bird gets a subtle lifted (3D) look.
+ *  Done with an injected style rule keyed on data-peng rather than per-element classes,
+ *  so minis (re)rendered anywhere on the page while the panel is open still pick it up. */
+let selectedPengStyle: HTMLStyleElement | null = null;
+function setSelectedPengMinis(keys: (string | null | undefined)[]) {
+  const ks = keys.filter(Boolean) as string[];
+  if (!selectedPengStyle) selectedPengStyle = document.head.appendChild(document.createElement('style'));
+  selectedPengStyle.textContent = ks.length === 0 ? '' :
+    ks.map(k => `.scan[data-peng="${CSS.escape(k)}"]`).join(', ') +
+    ' { position: relative; top: -1px; box-shadow: 1px 2px 3px rgba(0,0,0,.4); }';
+}
+
 function PenguinMini({ scan, onClick, observationDate, navigateDirectly, currentStatus, title }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean; currentStatus?: boolean; title?: string }) {
   const sex = (scan.sex || '').toUpperCase();
   const num = scan.peng_num ? `#${scan.peng_num}` : '';
@@ -1929,11 +1941,14 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
 
   // When the panel opens or switches bird, briefly wiggle every mini of this bird on
-  // the page (panel header included) so the user sees at a glance where it's referenced.
+  // the page (panel header included) so the user sees at a glance where it's referenced,
+  // and keep those minis subtly lifted for as long as the panel stays open.
   useEffect(() => {
     openPanelPengNum = p.peng_num || null;
-    wigglePengMinis([p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))]);
-    return () => { openPanelPengNum = null; };
+    const keys = [p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))];
+    setSelectedPengMinis(keys);
+    wigglePengMinis(keys);
+    return () => { openPanelPengNum = null; setSelectedPengMinis([]); };
   }, [p.peng_num]);
 
   // Peng-centric breeding family: run the SAME nest family detection (computeBoxFamilies)
