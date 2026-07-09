@@ -3806,6 +3806,7 @@ const MISSING_NO_SCANS_TITLE = 'Missing no scans';
 
 function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string) => string }) {
   const TITLE = MISSING_NO_SCANS_TITLE;
+  const navigate = useContext(CheckNavContext);
   const { total, rows } = useMissingNoScans();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
   const recentDay = rows[0]?.date;
@@ -3829,7 +3830,10 @@ function MissingNoScansReport({ hrefFor }: { hrefFor: (box: string, time: string
               const href = hrefFor(r.box, r.time);
               // Anchor per cell (not per row) — a <tr> can't contain an <a>, and this keeps
               // middle-click / ctrl-click / "open in new tab" working on every cell.
-              const link = (content: React.ReactNode) => <a href={href} className="cell-link" title="Go to this observation">{content}</a>;
+              const link = (content: React.ReactNode) => (
+                <a href={href} className="cell-link" title="Go to this observation"
+                  onClick={navigate ? e => navClick(e, () => navigate(href)) : undefined}>{content}</a>
+              );
               return (
                 <tr key={i} className="clickable">
                   <td>{link(r.date)}</td>
@@ -7842,10 +7846,12 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   };
   // Cells are real anchors so middle-click / ctrl-click / "open in new tab" work. The <a>
   // fills the cell, so a click anywhere in the row still navigates as it did before.
+  const navigate = useContext(CheckNavContext);
   const cell = (c: typeof columns[number], row: any) => {
     const content = c.render ? c.render(row[c.key], row) : row[c.key];
     return row._href
-      ? <a href={row._href} className="cell-link" title="Go to the observation">{content}</a>
+      ? <a href={row._href} className="cell-link" title="Go to the observation"
+          onClick={navigate ? e => navClick(e, () => navigate(row._href)) : undefined}>{content}</a>
       : content;
   };
 
@@ -7896,6 +7902,11 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
 // Pinned integrity checks — shortcuts the user parks in the header, after the colony selector.
 // Per-browser (localStorage), not per-account: these are a personal working set, and storing
 // them server-side would mean a schema change for something that never needs to travel.
+// Integrity-table cells are real anchors so they open in a new tab. A plain left-click should
+// still navigate inside the SPA — a real navigation reboots the app and re-runs the colony
+// load ("Loading colony data...") for data the page already has.
+const CheckNavContext = createContext<((href: string) => void) | null>(null);
+
 const PINNED_KEY = 'wildwatch.pinnedChecks';
 // `count` is the check's remaining (undismissed) error count, cached from the last time the
 // validation tab rendered — the header lives on pages where the checks aren't mounted, so it
@@ -8096,6 +8107,24 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Must stay above the `if (loading)` early return — a hook below it renders on some passes
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
+  // Apply one of the integrity tables' hrefs as in-app state instead of letting the browser
+  // navigate. Mirrors the shapes localdb builds: ?box&obs[&bird], ?day[&box].
+  const openCheckHref = useCallback((href: string) => {
+    const u = new URL(href, window.location.origin);
+    const q = u.searchParams;
+    const box = q.get('box'), obs = q.get('obs'), day = q.get('day'), bird = q.get('bird');
+    window.history.pushState(null, '', u.pathname + u.search);
+    setShowAdmin(false); setShowReports(false); setShowEntry(false);
+    setSelectedBird(bird || null);
+    if (day) { setDayBox(box ?? null); setSelectedDay(day); return; }
+    setSelectedDay(null);
+    if (box) {
+      setHighlightObs(null); setScrollToObs(null);
+      setObsAnchor(obs ? { box, time: obs } : null);
+      setSelectedBox(box);
+      if (obs) setTimeout(() => { setHighlightObs(obs); setScrollToObs(obs); }, 10);
+    }
+  }, []);
   const closeMenu = useCallback(() => {
     setMenuClosing(true);
     setTimeout(() => { setMenuOpen(false); setMenuClosing(false); }, 300);
@@ -8511,7 +8540,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <AdminPanel token={token} observationDates={stats?.observation_dates} />
+        <CheckNavContext.Provider value={openCheckHref}>
+          <AdminPanel token={token} observationDates={stats?.observation_dates} />
+        </CheckNavContext.Provider>
         {passwordDialog}
       </div>
     );
