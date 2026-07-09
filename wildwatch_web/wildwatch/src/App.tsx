@@ -7919,9 +7919,9 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   };
 
   return (
-    <div id={slug} style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8, scrollMarginTop: 70 }}>
+    <div id={slug} className="report-card" style={{ scrollMarginTop: 70 }}>
       <PinnableTitle title={title} count={active.length} />
-      {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
+      {desc && <p className="muted">{desc}</p>}
       {active.length === 0 ? <span style={{ color: '#4CAF50', fontSize: 13 }}>{empty || 'None found'}</span> : (<>
         <p style={{ color: '#F44336', fontWeight: 600, fontSize: 13, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}</p>
         <div className="table-scroll">
