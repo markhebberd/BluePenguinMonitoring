@@ -526,35 +526,31 @@ function DateLink({ date, onDayClick }: { date: string; onDayClick?: (day: strin
 }
 
 /** Peng_num of the bird whose peng panel is currently open (null when none). Lets a
- *  mini click detect "already selected" and re-trigger the wiggle. */
+ *  mini click detect "already selected" and toggle the highlight. */
 let openPanelPengNum: string | null = null;
-const wiggleTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
-/** Briefly wiggle every mini matching the given peng/pit keys, including the peng
- *  panel's own header mini. Safe to re-trigger mid-wiggle: the animation restarts. */
-function wigglePengMinis(keys: (string | null | undefined)[]) {
-  const ks = keys.filter(Boolean) as string[];
-  if (ks.length === 0) return;
-  const els = Array.from(document.querySelectorAll(ks.map(k => `[data-peng="${CSS.escape(k)}"]`).join(',')));
-  for (const el of els) {
-    clearTimeout(wiggleTimers.get(el));
-    el.classList.remove('peng-wiggle');
-    void (el as HTMLElement).offsetWidth; // reflow so a re-added class restarts the animation
-    el.classList.add('peng-wiggle');
-    wiggleTimers.set(el, setTimeout(() => el.classList.remove('peng-wiggle'), 2000));
-  }
-}
 
 /** While a peng panel is open, every mini of its bird gets a subtle lifted (3D) look —
  *  except the panel's own header mini, which is the selection itself, not a reference.
  *  Done with an injected style rule keyed on data-peng rather than per-element classes,
- *  so minis (re)rendered anywhere on the page while the panel is open still pick it up. */
+ *  so minis (re)rendered anywhere on the page while the panel is open still pick it up.
+ *  Re-clicking a mini of the already-open bird toggles the highlight off/on. */
 let selectedPengStyle: HTMLStyleElement | null = null;
-function setSelectedPengMinis(keys: (string | null | undefined)[]) {
-  const ks = keys.filter(Boolean) as string[];
+let selectedPengKeys: string[] = [];
+let selectedPengHidden = false;
+function applySelectedPengStyle() {
   if (!selectedPengStyle) selectedPengStyle = document.head.appendChild(document.createElement('style'));
-  selectedPengStyle.textContent = ks.length === 0 ? '' :
-    ks.map(k => `.scan[data-peng="${CSS.escape(k)}"]:not(.bird-title-peng *)`).join(', ') +
+  selectedPengStyle.textContent = selectedPengKeys.length === 0 || selectedPengHidden ? '' :
+    selectedPengKeys.map(k => `.scan[data-peng="${CSS.escape(k)}"]:not(.bird-title-peng *)`).join(', ') +
     ' { position: relative; top: -2px; box-shadow: 2px 3px 5px rgba(0,0,0,.5); }';
+}
+function setSelectedPengMinis(keys: (string | null | undefined)[]) {
+  selectedPengKeys = keys.filter(Boolean) as string[];
+  selectedPengHidden = false;
+  applySelectedPengStyle();
+}
+function toggleSelectedPengMinis() {
+  selectedPengHidden = !selectedPengHidden;
+  applySelectedPengStyle();
 }
 
 function PenguinMini({ scan, onClick, observationDate, navigateDirectly, currentStatus, title }: { scan: Scan | ChippedHere | any; onClick: () => void; observationDate?: string; navigateDirectly?: boolean; currentStatus?: boolean; title?: string }) {
@@ -616,8 +612,8 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
       onClick();
-      // Re-clicking the bird already open in the panel won't remount it — re-wiggle here.
-      if (scan.peng_num && scan.peng_num === openPanelPengNum) wigglePengMinis([scan.peng_num, chip]);
+      // Re-clicking the bird already open in the panel won't remount it — toggle the highlight.
+      if (scan.peng_num && scan.peng_num === openPanelPengNum) toggleSelectedPengMinis();
     })}>
       {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
     </a>
@@ -1947,14 +1943,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
 
   const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
 
-  // When the panel opens or switches bird, briefly wiggle every mini of this bird on
-  // the page (panel header included) so the user sees at a glance where it's referenced,
-  // and keep those minis subtly lifted for as long as the panel stays open.
+  // When the panel opens or switches bird, subtly lift every mini of this bird on the
+  // page so the user sees at a glance where it's referenced, for as long as it's open.
   useEffect(() => {
     openPanelPengNum = p.peng_num || null;
-    const keys = [p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))];
-    setSelectedPengMinis(keys);
-    wigglePengMinis(keys);
+    setSelectedPengMinis([p.peng_num, ...chips.map((c: any) => (c.pit_id || '').slice(-8))]);
     return () => { openPanelPengNum = null; setSelectedPengMinis([]); };
   }, [p.peng_num]);
 
