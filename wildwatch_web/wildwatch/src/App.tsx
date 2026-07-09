@@ -1755,6 +1755,7 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
     <div className="detail-obs">
       <div className="obs-columns">
         <div className="obs-col obs-col-overview">
+          <h3 className="obs-section-head">Breeding history</h3>
           <AllScannedBirds observations={data.observations} onBirdClick={onBirdClick} allPenguinsInBox={data.all_penguins}
             onSeasonClick={(t: string) => onScrollToObs(t)}>
             {(() => {
@@ -1781,6 +1782,7 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
           </AllScannedBirds>
         </div>
         <div className="obs-col obs-col-observations">
+          <h3 className="obs-section-head">Observations</h3>
           {(() => {
             const thisSeasonStart = getSeasonStart().toISOString();
             const thisLabel = getSeasonLabel();
