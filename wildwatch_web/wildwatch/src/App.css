@@ -426,7 +426,7 @@ h3.collapsible:hover { color:#1a5276; }
    tag have no count line, so offset them by the count-line height to center against the
    pills instead of the taller pill+count column. */
 .clutch-birds .offspring-final, .clutch-birds .offspring-fledged { margin-bottom:13px; }
-.obs-section-head { font-size:15px; color:#1a5276; font-weight:600; margin:16px 0 8px; }
+.obs-section-head { font-size:18px; color:#1a5276; font-weight:600; margin:16px 0 8px; }
 .obs-section-head:first-child { margin-top:0; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
 .season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
