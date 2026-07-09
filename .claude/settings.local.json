@@ -226,7 +226,30 @@
       "Bash(git -c pager.cat log --oneline -5)",
       "Bash(grep -n 'Never seen in box\\\\|Flagged row: show\\\\|foreach \\($scans as $sc\\) $addMini\\\\|< entered' admin.php)",
       "Bash(awk 'NR>=5000 && NR<=5140' App.tsx)",
-      "Bash(grep -niE \"background|color:|fm|partial|missed|#[0-9a-f]{3,6}|className=|cal-\")"
+      "Bash(grep -niE \"background|color:|fm|partial|missed|#[0-9a-f]{3,6}|className=|cal-\")",
+      "Bash(host wildwatch.co.nz)",
+      "Bash(getent hosts:*)",
+      "Bash(dig +short TXT wildwatch.co.nz)",
+      "Bash(dig +short TXT _dmarc.wildwatch.co.nz)",
+      "Bash(dig +short MX wildwatch.co.nz)",
+      "Bash(dig +short -x 204.168.139.151)",
+      "Bash(dig +short -x 2a01:4f9:c014:cfc6::)",
+      "Bash(dig +short A mail.wildwatch.co.nz)",
+      "Bash(dig +short AAAA mail.wildwatch.co.nz)",
+      "Bash(dig +short TXT default._domainkey.wildwatch.co.nz)",
+      "Bash(dig +short TXT mail._domainkey.wildwatch.co.nz)",
+      "Bash(timeout 8 bash -c 'exec 3<>/dev/tcp/mail.wildwatch.co.nz/25 && head -1 <&3')",
+      "Bash(sed -i 's/versionCode=\"3817\" android:versionName=\"38.17\"/versionCode=\"3818\" android:versionName=\"38.18\"/' nestcheck/AndroidManifest.xml)",
+      "Bash(sed -i 's|<ApplicationVersion>3817</ApplicationVersion>|<ApplicationVersion>3818</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.17</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.18</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(ip -6 addr show scope global)",
+      "Bash(dig +short AAAA wildwatch.co.nz @curitiba.ns.porkbun.com)",
+      "Bash(dig +short AAAA www.wildwatch.co.nz @curitiba.ns.porkbun.com)",
+      "Bash(sed -i 's/versionCode=\"3821\"/versionCode=\"3822\"/; s/versionName=\"38.21\"/versionName=\"38.22\"/' nestcheck/AndroidManifest.xml)",
+      "Bash(sed -i 's|<ApplicationVersion>3821</ApplicationVersion>|<ApplicationVersion>3822</ApplicationVersion>|; s|<ApplicationDisplayVersion>38.21</ApplicationDisplayVersion>|<ApplicationDisplayVersion>38.22</ApplicationDisplayVersion>|' nestcheck/PenguinMonitor.csproj)",
+      "Bash(dig +short AAAA wildwatch.co.nz)",
+      "Bash(dig +short:*)",
+      "Bash(awk *)"
     ]
   }
 }

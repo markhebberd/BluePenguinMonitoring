@@ -6155,6 +6155,14 @@ function AdminPanel({ token, observationDates }: { token: string; observationDat
     if (id === 'io') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
     window.history.replaceState(null, '', u.pathname + u.search);
   };
+  // A pinned-check link lands as /?admin&tab=validation#check-slug. The check's rows come from
+  // localdb, so the section can be a stub on first paint — re-run as the db version bumps.
+  useEffect(() => {
+    if (adminTab !== 'validation') return;
+    const hash = window.location.hash.slice(1);
+    if (!hash.startsWith('check-')) return;
+    document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [adminTab, dbVersion]);
 
   // --- Monitor CSV import (two-phase: analyze -> confirm -> commit) ---
   const [impFile, setImpFile] = useState<string>('');        // filename
@@ -7811,6 +7819,15 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   const { active, dismissed } = errorType ? splitDismissed(errorType, rows) : { active: rows, dismissed: [] as any[] };
   const shown = showAll ? active : active.slice(0, 5);
 
+  const slug = checkSlug(title);
+  const pinned = usePinnedChecks().some(p => p.slug === slug);
+  const doTogglePin = () => {
+    const q = pinned
+      ? `Remove "${title}" from the header?`
+      : `Add a link to "${title}" in the header?`;
+    if (window.confirm(q)) togglePinned(slug, title);
+  };
+
   const doDismiss = async (row: any) => {
     if (!errorType) return;
     const reason = window.prompt(`Mark this "${title}" item as reviewed & valid?\n\nOptional note (why it's fine):`, '');
@@ -7837,8 +7854,11 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   };
 
   return (
-    <div style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8 }}>
-      <h3 style={{ margin: '0 0 4px' }}>{title}</h3>
+    <div id={slug} style={{ marginTop: 16, padding: 12, border: '1px solid #e8ecef', borderRadius: 8, scrollMarginTop: 70 }}>
+      <h3 className="clickable check-title" style={{ margin: '0 0 4px' }} onClick={doTogglePin}
+        title={pinned ? 'Pinned to the header — click to remove' : 'Click to add a link to this check in the header'}>
+        {title}{pinned && <span className="check-pinned" aria-label="pinned"> 📌</span>}
+      </h3>
       {desc && <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>{desc}</p>}
       {active.length === 0 ? <span style={{ color: '#4CAF50' }}>{empty || 'None found'}</span> : (<>
         <p style={{ color: '#F44336', fontWeight: 600, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}:</p>
@@ -7878,6 +7898,36 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
       )}
     </div>
   );
+}
+
+// Pinned integrity checks — shortcuts the user parks in the header, after the colony selector.
+// Per-browser (localStorage), not per-account: these are a personal working set, and storing
+// them server-side would mean a schema change for something that never needs to travel.
+const PINNED_KEY = 'wildwatch.pinnedChecks';
+type PinnedCheck = { slug: string; title: string };
+const checkSlug = (title: string) => 'check-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const checkHref = (slug: string) => `/?admin&tab=validation#${slug}`;
+
+const readPinned = (): PinnedCheck[] => {
+  try { const v = JSON.parse(localStorage.getItem(PINNED_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+};
+let _pinned: PinnedCheck[] = readPinned();
+const _pinnedSubs = new Set<() => void>();
+const subscribePinned = (fn: () => void) => { _pinnedSubs.add(fn); return () => { _pinnedSubs.delete(fn); }; };
+const getPinnedSnapshot = () => _pinned;
+const writePinned = (next: PinnedCheck[]) => {
+  _pinned = next;
+  try { localStorage.setItem(PINNED_KEY, JSON.stringify(next)); } catch { /* quota/private mode — keep the in-memory pins */ }
+  _pinnedSubs.forEach(fn => fn());
+};
+const togglePinned = (slug: string, title: string) => {
+  const has = _pinned.some(p => p.slug === slug);
+  writePinned(has ? _pinned.filter(p => p.slug !== slug) : [..._pinned, { slug, title }]);
+  return !has;
+};
+function usePinnedChecks(): PinnedCheck[] {
+  return React.useSyncExternalStore(subscribePinned, getPinnedSnapshot);
 }
 
 // Cell renderers for integrity tables — styled plain text (not links), because IntegrityCheck
@@ -8273,6 +8323,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return regions.length > 1 ? regions.map(r => <optgroup key={r} label={r}>{opts(byRegion[r])}</optgroup>) : opts(colonies);
   })();
 
+  const pinnedChecks = usePinnedChecks();
+
   const siteHeader = (
     <header>
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
@@ -8282,6 +8334,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <select className="colony-select" value={colonyId} onChange={e => switchColony(Number(e.target.value))} title="Switch colony">
             {colonyOptionEls}
           </select>
+        )}
+        {pinnedChecks.length > 0 && (
+          <span className="pinned-checks">
+            {pinnedChecks.map(p => (
+              <a key={p.slug} className="pinned-check" href={checkHref(p.slug)} title={`Data validation — ${p.title}`}>{p.title}</a>
+            ))}
+          </span>
         )}
         <span className="header-user">
           {userName}
@@ -8302,6 +8361,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               <select className="colony-select" value={colonyId} onChange={e => { switchColony(Number(e.target.value)); closeMenu(); }}>
                 {colonyOptionEls}
               </select>
+            </div>
+          )}
+          {pinnedChecks.length > 0 && (
+            <div className="mobile-search-group">
+              <label className="mobile-label">Pinned checks</label>
+              <nav className="mobile-nav">
+                {pinnedChecks.map(p => <a key={p.slug} href={checkHref(p.slug)} onClick={() => closeMenu()}>{p.title}</a>)}
+              </nav>
             </div>
           )}
           <div className="mobile-search-group">

@@ -31,6 +31,13 @@ header h1:hover { opacity:.8; }
 .site-nav a.active { color:#fff; background:rgba(255,255,255,.18); font-weight:600; }
 .header-stats { font-size:11px; opacity:.7; }
 .header-user { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:13px; }
+/* Integrity checks the user pinned — shortcuts sitting after the colony selector. */
+.pinned-checks { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pinned-check { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.35); border-radius:4px;
+  padding:3px 8px; font-size:13px; color:#fff; text-decoration:none; white-space:nowrap; }
+.pinned-check:hover { background:rgba(255,255,255,.28); }
+.check-title:hover { text-decoration:underline; }
+.check-pinned { font-size:12px; }
 .colony-select { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:4px; padding:3px 8px; font-size:13px; cursor:pointer; }
 .colony-select option { color:#333; }
 .mobile-panel .colony-select { background:#fff; color:#333; border-color:#ccc; width:100%; padding:6px 8px; }
