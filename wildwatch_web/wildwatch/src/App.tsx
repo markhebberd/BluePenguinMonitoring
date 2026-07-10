@@ -5896,16 +5896,24 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [flipper, setFlipper] = useState('');
   const [observedSex, setObservedSex] = useState('');
   const [moulting, setMoulting] = useState(false);
-  const [ticks, setTicks] = useState(false);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [replaceNoScan, setReplaceNoScan] = useState(true);
 
   const pitNorm = pit.toUpperCase().trim();
   const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
   const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
   // Predict the peng_num the server will assign (MAX + 1) for the title.
   const nextPengNum = useMemo(() => allPenguins.reduce((m: number, p: any) => Math.max(m, parseInt(p.peng_num) || 0), 0) + 1, [allPenguins]);
+
+  // An adult being chipped is often the very bird recorded as "no scan" on that day's visit —
+  // offer to swap the marker for a real scan of the new bird.
+  const noScanObs = useMemo(() => {
+    if (!isAdult || !date || !box.trim()) return null;
+    return (queryBoxDetailSync(box.trim())?.observations || [])
+      .find((o: any) => toNzDateStr(o.observation_time_utc) === date && (o.no_scan || 0) > 0) || null;
+  }, [isAdult, date, box]);
 
   const save = async () => {
     setError('');
@@ -5933,12 +5941,28 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       const bio: Record<string, any> = {
         peng_num: pengNum, observation_date: date,
         observed_sex: observedSex || null,
-        is_moulting: moulting ? 1 : 0, condition_ticks: ticks ? 1 : 0,
+        is_moulting: moulting ? 1 : 0,
         notes: notes.trim() || null,
       };
       if (weight.trim()) bio.weight = parseFloat(weight);
       if (flipper.trim()) bio.flipper_length = parseFloat(flipper);
       await createRecord(token, 'penguin_biometric_data', bio);
+
+      // Swap the day's "no scan" marker for a real scan of the new bird: scan +1, no_scan −1,
+      // so the observation's adults = scans + no-scans balance is preserved.
+      if (noScanObs && replaceNoScan) {
+        try {
+          const why = `Replaced a no-scan with newly chipped #${pengNum}`;
+          await createRecord(token, 'penguin_scans', {
+            observation_id: noScanObs.observation_id, pit_id: pitNorm,
+            scan_time_utc: noScanObs.observation_time_utc,
+          }, why);
+          await updateRecord(token, 'observations', noScanObs.observation_id,
+            { no_scan: (noScanObs.no_scan || 1) - 1 }, why);
+        } catch (e: any) {
+          alert(`Penguin #${pengNum} was added, but replacing the no-scan failed: ${e?.message || e}`);
+        }
+      }
 
       onAdded(pengNum);
     } catch (e: any) {
@@ -5998,7 +6022,11 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
           </select></div>
         <div className="app-checks">
           <label><input type="checkbox" checked={moulting} onChange={e => setMoulting(e.target.checked)} /> Moulting</label>
-          <label><input type="checkbox" checked={ticks} onChange={e => setTicks(e.target.checked)} /> Ticks</label>
+          {noScanObs && (
+            <label title={`This visit recorded ${noScanObs.no_scan} unscanned adult${noScanObs.no_scan === 1 ? '' : 's'} — count this bird as one of them`}>
+              <input type="checkbox" checked={replaceNoScan} onChange={e => setReplaceNoScan(e.target.checked)} /> Replace no scan in Box {box.trim()}
+            </label>
+          )}
         </div>
         <div className="app-field"><label>Notes</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
