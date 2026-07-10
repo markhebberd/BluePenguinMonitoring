@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS observation_locations (
     location_name VARCHAR(50) NOT NULL,
     location_type VARCHAR(20) DEFAULT 'box',
     persistent_notes TEXT,
+    watched TINYINT(1) NOT NULL DEFAULT 0,
     rfid_tag_number VARCHAR(50),
     rfid_scan_time_utc DATETIME,
     rfid_latitude DOUBLE,

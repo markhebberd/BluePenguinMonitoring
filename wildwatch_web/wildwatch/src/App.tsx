@@ -2446,6 +2446,27 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   );
 }
 
+/** Tick beside the box heading: green = watched box, grey = not. Editors click to toggle. */
+function WatchedTick({ location, token, canEdit }: { location: any; token?: string; canEdit: boolean }) {
+  const [watched, setWatched] = useState<boolean>(!!Number(location.watched));
+  useEffect(() => { setWatched(!!Number(location.watched)); }, [location.location_id, location.watched]);
+  const toggle = async () => {
+    if (!canEdit || !token) return;
+    const next = !watched;
+    setWatched(next);
+    try {
+      await updateRecord(token, 'observation_locations', location.location_id, { watched: next ? 1 : 0 });
+    } catch (e: any) {
+      setWatched(!next);
+      alert('Failed to update watched flag: ' + (e?.message || e));
+    }
+  };
+  return (
+    <span className={`watched-tick${watched ? ' on' : ''}${canEdit ? ' clickable' : ''}`}
+      title={watched ? 'Watched box' : 'Not watched'} onClick={toggle}>✓</span>
+  );
+}
+
 /** Parse flexible date input into YYYY-MM-DD. Accepts d/m/yy, dd/mm/yyyy, d-m-yy, d m yy, yyyy-mm-dd, yy-m-d etc. */
 function parseDateInput(input: string): string | null {
   const s = input.trim();
@@ -5750,7 +5771,7 @@ export function EmbeddedPanel() {
     if (!boxData?.location) return <div className="embed-state embed-error">Box {view.id} not found</div>;
     return (
       <div className="embed-box">
-        <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><StatusLegend /></div></div>
+        <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><WatchedTick location={boxData.location} canEdit={false} /><StatusLegend /></div></div>
         <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
         <div className="detail-split">
           <BoxPanel key={view.id} data={boxData} boxName={view.id} allPenguins={allPenguins}
@@ -9088,6 +9109,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <div className="page-header">
               <div className="box-header-left">
                 <h2>Box {selectedBox}</h2>
+                {boxDetail?.location && <WatchedTick location={boxDetail.location} token={token} canEdit={userRole !== 'viewer'} />}
                 {boxDetail?.location && (
                   <div className="persistent-notes">
                     <EditableField value={boxDetail.location.persistent_notes || ''} onSave={(val) => updateRecord(token, 'observation_locations', boxDetail.location!.location_id, {persistent_notes: val})} placeholder="Box notes (persistent)" canEdit={userRole !== 'viewer'} />
