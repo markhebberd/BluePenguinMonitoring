@@ -28,7 +28,9 @@ GUARDED='observations|penguin_scans|penguin_biometric_data|penguins|penguin_chip
 if [ $# -gt 0 ]; then
   FILES=("$@")
 else
-  mapfile -t FILES < <(git ls-files '*.php')
+  # No mapfile — macOS ships bash 3.2.
+  FILES=()
+  while IFS= read -r f; do FILES+=("$f"); done < <(git ls-files '*.php')
 fi
 
 # Only look at files that still exist (a staged deletion has no worktree file).

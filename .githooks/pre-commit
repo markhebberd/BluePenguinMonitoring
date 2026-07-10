@@ -8,8 +8,9 @@
 set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 
-# Staged .php files, added/copied/modified/renamed (not deleted).
-mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR -- '*.php')
+# Staged .php files, added/copied/modified/renamed (not deleted). No mapfile — macOS bash 3.2.
+STAGED=()
+while IFS= read -r f; do STAGED+=("$f"); done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.php')
 [ ${#STAGED[@]} -eq 0 ] && exit 0
 
 # Check what is STAGED, not what is in the worktree — they differ when a file is
