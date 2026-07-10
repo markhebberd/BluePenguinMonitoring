@@ -319,7 +319,45 @@ if ($action === 'recent_changes') {
           AND a.action <> 'SELECT' AND a.table_name <> '__sql_console'
         ORDER BY a.change_timestamp DESC");
     $stmt->execute([$days]);
-    echo json_encode($stmt->fetchAll());
+    $rows = $stmt->fetchAll();
+
+    // The audit row for an observation records a scan COUNT, which tells a reader nothing about
+    // WHICH birds were there. Attach the observation's scans and no-scan count so the panel can
+    // draw the same penguin minis as the box view. These are the observation's CURRENT birds,
+    // not its birds as at the change — the audit log doesn't store per-scan history.
+    $obsIds = array_values(array_unique(array_map(
+        fn($r) => (int)$r['record_id'],
+        array_filter($rows, fn($r) => $r['table_name'] === 'observations'))));
+    if ($obsIds) {
+        $ph = implode(',', array_fill(0, count($obsIds), '?'));
+        $s = $pdo->prepare(
+            "SELECT ps.observation_id, ps.pit_id, pc.peng_num, pc.chip_date, p.sex, p.chipped_as_adult, p.chick_size_code
+               FROM penguin_scans ps
+               LEFT JOIN penguin_chips pc ON pc.pit_id = ps.pit_id
+               LEFT JOIN penguins p ON p.peng_num = pc.peng_num
+              WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+              ORDER BY ps.scan_id");
+        $s->execute($obsIds);
+        $scansByObs = [];
+        foreach ($s->fetchAll() as $sc) {
+            $oid = (int)$sc['observation_id'];
+            unset($sc['observation_id']);
+            $scansByObs[$oid][] = $sc;
+        }
+        $m = $pdo->prepare("SELECT observation_id, no_scan, observation_time_utc FROM observations WHERE observation_id IN ($ph)");
+        $m->execute($obsIds);
+        $obsMeta = [];
+        foreach ($m->fetchAll() as $o) $obsMeta[(int)$o['observation_id']] = $o;
+        foreach ($rows as &$r) {
+            if ($r['table_name'] !== 'observations') continue;
+            $oid = (int)$r['record_id'];
+            $r['obs_scans'] = $scansByObs[$oid] ?? [];
+            $r['obs_no_scan'] = (int)($obsMeta[$oid]['no_scan'] ?? 0);
+            $r['obs_time'] = $obsMeta[$oid]['observation_time_utc'] ?? null;
+        }
+        unset($r);
+    }
+    echo json_encode($rows);
     exit;
 }
 

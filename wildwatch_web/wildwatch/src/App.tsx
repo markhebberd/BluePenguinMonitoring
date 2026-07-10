@@ -6030,6 +6030,24 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
 
 /** Audit-log plumbing columns — never interesting to a human reading the change list. */
 const AUDIT_HIDDEN_FIELDS = ['location_id','observer_id','colony_id','monitor_filename','is_deleted','observation_id','scan_id','biometric_id'];
+/** On observation rows the box is already in the header, and the scan count is superseded by the minis. */
+const AUDIT_HIDDEN_OBS_FIELDS = [...AUDIT_HIDDEN_FIELDS, 'box', 'scans'];
+
+/** The birds on an observation audit row: real scans as minis, unscanned adults as "No scan". */
+function AuditObsBirds({ entry }: { entry: any }) {
+  const scans: any[] = entry.obs_scans || [];
+  const noScan: number = entry.obs_no_scan || 0;
+  if (scans.length === 0 && noScan === 0) return null;
+  return (
+    <span className="scans" style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
+      {scans.map((s, i) => (
+        <PenguinMini key={s.pit_id || i} scan={s} observationDate={entry.obs_time || undefined}
+          onClick={() => s.peng_num && _adminOpenBird?.(String(s.peng_num))} />
+      ))}
+      {Array.from({ length: noScan }).map((_, k) => <span key={`ns${k}`} className="scan no-scan">No scan</span>)}
+    </span>
+  );
+}
 
 /** "observation_time_utc" -> "Observation time utc" reads better than a raw column name. */
 const fieldLabel = (k: string) => k.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -6115,17 +6133,21 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
             })()}
             {e.action === 'UPDATE' && e.table_name !== 'date_mappings' && fields && (
               <div style={{marginTop:4, paddingLeft:6, borderLeft:'2px solid #e0e0e0'}}>
-                {Object.entries(fields).map(([k, v]: [string, any]) => <FieldDiff key={k} name={k} value={v} />)}
+                {Object.entries(fields)
+                  .filter(([k]) => !(e.table_name === 'observations' && AUDIT_HIDDEN_OBS_FIELDS.includes(k) && k !== 'scans'))
+                  .map(([k, v]: [string, any]) => <FieldDiff key={k} name={k} value={v} />)}
               </div>
             )}
             {/* INSERTs store the whole new row — show its meaningful fields (drop the ids/plumbing). */}
             {e.action === 'INSERT' && fields && e.table_name !== '__sql_console' && (
               <div style={{marginTop:4, paddingLeft:6, borderLeft:'2px solid #e0e0e0'}}>
                 {Object.entries(fields)
-                  .filter(([k, v]: [string, any]) => !AUDIT_HIDDEN_FIELDS.includes(k) && v !== null && v !== '')
+                  .filter(([k, v]: [string, any]) => !(e.table_name === 'observations' ? AUDIT_HIDDEN_OBS_FIELDS : AUDIT_HIDDEN_FIELDS).includes(k) && v !== null && v !== '')
                   .map(([k, v]: [string, any]) => <FieldDiff key={k} name={k} value={v} />)}
               </div>
             )}
+            {/* Who was in the box — the audit's scan count says nothing about which birds. */}
+            {e.table_name === 'observations' && <AuditObsBirds entry={e} />}
           </div>
         );
       })}

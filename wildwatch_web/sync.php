@@ -306,6 +306,8 @@ function handleUpload($pdo, $colonyId, $observer) {
             }
 
             // Create or force-replace (update in-place to preserve audit trail)
+            $oldObs = null;        // pre-replace row, so the audit entry can log a diff
+            $oldScanCount = 0;
             if ($forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT observation_id FROM observations
                     WHERE location_id = ? AND is_deleted = FALSE
@@ -315,6 +317,12 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $existingId = $existingStmt->fetchColumn();
 
                 if ($existingId) {
+                    $oldStmt = $pdo->prepare("SELECT adults, eggs, chicks, breeding_status, gate_status, notes, no_scan FROM observations WHERE observation_id = ?");
+                    $oldStmt->execute([$existingId]);
+                    $oldObs = $oldStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                    $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM penguin_scans WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+                    $cntStmt->execute([$existingId]);
+                    $oldScanCount = (int)$cntStmt->fetchColumn();
                     // Update existing observation in-place
                     $pdo->prepare("UPDATE observations SET observer_id=?, observation_time_utc=?, adults=?, eggs=?, chicks=?, breeding_status=?, gate_status=?, notes=?, monitor_filename=?, no_scan=? WHERE observation_id=?")
                         ->execute([
@@ -376,21 +384,31 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $scansCreated++;
             }
 
-            // Audit log — record actual observation data
-            $action = $forceReplace ? 'UPDATE' : 'INSERT';
+            // Audit log. A brand-new observation records the whole row it created; a replace of an
+            // existing one records only the fields that actually differ, so the change list reads
+            // as "what changed this time" rather than a re-print of the observation.
+            $newObs = [
+                'adults' => (int)($obs['adults'] ?? 0),
+                'eggs' => (int)($obs['eggs'] ?? 0),
+                'chicks' => (int)($obs['chicks'] ?? 0),
+                'breeding_status' => $obs['breeding_status'] ?? null,
+                'gate_status' => $obs['gate_status'] ?? null,
+                'notes' => $obs['notes'] ?? '',
+                'no_scan' => $noScanCount,
+            ];
+            $action = $oldObs ? 'UPDATE' : 'INSERT';
+            if ($oldObs) {
+                $fields = ['source' => 'nestcheck_sync', 'box' => $boxName];
+                foreach ($newObs as $col => $newVal) {
+                    if (($oldObs[$col] ?? null) != $newVal) $fields[$col] = ['old' => $oldObs[$col] ?? null, 'new' => $newVal];
+                }
+                if ($oldScanCount != $scansCreated) $fields['scans'] = ['old' => $oldScanCount, 'new' => $scansCreated];
+            } else {
+                $fields = array_merge(['source' => 'nestcheck_sync', 'box' => $boxName], $newObs,
+                    ['daily_label' => $dailyLabel, 'scans' => $scansCreated]);
+            }
             $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, ?, ?, ?)")
-                ->execute([$observationId, $action, $observerId, json_encode([
-                    'source' => 'nestcheck_sync',
-                    'box' => $boxName,
-                    'adults' => (int)($obs['adults'] ?? 0),
-                    'eggs' => (int)($obs['eggs'] ?? 0),
-                    'chicks' => (int)($obs['chicks'] ?? 0),
-                    'breeding_status' => $obs['breeding_status'] ?? null,
-                    'gate_status' => $obs['gate_status'] ?? null,
-                    'notes' => $obs['notes'] ?? '',
-                    'daily_label' => $dailyLabel,
-                    'scans' => $scansCreated,
-                ])]);
+                ->execute([$observationId, $action, $observerId, json_encode($fields)]);
 
             $created[] = ['box_name' => $boxName, 'observation_id' => (int)$observationId, 'scans' => $scansCreated];
         }
