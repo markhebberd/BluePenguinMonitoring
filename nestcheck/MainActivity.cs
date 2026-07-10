@@ -2810,6 +2810,7 @@ namespace PenguinMonitor
 
                             _appSettings.SelectedColonyId = newId;
                             _appSettings.SelectedColonyName = selected["colony_name"]?.ToString() ?? "";
+                            _appSettings.SelectedColonyPrefix = selected.TryGetValue("colony_prefix", out var cpfx) ? cpfx?.ToString() ?? "" : "";
                             _appSettings.AllBoxSetsString = selected["location_sets_string"]?.ToString() ?? "";
                             _appSettings.BoxSetString = "All";
                             DataStorageService.saveApplicationSettings(_appSettings);
@@ -3639,7 +3640,23 @@ namespace PenguinMonitor
             return (label, sex, isChick, pd);
         }
 
-        private TextView CreateScanBadge(string birdId, Action? onClick = null, float textSize = 10)
+        // Colony acronym for display (PT, NI). Falls back to the colony name's initials
+        // until a colonies sync delivers colony_prefix.
+        private string CurrentColonyAcronym()
+        {
+            if (!string.IsNullOrEmpty(_appSettings?.SelectedColonyPrefix)) return _appSettings!.SelectedColonyPrefix;
+            var name = _appSettings?.SelectedColonyName ?? "";
+            return string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(w => char.ToUpper(w[0])));
+        }
+
+        // Peng number with its colony acronym: bare "2" → "PT2"; already-prefixed "NI2" stays.
+        private string DisplayPengNum(string? pengNum)
+        {
+            if (string.IsNullOrEmpty(pengNum)) return "";
+            return char.IsLetter(pengNum[0]) ? pengNum : CurrentColonyAcronym() + pengNum;
+        }
+
+        private TextView CreateScanBadge(string birdId, Action? onClick = null, float textSize = 10, string? labelOverride = null)
         {
             if (birdId.StartsWith("NOSCAN_"))
             {
@@ -3654,7 +3671,7 @@ namespace PenguinMonitor
             }
             var (label, sex, isChick, pd) = LookupPenguinLabel(birdId);
 
-            var badge = new TextView(this) { Text = label, TextSize = textSize };
+            var badge = new TextView(this) { Text = labelOverride ?? label, TextSize = textSize };
             var padH = (int)(8 * textSize / 10);
             var padV = (int)(3 * textSize / 10);
             // Chipped-as-chick (includes returnees) gets a yellow strip on the right 15%, like wildwatch.
@@ -5481,24 +5498,32 @@ namespace PenguinMonitor
             // existing bird and retires the bird's old chip (mirrors the wildwatch flow).
             PenguinData? rechipTarget = null;
             string? rechipOldPit = null;
-            var modeNew = new RadioButton(this) { Text = "New penguin", Checked = true };
+            var modeNew = new RadioButton(this) { Text = "New penguin" };
             modeNew.SetTextColor(Color.Black);
             var modeRechip = new RadioButton(this) { Text = "Rechip" };
             modeRechip.SetTextColor(Color.Black);
             var modeGroup = new RadioGroup(this) { Orientation = Android.Widget.Orientation.Horizontal };
             modeGroup.AddView(modeNew);
             modeGroup.AddView(modeRechip);
+            // The rechip search (peng # or chip id, like the wildwatch penguin search) sits
+            // right beside the Rechip radio on the same row, shown only in rechip mode.
+            var rechipSearchInput = createInput("Peng # or chip id");
+            var rechipSearchParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            rechipSearchParams.SetMargins(8, 0, 0, 0);
+            rechipSearchInput.LayoutParameters = rechipSearchParams;
+            rechipSearchInput.Visibility = ViewStates.Gone;
+            modeGroup.AddView(rechipSearchInput);
+            // Once a bird is selected the search swaps for its mini view + an ✕ to deselect
+            var rechipSelectedRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            rechipSelectedRow.SetGravity(GravityFlags.CenterVertical);
+            rechipSelectedRow.LayoutParameters = rechipSearchParams;
+            rechipSelectedRow.Visibility = ViewStates.Gone;
+            modeGroup.AddView(rechipSelectedRow);
+            modeNew.Checked = true; // checked AFTER joining the group so exclusivity tracks it
             card.AddView(modeGroup);
 
-            // Rechip search: peng # or chip id, like the wildwatch penguin search
-            var rechipLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            rechipLayout.Visibility = ViewStates.Gone;
-            rechipLayout.AddView(createLabel("Rechip penguin"));
-            var rechipSearchInput = createInput("Peng # or chip id");
-            rechipLayout.AddView(rechipSearchInput);
             var rechipResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            rechipLayout.AddView(rechipResults);
-            card.AddView(rechipLayout);
+            card.AddView(rechipResults);
 
             // Chipped as (adult/chick) + Sex on one row to keep the form short
             var chippedSexRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
@@ -5645,6 +5670,15 @@ namespace PenguinMonitor
 
             // --- Rechip mode wiring ---
             bool suppressRechipSearch = false;
+            void ClearRechipTarget()
+            {
+                rechipTarget = null; rechipOldPit = null;
+                rechipSelectedRow.RemoveAllViews();
+                rechipSelectedRow.Visibility = ViewStates.Gone;
+                suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
+                rechipSearchInput.Visibility = modeRechip.Checked ? ViewStates.Visible : ViewStates.Gone;
+                if (modeRechip.Checked) dialog.SetTitle("Rechip penguin");
+            }
             void SelectRechipTarget(PenguinData pd, string key)
             {
                 rechipTarget = pd;
@@ -5652,16 +5686,31 @@ namespace PenguinMonitor
                 rechipOldPit = key.Length == 17 ? key
                     : _remotePenguinData?.FirstOrDefault(kv => kv.Value.PengNum == pd.PengNum && kv.Key.Length == 17).Key;
                 rechipResults.RemoveAllViews();
-                suppressRechipSearch = true;
-                rechipSearchInput.Text = $"#{pd.PengNum}";
-                suppressRechipSearch = false;
-                dialog.SetTitle($"Rechip penguin #{pd.PengNum}");
+                suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
+                // Swap the search for the selected bird's mini view + ✕
+                rechipSearchInput.Visibility = ViewStates.Gone;
+                rechipSelectedRow.RemoveAllViews();
+                var selLabel = LookupPenguinLabel(key).label;
+                if (!string.IsNullOrEmpty(pd.PengNum))
+                    selLabel = selLabel.Replace($"#{pd.PengNum}", DisplayPengNum(pd.PengNum));
+                var selBadge = CreateScanBadge(key, null, textSize: 14, labelOverride: selLabel);
+                rechipSelectedRow.AddView(selBadge);
+                var deselect = new TextView(this) { Text = "✕", TextSize = 20 };
+                deselect.SetTextColor(UIFactory.DANGER_RED);
+                deselect.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                deselect.SetPadding(24, 4, 12, 4);
+                deselect.Clickable = true;
+                deselect.Click += (s, e) => ClearRechipTarget();
+                rechipSelectedRow.AddView(deselect);
+                rechipSelectedRow.Visibility = ViewStates.Visible;
+                dialog.SetTitle($"Rechip penguin {DisplayPengNum(pd.PengNum)}");
                 addButton.Text = "Rechip penguin";
             }
-            modeRechip.CheckedChange += (s, e) =>
+            void UpdateMode()
             {
                 bool rechip = modeRechip.Checked;
-                rechipLayout.Visibility = rechip ? ViewStates.Visible : ViewStates.Gone;
+                rechipSearchInput.Visibility = rechip && rechipTarget == null ? ViewStates.Visible : ViewStates.Gone;
+                rechipSelectedRow.Visibility = rechip && rechipTarget != null ? ViewStates.Visible : ViewStates.Gone;
                 chippedSexRow.Visibility = rechip ? ViewStates.Gone : ViewStates.Visible;
                 if (rechip)
                 {
@@ -5671,33 +5720,57 @@ namespace PenguinMonitor
                 else
                 {
                     rechipTarget = null; rechipOldPit = null;
+                    rechipSelectedRow.RemoveAllViews();
                     rechipResults.RemoveAllViews();
                     suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
                     dialog.SetTitle(string.IsNullOrEmpty(nextPengLabel) ? $"New bird: {shortId}" : $"New bird {nextPengLabel}");
                     addButton.Text = "Add new penguin";
                 }
-            };
+            }
+            // Belt and braces: enforce mutual exclusivity manually as well as via the group
+            modeRechip.CheckedChange += (s, e) => { if (e.IsChecked && modeNew.Checked) modeNew.Checked = false; UpdateMode(); };
+            modeNew.CheckedChange += (s, e) => { if (e.IsChecked && modeRechip.Checked) modeRechip.Checked = false; UpdateMode(); };
             rechipSearchInput.TextChanged += (s, e) =>
             {
                 if (suppressRechipSearch) return;
                 rechipTarget = null; rechipOldPit = null;
                 rechipResults.RemoveAllViews();
-                var q = (rechipSearchInput.Text ?? "").Trim().ToUpper();
-                if (q.Length < 2 || _remotePenguinData == null) return;
-                // Distinct birds whose peng number or any chip id matches; prefer full pit keys
-                var matches = new Dictionary<string, (PenguinData pd, string key)>();
+                var q = (rechipSearchInput.Text ?? "").Trim().ToUpper().TrimStart('#');
+                if (q.Length < 1 || _remotePenguinData == null) return;
+                bool qIsNum = q.All(char.IsDigit);
+                long qVal = qIsNum && long.TryParse(q, out var qv) ? qv : -1;
+                // Distinct birds ranked: exact peng-number match first (a "2" puts PT2 and
+                // NI2 on top), then number prefix, number contains, then chip-id contains.
+                var best = new Dictionary<string, (int rank, long num, PenguinData pd, string key)>();
                 foreach (var kv in _remotePenguinData)
                 {
-                    var pn = kv.Value.PengNum ?? "";
+                    var pd2 = kv.Value;
+                    var pn = pd2.PengNum ?? "";
                     if (pn == "") continue;
-                    if (!pn.ToUpper().Contains(q) && !kv.Key.ToUpper().Contains(q)) continue;
-                    if (!matches.TryGetValue(pn, out var cur) || (kv.Key.Length == 17 && cur.key.Length != 17))
-                        matches[pn] = (kv.Value, kv.Key);
+                    var pnU = pn.ToUpper();
+                    var disp = DisplayPengNum(pn).ToUpper();
+                    var digits = new string(pnU.SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray());
+                    long.TryParse(digits, out var numVal);
+                    int rank =
+                        (qIsNum && numVal == qVal) || pnU == q || disp == q ? 0 :
+                        pnU.StartsWith(q) || disp.StartsWith(q) ? 1 :
+                        pnU.Contains(q) || disp.Contains(q) ? 2 :
+                        q.Length >= 3 && kv.Key.ToUpper().Contains(q) ? 3 : -1;
+                    if (rank < 0) continue;
+                    if (best.TryGetValue(pn, out var cur))
+                        best[pn] = (Math.Min(cur.rank, rank), numVal, pd2,
+                            cur.key.Length == 17 ? cur.key : (kv.Key.Length == 17 ? kv.Key : cur.key));
+                    else
+                        best[pn] = (rank, numVal, pd2, kv.Key);
                 }
-                foreach (var mt in matches.Values.Take(6))
+                foreach (var mt in best.Values.OrderBy(v => v.rank).ThenBy(v => v.num).Take(6))
                 {
                     var pdSel = mt.pd; var keySel = mt.key;
-                    var resultBadge = CreateScanBadge(keySel, () => SelectRechipTarget(pdSel, keySel), textSize: 14);
+                    // Show the colony acronym instead of '#' so PT2 and NI2 are unambiguous
+                    var lbl = LookupPenguinLabel(keySel).label;
+                    if (!string.IsNullOrEmpty(pdSel.PengNum))
+                        lbl = lbl.Replace($"#{pdSel.PengNum}", DisplayPengNum(pdSel.PengNum));
+                    var resultBadge = CreateScanBadge(keySel, () => SelectRechipTarget(pdSel, keySel), textSize: 14, labelOverride: lbl);
                     var bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
                     bp.SetMargins(0, 4, 0, 4);
                     resultBadge.LayoutParameters = bp;
@@ -5920,7 +5993,7 @@ namespace PenguinMonitor
                 {
                     new AlertDialog.Builder(this)
                         .SetTitle("Rechip")
-                        .SetMessage($"Are you sure you would like to rechip #{rechipTarget.PengNum}?")
+                        .SetMessage($"Are you sure you would like to rechip {DisplayPengNum(rechipTarget.PengNum)}?")
                         .SetPositiveButton("Yes", (s2, e2) => DoAdd())
                         .SetNegativeButton("No", (s2, e2) => { })
                         .Show();

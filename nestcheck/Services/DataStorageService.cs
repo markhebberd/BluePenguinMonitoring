@@ -199,6 +199,7 @@ namespace PenguinMonitor.Services
                                 var match = colonies.FirstOrDefault(c => Convert.ToInt32(c["colony_id"]) == appSettings.SelectedColonyId) ?? colonies[0];
                                 appSettings.SelectedColonyId = Convert.ToInt32(match["colony_id"]);
                                 appSettings.SelectedColonyName = match["colony_name"]?.ToString() ?? "";
+                                appSettings.SelectedColonyPrefix = match.TryGetValue("colony_prefix", out var cpfx) ? cpfx?.ToString() ?? "" : "";
                                 appSettings.AllBoxSetsString = match["location_sets_string"]?.ToString() ?? "";
                                 if (string.IsNullOrEmpty(appSettings.BoxSetString))
                                     appSettings.BoxSetString = "All";

@@ -666,6 +666,21 @@ namespace PenguinMonitor.Models
             }
         }
 
+        // Colony acronym (e.g. "PT", "NI") — prefixes bare peng numbers for display
+        private string selectedColonyPrefix = "";
+        public string SelectedColonyPrefix
+        {
+            get => selectedColonyPrefix;
+            set
+            {
+                if (selectedColonyPrefix != value)
+                {
+                    selectedColonyPrefix = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
         private bool showDailyLabelWarning = true;
         public bool ShowDailyLabelWarning
         {
