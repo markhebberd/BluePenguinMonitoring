@@ -5561,7 +5561,8 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                 return (
                   <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}
                     onClick={() => onBoxClick(box, cf.observation_time_utc)} style={{cursor:'pointer'}}>
-                    <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, cf.observation_time_utc))}><b>Box {box}</b></a>
+                    <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, cf.observation_time_utc))}
+                      onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}><b>Box {box}</b></a>
                     {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
                     {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
                     {cf.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(cf.chicks, 4))}</span>}
@@ -5609,8 +5610,9 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                   return (
                   <div key={o.observation_id || oi}>
                     <div className="day-row" onClick={() => onBoxClick(box, o.observation_time_utc)} style={{cursor:'pointer', borderLeft: isDup ? '3px solid #F44336' : undefined}}>
-                      {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, o.observation_time_utc))}><b>Box {box}</b></a>}
-                      {oi > 0 && <span className="day-box-link" style={{opacity:0.4}}>Box {box}</span>}
+                      {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, o.observation_time_utc))}
+                        onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}><b>Box {box}</b></a>}
+                      {oi > 0 && <span className="day-box-link" style={{opacity:0.4}} onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}>Box {box}</span>}
                       {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
                       {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
