@@ -155,16 +155,14 @@ function handleDelete($pdo, $colonyId, $observerId) {
     $boxId = $_GET['box_id'] ?? null;
     if (!$boxId) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'box_id parameter required']); return; }
 
-    // Get old values for audit
-    $old = $pdo->prepare("SELECT location_id, pit_id, scan_time_utc, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-    $old->execute([$colonyId, $boxId]);
-    $oldRow = $old->fetch();
+    $sel = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+    $sel->execute([$colonyId, $boxId]);
+    $locationId = $sel->fetchColumn();
 
     // Clear the tag only — keep the stored location (lat/long/accuracy). Audited as an UPDATE
     // (pit_id -> null), which is what it is; the location row itself survives.
-    $cleared = $oldRow
-        ? wwAuditedUpdate($pdo, 'observation_locations', $oldRow['location_id'], ['pit_id' => null], $observerId, 'boxtags_api')
-        : 0;
+    $cleared = $locationId === false ? 0
+        : wwAuditedUpdate($pdo, 'observation_locations', $locationId, ['pit_id' => null], $observerId, 'boxtags_api');
 
     if ($cleared > 0) {
         echo json_encode(['success' => true, 'message' => 'Box tag cleared', 'box_id' => $boxId]);

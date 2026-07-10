@@ -792,8 +792,7 @@ if ($action === 'colony_box_names') {
 }
 
 if ($action === 'create_colony_boxes') {
-    // Materialise a colony's box-sets into observation_locations rows. Idempotent:
-    // existing (colony_id, location_name) are kept via INSERT IGNORE.
+    // Materialise a colony's box-sets into observation_locations rows.
     $input = json_decode(file_get_contents('php://input'), true);
     $colonyId = (int)($input['colony_id'] ?? 0);
     $names = $input['box_names'] ?? [];
