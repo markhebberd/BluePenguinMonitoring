@@ -5929,6 +5929,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!chipBy.trim()) { setError('Chipped by is required'); return; }
     if (!isAdult && !chickSize) { setError('Select chick size (LC / BC / SC)'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
+    if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengNum}?`)) return;
     setSaving(true);
     try {
       let pengNum: string;
