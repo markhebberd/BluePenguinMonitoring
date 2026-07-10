@@ -174,10 +174,7 @@ function handleLogin($pdo) {
     }
     if (!$observer) { http_response_code(401); echo json_encode(['error'=>'Invalid credentials']); return; }
 
-    $token = bin2hex(random_bytes(32));
-    $expires = date('Y-m-d H:i:s', time() + 86400 * 30);
-    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
-        ->execute([$token, $observer['observer_id'], $expires]);
+    $token = wwSessionCreate($pdo, $observer['observer_id']);
 
     echo json_encode([
         'token'=>$token,
@@ -228,8 +225,7 @@ function handleRequestPasswordReset($pdo) {
         $stmt->execute([$email]);
         foreach ($stmt->fetchAll() as $observer) {
             // Replace any outstanding reset links (invites keep their longer validity)
-            $pdo->prepare("DELETE FROM password_resets WHERE observer_id = ? AND purpose = 'reset' AND used_at IS NULL")
-                ->execute([$observer['observer_id']]);
+            wwPasswordResetsInvalidate($pdo, $observer['observer_id'], 'reset');
             sendPasswordSetupEmail($pdo, $observer, 'reset');
         }
     }
@@ -267,16 +263,13 @@ function handleResetPassword($pdo) {
     // The observer is their own actor: they authenticated with the emailed token, not a session.
     wwAuditedUpdate($pdo, 'observers', $row['observer_id'], ['passphrase_hash' => $hash],
         $row['observer_id'], 'Password set via ' . $row['purpose'] . ' link');
-    $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE token_hash = ?")->execute([$row['token_hash']]);
-    $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$row['observer_id']]);
+    wwPasswordResetConsume($pdo, $row['token_hash']);
+    wwSessionsDeleteForObserver($pdo, $row['observer_id']);
 
     $stmt = $pdo->prepare("SELECT * FROM observers WHERE observer_id = ?");
     $stmt->execute([$row['observer_id']]);
     $observer = $stmt->fetch();
-    $token = bin2hex(random_bytes(32));
-    $expires = date('Y-m-d H:i:s', time() + 86400 * 30);
-    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
-        ->execute([$token, $observer['observer_id'], $expires]);
+    $token = wwSessionCreate($pdo, $observer['observer_id']);
     echo json_encode([
         'token' => $token,
         'observer_id' => $observer['observer_id'],

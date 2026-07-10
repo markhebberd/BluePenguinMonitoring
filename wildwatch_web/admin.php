@@ -469,7 +469,7 @@ if ($action === 'send_reset') {
     $row = $chk->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
     if (empty($row['email'])) { http_response_code(400); echo json_encode(['error'=>'User has no email address']); exit; }
-    $pdo->prepare("DELETE FROM password_resets WHERE observer_id = ? AND used_at IS NULL")->execute([$id]);
+    wwPasswordResetsInvalidate($pdo, $id);
     $ok = sendPasswordSetupEmail($pdo, $row, 'invite'); // 7-day link: admin-sent, so give the recipient time
     if (!$ok) { http_response_code(500); echo json_encode(['error'=>'Mail could not be sent']); exit; }
     echo json_encode(['success'=>true, 'email'=>$row['email']]);

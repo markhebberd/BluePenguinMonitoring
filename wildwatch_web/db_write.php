@@ -7,8 +7,9 @@
  * caller can forget: there is no other way to write. Endpoints (crud.php, sync.php, admin.php,
  * boxtags.php, integrity.php) are left with validation, permissions and routing.
  *
- * Deliberately NOT covered: sessions, password_resets, disk_history. Those are infrastructure,
- * not observations — auditing every login would bury the biological trail in noise.
+ * Infrastructure tables (sessions, password_resets, disk_history) are written by the unaudited
+ * helpers at the bottom of this file — auditing every login would bury the biological trail in
+ * noise, but their SQL lives here too so this file is the database's only writer.
  *
  * Callers must own the transaction. These functions never begin/commit, so a multi-row operation
  * (a sync, an import, a cascade delete) stays atomic and rolls back as a unit.
@@ -189,4 +190,56 @@ function wwAuditedUpsert($pdo, $table, $keyCols, $row, $observerId, $reason = nu
     $update = array_diff_key($row, array_flip($keyCols));
     wwAuditedUpdate($pdo, $table, $existingId, $update, $observerId, $reason);
     return $existingId;
+}
+
+// ============ Infrastructure writes (deliberately unaudited) ============
+// Sessions, password resets and disk metrics are plumbing, not observations. Each helper is
+// named for its one intent and contains its one statement.
+
+/** Create a 30-day session for an observer and return its token. */
+function wwSessionCreate($pdo, int $observerId): string {
+    $token = bin2hex(random_bytes(32));
+    $expires = date('Y-m-d H:i:s', time() + 86400 * 30);
+    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
+        ->execute([$token, $observerId, $expires]);
+    return $token;
+}
+
+/** Sliding session: extend a valid token to 30 days out, at most once per day. */
+function wwSessionTouch($pdo, string $token): void {
+    $pdo->prepare("UPDATE sessions SET expires_at = NOW() + INTERVAL 30 DAY WHERE token = ? AND expires_at < NOW() + INTERVAL 29 DAY")
+        ->execute([$token]);
+}
+
+/** Log an observer out everywhere — used after a password change. */
+function wwSessionsDeleteForObserver($pdo, int $observerId): void {
+    $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$observerId]);
+}
+
+/** Create a reset/invite token: stores only its hash, returns the raw token for the email link. */
+function wwPasswordResetCreate($pdo, int $observerId, string $purpose, int $ttlSeconds): string {
+    $token = bin2hex(random_bytes(32));
+    $pdo->prepare("INSERT INTO password_resets (token_hash, observer_id, purpose, expires_at)
+        VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))")
+        ->execute([hash('sha256', $token), $observerId, $purpose, $ttlSeconds]);
+    return $token;
+}
+
+/** Mark a reset token used. */
+function wwPasswordResetConsume($pdo, string $tokenHash): void {
+    $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE token_hash = ?")->execute([$tokenHash]);
+}
+
+/** Drop an observer's outstanding unused tokens — all of them, or one purpose only. */
+function wwPasswordResetsInvalidate($pdo, int $observerId, ?string $purpose = null): void {
+    $sql = "DELETE FROM password_resets WHERE observer_id = ? AND used_at IS NULL";
+    $args = [$observerId];
+    if ($purpose !== null) { $sql .= " AND purpose = ?"; $args[] = $purpose; }
+    $pdo->prepare($sql)->execute($args);
+}
+
+/** Record a disk-free sample and prune samples older than 400 days. */
+function wwDiskHistoryRecord($pdo, int $freeMb): void {
+    $pdo->prepare("INSERT INTO disk_history (recorded_at, disk_free_mb) VALUES (UTC_TIMESTAMP(), ?)")->execute([$freeMb]);
+    $pdo->exec("DELETE FROM disk_history WHERE recorded_at < UTC_TIMESTAMP() - INTERVAL 400 DAY");
 }

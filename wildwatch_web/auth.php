@@ -52,11 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 function redirectToApp($pdo, $observer) {
-    // Generate a 30-day session token
-    $token = bin2hex(random_bytes(32));
-    $expires = date('Y-m-d H:i:s', time() + 86400 * 30);
-    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, ?)")
-        ->execute([$token, $observer['observer_id'], $expires]);
+    $token = wwSessionCreate($pdo, $observer['observer_id']);
 
     $name = urlencode($observer['observer_name']);
     $oid = $observer['observer_id'];

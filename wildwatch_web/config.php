@@ -145,8 +145,7 @@ function getReadOnlyDbConnection($attemptsRemaining = 2) {
 
 /** Sliding session: extend a valid token to 30 days from now, at most once per day. */
 function touchSession($pdo, $token) {
-    $pdo->prepare("UPDATE sessions SET expires_at = NOW() + INTERVAL 30 DAY WHERE token = ? AND expires_at < NOW() + INTERVAL 29 DAY")
-        ->execute([$token]);
+    wwSessionTouch($pdo, $token);
 }
 
 /**
@@ -247,9 +246,7 @@ function recordDiskSample($pdo, $dir = null) {
     $free = @disk_free_space($dir);
     if ($free === false) return null;
     $freeMb = (int)round($free / 1048576);
-    $stmt = $pdo->prepare("INSERT INTO disk_history (recorded_at, disk_free_mb) VALUES (UTC_TIMESTAMP(), ?)");
-    $stmt->execute([$freeMb]);
-    $pdo->exec("DELETE FROM disk_history WHERE recorded_at < UTC_TIMESTAMP() - INTERVAL 400 DAY");
+    wwDiskHistoryRecord($pdo, $freeMb);
     return $freeMb;
 }
 
@@ -271,11 +268,7 @@ function sendWildwatchMail($to, $subject, $html) {
  * (only the sha256 is stored). $purpose: 'invite' (new user) or 'reset'.
  */
 function createPasswordResetToken($pdo, $observerId, $purpose, $ttlSeconds) {
-    $token = bin2hex(random_bytes(32));
-    $pdo->prepare("INSERT INTO password_resets (token_hash, observer_id, purpose, expires_at)
-        VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))")
-        ->execute([hash('sha256', $token), $observerId, $purpose, $ttlSeconds]);
-    return $token;
+    return wwPasswordResetCreate($pdo, $observerId, $purpose, $ttlSeconds);
 }
 
 /**
