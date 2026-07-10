@@ -2446,38 +2446,6 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
   );
 }
 
-/** Prototype of the nestcheck rechip flow: search for a bird, show its mini, then a
- *  Yes/No confirm. The actual rechip write is not implemented yet. */
-function RechipPenguin({ allPenguins, onBirdClick }: { allPenguins: any[]; onBirdClick?: (tag: string) => void }) {
-  const [search, setSearch] = useState('');
-  const [target, setTarget] = useState<any>(null);
-  const [confirming, setConfirming] = useState(false);
-  const pick = (tag: string) => {
-    const p = allPenguins.find((x: any) => x.peng_num === tag || x.pit_id === tag);
-    if (p) { setTarget(p); setConfirming(false); }
-  };
-  return (
-    <div className="rechip-penguin">
-      <span className="rechip-lbl">Rechip penguin:</span>
-      {!target ? (
-        <PenguinSearch penguins={allPenguins} search={search} onSearchChange={setSearch} onBirdClick={pick} />
-      ) : !confirming ? (
-        <>
-          <PenguinMini scan={target} onClick={() => onBirdClick?.(target.peng_num || target.pit_id)} />
-          <button className="edit-btn done-btn" onClick={() => setConfirming(true)}>OK</button>
-          <button className="edit-btn" title="Pick a different penguin" onClick={() => setTarget(null)}>×</button>
-        </>
-      ) : (
-        <>
-          <span className="rechip-confirm">Are you sure you would like to rechip <PenguinMini scan={target} onClick={() => onBirdClick?.(target.peng_num || target.pit_id)} />?</span>
-          <button className="edit-btn done-btn" onClick={() => { alert('Rechip flow not implemented yet (prototype)'); setTarget(null); setConfirming(false); }}>Yes</button>
-          <button className="edit-btn" onClick={() => setConfirming(false)}>No</button>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** Parse flexible date input into YYYY-MM-DD. Accepts d/m/yy, dd/mm/yyyy, d-m-yy, d m yy, yyyy-mm-dd, yy-m-d etc. */
 function parseDateInput(input: string): string | null {
   const s = input.trim();
@@ -5933,6 +5901,10 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [replaceNoScan, setReplaceNoScan] = useState(true);
+  // Rechip flow: same form, but the chip goes on an existing bird and its old chip retires.
+  const [step, setStep] = useState<'ask' | 'search' | 'form'>('ask');
+  const [rechipTarget, setRechipTarget] = useState<any>(null);
+  const [rechipSearch, setRechipSearch] = useState('');
 
   const pitNorm = pit.toUpperCase().trim();
   const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
@@ -5956,20 +5928,35 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!box.trim()) { setError('Chip box required'); return; }
     if (!chipBy.trim()) { setError('Chipped by is required'); return; }
     if (!isAdult && !chickSize) { setError('Select chick size (LC / BC / SC)'); return; }
+    if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
     setSaving(true);
     try {
-      const pengRes = await createRecord(token, 'penguins', {
-        chipped_as_adult: isAdult ? 1 : 0, chick_size_code: isAdult ? null : chickSize,
-      });
-      if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
-      const pengNum = pengRes.peng_num;
+      let pengNum: string;
+      if (rechipTarget) {
+        pengNum = rechipTarget.peng_num;
+      } else {
+        const pengRes = await createRecord(token, 'penguins', {
+          chipped_as_adult: isAdult ? 1 : 0, chick_size_code: isAdult ? null : chickSize,
+        });
+        if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
+        pengNum = pengRes.peng_num;
+      }
 
       const chipLoc = queryAllLocations().find((l: any) => String(l.location_name) === box.trim());
       const chipRes = await createRecord(token, 'penguin_chips', {
         pit_id: pitNorm, peng_num: pengNum, chip_date: date,
         chip_box: box.trim(), location_id: chipLoc?.location_id ?? null, chip_by: chipBy.trim() || null, is_active: 1,
-      });
-      if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + ` (penguin #${pengNum} was created)`); setSaving(false); return; }
+      }, rechipTarget ? `Rechip of #${pengNum}` : undefined);
+      if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + (rechipTarget ? '' : ` (penguin #${pengNum} was created)`)); setSaving(false); return; }
+
+      // Retire the bird's previous chip so the new PIT becomes the active one.
+      if (rechipTarget?.pit_id && rechipTarget.pit_id.toUpperCase() !== pitNorm) {
+        try {
+          await updateRecord(token, 'penguin_chips', rechipTarget.pit_id, { is_active: 0 }, `Rechipped to ${pitNorm}`);
+        } catch (e: any) {
+          alert(`New chip was saved, but retiring old chip ${rechipTarget.pit_id.slice(-8)} failed: ${e?.message || e}`);
+        }
+      }
 
       const bio: Record<string, any> = {
         peng_num: pengNum, observation_date: date,
@@ -5985,7 +5972,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       // so the observation's adults = scans + no-scans balance is preserved.
       if (noScanObs && replaceNoScan) {
         try {
-          const why = `Replaced a no-scan with newly chipped #${pengNum}`;
+          const why = `Replaced a no-scan with ${rechipTarget ? 'rechipped' : 'newly chipped'} #${pengNum}`;
           await createRecord(token, 'penguin_scans', {
             observation_id: noScanObs.observation_id, pit_id: pitNorm,
             scan_time_utc: noScanObs.observation_time_utc,
@@ -6004,11 +5991,42 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     }
   };
 
+  if (step === 'ask') return (
+    <div className="login-page" onClick={onClose}>
+      <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
+        <h2>Chip penguin · Box {chipBox}</h2>
+        <p>Are you chipping a new penguin or a rechip?</p>
+        <div className="app-actions">
+          <button type="button" onClick={() => setStep('form')}>New penguin</button>
+          <button type="button" onClick={() => setStep('search')}>Rechip</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (step === 'search') return (
+    <div className="login-page" onClick={onClose}>
+      <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
+        <h2>Rechip penguin · Box {chipBox}</h2>
+        <div className="rechip-penguin">
+          <span className="rechip-lbl">Rechip penguin:</span>
+          <PenguinSearch penguins={allPenguins} search={rechipSearch} onSearchChange={setRechipSearch}
+            onBirdClick={(tag: string) => {
+              const p = allPenguins.find((x: any) => x.peng_num === tag || x.pit_id === tag);
+              if (p) { setRechipTarget(p); setStep('form'); }
+            }} />
+        </div>
+        <div className="app-actions">
+          <button type="button" className="ghost-btn" onClick={() => setStep('ask')}>Back</button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>Enter penguin #{nextPengNum} · Box {box.trim() || chipBox}</h2>
-        <RechipPenguin allPenguins={allPenguins} />
+        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : `Enter penguin #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
@@ -6022,11 +6040,11 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
         <div className="app-row">
-          <div className="app-field"><label className="req">Life stage</label>
+          {!rechipTarget && <div className="app-field"><label className="req">Life stage</label>
             <div className="app-toggle">
               <button type="button" className={isAdult ? 'active' : ''} onClick={() => setIsAdult(true)}>Adult</button>
               <button type="button" className={!isAdult ? 'active' : ''} onClick={() => setIsAdult(false)}>Chick</button>
-            </div></div>
+            </div></div>}
           <div className="app-field"><label className="req">Chipped by</label>
             <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials"
               style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
@@ -6067,7 +6085,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (!isAdult && !chickSize)}>{saving ? 'Saving…' : 'Add penguin'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (!isAdult && !chickSize)}>{saving ? 'Saving…' : rechipTarget ? 'Rechip penguin' : 'Add penguin'}</button>
         </div>
       </div>
     </div>
