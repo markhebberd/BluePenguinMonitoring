@@ -5,11 +5,68 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
 header('Cache-Control: no-cache');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
-requireReadAuth();
+$auth = requireReadAuth();
 
 $pdo = getDbConnection();
 $colonyId = (int)($_GET['colony_id'] ?? 1);
 $viewPrefix = getColonyPrefix($pdo, $colonyId);
+
+// All penguins across every colony the caller may view — the "All penguins" page.
+// Newest initial chip first. peng_nums stay fully prefixed: the list spans colonies,
+// so a bare number would be ambiguous.
+if (isset($_GET['all'])) {
+    $where = '';
+    $args = [];
+    if (is_array($auth) && ($auth['role'] ?? '') !== 'admin') {
+        $ids = $pdo->prepare("SELECT colony_id FROM colony_permissions WHERE observer_id = ?");
+        $ids->execute([$auth['observer_id']]);
+        $colonyIds = $ids->fetchAll(PDO::FETCH_COLUMN);
+        if (empty($colonyIds)) { echo json_encode([]); exit; }
+        $where = 'WHERE p.colony_id IN (' . implode(',', array_fill(0, count($colonyIds), '?')) . ')';
+        $args = $colonyIds;
+    }
+    $stmt = $pdo->prepare("SELECT p.peng_num, p.sex, p.is_dead, p.death_date, p.chipped_as_adult, p.chick_size_code, c.colony_name
+        FROM penguins p
+        JOIN colonies c ON c.colony_id = p.colony_id
+        $where");
+    $stmt->execute($args);
+    $birds = [];
+    foreach ($stmt->fetchAll() as $b) $birds[$b['peng_num']] = $b;
+
+    // Initial-chip info comes from the earliest chip; the pits list carries every chip a
+    // rechipped bird has worn (chip-date order), each flagged active/inactive.
+    foreach ($pdo->query("SELECT peng_num, pit_id, chip_date, chip_box, chip_by, is_active
+                          FROM penguin_chips ORDER BY chip_date, pit_id") as $ch) {
+        if (!isset($birds[$ch['peng_num']])) continue;
+        $b = &$birds[$ch['peng_num']];
+        if (!isset($b['first_chip_date'])) {
+            $b['first_chip_date'] = $ch['chip_date'];
+            $b['first_chip_box'] = $ch['chip_box'];
+            $b['first_chip_by'] = $ch['chip_by'];
+        }
+        $b['pits'][] = ['pit_id' => $ch['pit_id'], 'is_active' => (int)$ch['is_active']];
+        unset($b);
+    }
+
+    // Chip-day biometric (weight/flipper), matching what the bird panel's chip line shows.
+    foreach ($pdo->query("SELECT peng_num, observation_date, weight, flipper_length
+                          FROM penguin_biometric_data
+                          WHERE (is_deleted = FALSE OR is_deleted IS NULL)") as $bio) {
+        $b = &$birds[$bio['peng_num']];
+        if (isset($b, $b['first_chip_date'])
+            && substr($bio['observation_date'], 0, 10) === substr($b['first_chip_date'], 0, 10)) {
+            if ($bio['weight'] !== null && !isset($b['chip_weight'])) $b['chip_weight'] = $bio['weight'];
+            if ($bio['flipper_length'] !== null && !isset($b['chip_flipper'])) $b['chip_flipper'] = $bio['flipper_length'];
+        }
+        unset($b);
+    }
+
+    $birds = array_values($birds);
+    usort($birds, fn($a, $b2) => strcmp($b2['first_chip_date'] ?? '', $a['first_chip_date'] ?? '')
+        ?: strcmp($b2['peng_num'], $a['peng_num']));
+    echo json_encode($birds);
+    exit;
+}
 
 // Count-only endpoint for validation
 if (isset($_GET['count'])) {

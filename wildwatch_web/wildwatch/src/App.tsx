@@ -5602,7 +5602,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   );
 }
 
-function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; day?: string; obs?: string } {
+function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; birds?: boolean; day?: string; obs?: string } {
   // Query-param form (current): box and bird are independent so a bird panel can
   // stay open across box changes and survive refresh/back — e.g. /?box=12&bird=PM1234.
   // obs (observation time) is a click-only anchor that deep-links to one observation.
@@ -5616,6 +5616,7 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
       enter: q.has('enter'),
       admin: q.has('admin'),
       reports: q.has('reports'),
+      birds: q.has('birds'),
     };
   }
   // Legacy path form — old bookmarks and cmd+click on path-style hrefs still resolve.
@@ -5623,7 +5624,7 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
   const boxMatch = path.match(/^\/box\/(.+)/);
   const birdMatch = path.match(/^\/bird\/(.+)/);
   const dayMatch = path.match(/^\/day\/(.+)/);
-  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', day: dayMatch?.[1] };
+  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', birds: path === '/birds', day: dayMatch?.[1] };
 }
 
 /**
@@ -6035,6 +6036,58 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
           <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (!isAdult && !chickSize)}>{saving ? 'Saving…' : 'Add penguin'}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Every penguin across the colonies the user can view, newest initial chip first.
+ *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
+function AllPenguinsPage({ token }: { token: string }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    fetch('/api/penguins.php?all=1', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => Array.isArray(d) ? setRows(d) : setError(d?.error || 'Failed to load'))
+      .catch(e => setError(String(e?.message || e)));
+  }, [token]);
+
+  const chippedAs = (r: any) => r.chipped_as_adult ? 'Adult' : `Chick${r.chick_size_code ? ` (${r.chick_size_code})` : ''}`;
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px' }}>
+      <div className="report-card">
+        <h3>All penguins{rows ? ` (${rows.length})` : ''}</h3>
+        <p className="muted">Every penguin in the colonies you can view, most recently chipped first. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn.</p>
+        {error && <p style={{ color: '#F44336' }}>{error}</p>}
+        {!rows && !error && <p className="muted">Loading…</p>}
+        {rows && (
+          <div className="table-scroll">
+            <table className="guess-rank-table zebra">
+              <thead><tr><th>Penguin</th><th>Colony</th><th>Chipped</th><th>Box</th><th>By</th><th>As</th><th>Sex</th><th>Weight (g)</th><th>Flipper (mm)</th><th>PIT ids</th></tr></thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.peng_num}>
+                    <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
+                    <td>{r.colony_name}</td>
+                    <td>{r.first_chip_date ? String(r.first_chip_date).slice(0, 10) : '—'}</td>
+                    <td>{r.first_chip_box || '—'}</td>
+                    <td>{r.first_chip_by || '—'}</td>
+                    <td>{chippedAs(r)}</td>
+                    <td>{r.sex || '—'}</td>
+                    <td>{r.chip_weight ?? '—'}</td>
+                    <td>{r.chip_flipper ?? '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                      {(r.pits || []).length === 0 ? '—' : (r.pits || []).map((p: any) => (
+                        <div key={p.pit_id} style={p.is_active ? undefined : { color: '#999' }} title={p.is_active ? undefined : 'Retired tag'}>{p.pit_id}</div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -8251,6 +8304,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [showAdmin, setShowAdmin] = useState(initial.admin || false);
   const [showReports, setShowReports] = useState(initial.reports || false);
+  const [showAllBirds, setShowAllBirds] = useState(initial.birds || false);
   const [showSettings, setShowSettings] = useState(false);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [datePickerCenter, setDatePickerCenter] = useState('');
@@ -8269,6 +8323,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (showAdmin) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?admin=1' + (t ? `&tab=${t}` : ''); }
     else if (showReports) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?reports=1' + (t ? `&tab=${t}` : ''); }
     else if (showEntry) path = '/?enter=1';
+    else if (showAllBirds) path = '/?birds=1';
     else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}${dayBox ? `&box=${encodeURIComponent(dayBox)}` : ''}`;
     else {
       const q = new URLSearchParams();
@@ -8282,12 +8337,12 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (window.location.pathname + window.location.search !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, selectedDay, obsAnchor, dayBox]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, showAllBirds, selectedDay, obsAnchor, dayBox]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, obs, enter, admin: adm, reports, day } = parseUrl();
+      const { box, bird, obs, enter, admin: adm, reports, birds, day } = parseUrl();
       // Back/forward lands on a fresh view — drop cross-view scroll targets. The obs anchor
       // is restored below; the box-load effect re-scrolls to it once the box data is ready.
       setHighlightObs(null); setScrollToObs(null); setDayBox(day && box ? box : null);
@@ -8297,6 +8352,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       setShowEntry(enter || false);
       setShowAdmin(adm || false);
       setShowReports(reports || false);
+      setShowAllBirds(birds || false);
       setSelectedDay(day || null);
     };
     window.addEventListener('popstate', onPopState);
@@ -8571,19 +8627,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
 
-  const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter') => {
+  const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter' | 'birds') => {
     // Drop any ?tab from the previous section so admin/reports don't inherit each other's tab.
     { const u = new URL(window.location.href); u.searchParams.delete('tab'); window.history.replaceState(null, '', u.pathname + u.search); }
     setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
     setShowAdmin(section === 'admin');
     setShowReports(section === 'reports');
     setShowEntry(section === 'enter');
+    setShowAllBirds(section === 'birds');
   };
 
   const goToDay = (day: string, box?: string) => {
     // Day view is an overlay: keep the box + bird panel underneath so dismissing the day
     // (Escape / back / returning to the box) restores exactly where you were.
-    setShowAdmin(false); setShowReports(false); setShowEntry(false);
+    setShowAdmin(false); setShowReports(false); setShowEntry(false); setShowAllBirds(false);
     setDayBox(box ?? null);
     setSelectedDay(day);
   };
@@ -8702,6 +8759,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => { goTo('reports'); closeMenu(); })}>Reports</a>
             {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin</a>}
             {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
+            <a className="mobile-nav-link" href="/birds" onClick={e => navClick(e, () => { goTo('birds'); closeMenu(); })}>All penguins</a>
           </nav>
           <div style={{marginTop:'auto'}}>
             <div className="mobile-nav-user" style={{display:'flex', alignItems:'center', gap:12, padding:'8px 12px'}}>
@@ -8718,7 +8776,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Day view is a full-screen overlay (not an early return) so the box + bird panel beneath
   // it stay mounted — their scroll position and expanded sections survive the detour. Dialogs
   // (z-index ≥ 900) still layer above it; Escape / browser-back clear selectedDay to dismiss.
-  const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showSettings) ? (
+  const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showAllBirds && !showSettings) ? (
     <div className="app day-overlay">
       {siteHeader}
       <div className="colony-toolbar">
@@ -8726,6 +8784,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
+        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
       </div>
       <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
     </div>
@@ -8792,6 +8851,17 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     );
   }
 
+  // All-penguins page: every bird across the colonies this user can view
+  if (showAllBirds) {
+    return wrap(
+      <div className="app">
+        {siteHeader}
+        <AllPenguinsPage token={token} />
+        {passwordDialog}
+      </div>
+    );
+  }
+
   // Reports page
   if (showReports) {
     return wrap(
@@ -8826,6 +8896,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
+        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         </div>
         <div className="bird-page">
           <div className="page-header">
@@ -8854,6 +8925,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
+        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
       </div>
       {(datePickerVisible || (!selectedBox && !selectedBird && !selectedDay)) && (
