@@ -5345,6 +5345,40 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
+/** Hover popup for a box's date on the day view: location name, the watched toggle,
+ *  and the box's last five observations. Kept open while the pointer is over it. */
+function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave }: {
+  box: string; token?: string; canEdit?: boolean; pos: { x: number; y: number };
+  onMouseEnter: () => void; onMouseLeave: () => void;
+}) {
+  const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(box));
+  const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
+  const left = Math.min(pos.x, window.innerWidth - 330);
+  const top = pos.y + 170 > window.innerHeight ? Math.max(4, pos.y - 178) : pos.y;
+  return (
+    <div className="box-peek" style={{ left, top }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+      <div className="box-peek-head">
+        <b>Box {box}</b>
+        {loc && <WatchedTick location={loc} token={token} canEdit={!!canEdit} />}
+      </div>
+      {obs.map((o: any) => (
+        <div key={o.observation_id} className="box-peek-row">
+          <span className="box-peek-date">{formatDate(o.observation_time_utc)}</span>
+          {(o.adults || 0) > 0 && <span>{'🐧'.repeat(Math.min(o.adults, 4))}</span>}
+          {(o.eggs || 0) > 0 && <span>{'🥚'.repeat(Math.min(o.eggs, 4))}</span>}
+          {(o.chicks || 0) > 0 && <span>{'🐣'.repeat(Math.min(o.chicks, 4))}</span>}
+          {o.breeding_status && o.breeding_status !== 'NO' && (
+            <span className={`badge ${DARK_TEXT_STATUSES.has(o.breeding_status) ? 'bordered' : ''}`}
+              style={{ background: STATUS_COLORS[o.breeding_status] || '#ccc', color: DARK_TEXT_STATUSES.has(o.breeding_status) ? '#333' : '#fff', fontSize: 10, padding: '1px 5px' }}>{o.breeding_status}</span>
+          )}
+          {o.gate_status && <span className="muted">{o.gate_status}</span>}
+        </div>
+      ))}
+      {obs.length === 0 && <div className="muted">No records</div>}
+    </div>
+  );
+}
+
 function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins: _allPenguins, peekCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean }) {
   const data = useDayData(date);
   const loading = !data;
@@ -5376,6 +5410,18 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   useEffect(() => { localStorage.setItem('ww_day_showall', showCarryForward ? '1' : '0'); }, [showCarryForward]);
   useEffect(() => { localStorage.setItem('ww_day_hidedcm', hideDcm ? '1' : '0'); }, [hideDcm]);
   useEffect(() => { localStorage.setItem('ww_day_changed', JSON.stringify([...changedFields])); }, [changedFields]);
+
+  // Box peek popup on date hover. The delayed hide lets the pointer travel from the
+  // date into the popup, where re-entering cancels the hide so it stays open.
+  const [peek, setPeek] = useState<{ box: string; x: number; y: number } | null>(null);
+  const peekTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const peekShow = (box: string, e: React.MouseEvent) => {
+    clearTimeout(peekTimer.current);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    peekTimer.current = setTimeout(() => setPeek({ box, x: rect.left, y: rect.bottom + 4 }), 250);
+  };
+  const peekHide = () => { clearTimeout(peekTimer.current); peekTimer.current = setTimeout(() => setPeek(null), 250); };
+  const peekKeep = () => clearTimeout(peekTimer.current);
 
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
@@ -5522,7 +5568,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                     {cfDs && cfDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs)?'bordered':''}`} style={{background:STATUS_COLORS[cfDs]||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{cfDs}</span>}
                     {cfScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={cf.observation_time_utc} />)}
                     {cf.gate_status && <span>{cf.gate_status}</span>}
-                    <span className="day-cf-date">{formatDate(cf.observation_time_utc)}</span>
+                    <span className="day-cf-date" onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}>{formatDate(cf.observation_time_utc)}</span>
                   </div>
                 );
               }
@@ -5608,6 +5654,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       {totalObs === 0 && totalChips === 0 && (
         <p className="muted">No activity recorded on this date.</p>
       )}
+      {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} />}
       </div>
 
       {sideBird && sideBirdData?.penguin && (
