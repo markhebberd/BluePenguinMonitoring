@@ -33,7 +33,8 @@ if ($method === 'GET') {
 switch ($method) {
     case 'GET': handleGet($pdo, $colonyId); break;
     case 'POST': handlePost($pdo, $colonyId); break;
-    case 'DELETE': handleDelete($pdo, $colonyId); break;
+    // Clearing a tag was audited against observer 0; the authenticated observer is right here.
+    case 'DELETE': handleDelete($pdo, $colonyId, $observer['observer_id'] ?? 0); break;
     default:
         http_response_code(405);
         echo json_encode(['success' => false, 'error' => 'Method not allowed']);
@@ -68,13 +69,6 @@ function handleGet($pdo, $colonyId) {
         }
         echo json_encode(['success' => true, 'data' => (object)$data, 'count' => count($data)]);
     }
-}
-
-function auditBoxTag($pdo, $action, $boxId, $changed) {
-    $observerId = $changed['observer_id'] ?? 0;
-    unset($changed['observer_id']);
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observation_locations', ?, ?, ?, ?)")
-        ->execute([$boxId, $action, $observerId, json_encode($changed)]);
 }
 
 /**
@@ -137,39 +131,27 @@ function handlePost($pdo, $colonyId) {
     $accuracy = $input['Accuracy'] ?? $input['accuracy'] ?? null;
     $observerId = $input['ObserverId'] ?? $input['observer_id'] ?? 0;
 
-    // Get old value for audit
-    $old = $pdo->prepare("SELECT pit_id, scan_time_utc, latitude, longitude, accuracy FROM observation_locations WHERE colony_id = ? AND location_name = ?");
-    $old->execute([$colonyId, $boxId]);
-    $oldRow = $old->fetch();
+    $pdo->beginTransaction();
+    try {
+        $sel = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
+        $sel->execute([$colonyId, $boxId]);
+        $locationId = $sel->fetchColumn();
+        if ($locationId === false) {
+            $locationId = wwAuditedInsert($pdo, 'observation_locations',
+                ['colony_id' => $colonyId, 'location_name' => $boxId, 'location_type' => 'box'], $observerId, 'nestcheck_app');
+        }
 
-    // Ensure location exists
-    $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')")->execute([$colonyId, $boxId]);
-
-    $audit = [
-        'scan_time_utc' => ['old' => $oldRow['scan_time_utc'] ?? null, 'new' => $scanTime],
-        'latitude' => ['old' => $oldRow['latitude'] ?? null, 'new' => $latitude],
-        'longitude' => ['old' => $oldRow['longitude'] ?? null, 'new' => $longitude],
-        'observer_id' => $observerId,
-        'source' => 'nestcheck_app',
-    ];
-
-    if ($tagNumber !== null) {
-        // Update pit_id, scan time, and GPS
-        $pdo->prepare("UPDATE observation_locations SET pit_id = ?, scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
-            ->execute([$tagNumber, $scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
-        $audit['pit_id'] = ['old' => $oldRow['pit_id'] ?? null, 'new' => $tagNumber];
-    } else {
-        // Location-only update — preserve any existing pit_id
-        $pdo->prepare("UPDATE observation_locations SET scan_time_utc = ?, latitude = ?, longitude = ?, accuracy = ? WHERE colony_id = ? AND location_name = ?")
-            ->execute([$scanTime, $latitude, $longitude, $accuracy, $colonyId, $boxId]);
-    }
-
-    auditBoxTag($pdo, 'UPDATE', $boxId, $audit);
+        // A null tag number means a location-only update — leave any existing pit_id alone.
+        $fields = ['scan_time_utc' => $scanTime, 'latitude' => $latitude, 'longitude' => $longitude, 'accuracy' => $accuracy];
+        if ($tagNumber !== null) $fields['pit_id'] = $tagNumber;
+        wwAuditedUpdate($pdo, 'observation_locations', $locationId, $fields, $observerId, 'nestcheck_app');
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['success' => false, 'error' => $e->getMessage()]); return; }
 
     echo json_encode(['success' => true, 'message' => 'Box tag saved', 'box_id' => $boxId]);
 }
 
-function handleDelete($pdo, $colonyId) {
+function handleDelete($pdo, $colonyId, $observerId) {
     $boxId = $_GET['box_id'] ?? null;
     if (!$boxId) { http_response_code(400); echo json_encode(['success' => false, 'error' => 'box_id parameter required']); return; }
 
@@ -178,15 +160,13 @@ function handleDelete($pdo, $colonyId) {
     $old->execute([$colonyId, $boxId]);
     $oldRow = $old->fetch();
 
-    // Clear the tag only — keep the stored location (lat/long/accuracy)
-    $stmt = $pdo->prepare("UPDATE observation_locations SET pit_id = NULL WHERE colony_id = ? AND location_name = ?");
-    $stmt->execute([$colonyId, $boxId]);
+    // Clear the tag only — keep the stored location (lat/long/accuracy). Audited as an UPDATE
+    // (pit_id -> null), which is what it is; the location row itself survives.
+    $cleared = $oldRow
+        ? wwAuditedUpdate($pdo, 'observation_locations', $oldRow['location_id'], ['pit_id' => null], $observerId, 'boxtags_api')
+        : 0;
 
-    if ($stmt->rowCount() > 0) {
-        auditBoxTag($pdo, 'DELETE', $boxId, [
-            'pit_id' => ['old' => $oldRow['pit_id'] ?? null, 'new' => null],
-            'source' => 'boxtags_api',
-        ]);
+    if ($cleared > 0) {
         echo json_encode(['success' => true, 'message' => 'Box tag cleared', 'box_id' => $boxId]);
     } else {
         http_response_code(404);

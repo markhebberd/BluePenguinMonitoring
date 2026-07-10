@@ -58,22 +58,31 @@ if ($method === 'POST') {
         }
         $reason = isset($body['reason']) ? mb_substr(trim($body['reason']), 0, 255) : null;
         if ($reason === '') $reason = null;
-        $stmt = $pdo->prepare("
-            INSERT INTO validation_dismissals (colony_id, error_type, error_key, content_hash, reason, dismissed_by)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                content_hash = VALUES(content_hash),
-                reason       = VALUES(reason),
-                dismissed_by = VALUES(dismissed_by),
-                dismissed_at = CURRENT_TIMESTAMP");
-        $stmt->execute([$colonyId, $errorType, $errorKey, $contentHash, $reason, $observerId]);
+        // Dismissing an integrity check hides a data problem from every other user — audited
+        // like any other write, so who hid what (and why) survives the row being deleted.
+        $pdo->beginTransaction();
+        try {
+            wwAuditedUpsert($pdo, 'validation_dismissals', ['colony_id', 'error_type', 'error_key'],
+                ['colony_id' => $colonyId, 'error_type' => $errorType, 'error_key' => $errorKey,
+                 'content_hash' => $contentHash, 'reason' => $reason, 'dismissed_by' => $observerId,
+                 'dismissed_at' => date('Y-m-d H:i:s')],   // re-dismissing refreshes the timestamp
+                $observerId, $reason);
+            $pdo->commit();
+        } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['success' => false, 'error' => $e->getMessage()]); exit; }
         echo json_encode(['success' => true]);
         exit;
     }
 
     if ($action === 'undismiss') {
-        $stmt = $pdo->prepare("DELETE FROM validation_dismissals WHERE colony_id = ? AND error_type = ? AND error_key = ?");
-        $stmt->execute([$colonyId, $errorType, $errorKey]);
+        $sel = $pdo->prepare("SELECT id FROM validation_dismissals WHERE colony_id = ? AND error_type = ? AND error_key = ?");
+        $sel->execute([$colonyId, $errorType, $errorKey]);
+        $pdo->beginTransaction();
+        try {
+            foreach ($sel->fetchAll(PDO::FETCH_COLUMN) as $dismissalId) {
+                wwAuditedDelete($pdo, 'validation_dismissals', $dismissalId, $observerId, 'Undismissed');
+            }
+            $pdo->commit();
+        } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['success' => false, 'error' => $e->getMessage()]); exit; }
         echo json_encode(['success' => true]);
         exit;
     }

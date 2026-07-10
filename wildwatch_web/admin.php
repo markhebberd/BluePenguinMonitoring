@@ -289,17 +289,23 @@ if ($action === 'cleanup_duplicate_observations') {
     ");
     $groups = $stmt->fetchAll();
     $deleted = 0;
-    foreach ($groups as $g) {
-        $del = $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE location_id = ? AND is_deleted = FALSE AND DATE(CONVERT_TZ(observation_time_utc, '+00:00', '+12:00')) = ? AND observation_id != ?");
-        $del->execute([$observer['observer_id'], $g['location_id'], $g['obs_date'], $g['keep_id']]);
-        $count = $del->rowCount();
-        // Also soft-delete scans/biometrics for those observations
-        if ($count > 0) {
-            $pdo->prepare("UPDATE penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id SET ps.is_deleted = TRUE, ps.deleted_at = NOW(), ps.deleted_by = ? WHERE o.location_id = ? AND o.is_deleted = TRUE AND o.deleted_by = ? AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)")
-                ->execute([$observer['observer_id'], $g['location_id'], $observer['observer_id'], $g['obs_date']]);
+    $pdo->beginTransaction();
+    try {
+        foreach ($groups as $g) {
+            // The losers of each duplicate group, deleted one at a time so each observation and
+            // each of its scans/biometrics lands in the audit log as its own entry.
+            $dupes = $pdo->prepare("SELECT observation_id FROM observations
+                WHERE location_id = ? AND is_deleted = FALSE
+                  AND DATE(CONVERT_TZ(observation_time_utc, '+00:00', '+12:00')) = ? AND observation_id != ?");
+            $dupes->execute([$g['location_id'], $g['obs_date'], $g['keep_id']]);
+            foreach ($dupes->fetchAll(PDO::FETCH_COLUMN) as $dupId) {
+                wwAuditedDeleteObservationChildren($pdo, $dupId, $observer['observer_id'], 'Duplicate observation cleanup');
+                wwAuditedDelete($pdo, 'observations', $dupId, $observer['observer_id'], 'Duplicate observation cleanup');
+                $deleted++;
+            }
         }
-        $deleted += $count;
-    }
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]); exit; }
     echo json_encode(['duplicate_groups' => count($groups), 'observations_deleted' => $deleted]);
     exit;
 }
@@ -370,27 +376,17 @@ if ($action === 'users') {
 if ($action === 'update_user') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !$input['observer_id']) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
-    $sets = []; $params = [];
+    $fields = [];
     foreach (['role', 'observer_name', 'email'] as $field) {
-        if (isset($input[$field])) { $sets[] = "$field = ?"; $params[] = $input[$field]; }
+        if (isset($input[$field])) $fields[$field] = $input[$field];
     }
-    if (empty($sets)) { echo json_encode(['success'=>true]); exit; }
-    $targetId = $input['observer_id'];
-    // Get old values for audit
-    $oldStmt = $pdo->prepare("SELECT role, observer_name, email FROM observers WHERE observer_id = ?");
-    $oldStmt->execute([$targetId]);
-    $oldRow = $oldStmt->fetch();
-    $params[] = $targetId;
-    $pdo->prepare("UPDATE observers SET " . implode(', ', $sets) . " WHERE observer_id = ?")->execute($params);
-    $changed = [];
-    foreach (['role', 'observer_name', 'email'] as $field) {
-        if (isset($input[$field]) && ($oldRow[$field] ?? null) != $input[$field])
-            $changed[$field] = ['old' => $oldRow[$field] ?? null, 'new' => $input[$field]];
-    }
-    if (!empty($changed)) {
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
-            ->execute([$targetId, $observer['observer_id'], json_encode($changed)]);
-    }
+    if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
+
+    $pdo->beginTransaction();
+    try {
+        wwAuditedUpdate($pdo, 'observers', $input['observer_id'], $fields, $observer['observer_id']);
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true]);
     exit;
 }
@@ -412,11 +408,13 @@ if ($action === 'create_user') {
     $dup->execute([$name]);
     if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>"A user named \"$name\" already exists"]); exit; }
     $hash = password_hash($invite ? bin2hex(random_bytes(32)) : $password, PASSWORD_BCRYPT);
-    $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash, role) VALUES (?, ?, ?, ?)")
-        ->execute([$name, $email !== '' ? $email : null, $hash, $role]);
-    $id = (int)$pdo->lastInsertId();
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'CREATE', ?, ?)")
-        ->execute([$id, $observer['observer_id'], json_encode(['observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'invited'=>$invite])]);
+    $pdo->beginTransaction();
+    try {
+        $id = (int)wwAuditedInsert($pdo, 'observers',
+            ['observer_name' => $name, 'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
+            $observer['observer_id'], $invite ? 'Created with email invite' : 'Created with password');
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
     echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
     exit;
@@ -489,11 +487,13 @@ if ($action === 'reset_password') {
     $chk->execute([$id]);
     $row = $chk->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
+    // The gateway redacts passphrase_hash — the log records that it was reset, never the value.
     $hash = password_hash($password, PASSWORD_BCRYPT);
-    $pdo->prepare("UPDATE observers SET passphrase_hash = ? WHERE observer_id = ?")->execute([$hash, $id]);
-    // Never log the password itself — just that it was reset.
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
-        ->execute([$id, $observer['observer_id'], json_encode(['passphrase_hash'=>'(reset)'])]);
+    $pdo->beginTransaction();
+    try {
+        wwAuditedUpdate($pdo, 'observers', $id, ['passphrase_hash' => $hash], $observer['observer_id'], 'Password reset by admin');
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true, 'observer_name'=>$row['observer_name']]);
     exit;
 }
@@ -542,14 +542,10 @@ if ($action === 'preview_date' || $action === 'delete_date') {
         $deleted = 0;
         $oid = $observer['observer_id'];
         foreach ($obsIds as $obsId) {
-            $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
-                ->execute([$oid, $obsId]);
-            $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
-                ->execute([$oid, $obsId]);
-            $pdo->prepare("UPDATE penguin_biometric_data SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")
-                ->execute([$oid, $obsId]);
-            $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'DELETE', ?, ?, ?)")
-                ->execute(['observations', $obsId, $oid, json_encode(['date' => $date, 'bulk_delete' => true]), $reason]);
+            // Children first, each audited in its own right, then the observation itself — whose
+            // audit entry carries the full row rather than a {date, bulk_delete} placeholder.
+            wwAuditedDeleteObservationChildren($pdo, $obsId, $oid, $reason);
+            wwAuditedDelete($pdo, 'observations', $obsId, $oid, $reason);
             $deleted++;
         }
         $pdo->commit();
@@ -696,33 +692,33 @@ if ($action === 'delete_penguin') {
     try {
         $oid = $observer['observer_id'];
 
+        $reason = $input['reason'] ?? 'Admin delete';
+
         // Get pit_ids for this penguin
         $chips = $pdo->prepare("SELECT pit_id FROM penguin_chips WHERE peng_num = ?");
         $chips->execute([$pengNum]);
         $pitIds = array_column($chips->fetchAll(), 'pit_id');
 
-        // Soft-delete scans
+        // Every row is hard-deleted (as before) but audited one by one, each entry carrying the
+        // whole row — so a penguin removed in error is reconstructable from the audit log alone.
         $scansDeleted = 0;
         if (!empty($pitIds)) {
             $ph = implode(',', array_fill(0, count($pitIds), '?'));
-            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM penguin_scans WHERE pit_id IN ($ph)");
-            $countStmt->execute($pitIds);
-            $scansDeleted = (int)$countStmt->fetchColumn();
-            $pdo->prepare("DELETE FROM penguin_scans WHERE pit_id IN ($ph)")->execute($pitIds);
+            $scanStmt = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE pit_id IN ($ph)");
+            $scanStmt->execute($pitIds);
+            foreach ($scanStmt->fetchAll(PDO::FETCH_COLUMN) as $scanId) {
+                wwAuditedDelete($pdo, 'penguin_scans', $scanId, $oid, $reason, true);
+                $scansDeleted++;
+            }
         }
 
-        // Delete biometrics
-        $pdo->prepare("DELETE FROM penguin_biometric_data WHERE peng_num = ?")->execute([$pengNum]);
+        $bioStmt = $pdo->prepare("SELECT biometric_id FROM penguin_biometric_data WHERE peng_num = ?");
+        $bioStmt->execute([$pengNum]);
+        foreach ($bioStmt->fetchAll(PDO::FETCH_COLUMN) as $bioId) wwAuditedDelete($pdo, 'penguin_biometric_data', $bioId, $oid, $reason, true);
 
-        // Delete chips
-        $pdo->prepare("DELETE FROM penguin_chips WHERE peng_num = ?")->execute([$pengNum]);
+        foreach ($pitIds as $pitId) wwAuditedDelete($pdo, 'penguin_chips', $pitId, $oid, $reason);
 
-        // Delete penguin
-        $pdo->prepare("DELETE FROM penguins WHERE peng_num = ?")->execute([$pengNum]);
-
-        // Audit
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES ('penguins', ?, 'DELETE', ?, ?, ?)")
-            ->execute([$pengNum, $oid, json_encode(['peng_num' => $pengNum, 'pit_ids' => $pitIds, 'scans_deleted' => $scansDeleted]), $input['reason'] ?? 'Admin delete']);
+        wwAuditedDelete($pdo, 'penguins', $pengNum, $oid, $reason);
 
         $pdo->commit();
         echo json_encode(['success' => true, 'scans_deleted' => $scansDeleted, 'chips_deleted' => count($pitIds)]);
@@ -748,10 +744,9 @@ if ($action === 'save_region') {
     if (!$name) { http_response_code(400); echo json_encode(['error' => 'region_name required']); exit; }
     $id = $input['region_id'] ?? null;
     if ($id) {
-        $pdo->prepare("UPDATE regions SET region_name = ? WHERE region_id = ?")->execute([$name, $id]);
+        wwAuditedUpdate($pdo, 'regions', $id, ['region_name' => $name], $observer['observer_id']);
     } else {
-        $pdo->prepare("INSERT INTO regions (region_name) VALUES (?)")->execute([$name]);
-        $id = $pdo->lastInsertId();
+        $id = wwAuditedInsert($pdo, 'regions', ['region_name' => $name], $observer['observer_id']);
     }
     echo json_encode(['success' => true, 'region_id' => (int)$id]);
     exit;
@@ -775,17 +770,13 @@ if ($action === 'save_colony') {
     if (!$name || !$regionId) { http_response_code(400); echo json_encode(['error' => 'colony_name and region_id required']); exit; }
     $id = $input['colony_id'] ?? null;
     if ($id) {
-        if ($hasFmExcluded) {
-            $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ?, fm_excluded_boxes = ? WHERE colony_id = ?")
-                ->execute([$name, $regionId, $locationSets, $fmExcluded, $id]);
-        } else {
-            $pdo->prepare("UPDATE colonies SET colony_name = ?, region_id = ?, location_sets_string = ? WHERE colony_id = ?")
-                ->execute([$name, $regionId, $locationSets, $id]);
-        }
+        $fields = ['colony_name' => $name, 'region_id' => $regionId, 'location_sets_string' => $locationSets];
+        if ($hasFmExcluded) $fields['fm_excluded_boxes'] = $fmExcluded;
+        wwAuditedUpdate($pdo, 'colonies', $id, $fields, $observer['observer_id']);
     } else {
-        $pdo->prepare("INSERT INTO colonies (colony_name, region_id, location_sets_string, fm_excluded_boxes) VALUES (?, ?, ?, ?)")
-            ->execute([$name, $regionId, $locationSets, $hasFmExcluded ? $fmExcluded : '0,AA,AB,AC']);
-        $id = $pdo->lastInsertId();
+        $id = wwAuditedInsert($pdo, 'colonies', ['colony_name' => $name, 'region_id' => $regionId,
+            'location_sets_string' => $locationSets,
+            'fm_excluded_boxes' => $hasFmExcluded ? $fmExcluded : '0,AA,AB,AC'], $observer['observer_id']);
     }
     echo json_encode(['success' => true, 'colony_id' => (int)$id]);
     exit;
@@ -807,14 +798,23 @@ if ($action === 'create_colony_boxes') {
     $colonyId = (int)($input['colony_id'] ?? 0);
     $names = $input['box_names'] ?? [];
     if (!$colonyId || !is_array($names) || empty($names)) { http_response_code(400); echo json_encode(['error' => 'colony_id and box_names required']); exit; }
-    $stmt = $pdo->prepare("INSERT IGNORE INTO observation_locations (colony_id, location_name, location_type) VALUES (?, ?, 'box')");
+    // Idempotent: skip names this colony already has, audit the ones we actually create.
+    $exists = $pdo->prepare("SELECT location_id FROM observation_locations WHERE colony_id = ? AND location_name = ?");
     $created = 0;
-    foreach ($names as $name) {
-        $name = trim((string)$name);
-        if ($name === '') continue;
-        $stmt->execute([$colonyId, $name]);
-        $created += $stmt->rowCount();
-    }
+    $pdo->beginTransaction();
+    try {
+        foreach ($names as $name) {
+            $name = trim((string)$name);
+            if ($name === '') continue;
+            $exists->execute([$colonyId, $name]);
+            if ($exists->fetchColumn() !== false) continue;
+            wwAuditedInsert($pdo, 'observation_locations',
+                ['colony_id' => $colonyId, 'location_name' => $name, 'location_type' => 'box'],
+                $observer['observer_id'], 'Colony box-set materialisation');
+            $created++;
+        }
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]); exit; }
     echo json_encode(['success' => true, 'created' => $created, 'requested' => count($names)]);
     exit;
 }
@@ -838,17 +838,20 @@ if ($action === 'save_colony_permission') {
     $role = trim($input['role'] ?? '');
     if (!$colonyId || !$observerId) { http_response_code(400); echo json_encode(['error' => 'colony_id and observer_id required']); exit; }
 
-    if ($role === '' || $role === 'none') {
-        $pdo->prepare("DELETE FROM colony_permissions WHERE colony_id = ? AND observer_id = ?")->execute([$colonyId, $observerId]);
-        $logRole = '(revoked)';
-    } else {
-        if (!in_array($role, ['view', 'edit'], true)) { http_response_code(400); echo json_encode(['error' => "role must be 'view', 'edit', or empty to revoke"]); exit; }
-        $pdo->prepare("INSERT INTO colony_permissions (colony_id, observer_id, role) VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE role = VALUES(role)")->execute([$colonyId, $observerId, $role]);
-        $logRole = $role;
-    }
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('colony_permissions', ?, 'UPDATE', ?, ?)")
-        ->execute([$observerId, $observer['observer_id'], json_encode(['colony_id' => $colonyId, 'observer_id' => $observerId, 'role' => $logRole])]);
+    $pdo->beginTransaction();
+    try {
+        if ($role === '' || $role === 'none') {
+            $sel = $pdo->prepare("SELECT permission_id FROM colony_permissions WHERE colony_id = ? AND observer_id = ?");
+            $sel->execute([$colonyId, $observerId]);
+            $permId = $sel->fetchColumn();
+            if ($permId !== false) wwAuditedDelete($pdo, 'colony_permissions', $permId, $observer['observer_id'], 'Access revoked');
+        } else {
+            if (!in_array($role, ['view', 'edit'], true)) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error' => "role must be 'view', 'edit', or empty to revoke"]); exit; }
+            wwAuditedUpsert($pdo, 'colony_permissions', ['colony_id', 'observer_id'],
+                ['colony_id' => $colonyId, 'observer_id' => $observerId, 'role' => $role], $observer['observer_id']);
+        }
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]); exit; }
     echo json_encode(['success' => true]);
     exit;
 }

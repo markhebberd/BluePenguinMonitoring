@@ -715,24 +715,7 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     return ['penguins' => $pengArr, 'sightings' => $sightArr];
 }
 
-/**
- * The single audited INSERT path. Write endpoints (crud edits, CSV import) insert through here so
- * every new row lands in the audit log identically — action INSERT with the row's fields as
- * changed_fields. $row is column => value. Returns the new auto-increment id.
- */
-/** Tables whose primary key is a natural string, not an auto-increment id. For these
- *  lastInsertId() returns 0, so the audit entry must take its record_id from the row. */
-const WW_NATURAL_KEYS = ['penguins' => 'peng_num', 'penguin_chips' => 'pit_id'];
-
-function wwAuditedInsert($pdo, $table, $row, $observerId, $reason = null) {
-    $cols = array_keys($row);
-    $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
-    $pdo->prepare($sql)->execute(array_values($row));
-    $newId = $pdo->lastInsertId();
-    $keyCol = WW_NATURAL_KEYS[$table] ?? null;
-    $recordId = ($keyCol !== null && isset($row[$keyCol])) ? $row[$keyCol] : $newId;
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'INSERT', ?, ?, ?)")
-        ->execute([$table, $recordId, $observerId, json_encode($row), $reason]);
-    return $newId;
-}
+// The audited write primitives (wwAuditedInsert / Update / Delete / Upsert) live in db_write.php,
+// the one gateway between the clients and the data tables. Every endpoint gets them via config.php.
+require_once __DIR__ . '/db_write.php';
 ?>

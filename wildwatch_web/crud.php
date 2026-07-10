@@ -68,14 +68,11 @@ if ($action === 'change_password') { handleChangePassword($pdo, $observer); exit
 $table = $_GET['table'] ?? '';
 $id = $_GET['id'] ?? null;
 
-$tables = [
-    'observations' => 'observation_id',
-    'penguins' => 'peng_num',
-    'penguin_scans' => 'scan_id',
-    'penguin_biometric_data' => 'biometric_id',
-    'penguin_chips' => 'pit_id',
-    'observation_locations' => 'location_id',
-];
+// Tables this generic endpoint exposes. Their primary keys come from the data gateway, so the
+// two can't drift apart — a table here that the gateway won't write is rejected at startup.
+$tables = array_intersect_key(WW_TABLE_KEYS, array_flip([
+    'observations', 'penguins', 'penguin_scans', 'penguin_biometric_data', 'penguin_chips', 'observation_locations',
+]));
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
 if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'role'=>$observer['role'] ?? 'viewer']); exit; }
@@ -220,10 +217,15 @@ function handleRegister($pdo) {
 
     $hash = password_hash($password, PASSWORD_BCRYPT);
     try {
-        $pdo->prepare("INSERT INTO observers (observer_name, email, passphrase_hash, role) VALUES (?, ?, ?, 'editor')")
-            ->execute([$name, $email, $hash]);
-        echo json_encode(['success'=>true, 'observer_id'=>$pdo->lastInsertId()]);
+        // Self-signup was the one account creation that left no audit trail.
+        $pdo->beginTransaction();
+        $newId = wwAuditedInsertSelf($pdo, 'observers',
+            ['observer_name' => $name, 'email' => $email, 'passphrase_hash' => $hash, 'role' => 'editor'],
+            'Self-signup');
+        $pdo->commit();
+        echo json_encode(['success'=>true, 'observer_id'=>$newId]);
     } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(409); echo json_encode(['error'=>'Name or email already exists']);
     }
 }
@@ -274,11 +276,11 @@ function handleResetPassword($pdo) {
     if (strlen($newPass) < 6) { http_response_code(400); echo json_encode(['error' => 'Password must be at least 6 characters']); return; }
 
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
-    $pdo->prepare("UPDATE observers SET passphrase_hash = ? WHERE observer_id = ?")->execute([$hash, $row['observer_id']]);
+    // The observer is their own actor: they authenticated with the emailed token, not a session.
+    wwAuditedUpdate($pdo, 'observers', $row['observer_id'], ['passphrase_hash' => $hash],
+        $row['observer_id'], 'Password set via ' . $row['purpose'] . ' link');
     $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE token_hash = ?")->execute([$row['token_hash']]);
     $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$row['observer_id']]);
-    $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observers', ?, 'UPDATE', ?, ?)")
-        ->execute([$row['observer_id'], $row['observer_id'], json_encode(['passphrase_hash' => '(set via ' . $row['purpose'] . ' link)'])]);
 
     $stmt = $pdo->prepare("SELECT * FROM observers WHERE observer_id = ?");
     $stmt->execute([$row['observer_id']]);
@@ -453,22 +455,13 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     if (!$old) { http_response_code(404); echo json_encode(['error'=>'Not found']); return; }
 
     $reason = $input['_reason'] ?? null;
-    $sets = []; $params = []; $changed = [];
-    foreach ($input as $col => $newVal) {
-        if ($col === '_reason') continue;
-        $sets[] = "$col = ?"; $params[] = $newVal;
-        if (($old[$col] ?? null) != $newVal) $changed[$col] = ['old'=>$old[$col] ?? null, 'new'=>$newVal];
-    }
-    if (empty($changed)) { echo json_encode(['success'=>true, 'changed'=>0]); return; }
-    $params[] = $id;
+    $fields = $input; unset($fields['_reason']);
 
     $pdo->beginTransaction();
     try {
-        $pdo->prepare("UPDATE $table SET " . implode(',', $sets) . " WHERE $pk = ?")->execute($params);
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'UPDATE', ?, ?, ?)")
-            ->execute([$table, $id, $observer['observer_id'], json_encode($changed), $reason]);
+        $changed = wwAuditedUpdate($pdo, $table, $id, $fields, $observer['observer_id'], $reason);
         $pdo->commit();
-        echo json_encode(['success'=>true, 'changed'=>count($changed)]);
+        echo json_encode(['success'=>true, 'changed'=>$changed]);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
 }
 
@@ -481,21 +474,13 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
 
     $pdo->beginTransaction();
     try {
-        if ($table === 'observations') {
-            // Soft delete observation and its related scans/biometrics
-            $oid = $observer['observer_id'];
-            $pdo->prepare("UPDATE observations SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
-            $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
-            $pdo->prepare("UPDATE penguin_biometric_data SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ?")->execute([$oid, $id]);
-        } elseif ($table === 'penguin_scans' || $table === 'penguin_biometric_data') {
-            // Soft delete
-            $pdo->prepare("UPDATE $table SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE $pk = ?")->execute([$observer['observer_id'], $id]);
-        } else {
-            $pdo->prepare("DELETE FROM $table WHERE $pk = ?")->execute([$id]);
-        }
         $reason = $body['_reason'] ?? null;
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields, change_reason) VALUES (?, ?, 'DELETE', ?, ?, ?)")
-            ->execute([$table, $id, $observer['observer_id'], json_encode($old), $reason]);
+        // Deleting an observation takes its scans and biometrics with it — each audited in its
+        // own right, so the history names the birds that went, not just the parent row.
+        if ($table === 'observations') {
+            wwAuditedDeleteObservationChildren($pdo, $id, $observer['observer_id'], $reason);
+        }
+        wwAuditedDelete($pdo, $table, $id, $observer['observer_id'], $reason);
         $pdo->commit();
         echo json_encode(['success'=>true]);
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(400); echo json_encode(['error'=>$e->getMessage()]); }
@@ -565,9 +550,14 @@ function handleChangePassword($pdo, $observer) {
         http_response_code(400); echo json_encode(['error'=>'New password must be 6+ characters']); return;
     }
 
+    // Changing your own password left no audit trail. The hash is redacted by the gateway.
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
-    $pdo->prepare("UPDATE observers SET passphrase_hash = ? WHERE observer_id = ?")
-        ->execute([$hash, $observer['observer_id']]);
+    $pdo->beginTransaction();
+    try {
+        wwAuditedUpdate($pdo, 'observers', $observer['observer_id'], ['passphrase_hash' => $hash],
+            $observer['observer_id'], 'Password changed by user');
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); return; }
 
     echo json_encode(['success'=>true]);
 }
