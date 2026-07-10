@@ -5365,13 +5365,11 @@ namespace PenguinMonitor
             card.AddView(createLabel("Condition"));
             var conditions = new (string label, string field)[] {
                 ("Moulting", "condition_moulting"),
-                ("Ticks", "condition_ticks"),
                 ("Dead", "condition_dead"),
             };
             bool condChecked(string field) => existing != null && field switch
             {
                 "condition_moulting" => existing.ConditionMoulting,
-                "condition_ticks" => existing.ConditionTicks,
                 "condition_dead" => existing.ConditionDead,
                 _ => false,
             };
@@ -5424,7 +5422,7 @@ namespace PenguinMonitor
                     FlipperLength = string.IsNullOrEmpty(flipperInput.Text) ? null : flipperInput.Text,
                     ObservedSex = ObservedSexOptions.FirstOrDefault(o => o.label == selectedSexLabel).code,
                     ConditionMoulting = conditionChecks["condition_moulting"].Checked,
-                    ConditionTicks = conditionChecks["condition_ticks"].Checked,
+                    ConditionTicks = existing?.ConditionTicks ?? false, // checkbox removed — keep stored value
                     ConditionDead = conditionChecks["condition_dead"].Checked,
                     Notes = string.IsNullOrEmpty(notesInput.Text) ? null : notesInput.Text,
                     BiometricId = existing?.BiometricId,
@@ -5533,8 +5531,26 @@ namespace PenguinMonitor
             chickSizeLayout.AddView(sizeGroup);
             card.AddView(chickSizeLayout);
 
+            // Replace a "No scan" placeholder: when today's observation for this box already
+            // holds a NOSCAN_ entry, this adult is almost certainly that bird — replace the
+            // placeholder (checked by default) instead of double-counting the adult.
+            bool boxHasNoScan = _colonyState.GetTodayForBox(_currentBoxName)?.ScannedIds
+                .Any(s2 => s2.BirdId.StartsWith("NOSCAN_")) == true;
+            var replaceNoScanCheck = new CheckBox(this)
+            {
+                Text = $"Replace no-scan in box {_currentBoxName}",
+                Checked = true,
+            };
+            replaceNoScanCheck.SetTextColor(Color.Black);
+            replaceNoScanCheck.Visibility = boxHasNoScan ? ViewStates.Visible : ViewStates.Gone;
+            card.AddView(replaceNoScanCheck);
+
             chippedAsChick.CheckedChange += (s, e) =>
+            {
                 chickSizeLayout.Visibility = chippedAsChick.Checked ? ViewStates.Visible : ViewStates.Gone;
+                // No-scans stand in for unscanned adults — replacing only applies to adults
+                replaceNoScanCheck.Visibility = !chippedAsChick.Checked && boxHasNoScan ? ViewStates.Visible : ViewStates.Gone;
+            };
 
             // Chip box (pre-filled with current box)
             card.AddView(createLabel("Chip box"));
@@ -5724,7 +5740,21 @@ namespace PenguinMonitor
                             else
                             {
                                 _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
-                                Toast.MakeText(this, $"#{pengNum} added (+1 Adult)", ToastLength.Short)?.Show();
+                                // Replace a no-scan placeholder: this adult was the unscanned bird,
+                                // so drop one NOSCAN_ and take back its +1 adult (net count unchanged).
+                                var replaceBox = _colonyState.GetTodayForBox(_currentBoxName);
+                                var noScanEntry = replaceNoScanCheck.Checked && replaceNoScanCheck.Visibility == ViewStates.Visible
+                                    ? replaceBox?.ScannedIds.FirstOrDefault(s2 => s2.BirdId.StartsWith("NOSCAN_")) : null;
+                                if (noScanEntry != null)
+                                {
+                                    replaceBox!.ScannedIds.Remove(noScanEntry);
+                                    _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                                    Toast.MakeText(this, $"#{pengNum} added — replaced no-scan in box {_currentBoxName}", ToastLength.Short)?.Show();
+                                }
+                                else
+                                {
+                                    Toast.MakeText(this, $"#{pengNum} added (+1 Adult)", ToastLength.Short)?.Show();
+                                }
                             }
                             SaveCurrentBoxData();
                             dialog.Dismiss();
