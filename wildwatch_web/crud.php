@@ -419,8 +419,9 @@ function handleCreate($pdo, $table, $pk, $observer) {
             $input['peng_num'] = dbPengNum($pdo, $cid, $input['peng_num']);
         }
         $newId = wwAuditedInsert($pdo, $table, $input, $observer['observer_id'], $reason);
-        // For penguins, use peng_num as the ID since it's not auto-increment
-        $recordId = ($table === 'penguins' && isset($input['peng_num'])) ? $input['peng_num'] : $newId;
+        // Natural-key tables (penguins, penguin_chips) have no auto-increment id to return.
+        $keyCol = WW_NATURAL_KEYS[$table] ?? null;
+        $recordId = ($keyCol !== null && isset($input[$keyCol])) ? $input[$keyCol] : $newId;
         $pdo->commit();
         $result = ['success'=>true, 'id'=>$recordId];
         // Return the full inserted row so callers get auto-generated fields (e.g. peng_num)
