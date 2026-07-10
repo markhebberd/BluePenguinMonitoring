@@ -510,14 +510,13 @@ function handleHistory($pdo, $table, $id) {
         $scanStmt->execute([$id]);
         $scanIds = $scanStmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // Also find scans referenced in audit log for this observation
-        $auditStmt = $pdo->prepare("SELECT record_id FROM audit_log WHERE table_name = 'penguin_scans' AND changed_fields LIKE ?");
-        $auditStmt->execute(['%"observation_id":' . (int)$id . '%']);
+        // Also find scans referenced in audit log for this observation (including ones since
+        // deleted). JSON_VALUE matches whether the id was encoded as a number or a string; the
+        // old LIKE '%"observation_id":123%' also matched 1230, 1234, ...
+        $auditStmt = $pdo->prepare("SELECT record_id FROM audit_log
+            WHERE table_name = 'penguin_scans' AND JSON_VALUE(changed_fields, '$.observation_id') = ?");
+        $auditStmt->execute([(string)(int)$id]);
         foreach ($auditStmt->fetchAll(PDO::FETCH_COLUMN) as $sid) $scanIds[] = $sid;
-        // Also match string-encoded observation_id
-        $auditStmt2 = $pdo->prepare("SELECT record_id FROM audit_log WHERE table_name = 'penguin_scans' AND changed_fields LIKE ?");
-        $auditStmt2->execute(['%"observation_id":"' . (int)$id . '"%']);
-        foreach ($auditStmt2->fetchAll(PDO::FETCH_COLUMN) as $sid) $scanIds[] = $sid;
         $scanIds = array_unique($scanIds);
 
         if (!empty($scanIds)) {
