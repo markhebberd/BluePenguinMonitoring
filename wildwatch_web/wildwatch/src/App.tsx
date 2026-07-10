@@ -6080,6 +6080,9 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
   ];
   const [sortKey, setSortKey] = useState('chipped');
   const [sortDesc, setSortDesc] = useState(true);
+  // Rendering every bird is ~10k DOM cells — cap it and let the user opt into the rest.
+  const CAP = 200;
+  const [showAll, setShowAll] = useState(false);
   const clickSort = (c: typeof COLS[number]) => {
     if (sortKey === c.key) setSortDesc(d => !d);
     else { setSortKey(c.key); setSortDesc(!!c.desc); }
@@ -6121,7 +6124,7 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
                 ))}
               </tr></thead>
               <tbody>
-                {sorted.map((r: any) => (
+                {(showAll ? sorted : sorted.slice(0, CAP)).map((r: any) => (
                   <tr key={r.peng_num}>
                     <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
                     <td>{r.colony_name}</td>
@@ -6141,6 +6144,11 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
                 ))}
               </tbody>
             </table>
+            {!showAll && sorted.length > CAP && (
+              <button className="edit-btn" style={{ marginTop: 8 }} onClick={() => setShowAll(true)}>
+                Show all ({sorted.length})
+              </button>
+            )}
           </div>
         )}
       </div>
