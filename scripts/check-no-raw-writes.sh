@@ -5,9 +5,12 @@
 # The gateway (wwAuditedInsert/Update/Delete/Upsert) writes an audit_log row inside every write,
 # so a write that bypasses it is a write nobody can trace. That is the whole point of the file.
 #
+# Run by the deploy workflow (.github/workflows/deploy-wildwatch.yml): a raw write fails
+# the check job and the deploy never triggers.
+#
 # Usage:
 #   scripts/check-no-raw-writes.sh              # check every tracked PHP file
-#   scripts/check-no-raw-writes.sh a.php b.php  # check specific files (pre-commit passes staged ones)
+#   scripts/check-no-raw-writes.sh a.php b.php  # check specific files
 #
 # Exit 0 = clean, 1 = a raw write was found.
 
@@ -15,15 +18,12 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 # Tables the gateway owns. A write to any of these outside db_write.php is a bug.
-GUARDED='observations|penguin_scans|penguin_biometric_data|penguins|penguin_chips|observation_locations|regions|colonies|colony_permissions|validation_dismissals|observers'
+GUARDED='observations|penguin_scans|penguin_biometric_data|penguins|penguin_chips|observation_locations|regions|colonies|colony_permissions|validation_dismissals|observers|date_mappings|audit_log'
 
 # Deliberate exceptions, each justified:
 #   db_write.php    — the gateway itself; its raw SQL is the implementation
 #   backup.php      — emits INSERT statements as text into a .sql dump; executes nothing
-#   audit_log       — written by the gateway, and by nothing else
 #   sessions, password_resets, disk_history — infrastructure, not observations
-#   date_mappings   — composite key (season_year, date_number); crud.php rewrites a season
-#                     wholesale and audits it as a single old => new diff
 
 if [ $# -gt 0 ]; then
   FILES=("$@")

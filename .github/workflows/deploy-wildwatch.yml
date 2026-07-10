@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'wildwatch_web/**'
+      - 'scripts/check-no-raw-writes.sh'
       - '.github/workflows/deploy-wildwatch.yml'
   workflow_dispatch:
 
@@ -20,7 +21,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Server-side enforcement of the data-gateway invariant. The pre-commit hook is opt-in
+  # per clone and skippable (--no-verify); this is not — a raw write never deploys.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No raw writes outside the data gateway
+        run: scripts/check-no-raw-writes.sh
+
   deploy:
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Trigger VPS pull-and-build deploy

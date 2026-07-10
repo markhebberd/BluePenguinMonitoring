@@ -89,23 +89,11 @@ if ($action === 'season_fm_dates') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !is_array($input)) { http_response_code(400); echo json_encode(['error'=>'JSON array required']); exit; }
 
-    $oldStmt = $pdo->prepare("SELECT date_number, actual_date, partial_monitor FROM date_mappings WHERE season_year = ? ORDER BY date_number");
-    $oldStmt->execute([$season]);
-    $oldMappings = $oldStmt->fetchAll();
-
     $pdo->beginTransaction();
     try {
-        $pdo->prepare("DELETE FROM date_mappings WHERE season_year = ?")->execute([$season]);
-        $stmt = $pdo->prepare("INSERT INTO date_mappings (season_year, date_number, actual_date, partial_monitor) VALUES (?, ?, ?, ?)");
-        foreach ($input as $row) {
-            $stmt->execute([$season, $row['n'], $row['date'], !empty($row['partial']) ? 1 : 0]);
-        }
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('date_mappings', ?, 'UPDATE', ?, ?)")
-            ->execute([$season, $observer['observer_id'], json_encode([
-                'season' => $season, 'old' => $oldMappings, 'new' => $input
-            ])]);
+        $count = wwAuditedReplaceSeason($pdo, $season, $input, $observer['observer_id']);
         $pdo->commit();
-        echo json_encode(['success'=>true, 'count'=>count($input)]);
+        echo json_encode(['success'=>true, 'count'=>$count]);
     } catch (Exception $e) {
         $pdo->rollBack();
         http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);

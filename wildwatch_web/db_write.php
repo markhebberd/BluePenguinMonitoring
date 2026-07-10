@@ -15,8 +15,8 @@
  */
 
 /** Primary key of every writable data table. A table absent from this map cannot be written.
- *  date_mappings is deliberately absent: its key is composite (season_year, date_number) and a
- *  season is rewritten wholesale, so crud.php audits that replacement as one old => new diff. */
+ *  date_mappings is deliberately absent from the row-oriented functions: its key is composite
+ *  (season_year, date_number) and a season is rewritten wholesale — use wwAuditedReplaceSeason. */
 const WW_TABLE_KEYS = [
     'observations'          => 'observation_id',
     'penguin_scans'         => 'scan_id',
@@ -153,6 +153,25 @@ function wwAuditedDeleteObservationChildren($pdo, $observationId, $observerId, $
         $counts[$table] = count($ids);
     }
     return $counts;
+}
+
+/**
+ * Replace a season's date_mappings wholesale. The one row-set-shaped write: the table's key is
+ * composite (season_year, date_number) and the UI edits a season as a unit, so it is audited as
+ * a single old => new diff under record_id = season_year. Caller owns the transaction.
+ */
+function wwAuditedReplaceSeason($pdo, int $season, array $rows, $observerId, $reason = null): int {
+    $old = $pdo->prepare("SELECT date_number, actual_date, partial_monitor FROM date_mappings WHERE season_year = ? ORDER BY date_number");
+    $old->execute([$season]);
+    $oldMappings = $old->fetchAll(PDO::FETCH_ASSOC);
+
+    $pdo->prepare("DELETE FROM date_mappings WHERE season_year = ?")->execute([$season]);
+    $ins = $pdo->prepare("INSERT INTO date_mappings (season_year, date_number, actual_date, partial_monitor) VALUES (?, ?, ?, ?)");
+    foreach ($rows as $row) {
+        $ins->execute([$season, $row['n'], $row['date'], !empty($row['partial']) ? 1 : 0]);
+    }
+    wwAudit($pdo, 'date_mappings', $season, 'UPDATE', ['season' => $season, 'old' => $oldMappings, 'new' => $rows], $observerId, $reason);
+    return count($rows);
 }
 
 /**

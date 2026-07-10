@@ -61,8 +61,7 @@ if ($action === 'sql') {
         if ($capped && count($rows) > $limit) { $rows = array_slice($rows, 0, $limit); $truncated = true; }
         $columns = $rows ? array_keys($rows[0]) : [];
         // Audit the query text (record_id 0 — not tied to a single row).
-        $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('__sql_console', 0, 'SELECT', ?, ?)")
-            ->execute([$observer['observer_id'], json_encode(['sql' => $sql], JSON_UNESCAPED_SLASHES)]);
+        wwAudit($pdo, '__sql_console', 0, 'SELECT', ['sql' => $sql], $observer['observer_id']);
         echo json_encode(['success' => true, 'columns' => $columns, 'rows' => $rows, 'rowCount' => count($rows), 'truncated' => $truncated, 'ms' => $ms]);
     } catch (PDOException $e) {
         echo json_encode(['error' => $e->getMessage()]);
