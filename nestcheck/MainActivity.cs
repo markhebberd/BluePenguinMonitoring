@@ -5566,8 +5566,6 @@ namespace PenguinMonitor
             card.AddView(createLabel("Condition"));
             var bioConditions = new (string label, string field)[] {
                 ("Moulting", "condition_moulting"),
-                ("Ticks", "condition_ticks"),
-                ("Dead", "condition_dead"),
             };
             var bioConditionChecks = new Dictionary<string, CheckBox>();
             foreach (var (label, field) in bioConditions)
