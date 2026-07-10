@@ -5326,7 +5326,7 @@ namespace PenguinMonitor
 
             // Sex
             card.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList(), dropdown: true);
             var savedSex = existing?.ObservedSex ?? "";
             var sexIdx = Array.FindIndex(ObservedSexOptions, o => o.code == savedSex);
             if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
@@ -5426,6 +5426,23 @@ namespace PenguinMonitor
         private void ShowNewBirdDialog(string shortId, string fullPitId)
         {
             SetDialogActive(true);
+            // Predict the next penguin number for the title (server assigns the real one on
+            // create). Trailing digits handle both bare PT numbers ("1012") and prefixed
+            // display forms ("NI7"); the prefix of the highest bird carries into the prediction.
+            string nextPengLabel = "";
+            if (_remotePenguinData != null && _remotePenguinData.Count > 0)
+            {
+                int maxNum = 0; string maxPrefix = "";
+                foreach (var pd0 in _remotePenguinData.Values)
+                {
+                    var m = Regex.Match(pd0.PengNum ?? "", @"^(.*?)(\d+)$");
+                    if (m.Success && int.TryParse(m.Groups[2].Value, out var n) && n > maxNum)
+                    {
+                        maxNum = n; maxPrefix = m.Groups[1].Value;
+                    }
+                }
+                if (maxNum > 0) nextPengLabel = $"#{maxPrefix}{maxNum + 1}";
+            }
             var scrollView = new ScrollView(this);
             scrollView.SetClipChildren(false);
             scrollView.DescendantFocusability = Android.Views.DescendantFocusability.AfterDescendants;
@@ -5460,16 +5477,11 @@ namespace PenguinMonitor
             pitInfo.SetPadding(0, 0, 0, 12);
             card.AddView(pitInfo);
 
-            // Sex
-            card.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
-            var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            spinnerParams.SetMargins(0, 4, 0, 12);
-            sexSpinner.LayoutParameters = spinnerParams;
-            card.AddView(sexSpinner);
-
-            // Chipped as adult/chick toggle — horizontal to keep the form short
-            card.AddView(createLabel("Chipped as"));
+            // Chipped as (adult/chick) + Sex on one row to keep the form short
+            var chippedSexRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var chippedCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            chippedCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            chippedCol.AddView(createLabel("Chipped as"));
             var chippedAsAdult = new RadioButton(this) { Text = "Adult" };
             chippedAsAdult.SetTextColor(Color.Black);
             var chippedAsChick = new RadioButton(this) { Text = "Chick" };
@@ -5478,32 +5490,35 @@ namespace PenguinMonitor
             chippedGroup.AddView(chippedAsAdult);
             chippedGroup.AddView(chippedAsChick);
             chippedAsAdult.Checked = true;
-            card.AddView(chippedGroup);
+            chippedCol.AddView(chippedGroup);
+            chippedSexRow.AddView(chippedCol);
 
-            // Chick size options (hidden until "Chick" selected)
+            // Right column swaps with the Adult/Chick toggle: Sex spinner for adults,
+            // a matching Chick-size spinner for chicks.
+            var sexCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            var sexColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            sexColParams.SetMargins(12, 0, 0, 0);
+            sexCol.LayoutParameters = sexColParams;
+            var spinnerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            spinnerParams.SetMargins(0, 4, 0, 4);
+
+            var sexLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            sexLayout.AddView(createLabel("Sex"));
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList(), dropdown: true);
+            sexSpinner.LayoutParameters = spinnerParams;
+            sexLayout.AddView(sexSpinner);
+            sexCol.AddView(sexLayout);
+
             var chickSizeLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chickSizeLayout.Visibility = ViewStates.Gone;
-            chickSizeLayout.SetPadding(16, 0, 0, 0);
+            chickSizeLayout.AddView(createLabel("Chick size"));
+            var chickSizeSpinner = _uiFactory.CreateSpinner(new List<string> { "Unknown", "Single Chick (SC)", "Big Chick (BC)", "Little Chick (LC)" }, dropdown: true);
+            chickSizeSpinner.LayoutParameters = spinnerParams;
+            chickSizeLayout.AddView(chickSizeSpinner);
+            sexCol.AddView(chickSizeLayout);
 
-            var sizeLabel = createLabel("Chick size");
-            chickSizeLayout.AddView(sizeLabel);
-
-            var sizeGroup = new RadioGroup(this);
-            var sizeUnknown = new RadioButton(this) { Text = "Unknown" };
-            sizeUnknown.SetTextColor(Color.Black);
-            sizeUnknown.Checked = true;
-            var sizeSC = new RadioButton(this) { Text = "Single Chick (SC)" };
-            sizeSC.SetTextColor(Color.Black);
-            var sizeBC = new RadioButton(this) { Text = "Big Chick (BC)" };
-            sizeBC.SetTextColor(Color.Black);
-            var sizeLC = new RadioButton(this) { Text = "Little Chick (LC)" };
-            sizeLC.SetTextColor(Color.Black);
-            sizeGroup.AddView(sizeUnknown);
-            sizeGroup.AddView(sizeSC);
-            sizeGroup.AddView(sizeBC);
-            sizeGroup.AddView(sizeLC);
-            chickSizeLayout.AddView(sizeGroup);
-            card.AddView(chickSizeLayout);
+            chippedSexRow.AddView(sexCol);
+            card.AddView(chippedSexRow);
 
             // Replace a "No scan" placeholder: when today's observation for this box already
             // holds a NOSCAN_ entry, this adult is almost certainly that bird — replace the
@@ -5521,7 +5536,9 @@ namespace PenguinMonitor
 
             chippedAsChick.CheckedChange += (s, e) =>
             {
+                // Chick → chick-size spinner; Adult → sex spinner (same spot, one at a time)
                 chickSizeLayout.Visibility = chippedAsChick.Checked ? ViewStates.Visible : ViewStates.Gone;
+                sexLayout.Visibility = chippedAsChick.Checked ? ViewStates.Gone : ViewStates.Visible;
                 // No-scans stand in for unscanned adults — replacing only applies to adults
                 replaceNoScanCheck.Visibility = !chippedAsChick.Checked && boxHasNoScan ? ViewStates.Visible : ViewStates.Gone;
             };
@@ -5554,13 +5571,24 @@ namespace PenguinMonitor
             bioHeader.SetPadding(0, 16, 0, 4);
             card.AddView(bioHeader);
 
-            card.AddView(createLabel("Weight (g)"));
+            // Weight + Flipper on one row
+            var bioRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var weightCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            weightCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            weightCol.AddView(createLabel("Weight (g)"));
             var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
-            card.AddView(weightInput);
+            weightCol.AddView(weightInput);
+            bioRow.AddView(weightCol);
 
-            card.AddView(createLabel("Flipper (mm)"));
+            var flipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            var flipperColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            flipperColParams.SetMargins(12, 0, 0, 0);
+            flipperCol.LayoutParameters = flipperColParams;
+            flipperCol.AddView(createLabel("Flipper (mm)"));
             var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
-            card.AddView(flipperInput);
+            flipperCol.AddView(flipperInput);
+            bioRow.AddView(flipperCol);
+            card.AddView(bioRow);
 
             card.AddView(createLabel("Condition"));
             var bioConditions = new (string label, string field)[] {
@@ -5581,7 +5609,7 @@ namespace PenguinMonitor
             card.AddView(notesInput);
 
             var dialog = new AlertDialog.Builder(this)
-                .SetTitle($"New bird: {shortId}")
+                .SetTitle(string.IsNullOrEmpty(nextPengLabel) ? $"New bird: {shortId}" : $"New bird {nextPengLabel}")
                 .SetView(scrollView)
                 .SetPositiveButton("Add new penguin", (EventHandler<DialogClickEventArgs>)null!)
                 .SetNegativeButton("Skip", (s, e) => { SetDialogActive(false); })
@@ -5595,13 +5623,13 @@ namespace PenguinMonitor
                 addButton.Text = "Adding...";
                 var isChick = chippedAsChick.Checked;
                 var sexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
-                var sex = ObservedSexOptions.FirstOrDefault(o => o.label == sexLabel).code;
+                // Sex applies to adults only — the spinner is hidden (chick size shown) for chicks
+                var sex = isChick ? "" : ObservedSexOptions.FirstOrDefault(o => o.label == sexLabel).code;
                 var chickSize = "";
                 if (isChick)
                 {
-                    if (sizeSC.Checked) chickSize = "SC";
-                    else if (sizeBC.Checked) chickSize = "BC";
-                    else if (sizeLC.Checked) chickSize = "LC";
+                    var sizeSel = chickSizeSpinner.SelectedItem?.ToString() ?? "";
+                    chickSize = sizeSel.Contains("(SC)") ? "SC" : sizeSel.Contains("(BC)") ? "BC" : sizeSel.Contains("(LC)") ? "LC" : "";
                 }
 
                 _ = Task.Run(async () =>
