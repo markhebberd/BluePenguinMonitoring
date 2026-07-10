@@ -3857,7 +3857,12 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                   onClick={navigate ? e => navClick(e, () => navigate(href)) : undefined}>{content}</a>
               );
               return (
-                <tr key={i} className="clickable">
+                // Whole row navigates; minis and the + No scan button are anchors/buttons and
+                // handle themselves (closest() also swallows their bubbled clicks).
+                <tr key={i} className="clickable" onClick={e => {
+                  if ((e.target as HTMLElement).closest('a, button')) return;
+                  if (navigate) navigate(href); else window.location.href = href;
+                }}>
                   <td>{link(r.date)}</td>
                   <td>{link(<strong>{r.box}</strong>)}</td>
                   {/* Uncapped, unlike the summary rows elsewhere — here the icons ARE the count. */}
