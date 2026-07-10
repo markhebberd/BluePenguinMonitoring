@@ -133,7 +133,6 @@ namespace PenguinMonitor
         private ImageButton? _expandButton;
         private LinearLayout? _prevObsSummaryLayout;
         private TextView? _stickyNoteBelowPrev;   // sticky note shown under the expanded prev-obs card
-        private TextView? _todayMiniView;
         private TextView? _prevObsHeaderText;
         private LinearLayout? _prevObsDetailLayout;
         // Which box the expanded previous-obs detail belongs to — auto-collapses on box change.
@@ -3097,6 +3096,18 @@ namespace PenguinMonitor
             actionRow.AddView(_syncButton);
             actionRow.AddView(authButton);
             _settingsCard.AddView(actionRow);
+
+            // Manual rechip / new-penguin entry with a placeholder PIT (no scanner needed)
+            var rechipButton = _uiFactory.CreateStyledButton("Rechip / new penguin", UIFactory.PRIMARY_BLUE);
+            var rechipParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            rechipParams.SetMargins(8, 8, 8, 8);
+            rechipButton.LayoutParameters = rechipParams;
+            rechipButton.Click += (s, e) =>
+            {
+                const string placeholderPit = "LA000000000000000";
+                ShowNewBirdDialog(placeholderPit.Substring(placeholderPit.Length - 8), placeholderPit);
+            };
+            _settingsCard.AddView(rechipButton);
         }
 
         private void UpdateBoxSetsSelector()
@@ -3898,31 +3909,7 @@ namespace PenguinMonitor
                 _stickyNoteBelowPrev.Visibility = expanded && hasSticky ? ViewStates.Visible : ViewStates.Gone;
             }
 
-            // Update today miniview
-            UpdateTodayMiniView();
-
             UpdateUnsyncedCards();
-        }
-
-        private void UpdateTodayMiniView()
-        {
-            if (_todayMiniView == null) return;
-            var today = _colonyState.GetTodayForBox(_currentBoxName);
-            if (today == null)
-            {
-                _todayMiniView.Visibility = ViewStates.Gone;
-                return;
-            }
-            string text = string.Concat(Enumerable.Repeat("🐧", today.Adults)) +
-                string.Concat(Enumerable.Repeat("🥚", today.Eggs)) +
-                string.Concat(Enumerable.Repeat("🐣", today.Chicks));
-            if (!string.IsNullOrEmpty(today.BreedingStatus) && today.BreedingStatus != "BR")
-                text += $" {today.BreedingStatus}";
-            if (!string.IsNullOrEmpty(today.GateStatus))
-                text += $" {today.GateStatus}";
-            if (string.IsNullOrWhiteSpace(text)) text = "Empty";
-            _todayMiniView.Text = text;
-            _todayMiniView.Visibility = ViewStates.Visible;
         }
 
         private LinearLayout? _unsyncedCardsContainer;
@@ -4276,19 +4263,6 @@ namespace PenguinMonitor
             _dupPenguinWarningView.SetPadding(12, 4, 12, 4);
             _dupPenguinWarningView.Visibility = ViewStates.Gone;
             _singleBoxDataOuterLayout.AddView(_dupPenguinWarningView);
-
-            // Today miniview (right-aligned, black border)
-            _todayMiniView = new TextView(this) { TextSize = 14 };
-            _todayMiniView.SetTextColor(Color.Black);
-            _todayMiniView.SetPadding(8, 4, 8, 4);
-            var todayMiniViewBg = new Android.Graphics.Drawables.GradientDrawable();
-            todayMiniViewBg.SetColor(Color.White);
-            todayMiniViewBg.SetCornerRadius(6 * (Resources?.DisplayMetrics?.Density ?? 2));
-            todayMiniViewBg.SetStroke((int)(2 * (Resources?.DisplayMetrics?.Density ?? 2)), Color.Black);
-            _todayMiniView.Background = todayMiniViewBg;
-            _todayMiniView.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            _todayMiniView.Visibility = ViewStates.Gone;
-            prevAndStickyRow.AddView(_todayMiniView);
 
             _singleBoxDataOuterLayout.AddView(prevAndStickyRow);
 
@@ -5494,13 +5468,13 @@ namespace PenguinMonitor
             sexSpinner.LayoutParameters = spinnerParams;
             card.AddView(sexSpinner);
 
-            // Chipped as adult/chick toggle
+            // Chipped as adult/chick toggle — horizontal to keep the form short
             card.AddView(createLabel("Chipped as"));
             var chippedAsAdult = new RadioButton(this) { Text = "Adult" };
             chippedAsAdult.SetTextColor(Color.Black);
             var chippedAsChick = new RadioButton(this) { Text = "Chick" };
             chippedAsChick.SetTextColor(Color.Black);
-            var chippedGroup = new RadioGroup(this);
+            var chippedGroup = new RadioGroup(this) { Orientation = Android.Widget.Orientation.Horizontal };
             chippedGroup.AddView(chippedAsAdult);
             chippedGroup.AddView(chippedAsChick);
             chippedAsAdult.Checked = true;
@@ -5552,17 +5526,26 @@ namespace PenguinMonitor
                 replaceNoScanCheck.Visibility = !chippedAsChick.Checked && boxHasNoScan ? ViewStates.Visible : ViewStates.Gone;
             };
 
-            // Chip box (pre-filled with current box)
-            card.AddView(createLabel("Chip box"));
+            // Chip box + Chipped by on one line (two labelled columns) to keep the form short
+            var chipRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var chipBoxCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            chipBoxCol.AddView(createLabel("Chip box"));
             var chipBoxInput = createInput("Box name");
             chipBoxInput.Text = _currentBoxName;
-            card.AddView(chipBoxInput);
+            chipBoxCol.AddView(chipBoxInput);
+            chipRow.AddView(chipBoxCol);
 
-            // Chipped by (pre-filled with current observer)
-            card.AddView(createLabel("Chipped by"));
+            var chipByCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            var chipByColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
+            chipByColParams.SetMargins(12, 0, 0, 0);
+            chipByCol.LayoutParameters = chipByColParams;
+            chipByCol.AddView(createLabel("Chipped by"));
             var chippedByInput = createInput("Observer name");
             chippedByInput.Text = _appSettings?.ObserverName ?? "";
-            card.AddView(chippedByInput);
+            chipByCol.AddView(chippedByInput);
+            chipRow.AddView(chipByCol);
+            card.AddView(chipRow);
 
             // --- Biometric data ---
             var bioHeader = new TextView(this) { Text = "Biometric Data (optional)", TextSize = 15 };
