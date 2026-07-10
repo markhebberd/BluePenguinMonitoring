@@ -1809,6 +1809,7 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
                     })}
                     {canEdit && onAddPenguin && <button className="add-penguin-btn" title="Add a penguin chipped in this box" onClick={() => onAddPenguin(boxName)}>+ 🐧</button>}
                   </div>
+                  {canEdit && <RechipPenguin allPenguins={allPenguins || []} onBirdClick={onBirdClick} />}
                 </div>
               );
             })()}
@@ -2441,6 +2442,38 @@ function PenguinSearch({ penguins, search, onSearchChange, onBirdClick }: {
       )}
       {open && search.length > 0 && filtered.exact.length === 0 && filtered.pit.length === 0 && (
         <div className="penguin-results"><div className="muted" style={{padding:'8px'}}>No penguins match "{search}"</div></div>
+      )}
+    </div>
+  );
+}
+
+/** Prototype of the nestcheck rechip flow: search for a bird, show its mini, then a
+ *  Yes/No confirm. The actual rechip write is not implemented yet. */
+function RechipPenguin({ allPenguins, onBirdClick }: { allPenguins: any[]; onBirdClick: (tag: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [target, setTarget] = useState<any>(null);
+  const [confirming, setConfirming] = useState(false);
+  const pick = (tag: string) => {
+    const p = allPenguins.find((x: any) => x.peng_num === tag || x.pit_id === tag);
+    if (p) { setTarget(p); setConfirming(false); }
+  };
+  return (
+    <div className="rechip-penguin">
+      <span className="rechip-lbl">Rechip penguin:</span>
+      {!target ? (
+        <PenguinSearch penguins={allPenguins} search={search} onSearchChange={setSearch} onBirdClick={pick} />
+      ) : !confirming ? (
+        <>
+          <PenguinMini scan={target} onClick={() => onBirdClick(target.peng_num || target.pit_id)} />
+          <button className="edit-btn done-btn" onClick={() => setConfirming(true)}>OK</button>
+          <button className="edit-btn" title="Pick a different penguin" onClick={() => setTarget(null)}>×</button>
+        </>
+      ) : (
+        <>
+          <span className="rechip-confirm">Are you sure you would like to rechip <PenguinMini scan={target} onClick={() => onBirdClick(target.peng_num || target.pit_id)} />?</span>
+          <button className="edit-btn done-btn" onClick={() => { alert('Rechip flow not implemented yet (prototype)'); setTarget(null); setConfirming(false); }}>Yes</button>
+          <button className="edit-btn" onClick={() => setConfirming(false)}>No</button>
+        </>
       )}
     </div>
   );
@@ -5975,7 +6008,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>Enter penguin #{nextPengNum} · Box {chipBox}</h2>
+        <h2>Enter penguin #{nextPengNum} · Box {box.trim() || chipBox}</h2>
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
