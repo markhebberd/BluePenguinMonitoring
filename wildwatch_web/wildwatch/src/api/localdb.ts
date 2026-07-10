@@ -881,6 +881,43 @@ export function queryAllPenguins(): any[] {
 /** Biometric sex-guess tally for a penguin, split into male/female-leaning counts.
  *  observed_sex codes: PM/MM (and legacy M) → male; PF/MF (and legacy F) → female; U (unsure) ignored.
  *  Used by PenguinMini to label unsexed birds with their guess history. */
+/** Rows for the All-penguins page, assembled entirely from the local cache — the snapshot's
+ *  penguins/chips/biometrics are global (not colony-filtered), so this covers every colony.
+ *  Same shape as penguins.php?all=1 minus colony_name (the caller derives a label from the
+ *  peng_num prefix until the server refresh supplies real names). */
+export function computeAllPenguinsRows(): any[] {
+  if (!mem) return [];
+  const chipsByPeng = new Map<string, any[]>();
+  for (const ch of mem.chipByPit.values()) {
+    if (!chipsByPeng.has(ch.peng_num)) chipsByPeng.set(ch.peng_num, []);
+    chipsByPeng.get(ch.peng_num)!.push(ch);
+  }
+  const rows: any[] = [];
+  for (const p of mem.penguins) {
+    const chips = (chipsByPeng.get(p.peng_num) || []).sort((a, b) =>
+      String(a.chip_date || '').localeCompare(String(b.chip_date || '')) || String(a.pit_id).localeCompare(String(b.pit_id)));
+    const first = chips[0];
+    const row: any = {
+      peng_num: p.peng_num, sex: p.sex, is_dead: p.is_dead, death_date: p.death_date,
+      chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code,
+      first_chip_date: first?.chip_date ?? null, first_chip_box: first?.chip_box ?? null, first_chip_by: first?.chip_by ?? null,
+      pits: chips.map(c => ({ pit_id: c.pit_id, is_active: c.is_active ? 1 : 0 })),
+    };
+    for (const b of (mem.bioByPeng.get(p.peng_num) || [])) {
+      if (b.is_deleted) continue;
+      const s = (b.observed_sex || '').toUpperCase();
+      if (s === 'PM' || s === 'MM' || s === 'M') row.guess_m = (row.guess_m || 0) + 1;
+      else if (s === 'PF' || s === 'MF' || s === 'F') row.guess_f = (row.guess_f || 0) + 1;
+      if (first?.chip_date && String(b.observation_date || '').slice(0, 10) === String(first.chip_date).slice(0, 10)) {
+        if (b.weight != null && row.chip_weight == null) row.chip_weight = b.weight;
+        if (b.flipper_length != null && row.chip_flipper == null) row.chip_flipper = b.flipper_length;
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 export function observedSexGuess(pengNum: string | null | undefined): { m: number; f: number } {
   const out = { m: 0, f: 0 };
   if (!mem || !pengNum) return out;

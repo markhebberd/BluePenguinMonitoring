@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -6043,15 +6043,24 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
 
 /** Every penguin across the colonies the user can view, newest initial chip first.
  *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
-function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void }) {
-  const [rows, setRows] = useState<any[] | null>(null);
+function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyName?: string; onBack?: () => void }) {
+  // The snapshot's penguins/chips/biometrics are global, so the table builds straight from
+  // the local cache — no network needed. A background server fetch then replaces it: it adds
+  // real colony names and applies colony permissions.
+  const dbv = useDbVersion();
+  const localRows = useMemo(() => computeAllPenguinsRows(), [dbv]);
+  const [serverRows, setServerRows] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
-    fetch('/api/penguins.php?all=1', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/penguins.php?all=1&colony_id=${getColonyId()}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => Array.isArray(d) ? setRows(d) : setError(d?.error || 'Failed to load'))
-      .catch(e => setError(String(e?.message || e)));
+      .then(d => Array.isArray(d) ? setServerRows(d) : setError(d?.error || 'Failed to load'))
+      .catch(e => { setError(String(e?.message || e)); });
   }, [token]);
+  const rows = serverRows || (localRows.length ? localRows : null);
+  // Until the server refresh lands, label birds by their peng_num prefix; bare numbers are
+  // the viewing colony's own standard.
+  const colonyOf = (r: any) => r.colony_name || String(r.peng_num).match(/^[A-Z]{2,4}/)?.[0] || colonyName || '—';
 
   // Adults are the default — the column only calls out chick chippings.
   const chippedAs = (r: any) => r.chipped_as_adult ? '' : `Chipped as chick${r.chick_size_code ? ` (${r.chick_size_code})` : ''}`;
@@ -6068,7 +6077,7 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
   // (newest/heaviest first), text columns ascending. Clicking the active column flips it.
   const COLS: { key: string; label: string; value: (r: any) => any; desc?: boolean }[] = [
     { key: 'peng', label: 'Penguin', value: r => [String(r.peng_num).replace(/\d+$/, ''), parseInt(String(r.peng_num).replace(/^\D+/, ''), 10) || 0] },
-    { key: 'colony', label: 'Colony', value: r => r.colony_name || '' },
+    { key: 'colony', label: 'Colony', value: r => colonyOf(r) },
     { key: 'chipped', label: 'Chipped', value: r => r.first_chip_date || '', desc: true },
     { key: 'box', label: 'Box', value: r => { const b = r.first_chip_box || ''; const n = parseInt(b, 10); return isNaN(n) ? [b, 0] : ['', n]; } },
     { key: 'by', label: 'By', value: r => r.first_chip_by || '' },
@@ -6111,7 +6120,7 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
       <div className="report-card">
         <h3>All penguins{rows ? ` (${rows.length})` : ''}</h3>
         <p className="muted">Every penguin in the colonies you can view. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn. Click a column to sort.</p>
-        {error && <p style={{ color: '#F44336' }}>{error}</p>}
+        {error && !rows && <p style={{ color: '#F44336' }}>{error}</p>}
         {!rows && !error && <p className="muted">Loading…</p>}
         {sorted && (
           <div className="table-scroll">
@@ -6127,7 +6136,7 @@ function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void
                 {(showAll ? sorted : sorted.slice(0, CAP)).map((r: any) => (
                   <tr key={r.peng_num}>
                     <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
-                    <td>{r.colony_name}</td>
+                    <td>{colonyOf(r)}</td>
                     <td>{r.first_chip_date ? String(r.first_chip_date).slice(0, 10) : '—'}</td>
                     <td>{r.first_chip_box || '—'}</td>
                     <td>{r.first_chip_by || '—'}</td>
@@ -8685,7 +8694,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     // make it wait behind the IndexedDB colony prime. The full chrome appears once loaded.
     if (showAllBirds) return (
       <div className="app">
-        <AllPenguinsPage token={token} onBack={() => setShowAllBirds(false)} />
+        <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name} onBack={() => setShowAllBirds(false)} />
       </div>
     );
     return <div className="center loading-screen">
@@ -8928,7 +8937,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <AllPenguinsPage token={token} />
+        <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name} />
         {passwordDialog}
       </div>
     );

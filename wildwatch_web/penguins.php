@@ -70,6 +70,9 @@ if (isset($_GET['all'])) {
     $birds = array_values($birds);
     usort($birds, fn($a, $b2) => strcmp($b2['first_chip_date'] ?? '', $a['first_chip_date'] ?? '')
         ?: strcmp($b2['peng_num'], $a['peng_num']));
+    // Same display form as the rest of the app (and the local cache): the viewing colony's
+    // bare-number standard applies, other colonies keep their prefix.
+    stripPengPrefix($birds, $viewPrefix);
     echo json_encode($birds);
     exit;
 }
