@@ -5261,7 +5261,7 @@ namespace PenguinMonitor
         // First entry is the blank "not recorded" default.
         private static readonly (string code, string label)[] ObservedSexOptions = new[]
         {
-            ("", "— Not recorded"),
+            ("", "Not recorded"),
             ("PM", "Probably male"),
             ("MM", "Maybe male"),
             ("U", "Unsure"),
@@ -5477,6 +5477,29 @@ namespace PenguinMonitor
             pitInfo.SetPadding(0, 0, 0, 12);
             card.AddView(pitInfo);
 
+            // New penguin / Rechip mode — a rechip attaches this PIT as a NEW chip on an
+            // existing bird and retires the bird's old chip (mirrors the wildwatch flow).
+            PenguinData? rechipTarget = null;
+            string? rechipOldPit = null;
+            var modeNew = new RadioButton(this) { Text = "New penguin", Checked = true };
+            modeNew.SetTextColor(Color.Black);
+            var modeRechip = new RadioButton(this) { Text = "Rechip" };
+            modeRechip.SetTextColor(Color.Black);
+            var modeGroup = new RadioGroup(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            modeGroup.AddView(modeNew);
+            modeGroup.AddView(modeRechip);
+            card.AddView(modeGroup);
+
+            // Rechip search: peng # or chip id, like the wildwatch penguin search
+            var rechipLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            rechipLayout.Visibility = ViewStates.Gone;
+            rechipLayout.AddView(createLabel("Rechip penguin"));
+            var rechipSearchInput = createInput("Peng # or chip id");
+            rechipLayout.AddView(rechipSearchInput);
+            var rechipResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            rechipLayout.AddView(rechipResults);
+            card.AddView(rechipLayout);
+
             // Chipped as (adult/chick) + Sex on one row to keep the form short
             var chippedSexRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
             var chippedCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
@@ -5616,17 +5639,83 @@ namespace PenguinMonitor
                 .Create();
 
             dialog.Show();
+            // Slightly wider than the default dialog — the two-column rows need the space
+            dialog.Window?.SetLayout((int)((Resources?.DisplayMetrics?.WidthPixels ?? 1080) * 0.98), ViewGroup.LayoutParams.WrapContent);
             var addButton = dialog.GetButton((int)DialogButtonType.Positive);
-            addButton.Click += (s, e) =>
+
+            // --- Rechip mode wiring ---
+            bool suppressRechipSearch = false;
+            void SelectRechipTarget(PenguinData pd, string key)
+            {
+                rechipTarget = pd;
+                // Retire the bird's current chip: prefer its full 17-char pit key
+                rechipOldPit = key.Length == 17 ? key
+                    : _remotePenguinData?.FirstOrDefault(kv => kv.Value.PengNum == pd.PengNum && kv.Key.Length == 17).Key;
+                rechipResults.RemoveAllViews();
+                suppressRechipSearch = true;
+                rechipSearchInput.Text = $"#{pd.PengNum}";
+                suppressRechipSearch = false;
+                dialog.SetTitle($"Rechip penguin #{pd.PengNum}");
+                addButton.Text = "Rechip penguin";
+            }
+            modeRechip.CheckedChange += (s, e) =>
+            {
+                bool rechip = modeRechip.Checked;
+                rechipLayout.Visibility = rechip ? ViewStates.Visible : ViewStates.Gone;
+                chippedSexRow.Visibility = rechip ? ViewStates.Gone : ViewStates.Visible;
+                if (rechip)
+                {
+                    dialog.SetTitle("Rechip penguin");
+                    addButton.Text = "Rechip penguin";
+                }
+                else
+                {
+                    rechipTarget = null; rechipOldPit = null;
+                    rechipResults.RemoveAllViews();
+                    suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
+                    dialog.SetTitle(string.IsNullOrEmpty(nextPengLabel) ? $"New bird: {shortId}" : $"New bird {nextPengLabel}");
+                    addButton.Text = "Add new penguin";
+                }
+            };
+            rechipSearchInput.TextChanged += (s, e) =>
+            {
+                if (suppressRechipSearch) return;
+                rechipTarget = null; rechipOldPit = null;
+                rechipResults.RemoveAllViews();
+                var q = (rechipSearchInput.Text ?? "").Trim().ToUpper();
+                if (q.Length < 2 || _remotePenguinData == null) return;
+                // Distinct birds whose peng number or any chip id matches; prefer full pit keys
+                var matches = new Dictionary<string, (PenguinData pd, string key)>();
+                foreach (var kv in _remotePenguinData)
+                {
+                    var pn = kv.Value.PengNum ?? "";
+                    if (pn == "") continue;
+                    if (!pn.ToUpper().Contains(q) && !kv.Key.ToUpper().Contains(q)) continue;
+                    if (!matches.TryGetValue(pn, out var cur) || (kv.Key.Length == 17 && cur.key.Length != 17))
+                        matches[pn] = (kv.Value, kv.Key);
+                }
+                foreach (var mt in matches.Values.Take(6))
+                {
+                    var pdSel = mt.pd; var keySel = mt.key;
+                    var resultBadge = CreateScanBadge(keySel, () => SelectRechipTarget(pdSel, keySel), textSize: 14);
+                    var bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                    bp.SetMargins(0, 4, 0, 4);
+                    resultBadge.LayoutParameters = bp;
+                    rechipResults.AddView(resultBadge);
+                }
+            };
+
+            void DoAdd()
             {
                 addButton.Enabled = false;
-                addButton.Text = "Adding...";
-                var isChick = chippedAsChick.Checked;
+                bool isRechip = rechipTarget != null;
+                addButton.Text = isRechip ? "Rechipping..." : "Adding...";
+                var isChick = isRechip ? rechipTarget!.LastKnownLifeStage == LifeStage.Chick : chippedAsChick.Checked;
                 var sexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
-                // Sex applies to adults only — the spinner is hidden (chick size shown) for chicks
-                var sex = isChick ? "" : ObservedSexOptions.FirstOrDefault(o => o.label == sexLabel).code;
+                // Sex applies to new adults only — hidden for chicks and for rechips
+                var sex = (isChick || isRechip) ? "" : ObservedSexOptions.FirstOrDefault(o => o.label == sexLabel).code;
                 var chickSize = "";
-                if (isChick)
+                if (isChick && !isRechip)
                 {
                     var sizeSel = chickSizeSpinner.SelectedItem?.ToString() ?? "";
                     chickSize = sizeSel.Contains("(SC)") ? "SC" : sizeSel.Contains("(BC)") ? "BC" : sizeSel.Contains("(LC)") ? "LC" : "";
@@ -5642,7 +5731,14 @@ namespace PenguinMonitor
                         // them within it (e.g. NI7) and stamps penguins.colony_id.
                         var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
 
-                        // 1. Create penguin record
+                        // 1. Create penguin record — skipped for a rechip (bird already exists)
+                        string? pengNum;
+                        if (isRechip)
+                        {
+                            pengNum = rechipTarget!.PengNum;
+                        }
+                        else
+                        {
                         var pengFields = new Dictionary<string, object>
                         {
                             ["chipped_as_adult"] = isChick ? 0 : 1,
@@ -5659,7 +5755,7 @@ namespace PenguinMonitor
                         var pengJson = await pengResp.Content.ReadAsStringAsync();
                         var pengResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(pengJson);
 
-                        var pengNum = pengResult?.ContainsKey("peng_num") == true ? pengResult["peng_num"]?.ToString() : null;
+                        pengNum = pengResult?.ContainsKey("peng_num") == true ? pengResult["peng_num"]?.ToString() : null;
                         if (string.IsNullOrEmpty(pengNum))
                         {
                             RunOnUiThread(() =>
@@ -5671,6 +5767,7 @@ namespace PenguinMonitor
                                     .Show();
                             });
                             return;
+                        }
                         }
 
                         // 2. Create chip record
@@ -5704,6 +5801,27 @@ namespace PenguinMonitor
                             return;
                         }
 
+                        // 2b. Rechip: retire the bird's previous chip (like the wildwatch flow)
+                        if (isRechip && !string.IsNullOrEmpty(rechipOldPit)
+                            && !string.Equals(rechipOldPit, fullPitId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                var retireReq = new HttpRequestMessage(HttpMethod.Post,
+                                    $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguin_chips&id={Uri.EscapeDataString(rechipOldPit)}&colony_id={colonyId}");
+                                retireReq.Headers.Add("Authorization", $"Bearer {token}");
+                                retireReq.Content = new StringContent(
+                                    JsonConvert.SerializeObject(new Dictionary<string, object> { ["is_active"] = 0 }),
+                                    System.Text.Encoding.UTF8, "application/json");
+                                await client.SendAsync(retireReq);
+                            }
+                            catch (Exception rex)
+                            {
+                                RunOnUiThread(() => Toast.MakeText(this,
+                                    $"New chip saved, but retiring old chip failed: {rex.Message}", ToastLength.Long)?.Show());
+                            }
+                        }
+
                         // 3. Create biometric record if any data entered
                         var bioFields = new Dictionary<string, object>();
                         if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
@@ -5726,27 +5844,37 @@ namespace PenguinMonitor
                         // 4. Update local penguin data cache
                         if (_remotePenguinData != null)
                         {
-                            var pd = new PenguinData
+                            if (isRechip)
                             {
-                                ScannedId = shortId,
-                                PengNum = pengNum,
-                                Sex = "", // sex is unconfirmed until set on penguins table
-                                LastKnownLifeStage = isChick ? LifeStage.Chick : LifeStage.Adult,
-                                ChipDate = DateTime.UtcNow,
-                                ChipAs = isChick ? "Chick" : "Adult",
-                                ChickSizeCode = chickSize,
-                            };
-                            _remotePenguinData[fullPitId] = pd;
-                            _remotePenguinData[shortId] = pd;
+                                // The bird keeps its identity — just teach the cache the new pit
+                                _remotePenguinData[fullPitId] = rechipTarget!;
+                                _remotePenguinData[shortId] = rechipTarget!;
+                            }
+                            else
+                            {
+                                var pd = new PenguinData
+                                {
+                                    ScannedId = shortId,
+                                    PengNum = pengNum,
+                                    Sex = "", // sex is unconfirmed until set on penguins table
+                                    LastKnownLifeStage = isChick ? LifeStage.Chick : LifeStage.Adult,
+                                    ChipDate = DateTime.UtcNow,
+                                    ChipAs = isChick ? "Chick" : "Adult",
+                                    ChickSizeCode = chickSize,
+                                };
+                                _remotePenguinData[fullPitId] = pd;
+                                _remotePenguinData[shortId] = pd;
+                            }
                         }
 
                         RunOnUiThread(() =>
                         {
+                            var verb = isRechip ? "rechipped" : "added";
                             // Increment adult or chick count
                             if (isChick)
                             {
                                 _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
-                                Toast.MakeText(this, $"#{pengNum} added (+1 Chick)", ToastLength.Short)?.Show();
+                                Toast.MakeText(this, $"#{pengNum} {verb} (+1 Chick)", ToastLength.Short)?.Show();
                             }
                             else
                             {
@@ -5760,11 +5888,11 @@ namespace PenguinMonitor
                                 {
                                     replaceBox!.ScannedIds.Remove(noScanEntry);
                                     _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
-                                    Toast.MakeText(this, $"#{pengNum} added — replaced no-scan in box {_currentBoxName}", ToastLength.Short)?.Show();
+                                    Toast.MakeText(this, $"#{pengNum} {verb} — replaced no-scan in box {_currentBoxName}", ToastLength.Short)?.Show();
                                 }
                                 else
                                 {
-                                    Toast.MakeText(this, $"#{pengNum} added (+1 Adult)", ToastLength.Short)?.Show();
+                                    Toast.MakeText(this, $"#{pengNum} {verb} (+1 Adult)", ToastLength.Short)?.Show();
                                 }
                             }
                             SaveCurrentBoxData();
@@ -5779,6 +5907,28 @@ namespace PenguinMonitor
                             Toast.MakeText(this, $"Failed: {ex.Message}", ToastLength.Long)?.Show());
                     }
                 });
+            }
+
+            addButton.Click += (s, e) =>
+            {
+                if (modeRechip.Checked && rechipTarget == null)
+                {
+                    Toast.MakeText(this, "Search and select a penguin to rechip first", ToastLength.Short)?.Show();
+                    return;
+                }
+                if (rechipTarget != null)
+                {
+                    new AlertDialog.Builder(this)
+                        .SetTitle("Rechip")
+                        .SetMessage($"Are you sure you would like to rechip #{rechipTarget.PengNum}?")
+                        .SetPositiveButton("Yes", (s2, e2) => DoAdd())
+                        .SetNegativeButton("No", (s2, e2) => { })
+                        .Show();
+                }
+                else
+                {
+                    DoAdd();
+                }
             };
         }
 
