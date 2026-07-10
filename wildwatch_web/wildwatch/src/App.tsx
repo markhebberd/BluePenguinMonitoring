@@ -6028,13 +6028,47 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
   );
 }
 
+/** Audit-log plumbing columns — never interesting to a human reading the change list. */
+const AUDIT_HIDDEN_FIELDS = ['location_id','observer_id','colony_id','monitor_filename','is_deleted','observation_id','scan_id','biometric_id'];
+
+/** "observation_time_utc" -> "Observation time utc" reads better than a raw column name. */
+const fieldLabel = (k: string) => k.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+
+/** Render an audit value: blanks are explicit, timestamps lose their seconds/T, objects stay readable. */
+const auditValue = (v: any) => {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (typeof v === 'object') return JSON.stringify(v);
+  const s = String(v);
+  return /^\d{4}-\d\d-\d\d[ T]/.test(s) ? s.slice(0, 16).replace('T', ' ') : s;
+};
+
+/** One "Field  old → new" line (or just "Field  value" when there's no before-state). */
+function FieldDiff({ name, value }: { name: string; value: any }) {
+  const isDiff = value && typeof value === 'object' && !Array.isArray(value) && ('old' in value || 'new' in value);
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 11, padding: '1px 0' }}>
+      <span style={{ minWidth: 130, flexShrink: 0, color: '#555', fontWeight: 600 }}>{fieldLabel(name)}</span>
+      {isDiff ? (
+        <span style={{ wordBreak: 'break-word' }}>
+          <span style={{ textDecoration: 'line-through', color: '#c0392b' }}>{auditValue(value.old)}</span>
+          <span style={{ color: '#999', margin: '0 6px' }}>→</span>
+          <span style={{ color: '#2e7d32', fontWeight: 600 }}>{auditValue(value.new)}</span>
+        </span>
+      ) : (
+        <span style={{ color: '#333', wordBreak: 'break-word' }}>{auditValue(value)}</span>
+      )}
+    </div>
+  );
+}
+
 function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
   const [expanded, setExpanded] = useState(false);
   const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   return <div style={{marginBottom:4}}>
     <div className="clickable" style={{padding:'6px 10px', background:'#f5f5f5', borderRadius:6, fontWeight:600, fontSize:13, display:'flex', justifyContent:'space-between'}} onClick={() => setExpanded(!expanded)}>
       <span>{expanded ? '▾' : '▸'} {dateLabel}</span>
-      <span className="muted">{entries.length} changes</span>
+      <span className="muted">{entries.length} change{entries.length === 1 ? '' : 's'}</span>
     </div>
     {expanded && <div style={{maxHeight:300, overflowY:'auto'}}>
       {entries.map((e: any, i: number) => {
@@ -6042,9 +6076,10 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
         return (
           <div key={i} className="obs-card" style={{marginBottom:2, padding:'4px 10px', marginLeft:8}}>
             <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', fontSize:12}}>
+              <span style={{fontFamily:'monospace', fontSize:11, color:'#666', minWidth:34}}>{e.nz_time || ''}</span>
               <span style={{background: e.action === 'DELETE' ? '#F44336' : e.action === 'INSERT' ? '#4CAF50' : e.action === 'IMPORT' ? '#00897b' : '#2196F3', color:'#fff', fontSize:10, padding:'1px 6px', borderRadius:3}}>{e.action}</span>
               <span>{e.table_name === '__sql_console' ? 'SQL console' : e.table_name === '__import' ? (fields?.filename || 'Import') : e.table_name === 'date_mappings' ? `Date table · season ${String(e.record_id).slice(-2)}` : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
-              <span className="muted">{e.observer_name || ''}</span>
+              <span style={{color:'#1a6b8f', fontWeight:600}}>{e.observer_name || 'unknown user'}</span>
               {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
             </div>
             {e.table_name === '__sql_console' && fields?.sql && (
@@ -6079,20 +6114,16 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
               </div>;
             })()}
             {e.action === 'UPDATE' && e.table_name !== 'date_mappings' && fields && (
-              <div style={{fontSize:11, marginTop:2}}>
-                {Object.entries(fields).map(([k, v]: [string, any]) => (
-                  <span key={k} className="muted" style={{marginRight:8}}>{k}: {v && typeof v === 'object' && 'old' in v ? <><s>{String(v.old ?? '')}</s> → {String(v.new ?? '')}</> : String(v ?? '')}</span>
-                ))}
+              <div style={{marginTop:4, paddingLeft:6, borderLeft:'2px solid #e0e0e0'}}>
+                {Object.entries(fields).map(([k, v]: [string, any]) => <FieldDiff key={k} name={k} value={v} />)}
               </div>
             )}
             {/* INSERTs store the whole new row — show its meaningful fields (drop the ids/plumbing). */}
             {e.action === 'INSERT' && fields && e.table_name !== '__sql_console' && (
-              <div style={{fontSize:11, marginTop:2}}>
+              <div style={{marginTop:4, paddingLeft:6, borderLeft:'2px solid #e0e0e0'}}>
                 {Object.entries(fields)
-                  .filter(([k, v]: [string, any]) => !['location_id','observer_id','colony_id','monitor_filename','is_deleted','observation_id','scan_id','biometric_id'].includes(k) && v !== null && v !== '' )
-                  .map(([k, v]: [string, any]) => (
-                    <span key={k} className="muted" style={{marginRight:8}}>{k}: {String(typeof v === 'string' && /^\d{4}-\d\d-\d\d[ T]/.test(v) ? v.slice(0, 16).replace('T', ' ') : v)}</span>
-                  ))}
+                  .filter(([k, v]: [string, any]) => !AUDIT_HIDDEN_FIELDS.includes(k) && v !== null && v !== '')
+                  .map(([k, v]: [string, any]) => <FieldDiff key={k} name={k} value={v} />)}
               </div>
             )}
           </div>
@@ -6178,6 +6209,8 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const [datePreview, setDatePreview] = useState<any>(null);
   const [recentChanges, setRecentChanges] = useState<any[]|null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
+  const [changesUser, setChangesUser] = useState('');   // '' = all users
+  const [changesDays, setChangesDays] = useState(7);    // admin.php caps this at 30
   const [exporting, setExporting] = useState(false);
   const dbVersion = useDbVersion(); // bumps whenever the local DB (IndexedDB) syncs
   // FM completeness: every incomplete registered book FM day up to today, in the order
@@ -6501,13 +6534,13 @@ function AdminPanel({ token, observationDates, checkTarget }: {
 
   const loadRecentChanges = async () => {
     setChangesLoading(true);
-    const r = await fetch('/api/admin.php?action=recent_changes&days=7', { headers: { 'Authorization': `Bearer ${token}` } });
+    const r = await fetch(`/api/admin.php?action=recent_changes&days=${changesDays}`, { headers: { 'Authorization': `Bearer ${token}` } });
     setRecentChanges(await r.json());
     setChangesLoading(false);
   };
   // Auto-load, and re-fetch whenever the local DB syncs (a sync means the server data — and so
-  // the audit log — has changed).
-  useEffect(() => { loadRecentChanges(); }, [dbVersion]);
+  // the audit log — has changed) or the window length changes.
+  useEffect(() => { loadRecentChanges(); }, [dbVersion, changesDays]);
 
   const previewDate = async (date: string) => {
     setDatePreview({ loading: true, date });
@@ -7172,20 +7205,48 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
-        <h3>Last 7 days DB changes</h3>
-        <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
-          {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
-        </button>
+        <h3>Last {changesDays} days DB changes</h3>
+        <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+          <button className="edit-btn" onClick={loadRecentChanges} disabled={changesLoading}>
+            {changesLoading ? 'Loading...' : recentChanges ? 'Refresh' : 'Load'}
+          </button>
+          <label style={{fontSize:13, color:'#555'}}>Period</label>
+          <select value={changesDays} onChange={e => setChangesDays(Number(e.target.value))} style={{padding:'4px 8px'}}>
+            <option value={1}>Last 24 hours</option>
+            <option value={7}>Last 7 days</option>
+            <option value={14}>Last 14 days</option>
+            <option value={30}>Last 30 days</option>
+          </select>
+          {recentChanges && (() => {
+            // Users come from the changes themselves — only people who actually changed
+            // something in the window are worth offering as a filter.
+            const counts = new Map<string, number>();
+            for (const e of recentChanges) {
+              const n = e.observer_name || 'unknown user';
+              counts.set(n, (counts.get(n) || 0) + 1);
+            }
+            const names = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
+            return <>
+              <label style={{fontSize:13, color:'#555'}}>User</label>
+              <select value={changesUser} onChange={e => setChangesUser(e.target.value)} style={{padding:'4px 8px'}}>
+                <option value="">All users ({recentChanges.length})</option>
+                {names.map(n => <option key={n} value={n}>{n} ({counts.get(n)})</option>)}
+              </select>
+            </>;
+          })()}
+        </div>
         {recentChanges && (() => {
+          const shown = changesUser ? recentChanges.filter(e => (e.observer_name || 'unknown user') === changesUser) : recentChanges;
+          if (shown.length === 0) return <p className="muted" style={{marginTop:8}}>No changes by {changesUser} in this period.</p>;
           const byDate = new Map<string, any[]>();
-          for (const e of recentChanges) {
+          for (const e of shown) {
             const d = e.nz_date || 'Unknown';
             if (!byDate.has(d)) byDate.set(d, []);
             byDate.get(d)!.push(e);
           }
           return <div style={{marginTop:8}}>
             {Array.from(byDate.entries()).map(([date, entries]) => (
-              <ChangeDateGroup key={date} date={date} entries={entries} />
+              <ChangeDateGroup key={date + changesUser} date={date} entries={entries} />
             ))}
           </div>;
         })()}

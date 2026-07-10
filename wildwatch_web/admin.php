@@ -309,6 +309,7 @@ if ($action === 'recent_changes') {
     $stmt = $pdo->prepare("SELECT a.*,
         o.observer_name,
         DATE(CONVERT_TZ(a.change_timestamp, '+00:00', '+12:00')) as nz_date,
+        DATE_FORMAT(CONVERT_TZ(a.change_timestamp, '+00:00', '+12:00'), '%H:%i') as nz_time,
         CASE WHEN a.table_name = 'observations' THEN
             (SELECT ol.location_name FROM observations obs JOIN observation_locations ol ON obs.location_id = ol.location_id WHERE obs.observation_id = a.record_id LIMIT 1)
         END as box_name
