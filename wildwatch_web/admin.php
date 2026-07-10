@@ -646,32 +646,43 @@ if ($action === 'preview_penguin_delete') {
     $pengNum = $_GET['peng_num'] ?? '';
     if (!$pengNum) { http_response_code(400); echo json_encode(['error' => 'peng_num required']); exit; }
 
-    $peng = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ?");
-    $peng->execute([$pengNum]);
+    // Same resolution as bird.php: a prefixed input matches as-is ("NI7"), a bare number
+    // resolves within the viewing colony ("319" → "PT319"). Exact matches only — a
+    // wrong-colony guess on a delete screen would be far worse than not-found.
+    $viewPrefix = getColonyPrefix($pdo, (int)($_GET['colony_id'] ?? 1));
+    $peng = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ? OR peng_num = ? LIMIT 1");
+    $peng->execute([$pengNum, $viewPrefix . $pengNum]);
     $penguin = $peng->fetch();
     if (!$penguin) { http_response_code(404); echo json_encode(['error' => 'Penguin not found']); exit; }
+    $pid = $penguin['peng_num'];  // full prefixed PK — the delete action must be sent this
 
     $chips = $pdo->prepare("SELECT * FROM penguin_chips WHERE peng_num = ?");
-    $chips->execute([$pengNum]);
+    $chips->execute([$pid]);
     $chipList = $chips->fetchAll();
 
     $pitIds = array_column($chipList, 'pit_id');
     $scans = [];
+    $scansSoftDeleted = 0;
     if (!empty($pitIds)) {
+        // All scans, including already-soft-deleted ones: the delete hard-purges those too,
+        // so the preview must count exactly what the delete will touch.
         $ph = implode(',', array_fill(0, count($pitIds), '?'));
         $scanStmt = $pdo->prepare("SELECT ps.*, o.observation_time_utc, ol.location_name AS box_name
             FROM penguin_scans ps
             JOIN observations o ON ps.observation_id = o.observation_id
             JOIN observation_locations ol ON o.location_id = ol.location_id
-            WHERE ps.pit_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+            WHERE ps.pit_id IN ($ph)
             ORDER BY o.observation_time_utc DESC");
         $scanStmt->execute($pitIds);
-        $scans = $scanStmt->fetchAll();
+        $allScans = $scanStmt->fetchAll();
+        $scans = array_values(array_filter($allScans, fn($s) => empty($s['is_deleted'])));
+        $scansSoftDeleted = count($allScans) - count($scans);
     }
 
-    $bio = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
-    $bio->execute([$pengNum]);
-    $bioData = $bio->fetchAll();
+    $bio = $pdo->prepare("SELECT * FROM penguin_biometric_data WHERE peng_num = ?");
+    $bio->execute([$pid]);
+    $allBio = $bio->fetchAll();
+    $bioData = array_values(array_filter($allBio, fn($b) => empty($b['is_deleted'])));
 
     echo json_encode([
         'penguin' => $penguin,
@@ -679,6 +690,8 @@ if ($action === 'preview_penguin_delete') {
         'scans' => $scans,
         'biometrics' => $bioData,
         'scan_count' => count($scans),
+        'scans_soft_deleted' => $scansSoftDeleted,
+        'bio_soft_deleted' => count($allBio) - count($bioData),
     ]);
     exit;
 }

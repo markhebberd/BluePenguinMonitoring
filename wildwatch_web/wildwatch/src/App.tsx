@@ -7893,7 +7893,7 @@ function RemovePenguin({ token }: { token: string }) {
     const num = pengNum.trim().replace('#', '');
     if (!num) return;
     setLoading(true); setPreview(null); setResult(null);
-    const r = await fetch(`/api/admin.php?action=preview_penguin_delete&peng_num=${num}`, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch(`/api/admin.php?action=preview_penguin_delete&peng_num=${encodeURIComponent(num)}&colony_id=${getColonyId()}`, { headers: { Authorization: `Bearer ${token}` } });
     const d = await r.json();
     if (d.error) { setResult(`Error: ${d.error}`); }
     else { setPreview(d); }
@@ -7903,7 +7903,9 @@ function RemovePenguin({ token }: { token: string }) {
   const deletePenguin = async () => {
     if (!preview) return;
     const num = preview.penguin.peng_num;
-    if (!confirm(`Permanently delete penguin #${num}?\n\nThis will remove:\n- ${preview.chips.length} chip record(s)\n- ${preview.scan_count} scan(s) from observations\n- All biometric data\n\nThis cannot be undone.`)) return;
+    const scanTotal = preview.scan_count + (preview.scans_soft_deleted || 0);
+    const bioTotal = preview.biometrics.length + (preview.bio_soft_deleted || 0);
+    if (!confirm(`Permanently delete penguin #${num}?\n\nHard-deletes:\n- ${scanTotal} scan(s)\n- ${bioTotal} biometric record(s)\n- ${preview.chips.length} chip record(s)\n- the penguin itself\n\nEach deleted row is copied to the audit log first.`)) return;
     setLoading(true);
     const r = await fetch('/api/admin.php?action=delete_penguin', {
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -7960,11 +7962,38 @@ function RemovePenguin({ token }: { token: string }) {
           {preview.scans.length > 20 && <p className="muted" style={{fontSize:11}}>...and {preview.scans.length - 20} more</p>}
 
           {preview.biometrics.length > 0 && (
-            <>
-              <h4 style={{margin:'8px 0 4px', fontSize:13}}>Biometrics ({preview.biometrics.length})</h4>
-              <p className="muted" style={{fontSize:11, margin:0}}>Will be soft-deleted</p>
-            </>
+            <h4 style={{margin:'8px 0 4px', fontSize:13}}>Biometrics ({preview.biometrics.length})</h4>
           )}
+
+          <h4 style={{margin:'12px 0 4px', fontSize:13}}>What deleting will do</h4>
+          <table style={{fontSize:12, borderCollapse:'collapse'}}>
+            <tbody>
+              {([
+                ['penguin_scans', preview.scan_count + (preview.scans_soft_deleted || 0),
+                  `hard-deleted (${preview.scan_count} live${preview.scans_soft_deleted ? `, ${preview.scans_soft_deleted} already soft-deleted` : ''}) — the scans disappear from their observations`],
+                ['penguin_biometric_data', preview.biometrics.length + (preview.bio_soft_deleted || 0),
+                  `hard-deleted (${preview.biometrics.length} live${preview.bio_soft_deleted ? `, ${preview.bio_soft_deleted} already soft-deleted` : ''})`],
+                ['penguin_chips', preview.chips.length, 'hard-deleted'],
+                ['penguins', 1, 'hard-deleted — the bird itself'],
+              ] as [string, number, string][]).map(([table, n, what]) => (
+                <tr key={table}>
+                  <td style={{padding:'1px 8px', fontFamily:'monospace'}}>{table}</td>
+                  <td style={{padding:'1px 8px', textAlign:'right'}}>{n} row{n === 1 ? '' : 's'}</td>
+                  <td style={{padding:'1px 8px', color:'#666'}}>{what}</td>
+                </tr>
+              ))}
+              <tr>
+                <td style={{padding:'1px 8px', fontFamily:'monospace'}}>audit_log</td>
+                <td style={{padding:'1px 8px', textAlign:'right'}}>
+                  {preview.scan_count + (preview.scans_soft_deleted || 0) + preview.biometrics.length + (preview.bio_soft_deleted || 0) + preview.chips.length + 1} rows
+                </td>
+                <td style={{padding:'1px 8px', color:'#666'}}>added — one DELETE entry per row, carrying the full row, so the bird is reconstructable from the log</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="muted" style={{fontSize:11, margin:'4px 0 0'}}>
+            Everything runs in one transaction — it all happens, or none of it does. There is no undo button; recovery means restoring from the audit log by hand.
+          </p>
 
           <button onClick={deletePenguin} disabled={loading}
             style={{marginTop:12, background:'#F44336', color:'#fff', border:'none', padding:'8px 20px', borderRadius:4, cursor:'pointer', fontWeight:600}}>
