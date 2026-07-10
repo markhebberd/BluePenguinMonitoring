@@ -60,8 +60,8 @@ if ($action === 'sql') {
         $truncated = false;
         if ($capped && count($rows) > $limit) { $rows = array_slice($rows, 0, $limit); $truncated = true; }
         $columns = $rows ? array_keys($rows[0]) : [];
-        // Audit the query text (record_id 0 — not tied to a single row).
-        wwAudit($pdo, '__sql_console', 0, 'SELECT', ['sql' => $sql], $observer['observer_id']);
+        // Not audited: reads change nothing, and the Database tab's automated browsing was
+        // flooding the log. The SELECT-only grant on DB_RO_USER is the security boundary.
         echo json_encode(['success' => true, 'columns' => $columns, 'rows' => $rows, 'rowCount' => count($rows), 'truncated' => $truncated, 'ms' => $ms]);
     } catch (PDOException $e) {
         echo json_encode(['error' => $e->getMessage()]);
