@@ -307,7 +307,7 @@ function handleUpload($pdo, $colonyId, $observer) {
 
             // Create or force-replace (update in-place to preserve audit trail)
             $oldObs = null;        // pre-replace row, so the audit entry can log a diff
-            $oldScanCount = 0;
+            $oldScans = [];        // pit_id => scan_id, the birds already on this observation
             if ($forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT observation_id FROM observations
                     WHERE location_id = ? AND is_deleted = FALSE
@@ -320,9 +320,6 @@ function handleUpload($pdo, $colonyId, $observer) {
                     $oldStmt = $pdo->prepare("SELECT adults, eggs, chicks, breeding_status, gate_status, notes, no_scan FROM observations WHERE observation_id = ?");
                     $oldStmt->execute([$existingId]);
                     $oldObs = $oldStmt->fetch(PDO::FETCH_ASSOC) ?: null;
-                    $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM penguin_scans WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
-                    $cntStmt->execute([$existingId]);
-                    $oldScanCount = (int)$cntStmt->fetchColumn();
                     // Update existing observation in-place
                     $pdo->prepare("UPDATE observations SET observer_id=?, observation_time_utc=?, adults=?, eggs=?, chicks=?, breeding_status=?, gate_status=?, notes=?, monitor_filename=?, no_scan=? WHERE observation_id=?")
                         ->execute([
@@ -332,9 +329,12 @@ function handleUpload($pdo, $colonyId, $observer) {
                             $dailyLabel ?: null, $noScanCount, $existingId,
                         ]);
                     $observationId = $existingId;
-                    // Soft-delete old scans — will be recreated below
-                    $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)")
-                        ->execute([$observerId, $observationId]);
+                    // Old scans are kept, not wiped: the loop below adds only birds that weren't
+                    // already here, and removes only those the phone no longer reports. Blanket
+                    // delete-and-recreate churned scan_ids and hid who actually arrived or left.
+                    $oldScanStmt = $pdo->prepare("SELECT scan_id, pit_id FROM penguin_scans WHERE observation_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
+                    $oldScanStmt->execute([$observationId]);
+                    foreach ($oldScanStmt->fetchAll(PDO::FETCH_ASSOC) as $os) $oldScans[$os['pit_id']] = (int)$os['scan_id'];
                 } else {
                     // No existing — create new
                     $pdo->prepare("INSERT INTO observations (location_id, observer_id, observation_time_utc, adults, eggs, chicks, breeding_status, gate_status, notes, monitor_filename, no_scan) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
@@ -355,8 +355,10 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $observationId = $pdo->lastInsertId();
             }
 
-            // Create penguin scans
+            // Create penguin scans. Each insert is audited (wwAuditedInsert) so the observation's
+            // change history names the bird that arrived, instead of only moving a scan count.
             $scansCreated = 0;
+            $seenPits = [];
             foreach ($obs['scans'] ?? [] as $scan) {
                 $pitId = $scan['pit_id'] ?? '';
                 if (empty($pitId)) continue;
@@ -374,15 +376,30 @@ function handleUpload($pdo, $colonyId, $observer) {
                 $fullPitId = $chipLookup[$cleanId] ?? $chipLookup[substr($cleanId, -8)] ?? null;
                 if (!$fullPitId) { $errors[] = ['error' => "Unknown pit_id: $pitId", 'box' => $boxName]; continue; }
 
-                // Skip duplicate pit_id for same observation
-                $dupCheck = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
-                $dupCheck->execute([$observationId, $fullPitId]);
-                if ($dupCheck->fetch()) continue;
+                // Skip duplicate pit_id for same observation — within this payload, or already stored
+                if (isset($seenPits[$fullPitId])) continue;
+                $seenPits[$fullPitId] = true;
+                if (isset($oldScans[$fullPitId])) continue;   // bird already on this observation
 
-                $pdo->prepare("INSERT INTO penguin_scans (observation_id, pit_id, scan_time_utc, latitude, longitude, accuracy) VALUES (?,?,?,?,?,?)")
-                    ->execute([$observationId, $fullPitId, $scanTime, $lat, $lon, $acc]);
+                wwAuditedInsert($pdo, 'penguin_scans', [
+                    'observation_id' => (int)$observationId, 'pit_id' => $fullPitId, 'scan_time_utc' => $scanTime,
+                    'latitude' => $lat, 'longitude' => $lon, 'accuracy' => $acc,
+                ], $observerId);
                 $scansCreated++;
             }
+
+            // Birds the phone no longer reports on this observation — soft-delete, and audit each
+            // so the history reads "<bird> removed" rather than a silently shrinking count.
+            $scansRemoved = 0;
+            foreach ($oldScans as $pit => $scanId) {
+                if (isset($seenPits[$pit])) continue;
+                $pdo->prepare("UPDATE penguin_scans SET is_deleted = TRUE, deleted_at = NOW(), deleted_by = ? WHERE scan_id = ?")
+                    ->execute([$observerId, $scanId]);
+                $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('penguin_scans', ?, 'DELETE', ?, ?)")
+                    ->execute([$scanId, $observerId, json_encode(['observation_id' => (int)$observationId, 'pit_id' => $pit])]);
+                $scansRemoved++;
+            }
+            $scanTotal = count($seenPits);
 
             // Audit log. A brand-new observation records the whole row it created; a replace of an
             // existing one records only the fields that actually differ, so the change list reads
@@ -402,15 +419,17 @@ function handleUpload($pdo, $colonyId, $observer) {
                 foreach ($newObs as $col => $newVal) {
                     if (($oldObs[$col] ?? null) != $newVal) $fields[$col] = ['old' => $oldObs[$col] ?? null, 'new' => $newVal];
                 }
-                if ($oldScanCount != $scansCreated) $fields['scans'] = ['old' => $oldScanCount, 'new' => $scansCreated];
+                // The per-scan audit rows name the birds; this just records the count moving.
+                if (count($oldScans) != $scanTotal) $fields['scans'] = ['old' => count($oldScans), 'new' => $scanTotal];
             } else {
                 $fields = array_merge(['source' => 'nestcheck_sync', 'box' => $boxName], $newObs,
-                    ['daily_label' => $dailyLabel, 'scans' => $scansCreated]);
+                    ['daily_label' => $dailyLabel, 'scans' => $scanTotal]);
             }
             $pdo->prepare("INSERT INTO audit_log (table_name, record_id, action, observer_id, changed_fields) VALUES ('observations', ?, ?, ?, ?)")
                 ->execute([$observationId, $action, $observerId, json_encode($fields)]);
 
-            $created[] = ['box_name' => $boxName, 'observation_id' => (int)$observationId, 'scans' => $scansCreated];
+            $created[] = ['box_name' => $boxName, 'observation_id' => (int)$observationId, 'scans' => $scanTotal,
+                          'scans_added' => $scansCreated, 'scans_removed' => $scansRemoved];
         }
 
         $pdo->commit();
