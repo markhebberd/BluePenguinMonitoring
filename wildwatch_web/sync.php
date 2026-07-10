@@ -172,7 +172,7 @@ function handleDownload($pdo, $colonyId, $observer) {
     }
 
     // Locations
-    $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes FROM observation_locations WHERE colony_id = ?");
+    $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes, watched FROM observation_locations WHERE colony_id = ?");
     $locStmt->execute([$colonyId]);
 
     echo json_encode([

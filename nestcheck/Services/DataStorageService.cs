@@ -357,7 +357,7 @@ namespace PenguinMonitor.Services
                     if (serverState?.locations != null)
                     {
                         var boxNotes = new Dictionary<string, BoxNoteData>();
-                        foreach (var loc in serverState.locations) boxNotes[loc.location_name ?? ""] = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "" };
+                        foreach (var loc in serverState.locations) boxNotes[loc.location_name ?? ""] = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1 };
                         File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
                     }
                     onLineProgress?.Invoke(0, $"{result.BoxCount} boxes ✓");
@@ -793,6 +793,7 @@ namespace PenguinMonitor.Services
             public int location_id { get; set; }
             public string? location_name { get; set; }
             public string? persistent_notes { get; set; }
+            public int watched { get; set; }
         }
 
         // ===== Colony State persistence =====

@@ -2053,6 +2053,7 @@ namespace PenguinMonitor
                 ("1 egg", () => _appSettings.ShowSingleEggBoxesInMultiboxView, v => { _appSettings.ShowSingleEggBoxesInMultiboxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
                 ("2 egg", () => _appSettings.ShowDoubleEggBoxesInMultiboxView, v => { _appSettings.ShowDoubleEggBoxesInMultiboxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
                 ("No scan", () => _appSettings.ShowNoScanBoxesInMultiboxView, v => { _appSettings.ShowNoScanBoxesInMultiboxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
+                ("Watched", () => _appSettings.ShowWatchedBoxesInMultiBoxView, v => { _appSettings.ShowWatchedBoxesInMultiBoxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
             })
             {
                 var cb = new CheckBox(this) { Text = text, Checked = getter() };
@@ -2180,7 +2181,8 @@ namespace PenguinMonitor
                             || _appSettings.ShowDoubleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 2)
                             || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("DCM")
                             || _appSettings.ShowABNBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("ABN")
-                            || _appSettings.ShowNoScanBoxesInMultiboxView && currentBoxData != null && currentBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"));
+                            || _appSettings.ShowNoScanBoxesInMultiboxView && currentBoxData != null && currentBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"))
+                            || _appSettings.ShowWatchedBoxesInMultiBoxView && boxNoteForFilter != null && boxNoteForFilter.Watched;
 
                 bool hideBoxWithData = _appSettings.HideBoxesWithDataInMultiBoxView && (GetDisplayBoxData(boxName) != null);
                 bool hideDCM = _appSettings.HideDCMInMultiBoxView && ((mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus == "DCM"));
@@ -3211,6 +3213,7 @@ namespace PenguinMonitor
             if (_appSettings.ShowInterestingBoxesInMultiBoxView) filters.Add("box notes");
             if (_appSettings.ShowSingleEggBoxesInMultiboxView) filters.Add("1 egg");
             if (_appSettings.ShowDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
+            if (_appSettings.ShowWatchedBoxesInMultiBoxView) filters.Add("watched");
 
             return filters.Count > 0 ? string.Join(", ", filters) : "none";
         }
@@ -5638,19 +5641,6 @@ namespace PenguinMonitor
             bioRow.AddView(flipperCol);
             card.AddView(bioRow);
 
-            card.AddView(createLabel("Condition"));
-            var bioConditions = new (string label, string field)[] {
-                ("Moulting", "condition_moulting"),
-            };
-            var bioConditionChecks = new Dictionary<string, CheckBox>();
-            foreach (var (label, field) in bioConditions)
-            {
-                var cb = new CheckBox(this) { Text = label };
-                cb.SetTextColor(Color.Black);
-                bioConditionChecks[field] = cb;
-                card.AddView(cb);
-            }
-
             card.AddView(createLabel("Notes"));
             var notesInput = createInput("Notes",
                 Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagMultiLine | Android.Text.InputTypes.TextFlagCapSentences);
@@ -5900,8 +5890,6 @@ namespace PenguinMonitor
                         if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
                         if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["flipper_length"] = flipperInput.Text;
                         if (!string.IsNullOrEmpty(sex)) bioFields["observed_sex"] = sex;
-                        foreach (var (field, cb) in bioConditionChecks)
-                            if (cb.Checked) bioFields[field] = true;
                         if (bioFields.Count > 0)
                         {
                             bioFields["peng_num"] = pengNum;
