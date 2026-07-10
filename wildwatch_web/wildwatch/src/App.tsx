@@ -6213,23 +6213,36 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     window.history.replaceState(null, '', u.pathname + u.search);
   };
   // A pinned-check link lands as /?admin&tab=validation#check-slug. The check's rows come from
-  // localdb, so the section can be a stub on first paint — re-run as the db version bumps.
+  // localdb, so the section can be a stub on first paint — re-run as the db version bumps,
+  // but only until a scroll has happened with real data (dbVersion > 0). Without the guard,
+  // every later db bump (an edit like "+ No scan", the 30s poll) yanks the page back to the
+  // hash target.
+  const hashScrollDone = useRef<string | null>(null);
   useEffect(() => {
     if (adminTab !== 'validation') return;
     const hash = window.location.hash.slice(1);
     if (!hash.startsWith('check-')) return;
+    if (hashScrollDone.current === hash) return;
     document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (dbVersion > 0) hashScrollDone.current = hash;
   }, [adminTab, dbVersion]);
 
   // In-app arrival from a header pin. selectTab writes ?tab=validation; the scroll waits a
   // tick because the target section is inside a display:none tab until this render commits,
-  // and scrollIntoView on a hidden element does nothing.
+  // and scrollIntoView on a hidden element does nothing. Same once-per-target guard as the
+  // hash effect above; a fresh click bumps the nonce, so repeat pins still scroll.
   const pinSlug = checkTarget?.slug;
   const pinNonce = checkTarget?.nonce;
+  const pinScrollDone = useRef<string | null>(null);
   useEffect(() => {
     if (!pinSlug) return;
+    const key = `${pinSlug}:${pinNonce}`;
+    if (pinScrollDone.current === key) return;
     selectTab('validation');
-    const t = setTimeout(() => document.getElementById(pinSlug)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    const t = setTimeout(() => {
+      document.getElementById(pinSlug)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (dbVersion > 0) pinScrollDone.current = key;
+    }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinSlug, pinNonce, dbVersion]);
