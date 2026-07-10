@@ -6043,7 +6043,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
 
 /** Every penguin across the colonies the user can view, newest initial chip first.
  *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
-function AllPenguinsPage({ token }: { token: string }) {
+function AllPenguinsPage({ token, onBack }: { token: string; onBack?: () => void }) {
   const [rows, setRows] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -6104,6 +6104,7 @@ function AllPenguinsPage({ token }: { token: string }) {
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px' }}>
+      {onBack && <a className="page-back clickable" onClick={onBack}>&larr; Colony</a>}
       <div className="report-card">
         <h3>All penguins{rows ? ` (${rows.length})` : ''}</h3>
         <p className="muted">Every penguin in the colonies you can view. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn. Click a column to sort.</p>
@@ -8671,12 +8672,21 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return () => { document.body.style.overflow = prev; };
   }, [selectedDay]);
 
-  if (loading) return <div className="center loading-screen">
-    {loadPct === null && <div className="spinner"/>}
-    <p>{loadProgress || 'Loading colony data...'}</p>
-    {loadPct !== null && <div className="progress-bar"><div className="progress-fill" style={{width: `${Math.round(loadPct * 100)}%`}}/></div>}
-    <p className="muted" style={{fontSize:14, position:'absolute', bottom:16, right:16}}>Photo: Marty Melville</p>
-  </div>;
+  if (loading) {
+    // The all-penguins page reads nothing from localdb — one small server fetch — so don't
+    // make it wait behind the IndexedDB colony prime. The full chrome appears once loaded.
+    if (showAllBirds) return (
+      <div className="app">
+        <AllPenguinsPage token={token} onBack={() => setShowAllBirds(false)} />
+      </div>
+    );
+    return <div className="center loading-screen">
+      {loadPct === null && <div className="spinner"/>}
+      <p>{loadProgress || 'Loading colony data...'}</p>
+      {loadPct !== null && <div className="progress-bar"><div className="progress-fill" style={{width: `${Math.round(loadPct * 100)}%`}}/></div>}
+      <p className="muted" style={{fontSize:14, position:'absolute', bottom:16, right:16}}>Photo: Marty Melville</p>
+    </div>;
+  }
 
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
