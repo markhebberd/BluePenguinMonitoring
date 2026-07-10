@@ -578,7 +578,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .app-actions .ghost-btn:hover { background:#ddd; }
 .add-penguin-btn { border:2px dashed #81C784; background:#F1F8E9; color:#2E7D32; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:14px; font-weight:700; align-self:center; line-height:1.4; }
 .add-penguin-btn:hover { background:#C8E6C9; }
-.rechip-penguin { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.rechip-penguin { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0 12px; }
 .rechip-penguin .rechip-lbl { color:#888; }
 .rechip-penguin .penguin-search-input { font-size:13px; padding:5px 8px; width:120px; }
 .rechip-penguin .rechip-confirm { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
