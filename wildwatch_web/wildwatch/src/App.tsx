@@ -6053,20 +6053,74 @@ function AllPenguinsPage({ token }: { token: string }) {
       .catch(e => setError(String(e?.message || e)));
   }, [token]);
 
-  const chippedAs = (r: any) => r.chipped_as_adult ? 'Adult' : `Chick${r.chick_size_code ? ` (${r.chick_size_code})` : ''}`;
+  // Adults are the default — the column only calls out chick chippings.
+  const chippedAs = (r: any) => r.chipped_as_adult ? '' : `Chipped as chick${r.chick_size_code ? ` (${r.chick_size_code})` : ''}`;
+  // Confirmed sex wins; otherwise the majority of observed-sex guesses shows as UM/UF
+  // (same rule as observedSexGuess elsewhere in the app).
+  const sexDisplay = (r: any) => {
+    const s = (r.sex || '').toUpperCase();
+    if (s === 'M' || s === 'F') return s;
+    const m = r.guess_m || 0, f = r.guess_f || 0;
+    return m > f ? 'UM' : f > m ? 'UF' : '';
+  };
+
+  // Column sorting. Each column defines its sort value; numeric/date columns open descending
+  // (newest/heaviest first), text columns ascending. Clicking the active column flips it.
+  const COLS: { key: string; label: string; value: (r: any) => any; desc?: boolean }[] = [
+    { key: 'peng', label: 'Penguin', value: r => [String(r.peng_num).replace(/\d+$/, ''), parseInt(String(r.peng_num).replace(/^\D+/, ''), 10) || 0] },
+    { key: 'colony', label: 'Colony', value: r => r.colony_name || '' },
+    { key: 'chipped', label: 'Chipped', value: r => r.first_chip_date || '', desc: true },
+    { key: 'box', label: 'Box', value: r => { const b = r.first_chip_box || ''; const n = parseInt(b, 10); return isNaN(n) ? [b, 0] : ['', n]; } },
+    { key: 'by', label: 'By', value: r => r.first_chip_by || '' },
+    { key: 'as', label: 'As', value: r => chippedAs(r) },
+    { key: 'sex', label: 'Sex', value: r => sexDisplay(r) },
+    { key: 'weight', label: 'Weight (g)', value: r => r.chip_weight != null ? Number(r.chip_weight) : null, desc: true },
+    { key: 'flipper', label: 'Flipper (mm)', value: r => r.chip_flipper != null ? Number(r.chip_flipper) : null, desc: true },
+    { key: 'pits', label: 'PIT ids', value: r => r.pits?.[0]?.pit_id || '' },
+  ];
+  const [sortKey, setSortKey] = useState('chipped');
+  const [sortDesc, setSortDesc] = useState(true);
+  const clickSort = (c: typeof COLS[number]) => {
+    if (sortKey === c.key) setSortDesc(d => !d);
+    else { setSortKey(c.key); setSortDesc(!!c.desc); }
+  };
+  const sorted = useMemo(() => {
+    if (!rows) return null;
+    const col = COLS.find(c => c.key === sortKey) || COLS[2];
+    const cmp = (a: any, b: any): number => {
+      if (Array.isArray(a)) return cmp(a[0], b[0]) || cmp(a[1], b[1]);
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b));
+    };
+    const empty = (v: any) => v === null || v === undefined || v === '';
+    return [...rows].sort((a, b) => {
+      const va = col.value(a), vb = col.value(b);
+      // Rows with no value sink to the bottom in either direction.
+      if (empty(va) || empty(vb)) return empty(va) && empty(vb) ? 0 : empty(va) ? 1 : -1;
+      const r = cmp(va, vb);
+      return sortDesc ? -r : r;
+    });
+  }, [rows, sortKey, sortDesc]);
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px' }}>
       <div className="report-card">
         <h3>All penguins{rows ? ` (${rows.length})` : ''}</h3>
-        <p className="muted">Every penguin in the colonies you can view, most recently chipped first. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn.</p>
+        <p className="muted">Every penguin in the colonies you can view. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn. Click a column to sort.</p>
         {error && <p style={{ color: '#F44336' }}>{error}</p>}
         {!rows && !error && <p className="muted">Loading…</p>}
-        {rows && (
+        {sorted && (
           <div className="table-scroll">
             <table className="guess-rank-table zebra">
-              <thead><tr><th>Penguin</th><th>Colony</th><th>Chipped</th><th>Box</th><th>By</th><th>As</th><th>Sex</th><th>Weight (g)</th><th>Flipper (mm)</th><th>PIT ids</th></tr></thead>
+              <thead><tr>
+                {COLS.map(c => (
+                  <th key={c.key} className="clickable" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => clickSort(c)}>
+                    {c.label}{sortKey === c.key ? (sortDesc ? ' ▼' : ' ▲') : ''}
+                  </th>
+                ))}
+              </tr></thead>
               <tbody>
-                {rows.map((r: any) => (
+                {sorted.map((r: any) => (
                   <tr key={r.peng_num}>
                     <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
                     <td>{r.colony_name}</td>
@@ -6074,7 +6128,7 @@ function AllPenguinsPage({ token }: { token: string }) {
                     <td>{r.first_chip_box || '—'}</td>
                     <td>{r.first_chip_by || '—'}</td>
                     <td>{chippedAs(r)}</td>
-                    <td>{r.sex || '—'}</td>
+                    <td>{(() => { const s = sexDisplay(r); return s ? <span style={s.startsWith('U') ? { color: '#888' } : undefined} title={s.startsWith('U') ? 'Unconfirmed — from observed-sex guesses' : undefined}>{s}</span> : '—'; })()}</td>
                     <td>{r.chip_weight ?? '—'}</td>
                     <td>{r.chip_flipper ?? '—'}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>

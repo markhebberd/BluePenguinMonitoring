@@ -48,12 +48,18 @@ if (isset($_GET['all'])) {
         unset($b);
     }
 
-    // Chip-day biometric (weight/flipper), matching what the bird panel's chip line shows.
-    foreach ($pdo->query("SELECT peng_num, observation_date, weight, flipper_length
+    // Chip-day biometric (weight/flipper), matching what the bird panel's chip line shows,
+    // plus observed-sex guess tallies (PM/MM vs PF/MF, same rule as the app's observedSexGuess)
+    // so unconfirmed birds can display UM/UF.
+    foreach ($pdo->query("SELECT peng_num, observation_date, weight, flipper_length, observed_sex
                           FROM penguin_biometric_data
                           WHERE (is_deleted = FALSE OR is_deleted IS NULL)") as $bio) {
+        if (!isset($birds[$bio['peng_num']])) continue;
         $b = &$birds[$bio['peng_num']];
-        if (isset($b, $b['first_chip_date'])
+        $s = strtoupper((string)($bio['observed_sex'] ?? ''));
+        if (in_array($s, ['PM', 'MM', 'M'], true)) $b['guess_m'] = ($b['guess_m'] ?? 0) + 1;
+        elseif (in_array($s, ['PF', 'MF', 'F'], true)) $b['guess_f'] = ($b['guess_f'] ?? 0) + 1;
+        if (isset($b['first_chip_date'])
             && substr($bio['observation_date'], 0, 10) === substr($b['first_chip_date'], 0, 10)) {
             if ($bio['weight'] !== null && !isset($b['chip_weight'])) $b['chip_weight'] = $bio['weight'];
             if ($bio['flipper_length'] !== null && !isset($b['chip_flipper'])) $b['chip_flipper'] = $bio['flipper_length'];
