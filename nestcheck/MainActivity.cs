@@ -126,6 +126,7 @@ namespace PenguinMonitor
         private TextView? _dataCardTitleText;
         private ImageView? _dataCardLockIconView;
         private TextView? _discardButton;
+        private TextView? _watchedToggle;   // header watched flag — shown while the box is locked
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
@@ -3359,6 +3360,12 @@ namespace PenguinMonitor
                             _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
                         if (_discardButton != null)
                             _discardButton.Visibility = !_isBoxLocked && !tagMode ? ViewStates.Visible : ViewStates.Gone;
+                        // Watched toggle takes the X's slot while locked
+                        if (_watchedToggle != null)
+                        {
+                            _watchedToggle.Visibility = _isBoxLocked && !tagMode && !_isHistoricalView ? ViewStates.Visible : ViewStates.Gone;
+                            UpdateWatchedToggle();
+                        }
                     }
 
                     if (_dataCardLockIconView != null)
@@ -4186,15 +4193,16 @@ namespace PenguinMonitor
             _boxSavedTimeTextView = new TextView(this);
             _singleBoxDataTitleLayout.AddView(_boxSavedTimeTextView);
 
-            // Discard button — visible only when unlocked
-            _discardButton = new TextView(this) { Text = "✕", TextSize = 14, Gravity = GravityFlags.Center };
+            // Discard button — visible only when unlocked. Full header height and square
+            // so it's an easy tap target in the field.
+            var hdrBtnSize = (int)(48 * (Resources?.DisplayMetrics?.Density ?? 2));
+            _discardButton = new TextView(this) { Text = "✕", TextSize = 20, Gravity = GravityFlags.Center };
             _discardButton.SetTextColor(Color.White);
             _discardButton.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             _discardButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.DANGER_RED, 6);
-            var discardParams = new LinearLayout.LayoutParams(
-                (int)(28 * (Resources?.DisplayMetrics?.Density ?? 2)),
-                (int)(28 * (Resources?.DisplayMetrics?.Density ?? 2)));
+            var discardParams = new LinearLayout.LayoutParams(hdrBtnSize, hdrBtnSize);
             discardParams.SetMargins(12, 0, 4, 0);
+            discardParams.Gravity = GravityFlags.CenterVertical;
             _discardButton.LayoutParameters = discardParams;
             _discardButton.Visibility = ViewStates.Gone;
             _discardButton.Clickable = true;
@@ -4223,6 +4231,60 @@ namespace PenguinMonitor
                 }
             };
             _singleBoxDataTitleLayout.AddView(_discardButton);
+
+            // Watched toggle — occupies the X's slot while the box is LOCKED. One tap flips
+            // the website's observation_locations.watched flag (green = watched).
+            _watchedToggle = new TextView(this) { Text = "✓", TextSize = 20, Gravity = GravityFlags.Center };
+            _watchedToggle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            var watchedParams = new LinearLayout.LayoutParams(hdrBtnSize, hdrBtnSize);
+            watchedParams.SetMargins(12, 0, 4, 0);
+            watchedParams.Gravity = GravityFlags.CenterVertical;
+            _watchedToggle.LayoutParameters = watchedParams;
+            _watchedToggle.Visibility = ViewStates.Gone;
+            _watchedToggle.Clickable = true;
+            _watchedToggle.Click += (s, e) =>
+            {
+                if (!_isBoxLocked) return;
+                if (!_boxNotes.TryGetValue(_currentBoxName, out var note) || note.LocationId <= 0)
+                {
+                    Toast.MakeText(this, "Box not on the server yet — sync first", ToastLength.Short)?.Show();
+                    return;
+                }
+                var newVal = !note.Watched;
+                note.Watched = newVal; // optimistic — reverted below if the server says no
+                UpdateWatchedToggle();
+                _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
+                var boxName = _currentBoxName;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var client = Http.CreateClient(TimeSpan.FromSeconds(15));
+                        var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
+                        var req = new HttpRequestMessage(HttpMethod.Post,
+                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=observation_locations&id={note.LocationId}&colony_id={colonyId}");
+                        req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
+                        req.Content = new StringContent(
+                            JsonConvert.SerializeObject(new Dictionary<string, object> { ["watched"] = newVal ? 1 : 0 }),
+                            System.Text.Encoding.UTF8, "application/json");
+                        var resp = await client.SendAsync(req);
+                        if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {(int)resp.StatusCode}");
+                        RunOnUiThread(() => Toast.MakeText(this,
+                            newVal ? $"Box {boxName} watched ✓" : $"Box {boxName} no longer watched", ToastLength.Short)?.Show());
+                    }
+                    catch (Exception ex)
+                    {
+                        RunOnUiThread(() =>
+                        {
+                            note.Watched = !newVal; // revert
+                            _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
+                            UpdateWatchedToggle();
+                            Toast.MakeText(this, $"Watched update failed: {ex.Message}", ToastLength.Long)?.Show();
+                        });
+                    }
+                });
+            };
+            _singleBoxDataTitleLayout.AddView(_watchedToggle);
 
             // Navigation buttons above the box header
             _boxNavigationButtonsLayout = CreateNavigationLayout();
@@ -6353,6 +6415,15 @@ namespace PenguinMonitor
                 System.Diagnostics.Debug.WriteLine($"Failed to trigger chick alert: {ex.Message}");
             }
         }
+        // Green tick = watched box (mirrors the website's tick); grey = not watched.
+        private void UpdateWatchedToggle()
+        {
+            if (_watchedToggle == null) return;
+            bool watched = _boxNotes.TryGetValue(_currentBoxName, out var wn) && wn.Watched;
+            _watchedToggle.Background = _uiFactory.CreateRoundedBackground(watched ? UIFactory.SUCCESS_GREEN : UIFactory.LIGHTER_GRAY, 6);
+            _watchedToggle.SetTextColor(watched ? Color.White : Color.DarkGray);
+        }
+
         private void ClearInternalStorageData()
         {
             try

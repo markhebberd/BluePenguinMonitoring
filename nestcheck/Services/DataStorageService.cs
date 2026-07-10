@@ -902,6 +902,19 @@ namespace PenguinMonitor.Services
             }
         }
 
+        public void SaveBoxNotesToDisk(Android.Content.Context context, Dictionary<string, BoxNoteData> boxNotes)
+        {
+            try
+            {
+                File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME),
+                    JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save box notes: {ex.Message}");
+            }
+        }
+
         public Dictionary<string, BoxNoteData> LoadBoxNotesFromDisk(Android.Content.Context context)
         {
             try
