@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Blocks a commit that writes to a data table without going through the audited gateway
+# (wildwatch_web/db_write.php). See scripts/check-no-raw-writes.sh for the rationale.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass deliberately:     git commit --no-verify
+
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Staged .php files, added/copied/modified/renamed (not deleted).
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR -- '*.php')
+[ ${#STAGED[@]} -eq 0 ] && exit 0
+
+# Check what is STAGED, not what is in the worktree — they differ when a file is
+# partially staged, and the commit contains the staged version.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+STAGED_COPIES=()
+for f in "${STAGED[@]}"; do
+    dest="$TMP/$f"
+    mkdir -p "$(dirname "$dest")"
+    git show ":$f" > "$dest" 2>/dev/null || continue
+    STAGED_COPIES+=("$dest")
+done
+[ ${#STAGED_COPIES[@]} -eq 0 ] && exit 0
+
+# The checker resolves paths against the repo root, so run it from there and hand it
+# the temp copies. It prints the offending file:line and how to fix it.
+if ! "$ROOT/scripts/check-no-raw-writes.sh" "${STAGED_COPIES[@]}"; then
+    echo "  (paths above are staged copies under $TMP — the real files are in your worktree)" >&2
+    echo "  To commit anyway: git commit --no-verify" >&2
+    exit 1
+fi
+
+exit 0
