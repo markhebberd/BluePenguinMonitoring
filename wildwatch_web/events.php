@@ -26,5 +26,17 @@ $stmt = $pdo->query("SELECT GREATEST(
 ) as wm");
 $wm = $stmt->fetch()['wm'];
 
+// Hard deletes move no timestamp, so timestamps alone miss them. Folding per-table row
+// counts into the watermark makes any delete (or insert) register as a change; the
+// client's next incremental sync then hits the _counts mismatch check and fully reloads.
+$c = $pdo->query("SELECT
+    (SELECT COUNT(*) FROM observations) AS o,
+    (SELECT COUNT(*) FROM penguin_scans) AS s,
+    (SELECT COUNT(*) FROM penguins) AS p,
+    (SELECT COUNT(*) FROM penguin_chips) AS ch,
+    (SELECT COUNT(*) FROM observation_locations) AS l,
+    (SELECT COUNT(*) FROM penguin_biometric_data) AS b")->fetch();
+$wm .= "|{$c['o']}:{$c['s']}:{$c['p']}:{$c['ch']}:{$c['l']}:{$c['b']}";
+
 $lastWm = $_GET['wm'] ?? '';
 echo json_encode(['changed' => $lastWm !== '' && $lastWm !== $wm, 'wm' => $wm]);
