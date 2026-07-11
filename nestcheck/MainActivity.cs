@@ -3266,7 +3266,7 @@ namespace PenguinMonitor
 
                     // Historical view mode
                     if (_appTitleText != null)
-                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer" : $"Nestcheck {CurrentColonyAcronym()}".TrimEnd();
+                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer" : HeaderTitle();
                     if (_exitHistoricalButton != null)
                         _exitHistoricalButton.Visibility = _isHistoricalView ? ViewStates.Visible : ViewStates.Gone;
                     if (_isHistoricalView)
@@ -3673,6 +3673,14 @@ namespace PenguinMonitor
             if (!string.IsNullOrEmpty(_appSettings?.SelectedColonyPrefix)) return _appSettings!.SelectedColonyPrefix;
             var name = _appSettings?.SelectedColonyName ?? "";
             return string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(w => char.ToUpper(w[0])));
+        }
+
+        // Header title: PT (Tarakohe, the default colony) shows plain "Nestcheck";
+        // other colonies keep their acronym so the switch is obvious in the field.
+        private string HeaderTitle()
+        {
+            var acronym = CurrentColonyAcronym();
+            return acronym == "PT" ? "Nestcheck" : $"Nestcheck {acronym}".TrimEnd();
         }
 
         // Peng number with its colony acronym: bare "2" → "PT2"; already-prefixed "NI2" stays.
