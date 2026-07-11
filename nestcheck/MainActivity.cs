@@ -6071,6 +6071,14 @@ namespace PenguinMonitor
                 var summary = new List<string>();
                 summary.Add(rechipTarget != null ? $"Rechip {DisplayPengNum(rechipTarget.PengNum)}"
                                                  : $"New penguin ({(chippedAsChick.Checked ? "chick" : "adult")})");
+                // The bird number is assigned server-side on create — ask the server live so
+                // the preview can't be stale (another device may have chipped since last sync).
+                int birdNumLine = -1;
+                if (rechipTarget == null && !isTestChip)
+                {
+                    birdNumLine = summary.Count;
+                    summary.Add("Bird #: checking server…");
+                }
                 summary.Add($"PIT: {fullPitId}" + (isTestChip ? " (test chip — nothing will be saved)" : ""));
                 if (rechipTarget == null)
                 {
@@ -6087,12 +6095,43 @@ namespace PenguinMonitor
                 if (replaceNoScanCheck.Visibility == ViewStates.Visible && replaceNoScanCheck.Checked)
                     summary.Add($"Replaces a no-scan in box {_currentBoxName}");
 
-                new AlertDialog.Builder(this)
+                var confirmDlg = new AlertDialog.Builder(this)
                     .SetTitle(rechipTarget != null ? "Confirm rechip" : "Confirm new penguin")
                     .SetMessage(string.Join("\n", summary))
                     .SetPositiveButton("Yes, save", (s2, e2) => DoAdd())
                     .SetNegativeButton("No", (s2, e2) => { })
-                    .Show();
+                    .Create();
+                confirmDlg.Show();
+
+                if (birdNumLine >= 0)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        string line;
+                        try
+                        {
+                            var client = Http.CreateClient(TimeSpan.FromSeconds(8));
+                            var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
+                            var req = new HttpRequestMessage(HttpMethod.Get,
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=next_peng_num&colony_id={colonyId}");
+                            req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
+                            var resp = await client.SendAsync(req);
+                            var d = JsonConvert.DeserializeObject<Dictionary<string, object>>(await resp.Content.ReadAsStringAsync());
+                            var pn = d != null && d.ContainsKey("peng_num") ? d["peng_num"]?.ToString() : null;
+                            line = !string.IsNullOrEmpty(pn) ? $"Bird #: {pn}"
+                                : (string.IsNullOrEmpty(nextPengLabel) ? "Bird #: unavailable" : $"Bird #: {nextPengLabel} (offline estimate)");
+                        }
+                        catch
+                        {
+                            line = string.IsNullOrEmpty(nextPengLabel) ? "Bird #: unavailable" : $"Bird #: {nextPengLabel} (offline estimate)";
+                        }
+                        RunOnUiThread(() =>
+                        {
+                            summary[birdNumLine] = line;
+                            try { confirmDlg.SetMessage(string.Join("\n", summary)); } catch { }
+                        });
+                    });
+                }
             };
         }
 

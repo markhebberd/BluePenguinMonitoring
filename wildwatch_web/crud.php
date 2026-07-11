@@ -65,6 +65,20 @@ if ($action === 'all_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
 if ($action === 'change_password') { handleChangePassword($pdo, $observer); exit; }
 
+/** The peng_num the next penguins-create in this colony will assign (prefixed, e.g. "PT1004").
+ *  Single source of truth: the create path AND the preview endpoint both use this. */
+function wwNextPengNum($pdo, int $colonyId): string {
+    $stmt = $pdo->prepare("SELECT MAX(CAST(REGEXP_REPLACE(peng_num, '^[A-Z]+', '') AS UNSIGNED)) FROM penguins WHERE colony_id = ?");
+    $stmt->execute([$colonyId]);
+    return getColonyPrefix($pdo, $colonyId) . (string)((int)$stmt->fetchColumn() + 1);
+}
+
+// Preview of the number the next penguins-create will assign.
+if ($action === 'next_peng_num' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    echo json_encode(['success' => true, 'peng_num' => wwNextPengNum($pdo, (int)($_GET['colony_id'] ?? 1))]);
+    exit;
+}
+
 $table = $_GET['table'] ?? '';
 $id = $_GET['id'] ?? null;
 
@@ -389,9 +403,7 @@ function handleCreate($pdo, $table, $pk, $observer) {
 
         // Auto-generate peng_num for new penguins (next number in the requested colony)
         if ($table === 'penguins' && !isset($input['peng_num'])) {
-            $stmt = $pdo->prepare("SELECT MAX(CAST(REGEXP_REPLACE(peng_num, '^[A-Z]+', '') AS UNSIGNED)) FROM penguins WHERE colony_id = ?");
-            $stmt->execute([$cid]);
-            $input['peng_num'] = $viewPrefix . (string)((int)$stmt->fetchColumn() + 1);
+            $input['peng_num'] = wwNextPengNum($pdo, $cid);
         }
         // New penguins are stamped with their home colony
         if ($table === 'penguins' && !isset($input['colony_id'])) {
