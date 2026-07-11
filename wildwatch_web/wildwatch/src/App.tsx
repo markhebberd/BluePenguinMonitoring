@@ -2954,19 +2954,19 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
   // Load date mappings for season
   useEffect(() => {
     if (season < 2020) return;
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setDateMappings(Array.isArray(d) ? d : []))
       .catch(() => setDateMappings([]));
     // The previous season's date table often runs on into this season's calendar range
     // (observers keep numbering past 1 Apr); surface those trailing dates here too.
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season - 1}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season - 1}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setPrevSeasonMappings(Array.isArray(d) ? d : []))
       .catch(() => setPrevSeasonMappings([]));
     // The next season's book can start before 1 Apr (like this one); its early dates land in
     // this season's widened window too, so surface them as cross-season dates as well.
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season + 1}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`/api/crud.php?action=season_fm_dates&season=${season + 1}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setNextSeasonMappings(Array.isArray(d) ? d : []))
       .catch(() => setNextSeasonMappings([]));
@@ -3330,7 +3330,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
                   const parsed = parseDateFlex(rest);
                   return { n: parseInt(first), date: parsed, partial };
                 }).filter(m => !isNaN(m.n) && m.date) as {n:number; date:string; partial:boolean}[];
-                await fetch(`/api/crud.php?action=season_fm_dates&season=${season}`, {
+                await fetch(`/api/crud.php?action=season_fm_dates&season=${season}&colony_id=${getColonyId()}`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                   body: JSON.stringify(mappings)
@@ -5881,7 +5881,7 @@ export function EmbeddedPanel() {
   const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
   useEffect(() => {
     if (!token) return;
-    fetch('/api/crud.php?action=all_fm_dates', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/crud.php?action=all_fm_dates&colony_id=${colonyId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(rows => {
         const m = new Map<string, { season: number; number: number; partial: boolean }>();
@@ -8895,7 +8895,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
   useEffect(() => {
     if (!token) return;
-    fetch('/api/crud.php?action=all_fm_dates', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/crud.php?action=all_fm_dates&colony_id=${getColonyId()}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(rows => {
         const m = new Map<string, { season: number; number: number; partial: boolean }>();
@@ -8903,7 +8903,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         setRegisteredFmDates(m);
       })
       .catch(() => {});
-  }, [token]);
+  }, [token, colonyId]);
 
   const dateTip = useDateTooltip();
   const dateTipCtx = useMemo(() => ({ ...dateTip, statsCache: dateStatsCache, registeredFmDates }), [dateTip, dateStatsCache, registeredFmDates]);

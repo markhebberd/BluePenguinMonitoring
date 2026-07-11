@@ -45,8 +45,16 @@ if ($action === 'reset_password') { handleResetPassword($pdo); exit; }
 $observer = authenticate($pdo);
 if (!$observer) { http_response_code(401); echo json_encode(['error' => 'Not authenticated']); exit; }
 
+// FM dates are a Tarakohe (PT) field-book concept — the date_mappings table has no colony
+// column, so every FM endpoint gates on the caller's active colony instead. Non-PT colonies
+// get an empty set (reads) or a refusal (writes). colony_id defaults to 1 (Tarakohe).
+function wwFmDatesApply($pdo): bool {
+    return getColonyPrefix($pdo, (int)($_GET['colony_id'] ?? 1)) === 'PT';
+}
+
 // Season field-monitoring dates — read (GET) and write (POST)
 if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (!wwFmDatesApply($pdo)) { echo json_encode([]); exit; }
     $seasonInput = $_GET['season'] ?? '';
     $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
     if (!$season) { echo json_encode(['error' => 'season required']); exit; }
@@ -58,6 +66,7 @@ if ($action === 'season_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
 // All registered FM dates across every season — lets the app flag FM dates app-wide
 if ($action === 'all_fm_dates' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (!wwFmDatesApply($pdo)) { echo json_encode([]); exit; }
     $stmt = $pdo->query("SELECT season_year, date_number, actual_date, partial_monitor FROM date_mappings ORDER BY actual_date");
     echo json_encode($stmt->fetchAll());
     exit;
@@ -93,6 +102,7 @@ if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'r
 
 // Season field-monitoring dates — write (POST) requires auth
 if ($action === 'season_fm_dates') {
+    if (!wwFmDatesApply($pdo)) { http_response_code(403); echo json_encode(['error'=>'FM dates only apply to colony PT']); exit; }
     $seasonInput = $_GET['season'] ?? '';
     $season = strlen($seasonInput) === 2 ? 2000 + intval($seasonInput) : intval($seasonInput);
     if (!$season) { echo json_encode(['error' => 'season required']); exit; }
