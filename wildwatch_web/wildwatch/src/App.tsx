@@ -2915,7 +2915,7 @@ function parseSeasonDate(input: string, _seasonYear: number): string | null {
   return parseDateFlex(input);
 }
 
-function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPenguins: any[]; onBack: () => void }) {
+function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string; allPenguins: any[]; onBack: () => void; fmColony: boolean }) {
   // Remember the selected season across nav-away/back (page unmounts when leaving /enter)
   const [season, setSeason] = useState(() => {
     const saved = parseInt(sessionStorage.getItem('ww_entry_season') || '', 10);
@@ -3256,8 +3256,8 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       <div className="entry-split">
       {/* LEFT: date table + existing data */}
       <div className="entry-left">
-      {/* Date mappings */}
-      <div className="entry-context">
+      {/* Date mappings — an FM-book (colony PT) concept, hidden elsewhere */}
+      {fmColony && <div className="entry-context">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px'}}>
           <span style={{fontSize:'13px', fontWeight:600, color:'#1a5276'}}>Date table (season {String(season).slice(-2)})</span>
           <button type="button" style={{padding:'4px 12px', background:'#1a5276', color:'#fff', border:'none', borderRadius:'4px', fontSize:'12px', cursor:'pointer'}} onClick={() => { setDateEditorText(dateMappings.map(m =>
@@ -3342,7 +3342,7 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Existing observations + chippings for this box+season */}
       {box && entryRows.length > 0 && (
@@ -3398,14 +3398,14 @@ function DataEntryPage({ token, allPenguins, onBack }: { token: string; allPengu
       <div className="entry-form">
         <h3>New observation</h3>
         <div className="entry-row">
-          <label>Date (# or d/m/yy)</label>
+          <label>{fmColony ? 'Date (# or d/m/yy)' : 'Date (d/m/yy)'}</label>
           <div style={{display:'flex', alignItems:'center', gap:4}}>
-            <button type="button" className="entry-box-nav" title="Previous FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(-1)}>‹</button>
+            {fmColony && <button type="button" className="entry-box-nav" title="Previous FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(-1)}>‹</button>}
             <input type="text" value={dateInput} onChange={e => setDateInput(e.target.value)} placeholder={dateMappings.length > 0 ? `1-${dateMappings.length} or d/m/yy` : 'e.g. 11/2/26'} style={{flex:1, minWidth:0}} />
-            <button type="button" className="entry-box-nav" title="Next FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(1)}>›</button>
+            {fmColony && <button type="button" className="entry-box-nav" title="Next FM date" disabled={fmStepDates.length === 0} onClick={() => stepFm(1)}>›</button>}
           </div>
           {parsedDate && <span className="date-preview"><DateLink date={parsedDate} onDayClick={(d) => { window.location.href = `/day/${d}`; }} />{dateMappings.find(m => m.actual_date === parsedDate) ? ` (#${dateMappings.find(m => m.actual_date === parsedDate)!.date_number})` : ''}</span>}
-          {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : ' - no date table'}</span>}
+          {dateInput && !parsedDate && <span className="date-preview date-invalid">Invalid{dateMappings.length > 0 ? ` (dates 1-${dateMappings.length} available)` : fmColony ? ' - no date table' : ''}</span>}
           {parsedDate && box && (() => {
             const dup = allBoxObs.find((o: any) => toNzDateStr(o.observation_time_utc) === parsedDate);
             return dup ? (
@@ -9382,7 +9382,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => goTo('colony')} />
+        <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => goTo('colony')}
+          fmColony={(colonies.find((c: any) => Number(c.colony_id) === colonyId)?.colony_prefix ?? 'PT') === 'PT'} />
         {passwordDialog}
       </div>
     );
