@@ -6326,30 +6326,32 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
     { key: 'flipper', label: 'Flipper (mm)', value: r => r.chip_flipper != null ? Number(r.chip_flipper) : null, desc: true },
     { key: 'pits', label: 'PIT ids', value: r => r.pits?.[0]?.pit_id || '' },
   ];
-  // CSV for the EID reader: pit_id, then a ≤16-char activity field — peng_num (bare number
-  // for PT birds, other colonies keep their prefix), the chipping box, then boxes the bird
-  // has been seen in (most recent first, as many as fit), ending with chick size + sex
-  // (e.g. "123-9-23-82-F", "NI3-N1-LCUM"). Doubled separators left by an empty middle or
-  // suffix collapse so any wasted characters sit at the end.
+  // CSV for the EID reader: pit_id, then a ≤16-char activity field — the chipping box, then
+  // boxes the bird has been seen in (most recent first, as many as fit), ending with
+  // chick size (if any) + sex confidence + sex: confirmed birds get the bare letter ("-M"),
+  // unconfirmed get "U" plus the majority observed-sex guess if one exists ("-UM", "-U",
+  // "-LCUM"). Doubled separators left by an empty middle collapse so any wasted characters
+  // sit at the end.
   const exportCsv = () => {
     const boxesByPit = computeBoxesSeenByPit();
     const lines: string[] = [];
     for (const r of rows || []) {
       const activePits = (r.pits || []).filter((p: any) => p.is_active);
       if (!activePits.length) continue;
-      // Rows viewed from another colony still carry the PT prefix; bare numbers are always PT.
-      const peng = String(r.peng_num).replace(/^PT(?=\d+$)/, '');
       const chipBox = String(r.first_chip_box || '');
-      const suffix = `${!r.chipped_as_adult && r.chick_size_code ? r.chick_size_code : ''}${sexDisplay(r)}`;
-      const end = suffix ? `-${suffix}` : '';
+      const s = (r.sex || '').toUpperCase();
+      const m = r.guess_m || 0, f = r.guess_f || 0;
+      const sexPart = (s === 'M' || s === 'F') ? s : `U${m > f ? 'M' : f > m ? 'F' : ''}`;
+      const suffix = `${r.chick_size_code || ''}${sexPart}`;
+      const end = `-${suffix}`;
       const seen = (boxesByPit.get(activePits[0].pit_id) || []).filter(b => b !== chipBox);
       let middle = '';
       for (const b of seen) {
         const cand = middle ? `${middle}-${b}` : b;
-        if (`${peng}-${chipBox}-${cand}${end}`.length > 16) break;
+        if (`${chipBox}-${cand}${end}`.length > 16) break;
         middle = cand;
       }
-      const field = `${peng}-${chipBox}-${middle}${end}`
+      const field = `${chipBox}-${middle}${end}`
         .replace(/-{2,}/g, '-').replace(/ {2,}/g, ' ')
         .replace(/^-+/, '').replace(/-+$/, '').slice(0, 16);
       // Stored pit_ids carry an "LA" prefix; the reader wants the bare 15 digits.
