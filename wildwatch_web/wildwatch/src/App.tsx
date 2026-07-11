@@ -1319,6 +1319,11 @@ function StatusPickRing({ pos, current, onPick, onClose }: { pos: { x: number; y
     <>
       <div className="status-picker-backdrop" onClick={onClose} />
       <div className="status-picker" style={{ left: pos.x, top: pos.y }} onClick={e => e.stopPropagation()}>
+        <button type="button"
+          className={`status-pick-item bordered${current ? '' : ' current'}`}
+          style={{ transform: 'translate(-50%,-50%)', background: STATUS_COLORS[''], color: '#333' }}
+          title="No data — double-click to clear the status"
+          onDoubleClick={() => onPick('')}>No data</button>
         {STATUS_PICK_OPTIONS.map((opt, i) => {
           const n = STATUS_PICK_OPTIONS.length;
           const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
@@ -6347,7 +6352,8 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
       const field = `${peng}-${chipBox}-${middle}${end}`
         .replace(/-{2,}/g, '-').replace(/ {2,}/g, ' ')
         .replace(/^-+/, '').replace(/-+$/, '').slice(0, 16);
-      for (const p of activePits) lines.push(`${p.pit_id},${field}`);
+      // Stored pit_ids carry an "LA" prefix; the reader wants the bare 15 digits.
+      for (const p of activePits) lines.push(`${String(p.pit_id).replace(/^[A-Za-z]+/, '')},${field}`);
     }
     const url = URL.createObjectURL(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
     const a = document.createElement('a');
