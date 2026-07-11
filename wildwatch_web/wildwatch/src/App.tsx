@@ -6282,7 +6282,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
 
 /** Every penguin across the colonies the user can view, newest initial chip first.
  *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
-function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyName?: string; onBack?: () => void }) {
+function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: string; colonyName?: string; onBack?: () => void; onOpenBird?: (n: string) => void }) {
   // The snapshot's penguins/chips/biometrics are global, so the table builds straight from
   // the local cache — no network needed. A background server fetch then replaces it: it adds
   // real colony names and applies colony permissions.
@@ -6318,12 +6318,12 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
     { key: 'peng', label: 'Penguin', value: r => [String(r.peng_num).replace(/\d+$/, ''), parseInt(String(r.peng_num).replace(/^\D+/, ''), 10) || 0] },
     { key: 'colony', label: 'Colony', value: r => colonyOf(r) },
     { key: 'chipped', label: 'Chipped', value: r => r.first_chip_date || '', desc: true },
-    { key: 'box', label: 'Box', value: r => { const b = r.first_chip_box || ''; const n = parseInt(b, 10); return isNaN(n) ? [b, 0] : ['', n]; } },
+    { key: 'box', label: 'Chip box', value: r => { const b = r.first_chip_box || ''; const n = parseInt(b, 10); return isNaN(n) ? [b, 0] : ['', n]; } },
     { key: 'by', label: 'By', value: r => r.first_chip_by || '' },
     { key: 'as', label: 'As', value: r => chippedAs(r) },
     { key: 'sex', label: 'Sex', value: r => sexDisplay(r) },
-    { key: 'weight', label: 'Weight (g)', value: r => r.chip_weight != null ? Number(r.chip_weight) : null, desc: true },
-    { key: 'flipper', label: 'Flipper (mm)', value: r => r.chip_flipper != null ? Number(r.chip_flipper) : null, desc: true },
+    { key: 'weight', label: 'Chip weight (g)', value: r => r.chip_weight != null ? Number(r.chip_weight) : null, desc: true },
+    { key: 'flipper', label: 'Chip flipper (mm)', value: r => r.chip_flipper != null ? Number(r.chip_flipper) : null, desc: true },
     { key: 'pits', label: 'PIT ids', value: r => r.pits?.[0]?.pit_id || '' },
   ];
   // CSV for the EID reader: pit_id, then a ≤16-char activity field — the chipping box, then
@@ -6413,7 +6413,12 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
               <tbody>
                 {sorted.map((r: any) => (
                   <tr key={r.peng_num}>
-                    <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {onOpenBird
+                        ? <span className="clickable" style={{ color: '#1a6b8f' }} onClick={() => onOpenBird(String(r.peng_num))}>{r.peng_num}</span>
+                        : r.peng_num}
+                      {r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}
+                    </td>
                     <td>{colonyOf(r)}</td>
                     <td>{r.first_chip_date ? String(r.first_chip_date).slice(0, 10) : '—'}</td>
                     <td>{r.first_chip_box || '—'}</td>
@@ -8985,6 +8990,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Reports page: clicking a bird docks a peng panel on the right instead of leaving.
   const [reportsBird, setReportsBird] = useState<string|null>(null);
   const reportsBirdData = useBirdDetail(reportsBird);
+  // All-penguins page: clicking a peng docks the same side panel as the reports page.
+  const [allBirdsBird, setAllBirdsBird] = useState<string|null>(null);
+  const allBirdsBirdData = useBirdDetail(allBirdsBird);
 
   const openBird = (pengNum: string) => {
     if (window.innerWidth < 900 && selectedBox) {
@@ -9330,7 +9338,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name} />
+        <div className={allBirdsBird && allBirdsBirdData?.penguin ? 'reports-page-docked' : ''}>
+          <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name}
+            onOpenBird={setAllBirdsBird} />
+        </div>
+        {allBirdsBird && allBirdsBirdData?.penguin && (
+          <div className="day-bird-dock entry-bird-dock">
+            <BirdPage data={allBirdsBirdData} onBirdClick={(num: string) => setAllBirdsBird(num)}
+              onBoxClick={(box: string) => { setShowAllBirds(false); openBox(box); }}
+              onSightingClick={(box: string, date: string) => { setShowAllBirds(false); goToBoxFromBird(box, date); }}
+              onDayClick={(d: string) => { setShowAllBirds(false); goToDay(d); }}
+              onClose={() => setAllBirdsBird(null)}
+              token={token} canEdit={userRole !== 'viewer'} />
+          </div>
+        )}
         {passwordDialog}
       </div>
     );
