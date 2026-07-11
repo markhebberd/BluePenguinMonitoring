@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -6321,6 +6321,42 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
     { key: 'flipper', label: 'Flipper (mm)', value: r => r.chip_flipper != null ? Number(r.chip_flipper) : null, desc: true },
     { key: 'pits', label: 'PIT ids', value: r => r.pits?.[0]?.pit_id || '' },
   ];
+  // CSV for the EID reader: pit_id, then a ≤16-char activity field — peng_num (bare number
+  // for PT birds, other colonies keep their prefix), the chipping box, then boxes the bird
+  // has been seen in (most recent first, as many as fit), ending with chick size + sex
+  // (e.g. "123-9-23-82-F", "NI3-N1-LCUM"). Doubled separators left by an empty middle or
+  // suffix collapse so any wasted characters sit at the end.
+  const exportCsv = () => {
+    const boxesByPit = computeBoxesSeenByPit();
+    const lines: string[] = [];
+    for (const r of rows || []) {
+      const activePits = (r.pits || []).filter((p: any) => p.is_active);
+      if (!activePits.length) continue;
+      // Rows viewed from another colony still carry the PT prefix; bare numbers are always PT.
+      const peng = String(r.peng_num).replace(/^PT(?=\d+$)/, '');
+      const chipBox = String(r.first_chip_box || '');
+      const suffix = `${!r.chipped_as_adult && r.chick_size_code ? r.chick_size_code : ''}${sexDisplay(r)}`;
+      const end = suffix ? `-${suffix}` : '';
+      const seen = (boxesByPit.get(activePits[0].pit_id) || []).filter(b => b !== chipBox);
+      let middle = '';
+      for (const b of seen) {
+        const cand = middle ? `${middle}-${b}` : b;
+        if (`${peng}-${chipBox}-${cand}${end}`.length > 16) break;
+        middle = cand;
+      }
+      const field = `${peng}-${chipBox}-${middle}${end}`
+        .replace(/-{2,}/g, '-').replace(/ {2,}/g, ' ')
+        .replace(/^-+/, '').replace(/-+$/, '').slice(0, 16);
+      for (const p of activePits) lines.push(`${p.pit_id},${field}`);
+    }
+    const url = URL.createObjectURL(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `penguins-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const [sortKey, setSortKey] = useState('chipped');
   const [sortDesc, setSortDesc] = useState(true);
   const clickSort = (c: typeof COLS[number]) => {
@@ -6349,7 +6385,10 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '16px 20px' }}>
       {onBack && <a className="page-back clickable" onClick={onBack}>&larr; Colony</a>}
       <div className="report-card">
-        <h3>All penguins{rows ? ` (${rows.length})` : ''}</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>All penguins{rows ? ` (${rows.length})` : ''}</h3>
+          {rows && <button className="action-btn" onClick={exportCsv}>Export CSV</button>}
+        </div>
         <p className="muted">Every penguin in the colonies you can view. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn. Click a column to sort.</p>
         {error && !rows && <p style={{ color: '#F44336' }}>{error}</p>}
         {!rows && !error && <p className="muted">Loading…</p>}

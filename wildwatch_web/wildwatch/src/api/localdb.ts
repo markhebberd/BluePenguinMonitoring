@@ -918,6 +918,30 @@ export function computeAllPenguinsRows(): any[] {
   return rows;
 }
 
+/** Distinct boxes each bird has been scanned in, most recent first, keyed by pit_id (any of the
+ *  bird's chips maps to the same list) so callers whose peng_nums may be prefix-stripped for
+ *  display can still look up. Sightings come from the cached (active-colony) observations. */
+export function computeBoxesSeenByPit(): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (!mem) return out;
+  for (const chips of mem.chipsByPeng.values()) {
+    const seen: { box: string; t: string }[] = [];
+    for (const ch of chips) {
+      for (const sc of (mem.scansByPit.get(ch.pit_id) || [])) {
+        const obs = mem.obsById.get(sc.observation_id);
+        if (!obs || obs.is_deleted) continue;
+        const box = mem.locById.get(obs.location_id)?.location_name;
+        if (box) seen.push({ box: String(box), t: String(obs.observation_time_utc || '') });
+      }
+    }
+    seen.sort((a, b) => b.t.localeCompare(a.t));
+    const boxes: string[] = [];
+    for (const s of seen) if (!boxes.includes(s.box)) boxes.push(s.box);
+    for (const ch of chips) out.set(ch.pit_id, boxes);
+  }
+  return out;
+}
+
 export function observedSexGuess(pengNum: string | null | undefined): { m: number; f: number } {
   const out = { m: 0, f: 0 };
   if (!mem || !pengNum) return out;
