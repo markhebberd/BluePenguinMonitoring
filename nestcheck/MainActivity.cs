@@ -135,7 +135,7 @@ namespace PenguinMonitor
 
         private TextView? _standaloneDailyLabelWarning;
         private TextView? _noColonyBanner;   // blocks data entry while no box sets string is loaded
-        private ImageButton? _expandButton;
+        private TextView? _webviewButton;   // opens the wildwatch box panel for the current nest
         private LinearLayout? _prevObsSummaryLayout;
         private TextView? _stickyNoteBelowPrev;   // sticky note shown under the expanded prev-obs card
         private TextView? _prevObsHeaderText;
@@ -3363,15 +3363,14 @@ namespace PenguinMonitor
                     }
 
                     ///Single Box Card
-                    // Hide expand/collapse button in tag mode, but keep lock icon and click area
-                    if (_expandButton != null)
+                    // Hide the webview button in tag mode, but keep lock icon and click area
+                    if (_webviewButton != null)
                     {
-                        // Expand/collapse button is always available (except tag mode, which replaces the content)
-                        _expandButton.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
-                        // Keep the fold/unfold icon in sync with the actual content state
-                        bool contentExpanded = _singleBoxDataContentLayout != null && _singleBoxDataContentLayout.Visibility == ViewStates.Visible;
-                        _expandButton.SetImageResource(contentExpanded ? Resource.Drawable.fold : Resource.Drawable.unfold);
-                        // Nav buttons are always visible, even when the box card is collapsed
+                        _webviewButton.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
+                        // The box card never collapses — outside tag mode the content is always shown
+                        if (_singleBoxDataContentLayout != null && !tagMode)
+                            _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                        // Nav buttons are always visible
                         if (_boxNavigationButtonsLayout != null)
                             _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
                         if (_discardButton != null)
@@ -4063,25 +4062,14 @@ namespace PenguinMonitor
                 Focusable = true
             };
             _singleBoxDataTitleLayout.SetGravity(GravityFlags.Center);
-            _expandButton = new ImageButton(this);
-            _expandButton.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            var expandSingleBoxImageButton = _expandButton;
-            expandSingleBoxImageButton.SetImageResource(Resource.Drawable.unfold);
-            expandSingleBoxImageButton.SetBackgroundColor(Color.Transparent);
-            expandSingleBoxImageButton.Click += (s, e) =>
-            {
-                if (_singleBoxDataContentLayout.Visibility == ViewStates.Gone)
-                {
-                    _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
-                    expandSingleBoxImageButton.SetImageResource(Resource.Drawable.fold);
-                }
-                else
-                {
-                    _singleBoxDataContentLayout.Visibility = ViewStates.Gone;
-                    expandSingleBoxImageButton.SetImageResource(Resource.Drawable.unfold);
-                }
-            };
-            _singleBoxDataTitleLayout.AddView(expandSingleBoxImageButton);
+            // Webview button — replaces the old expand/collapse toggle (the box card never
+            // collapses now). Opens the wildwatch box panel for the current nest.
+            _webviewButton = new TextView(this) { Text = "🌐", TextSize = 22, Gravity = GravityFlags.Center };
+            var wvBtnSize = (int)(48 * (Resources?.DisplayMetrics?.Density ?? 2));
+            _webviewButton.LayoutParameters = new LinearLayout.LayoutParams(wvBtnSize, wvBtnSize);
+            _webviewButton.Clickable = true;
+            _webviewButton.Click += (s, e) => ShowBoxPanel(_currentBoxName);
+            _singleBoxDataTitleLayout.AddView(_webviewButton);
             _singleBoxDataTitleLayout.Click += (sender, e) =>
             {
                 _isBoxLocked = !_isBoxLocked;
