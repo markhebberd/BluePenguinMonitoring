@@ -127,6 +127,10 @@ namespace PenguinMonitor
         private ImageView? _dataCardLockIconView;
         private TextView? _discardButton;
         private TextView? _watchedToggle;   // header watched flag — shown while the box is locked
+        // Demo PIT used by the Settings "Rechip / new penguin" button — never sent to the server
+        private const string PLACEHOLDER_PIT = "LA000000000000000";
+        // While the new-bird dialog is open with the placeholder, a real scan lands here
+        private Action<string>? _newBirdScanCapture;
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
@@ -557,6 +561,14 @@ namespace PenguinMonitor
             if (!BluetoothManager.IsCompleteEid(cleanEid))
             {
                 Toast.MakeText(this, $"⚠️ Partial scan ignored ({cleanEid.Length} chars) — please scan again", ToastLength.Short)?.Show();
+                return;
+            }
+
+            // The new-bird dialog (opened with the demo placeholder PIT) accepts a real
+            // scanned chip in its place instead of routing the scan to the box.
+            if (_newBirdScanCapture != null)
+            {
+                _newBirdScanCapture(cleanEid);
                 return;
             }
 
@@ -3108,8 +3120,7 @@ namespace PenguinMonitor
             rechipButton.LayoutParameters = rechipParams;
             rechipButton.Click += (s, e) =>
             {
-                const string placeholderPit = "LA000000000000000";
-                ShowNewBirdDialog(placeholderPit.Substring(placeholderPit.Length - 8), placeholderPit);
+                ShowNewBirdDialog(PLACEHOLDER_PIT.Substring(PLACEHOLDER_PIT.Length - 8), PLACEHOLDER_PIT);
             };
             _settingsCard.AddView(rechipButton);
         }
@@ -5697,6 +5708,28 @@ namespace PenguinMonitor
             dialog.Window?.SetLayout((int)((Resources?.DisplayMetrics?.WidthPixels ?? 1080) * 0.98), ViewGroup.LayoutParams.WrapContent);
             var addButton = dialog.GetButton((int)DialogButtonType.Positive);
 
+            // A real chip scanned while this dialog holds the demo placeholder replaces it,
+            // so the bird gets its true chip (and the placeholder is never sent).
+            _newBirdScanCapture = scanned =>
+            {
+                if (!string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase)) return;
+                var scanKey = scanned.ToUpper();
+                var scanShort = scanKey.Length >= 8 ? scanKey.Substring(scanKey.Length - 8) : scanKey;
+                if (_remotePenguinData != null &&
+                    (_remotePenguinData.TryGetValue(scanKey, out var owner) || _remotePenguinData.TryGetValue(scanShort, out owner)))
+                {
+                    Toast.MakeText(this, $"Chip already on {DisplayPengNum(owner?.PengNum)} — not captured", ToastLength.Long)?.Show();
+                    return;
+                }
+                fullPitId = scanKey;
+                shortId = scanShort;
+                pitInfo.Text = $"PIT ID: {fullPitId}";
+                if (!modeRechip.Checked && string.IsNullOrEmpty(nextPengLabel))
+                    dialog.SetTitle($"New bird: {shortId}");
+                Toast.MakeText(this, $"Chip {scanShort} captured ✓", ToastLength.Short)?.Show();
+            };
+            dialog.DismissEvent += (s, e) => _newBirdScanCapture = null;
+
             // --- Rechip mode wiring ---
             bool suppressRechipSearch = false;
             void ClearRechipTarget()
@@ -5872,7 +5905,11 @@ namespace PenguinMonitor
                         }
                         }
 
-                        // 2. Create chip record
+                        // 2. Create chip record — skipped for the demo placeholder PIT (the
+                        // Settings-button flow): the bird is created chipless, never a fake chip.
+                        bool isPlaceholderPit = string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase);
+                        if (!isPlaceholderPit)
+                        {
                         var chipFields = new Dictionary<string, object>
                         {
                             ["peng_num"] = pengNum,
@@ -5902,9 +5939,10 @@ namespace PenguinMonitor
                             });
                             return;
                         }
+                        }
 
                         // 2b. Rechip: retire the bird's previous chip (like the wildwatch flow)
-                        if (isRechip && !string.IsNullOrEmpty(rechipOldPit)
+                        if (!isPlaceholderPit && isRechip && !string.IsNullOrEmpty(rechipOldPit)
                             && !string.Equals(rechipOldPit, fullPitId, StringComparison.OrdinalIgnoreCase))
                         {
                             try
