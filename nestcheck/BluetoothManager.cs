@@ -180,7 +180,7 @@ namespace PenguinMonitor
                     return;
                 }
 
-                while (!_isConnected && _cts?.Token.IsCancellationRequested != true)
+                while (!_isConnected && _shouldReconnect && _cts?.Token.IsCancellationRequested != true)
                 {
                     pass++;
                     if (pass > 1)
@@ -330,7 +330,7 @@ namespace PenguinMonitor
             if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true && _deviceAddresses.Count > 0)
             {
                 StatusChanged?.Invoke($"{ConnectedDeviceName ?? "Scanner"} disconnected — reconnecting...");
-                await Task.Delay(3000);
+                try { await Task.Delay(3000, _cts?.Token ?? CancellationToken.None); } catch (OperationCanceledException) { return; }
                 if (_shouldReconnect && _cts?.Token.IsCancellationRequested != true)
                     await ConnectLoop();
             }

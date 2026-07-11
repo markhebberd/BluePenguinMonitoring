@@ -430,6 +430,11 @@ namespace PenguinMonitor
         public void OnProviderEnabled(string provider) { } // required by ILocationListener
         private void InitializeBluetooth()
         {
+            // Always retire the previous manager first. Re-init paths (settings redraw
+            // re-firing the checkbox, exit-historical, restart) otherwise orphan a live
+            // manager whose reconnect loop runs forever — even with the scanner disabled.
+            _bluetoothManager?.Dispose();
+            _bluetoothManager = null;
             MigrateLegacyScanner();
             var addresses = _appSettings.RememberedScanners.Where(s => s.Enabled).Select(s => s.Address).ToList();
             if (addresses.Count == 0)
