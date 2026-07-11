@@ -2176,7 +2176,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               const hasChick = season.entries.some(e => e.fam.chicks.length > 0);
               const anyActive = season.entries.some(e => clutchActive(e.fam.clutch));
               const st = season.entries.length === 0 ? 'none' : hasChick ? 'bred' : anyActive ? 'active' : 'fail';
-              const stLabel = st === 'none' ? 'No breeding' : st === 'bred' ? 'Bred' : st === 'active' ? 'Active' : 'Failed';
+              // In the bird's own hatch season it IS the chick — "Bred" would read as it breeding.
+              const wasChick = season.entries.some(e => e.role === 'chick');
+              const stLabel = st === 'none' ? 'No breeding' : st === 'bred' ? (wasChick ? 'Chick' : 'Bred') : st === 'active' ? 'Active' : 'Failed';
               return (
                 <div key={season.seasonYear} className="season-birds">
                   <div className="season-year">
