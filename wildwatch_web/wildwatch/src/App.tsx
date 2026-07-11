@@ -5360,6 +5360,15 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
   );
 }
 
+/** Relative time for the day view's stalker mode: "12 minutes ago", "1h 20m ago". */
+function timeAgo(utc: string): string {
+  const mins = Math.floor((Date.now() - parseDate(utc).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m ago` : `${h} hour${h === 1 ? '' : 's'} ago`;
+}
+
 /** Hover popup for a box's date on the day view: location name, the watched toggle,
  *  and the box's last five observations. Kept open while the pointer is over it. */
 function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave }: {
@@ -5425,6 +5434,19 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   useEffect(() => { localStorage.setItem('ww_day_showall', showCarryForward ? '1' : '0'); }, [showCarryForward]);
   useEffect(() => { localStorage.setItem('ww_day_hidedcm', hideDcm ? '1' : '0'); }, [hideDcm]);
   useEffect(() => { localStorage.setItem('ww_day_changed', JSON.stringify([...changedFields])); }, [changedFields]);
+
+  // Stalker mode (today only): rows in scanned order, earliest first, each stamped
+  // "N minutes ago". A minute tick keeps the relative times fresh while it's on.
+  const isToday = date === toNzDateStr(new Date().toISOString());
+  const [stalker, setStalker] = useState(() => localStorage.getItem('ww_day_stalker') === '1');
+  useEffect(() => { localStorage.setItem('ww_day_stalker', stalker ? '1' : '0'); }, [stalker]);
+  const [, setAgoTick] = useState(0);
+  useEffect(() => {
+    if (!stalker || !isToday) return;
+    const id = setInterval(() => setAgoTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, [stalker, isToday]);
+  const stalking = stalker && isToday;
 
   // Box peek popup on date hover. The delayed hide lets the pointer travel from the
   // date into the popup, where re-entering cancels the hide so it stays open.
@@ -5532,6 +5554,12 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
             <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
               Changed {changedExpanded ? '▴' : '▾'}
             </button>
+            {isToday && (
+              <button type="button" className={`day-changed-toggle${stalker ? ' active' : ''}`} onClick={() => setStalker(v => !v)}
+                title="Show boxes in scanned order, earliest first, with how long ago each was visited">
+                Stalker
+              </button>
+            )}
             {changedExpanded && CHANGED_FIELDS.map(f => (
               <label key={f.key} className="day-cf-toggle">
                 <input type="checkbox" checked={changedFields.has(f.key)} onChange={() => toggleChangedField(f.key)} /> {f.label}
@@ -5583,6 +5611,19 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                 return (byBox[box]?.obs || []).some((o: any) => obsDiffersFromPrev(o, prev, changedFields));
               });
               hiddenByChange = observedBefore - allBoxNames.length;
+            }
+
+            // Stalker mode: boxes visited today in scanned order, earliest first.
+            // Carry-forward-only boxes weren't visited, so they drop out; chip-only
+            // boxes have no observation time and sink to the end.
+            if (stalking) {
+              const earliest = (box: string) => {
+                const obs = byBox[box]?.obs || [];
+                return obs.length ? obs.reduce((m: string, o: any) => o.observation_time_utc < m ? o.observation_time_utc : m, obs[0].observation_time_utc) : '9999';
+              };
+              allBoxNames = allBoxNames
+                .filter(b => observedBoxes.has(b) || (byBox[b]?.chips.length || 0) > 0)
+                .sort((a, b) => earliest(a).localeCompare(earliest(b)));
             }
 
             const rows = allBoxNames.map(box => {
@@ -5674,6 +5715,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {isDup && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup</span>}
                       {hasDupScan && <span style={{color:'#F44336', fontSize:10, fontWeight:600}}>⚠ dup scan</span>}
                       {o.notes && <span className="day-note">{o.notes}</span>}
+                      {stalking && <span className="stalker-ago">{timeAgo(o.observation_time_utc)}</span>}
                     </div>
                   </div>
                   );
