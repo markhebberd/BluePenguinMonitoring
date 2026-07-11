@@ -2199,7 +2199,7 @@ namespace PenguinMonitor
                             || _appSettings.ShowDoubleEggBoxesInMultiboxView && (mostRecentBoxData.Eggs == 2)
                             || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("DCM")
                             || _appSettings.ShowABNBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("ABN")
-                            || _appSettings.ShowNoScanBoxesInMultiboxView && currentBoxData != null && currentBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"))
+                            || _appSettings.ShowNoScanBoxesInMultiboxView && mostRecentBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"))
                             || _appSettings.ShowWatchedBoxesInMultiBoxView && boxNoteForFilter != null && boxNoteForFilter.Watched;
 
                 bool hideBoxWithData = _appSettings.HideBoxesWithDataInMultiBoxView && (GetDisplayBoxData(boxName) != null);
@@ -3230,6 +3230,7 @@ namespace PenguinMonitor
             if (_appSettings.ShowInterestingBoxesInMultiBoxView) filters.Add("box notes");
             if (_appSettings.ShowSingleEggBoxesInMultiboxView) filters.Add("1 egg");
             if (_appSettings.ShowDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
+            if (_appSettings.ShowNoScanBoxesInMultiboxView) filters.Add("no scan");
             if (_appSettings.ShowWatchedBoxesInMultiBoxView) filters.Add("watched");
 
             return filters.Count > 0 ? string.Join(", ", filters) : "none";
