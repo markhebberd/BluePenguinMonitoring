@@ -6168,7 +6168,14 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
               style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
               onChange={e => setPit(e.target.value.toUpperCase())} /></div>
         </div>
-        {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
+        {pit && !pitValid && <div className="app-pit-error">{(() => {
+          // Structural problem → full format reminder; otherwise say exactly what's still needed.
+          const letters = pitNorm.slice(0, 2), digits = pitNorm.slice(2);
+          if (!/^[A-Z]{0,2}$/.test(letters) || !/^\d*$/.test(digits)) return 'Must be 2 letters then 15 digits (17 chars)';
+          if (pitNorm.length < 2) { const n = 2 - pitNorm.length; return `${n} more letter${n === 1 ? '' : 's'} then 15 digits required`; }
+          const n = 15 - digits.length;
+          return `${n} more digit${n === 1 ? '' : 's'} required`;
+        })()}</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
         {/* Chipped as + Sex share a row; the right column swaps to Chick size for chicks.
             The whole row is hidden in rechip mode (the bird's identity already exists). */}
