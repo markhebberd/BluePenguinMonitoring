@@ -3945,48 +3945,83 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
 function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   const v = useDbVersion();
   const rows = useMemo(() => {
-    // Tally distinct chipped chicks per detected parent across every box (same nest-family
-    // detection the box overview / bird panel use).
-    const byParent = new Map<string, { bird: any; chicks: Set<string> }>();
+    // Per detected parent, breeding outcomes summed over every clutch where they were a
+    // parent (same nest-family detection the box overview / bird panel use). Eggs/chicks
+    // are per-clutch peaks summed; chipped and returned chicks are DISTINCT birds.
+    // Presumed fledged = chipped chicks (chipping happens at fledge) + unchipped chicks a
+    // monitor logged as fledged.
+    const byParent = new Map<string, { bird: any; eggs: number; chicksProduced: number; fledgedUnchipped: number; chicks: Set<string>; returned: Set<string> }>();
     for (const loc of queryAllLocations()) {
       const bd = queryBoxDetailSync(loc.location_name);
       if (!bd?.observations?.length) continue;
       for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
         for (const fam of sd.families) {
-          const chickNums = fam.chicks.map((ck: any) => ck.peng_num).filter(Boolean);
-          if (chickNums.length === 0) continue;
           for (const parent of fam.parents) {
             if (!parent.peng_num) continue;
             let e = byParent.get(parent.peng_num);
-            if (!e) { e = { bird: parent, chicks: new Set() }; byParent.set(parent.peng_num, e); }
-            for (const n of chickNums) e.chicks.add(n);
+            if (!e) { e = { bird: parent, eggs: 0, chicksProduced: 0, fledgedUnchipped: 0, chicks: new Set(), returned: new Set() }; byParent.set(parent.peng_num, e); }
+            e.eggs += fam.clutch.maxEggs;
+            e.chicksProduced += fam.clutch.maxChicks;
+            e.fledgedUnchipped += fam.fledgedUnchipped;
+            for (const ck of fam.chicks) if (ck.peng_num) {
+              e.chicks.add(ck.peng_num);
+              if (ck.hasReturned) e.returned.add(ck.peng_num);
+            }
           }
         }
       }
     }
-    return Array.from(byParent.values())
-      .map(e => ({ bird: e.bird, count: e.chicks.size }))
-      .sort((a, b) => b.count - a.count || (parseInt(a.bird.peng_num) || 0) - (parseInt(b.bird.peng_num) || 0))
-      .slice(0, 10);
+    return Array.from(byParent.values()).map(e => ({
+      bird: e.bird, eggs: e.eggs, chicksProduced: e.chicksProduced,
+      chipped: e.chicks.size, fledged: e.chicks.size + e.fledgedUnchipped, returned: e.returned.size,
+    }));
   }, [v]);
+
+  const COLS: { key: string; label: string; value: (r: any) => number }[] = [
+    { key: 'eggs', label: 'Eggs', value: r => r.eggs },
+    { key: 'chicksProduced', label: 'Chicks', value: r => r.chicksProduced },
+    { key: 'chipped', label: 'Chipped chicks', value: r => r.chipped },
+    { key: 'fledged', label: 'Presumed fledged', value: r => r.fledged },
+    { key: 'returned', label: 'Returned chicks', value: r => r.returned },
+  ];
+  // One-way sorting: clicking a column ranks by it, highest first.
+  const [sortKey, setSortKey] = useState('chipped');
+  const sorted = useMemo(() => {
+    const col = COLS.find(c => c.key === sortKey) || COLS[2];
+    const byPeng = (a: any, b: any) => (parseInt(a.bird.peng_num) || 0) - (parseInt(b.bird.peng_num) || 0);
+    return [...rows].sort((a, b) => (col.value(b) - col.value(a)) || byPeng(a, b));
+  }, [rows, sortKey]);
+  const arrow = (key: string) => sortKey === key ? ' ▼' : '';
 
   return (
     <div className="report-card">
-      <h3>Most chipped chicks raised</h3>
-      <p className="muted">Penguins ranked by distinct chipped chicks from nests where they were a detected parent (top 10)</p>
-      {rows.length === 0 ? <p className="muted">No data available</p> : (
-        <table className="guess-rank-table rank-table">
-          <thead><tr><th>#</th><th>Penguin</th><th>Chipped chicks</th></tr></thead>
-          <tbody>
-            {rows.map((r: any, i: number) => (
-              <tr key={r.bird.peng_num}>
-                <td>{i + 1}</td>
-                <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
-                <td><strong>{r.count}</strong></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <h3>Most successful parents</h3>
+      <p className="muted">Breeding outcomes summed over every clutch where the bird was a detected parent. Eggs and chicks are each clutch's peak count; presumed fledged is chipped chicks plus unchipped chicks logged as fledged. Click a column to sort.</p>
+      {sorted.length === 0 ? <p className="muted">No data available</p> : (
+        <div className="table-scroll">
+          <table className="guess-rank-table rank-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Penguin</th>
+              {COLS.map(c => (
+                <th key={c.key} className="clickable" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(c.key)}>{c.label}{arrow(c.key)}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {sorted.map((r: any, i: number) => (
+                <tr key={r.bird.peng_num}>
+                  <td>{i + 1}</td>
+                  <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
+                  <td>{r.eggs}</td>
+                  <td>{r.chicksProduced}</td>
+                  <td><strong>{r.chipped}</strong></td>
+                  <td>{r.fledged}</td>
+                  <td>{r.returned}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
