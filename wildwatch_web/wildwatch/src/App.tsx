@@ -6043,8 +6043,9 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [replaceNoScan, setReplaceNoScan] = useState(true);
-  // Rechip flow: same form, but the chip goes on an existing bird and its old chip retires.
-  const [step, setStep] = useState<'ask' | 'search' | 'form'>('ask');
+  // Rechip mode: same form, but the chip goes on an existing bird and its old chip retires.
+  // The New penguin / Rechip choice sits at the top of the form (mirrors nestcheck).
+  const [mode, setMode] = useState<'new' | 'rechip'>('new');
   const [rechipTarget, setRechipTarget] = useState<any>(null);
   const [rechipSearch, setRechipSearch] = useState('');
 
@@ -6069,6 +6070,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     if (!box.trim()) { setError('Chip box required'); return; }
     if (!chipBy.trim()) { setError('Chipped by is required'); return; }
+    if (mode === 'rechip' && !rechipTarget) { setError('Search for the penguin to rechip'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
     if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengNum}?`)) return;
     setSaving(true);
@@ -6133,42 +6135,30 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     }
   };
 
-  if (step === 'ask') return (
-    <div className="login-page" onClick={onClose}>
-      <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>Chip penguin · Box {chipBox}</h2>
-        <p>Are you chipping a new penguin or a rechip?</p>
-        <div className="app-actions">
-          <button type="button" onClick={() => setStep('form')}>New penguin</button>
-          <button type="button" onClick={() => setStep('search')}>Rechip</button>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (step === 'search') return (
-    <div className="login-page" onClick={onClose}>
-      <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>Rechip penguin · Box {chipBox}</h2>
-        <div className="rechip-penguin">
-          <span className="rechip-lbl">Rechip penguin:</span>
-          <PenguinSearch penguins={allPenguins} search={rechipSearch} onSearchChange={setRechipSearch}
-            onBirdClick={(tag: string) => {
-              const p = allPenguins.find((x: any) => x.peng_num === tag || x.pit_id === tag);
-              if (p) { setRechipTarget(p); setStep('form'); }
-            }} />
-        </div>
-        <div className="app-actions">
-          <button type="button" className="ghost-btn" onClick={() => setStep('ask')}>Back</button>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : `New bird #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
+        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : mode === 'rechip' ? 'Rechip penguin' : `New bird #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
+        {/* New penguin / Rechip mode row with the rechip search inline (mirrors nestcheck). */}
+        <div className="rechip-penguin">
+          <div className="app-toggle" style={{ flexShrink: 0 }}>
+            <button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => { setMode('new'); setRechipTarget(null); setRechipSearch(''); }}>New penguin</button>
+            <button type="button" className={mode === 'rechip' ? 'active' : ''} onClick={() => setMode('rechip')}>Rechip</button>
+          </div>
+          {mode === 'rechip' && !rechipTarget && (
+            <PenguinSearch penguins={allPenguins} search={rechipSearch} onSearchChange={setRechipSearch}
+              onBirdClick={(tag: string) => {
+                const p = allPenguins.find((x: any) => x.peng_num === tag || x.pit_id === tag);
+                if (p) { setRechipTarget(p); setRechipSearch(''); }
+              }} />
+          )}
+          {rechipTarget && (
+            <>
+              <PenguinMini scan={rechipTarget} onClick={() => {}} />
+              <span className="rechip-deselect" title="Pick a different penguin" onClick={() => setRechipTarget(null)}>✕</span>
+            </>
+          )}
+        </div>
         {/* Field order/rows mirror nestcheck's new-bird dialog; Date is web-only (nestcheck stamps today). */}
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
@@ -6181,8 +6171,8 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
         {/* Chipped as + Sex share a row; the right column swaps to Chick size for chicks.
-            The whole row is hidden on a rechip (the bird's identity already exists). */}
-        {!rechipTarget && (
+            The whole row is hidden in rechip mode (the bird's identity already exists). */}
+        {mode === 'new' && (
           <div className="app-row">
             <div className="app-field"><label className="req">Chipped as</label>
               <div className="app-toggle">
@@ -6237,7 +6227,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim()}>{saving ? 'Saving…' : rechipTarget ? 'Save rechip' : 'Save chip'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (mode === 'rechip' && !rechipTarget)}>{saving ? 'Saving…' : mode === 'rechip' ? 'Save rechip' : 'Save chip'}</button>
         </div>
       </div>
     </div>

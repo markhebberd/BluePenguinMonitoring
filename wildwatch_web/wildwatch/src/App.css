@@ -585,6 +585,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .rechip-penguin { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0 12px; }
 .rechip-penguin .rechip-lbl { color:#888; }
 .rechip-penguin .penguin-search { flex:1; }
+.rechip-deselect { color:#c0392b; font-weight:700; font-size:18px; cursor:pointer; padding:0 6px; user-select:none; }
 .watched-tick { color:#ccc; font-size:20px; font-weight:700; line-height:1; user-select:none; }
 .watched-tick.on { color:#4CAF50; }
 .box-peek { position:fixed; z-index:700; background:#fff; border:1px solid #ddd; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.15); padding:8px 12px; font-size:12px; max-width:330px; }
