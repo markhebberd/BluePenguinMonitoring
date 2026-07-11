@@ -2201,7 +2201,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 ? <PenguinMini scan={e.partner} onClick={() => onBirdClick(e.partner.peng_num || e.partner.pit_id)} />
                                 : <span className="muted">partner not identified</span>}
                             </>) : (<>
-                              <span className="muted">parents</span>
+                              <span className="muted">Parents</span>
                               {e.parents.length > 0
                                 ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
                                 : <span className="muted">not identified</span>}
@@ -2233,7 +2233,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                   <span key={`fu${j}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                                 ))}
                               </>) : e.siblings.length > 0 && <>
-                                <span className="muted">siblings</span>
+                                <span className="muted">Sibling</span>
                                 {e.siblings.map((sb: any) => (
                                   <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
                                 ))}
