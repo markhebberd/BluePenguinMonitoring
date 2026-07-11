@@ -178,38 +178,77 @@ function wwAuditedReplaceSeason($pdo, int $season, array $rows, $observerId, $re
 /**
  * Renumber a penguin: peng_num $from -> $to, carrying its chips and biometrics with it.
  *
- * peng_num is a primary key with FK-RESTRICT children (penguin_chips, penguin_biometric_data), so
- * a straight `UPDATE penguins SET peng_num` is impossible in either order — the parent can't move
- * while children reference it, and children can't point at a number the parent doesn't have yet.
- * Instead: create the new parent row, repoint the children, delete the old parent. Every step is
- * audited, so the whole rename is reconstructable. $to must be vacant. Returns [chips, biometrics].
+ * One UPDATE on the parent — the child FKs (penguin_chips, penguin_biometric_data) are
+ * ON UPDATE CASCADE, so their peng_num follows automatically. The bird's audit history is then
+ * repointed to the new number: audit_log.record_id is polymorphic (no FK), so the cascade can't
+ * reach it, and without the repoint a renamed bird's history would split across two numbers.
+ * changed_fields JSON in old entries keeps whatever number was current when each was written —
+ * the log's content is a snapshot; only the lookup key follows the bird.
+ * $to must be vacant. Returns [chips, biometrics] carried, for reporting.
  */
 function wwAuditedRenumberPenguin($pdo, $from, $to, $observerId, $reason = null): array {
-    // Copy only writable columns: is_dead is generated (from death_date), updated_at is automatic.
-    $sel = $pdo->prepare("SELECT peng_num, colony_id, chipped_as_adult, sex, vid_for_scanner, created_at, chick_size_code, notes, death_date FROM penguins WHERE peng_num = ?");
+    $sel = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
     $sel->execute([$from]);
-    $row = $sel->fetch(PDO::FETCH_ASSOC);
-    if (!$row) throw new RuntimeException("penguin $from not found");
+    if (!$sel->fetchColumn()) throw new RuntimeException("penguin $from not found");
 
     $clash = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
     $clash->execute([$to]);
     if ($clash->fetchColumn()) throw new RuntimeException("target peng_num $to is not vacant");
 
-    $row['peng_num'] = $to;
-    wwAuditedInsert($pdo, 'penguins', $row, $observerId, $reason);
+    $count = $pdo->prepare("SELECT
+        (SELECT COUNT(*) FROM penguin_chips WHERE peng_num = ?) AS chips,
+        (SELECT COUNT(*) FROM penguin_biometric_data WHERE peng_num = ?) AS biometrics");
+    $count->execute([$from, $from]);
+    ['chips' => $chips, 'biometrics' => $bios] = array_map('intval', $count->fetch(PDO::FETCH_ASSOC));
 
-    $chips = $pdo->prepare("SELECT pit_id FROM penguin_chips WHERE peng_num = ?");
-    $chips->execute([$from]);
-    $pitIds = $chips->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($pitIds as $pit) wwAuditedUpdate($pdo, 'penguin_chips', $pit, ['peng_num' => $to], $observerId, $reason);
+    $pdo->prepare("UPDATE penguins SET peng_num = ? WHERE peng_num = ?")->execute([$to, $from]);
+    $pdo->prepare("UPDATE audit_log SET record_id = ? WHERE table_name = 'penguins' AND record_id = ?")
+        ->execute([$to, $from]);
+    wwAudit($pdo, 'penguins', $to, 'UPDATE',
+        ['peng_num' => ['old' => $from, 'new' => $to], 'chips_carried' => $chips, 'biometrics_carried' => $bios],
+        $observerId, $reason);
+    return ['chips' => $chips, 'biometrics' => $bios];
+}
 
-    $bios = $pdo->prepare("SELECT biometric_id FROM penguin_biometric_data WHERE peng_num = ?");
-    $bios->execute([$from]);
-    $bioIds = $bios->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($bioIds as $bid) wwAuditedUpdate($pdo, 'penguin_biometric_data', $bid, ['peng_num' => $to], $observerId, $reason);
+/**
+ * Swap two penguins' numbers. Three cascading renames through a temporary number (both slots are
+ * occupied, so neither direct rename is possible), but audited as what it is: one UPDATE entry per
+ * bird, each showing its own old => new number. Audit histories are swapped along with the
+ * numbers, so each bird's log entries stay findable under its current number.
+ * Returns per-bird carried counts keyed by final number.
+ */
+function wwAuditedSwapPenguins($pdo, $a, $b, $observerId, $reason = null): array {
+    if ($a === $b) throw new RuntimeException("cannot swap $a with itself");
+    foreach ([$a, $b] as $pn) {
+        $sel = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+        $sel->execute([$pn]);
+        if (!$sel->fetchColumn()) throw new RuntimeException("penguin $pn not found");
+    }
 
-    wwAuditedDelete($pdo, 'penguins', $from, $observerId, $reason);   // hard delete, audited with full row
-    return ['chips' => count($pitIds), 'biometrics' => count($bioIds)];
+    $tmp = '~swap~';   // fits varchar(20); '~' is outside the colony-prefix alphabet, so always vacant
+    $clash = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+    $clash->execute([$tmp]);
+    if ($clash->fetchColumn()) throw new RuntimeException("temporary number $tmp is occupied — previous swap left debris?");
+
+    $counts = [];
+    $count = $pdo->prepare("SELECT
+        (SELECT COUNT(*) FROM penguin_chips WHERE peng_num = ?) AS chips,
+        (SELECT COUNT(*) FROM penguin_biometric_data WHERE peng_num = ?) AS biometrics");
+    foreach (['a' => $a, 'b' => $b] as $k => $pn) {
+        $count->execute([$pn, $pn]);
+        $counts[$k] = array_map('intval', $count->fetch(PDO::FETCH_ASSOC));
+    }
+
+    $move = $pdo->prepare("UPDATE penguins SET peng_num = ? WHERE peng_num = ?");
+    $repoint = $pdo->prepare("UPDATE audit_log SET record_id = ? WHERE table_name = 'penguins' AND record_id = ?");
+    foreach ([[$a, $tmp], [$b, $a], [$tmp, $b]] as [$src, $dst]) {
+        $move->execute([$dst, $src]);
+        $repoint->execute([$dst, $src]);
+    }
+
+    wwAudit($pdo, 'penguins', $b, 'UPDATE', ['peng_num' => ['old' => $a, 'new' => $b], 'swapped_with' => $a] + $counts['a'], $observerId, $reason);
+    wwAudit($pdo, 'penguins', $a, 'UPDATE', ['peng_num' => ['old' => $b, 'new' => $a], 'swapped_with' => $b] + $counts['b'], $observerId, $reason);
+    return [$b => $counts['a'], $a => $counts['b']];
 }
 
 /**

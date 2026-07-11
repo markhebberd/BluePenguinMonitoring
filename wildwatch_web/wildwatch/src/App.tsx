@@ -7699,6 +7699,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <RemovePenguin token={token} />
       </div>
 
+      <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <RenumberPenguin token={token} />
+      </div>
+
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
         <h3>Data integrity</h3>
         <MissingNoScansReport token={token} hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
@@ -8258,6 +8262,63 @@ function RegionsAndColonies({ token }: { token: string }) {
           </div>
         )}
       </>)}
+    </div>
+  );
+}
+
+function RenumberPenguin({ token }: { token: string }) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string|null>(null);
+
+  const post = async (action: string, body: any, confirmMsg: string) => {
+    if (!confirm(confirmMsg)) return;
+    setBusy(true); setResult(null);
+    try {
+      const r = await fetch(`/api/admin.php?action=${action}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, colony_id: getColonyId() }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        if (action === 'rename_penguin') {
+          setResult(`Renamed ${d.from} → ${d.to} (${d.chips} chip${d.chips === 1 ? '' : 's'}, ${d.biometrics} biometric record${d.biometrics === 1 ? '' : 's'} carried; scans follow the chips).`);
+        } else {
+          setResult(`Swapped ${d.a} ↔ ${d.b}. Each bird keeps its chips, scans, biometrics and history under its new number.`);
+        }
+        setFrom(''); setTo('');
+      } else {
+        setResult(`Error: ${d.error}`);
+      }
+    } catch (e: any) {
+      setResult(`Error: ${e?.message || e}`);
+    }
+    setBusy(false);
+  };
+
+  const a = from.trim().replace('#', ''), b = to.trim().replace('#', '');
+  const rename = () => post('rename_penguin', { from: a, to: b },
+    `Rename penguin #${a} to #${b}?\n\nThe bird keeps its chips, scans, biometrics and audit history — only the number changes. #${b} must be vacant.`);
+  const swap = () => post('swap_penguins', { a, b },
+    `Swap the numbers of penguins #${a} and #${b}?\n\nEach bird keeps its own chips, scans, biometrics and audit history — the two numbers simply trade places.`);
+
+  const box = { padding: '4px 8px', fontSize: 13, border: '1px solid #ccc', borderRadius: 4, width: 100 };
+  return (
+    <div>
+      <h3>Renumber Penguin</h3>
+      <p className="muted" style={{fontSize:12, margin:'0 0 8px'}}>
+        Rename gives the first penguin the second number (which must be free). Swap trades the two penguins' numbers.
+        Chips, scans, biometrics and audit history follow each bird. A bare number means the colony you are viewing.
+      </p>
+      <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
+        <input type="text" value={from} onChange={e => setFrom(e.target.value)} placeholder="Penguin #" style={box} />
+        <span style={{color:'#999'}}>→</span>
+        <input type="text" value={to} onChange={e => setTo(e.target.value)} placeholder="New / other #" style={box} />
+        <button className="edit-btn" onClick={rename} disabled={busy || !a || !b}>{busy ? '...' : 'Rename'}</button>
+        <button className="edit-btn" onClick={swap} disabled={busy || !a || !b}>{busy ? '...' : 'Swap'}</button>
+      </div>
+      {result && <p style={{fontSize:13, color: result.startsWith('Error') ? '#F44336' : '#2e7d32'}}>{result}</p>}
     </div>
   );
 }

@@ -828,6 +828,77 @@ if ($action === 'delete_penguin') {
     exit;
 }
 
+// --- Renumber / swap penguins ---
+
+/** Resolve admin input to a penguin row, same rules as preview_penguin_delete: a prefixed input
+ *  matches as-is ("NI7"), a bare number resolves within the viewing colony ("319" -> "PT319").
+ *  Exact matches only. Returns the row or null. */
+function resolvePenguin(PDO $pdo, string $raw, int $viewColonyId): ?array {
+    $viewPrefix = getColonyPrefix($pdo, $viewColonyId);
+    $sel = $pdo->prepare("SELECT * FROM penguins WHERE peng_num = ? OR peng_num = ? LIMIT 1");
+    $sel->execute([$raw, $viewPrefix . $raw]);
+    return $sel->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+if ($action === 'rename_penguin') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $fromRaw = trim($input['from'] ?? '');
+    $toRaw = strtoupper(trim($input['to'] ?? ''));
+    if ($fromRaw === '' || $toRaw === '') { http_response_code(400); echo json_encode(['error' => 'from and to required']); exit; }
+
+    $penguin = resolvePenguin($pdo, $fromRaw, (int)($input['colony_id'] ?? 1));
+    if (!$penguin) { http_response_code(404); echo json_encode(['error' => "Penguin $fromRaw not found"]); exit; }
+    $from = $penguin['peng_num'];
+
+    // The new number stays in the bird's own colony: a bare number gets that colony's prefix, a
+    // prefixed one must match it — renaming PT319 to NI5 would contradict the row's colony_id.
+    $prefix = getColonyPrefix($pdo, (int)$penguin['colony_id']);
+    $to = preg_match('/^[0-9]+$/', $toRaw) ? $prefix . $toRaw : $toRaw;
+    if (!preg_match('/^' . preg_quote($prefix, '/') . '[0-9]+$/', $to)) {
+        http_response_code(400); echo json_encode(['error' => "New number must be $prefix + digits (this bird is in the $prefix colony)"]); exit;
+    }
+    if ($to === $from) { http_response_code(400); echo json_encode(['error' => "$from already has that number"]); exit; }
+
+    $pdo->beginTransaction();
+    try {
+        $reason = trim($input['reason'] ?? '') ?: "Admin rename $from -> $to";
+        $moved = wwAuditedRenumberPenguin($pdo, $from, $to, $observer['observer_id'], $reason);
+        $pdo->commit();
+        echo json_encode(['success' => true, 'from' => $from, 'to' => $to] + $moved);
+    } catch (Exception $e) {
+        $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($action === 'swap_penguins') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $aRaw = trim($input['a'] ?? '');
+    $bRaw = trim($input['b'] ?? '');
+    if ($aRaw === '' || $bRaw === '') { http_response_code(400); echo json_encode(['error' => 'a and b required']); exit; }
+
+    $colonyId = (int)($input['colony_id'] ?? 1);
+    $pa = resolvePenguin($pdo, $aRaw, $colonyId);
+    if (!$pa) { http_response_code(404); echo json_encode(['error' => "Penguin $aRaw not found"]); exit; }
+    $pb = resolvePenguin($pdo, $bRaw, $colonyId);
+    if (!$pb) { http_response_code(404); echo json_encode(['error' => "Penguin $bRaw not found"]); exit; }
+    if ($pa['colony_id'] !== $pb['colony_id']) {
+        // Swapping numbers across colonies would put each bird's prefix at odds with its colony_id.
+        http_response_code(400); echo json_encode(['error' => "{$pa['peng_num']} and {$pb['peng_num']} are in different colonies"]); exit;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $reason = trim($input['reason'] ?? '') ?: "Admin swap {$pa['peng_num']} <-> {$pb['peng_num']}";
+        $moved = wwAuditedSwapPenguins($pdo, $pa['peng_num'], $pb['peng_num'], $observer['observer_id'], $reason);
+        $pdo->commit();
+        echo json_encode(['success' => true, 'a' => $pa['peng_num'], 'b' => $pb['peng_num'], 'moved' => $moved]);
+    } catch (Exception $e) {
+        $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
 // --- Regions & Colonies management ---
 
 if ($action === 'regions') {
