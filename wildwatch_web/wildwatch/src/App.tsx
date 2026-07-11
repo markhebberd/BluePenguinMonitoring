@@ -2179,11 +2179,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               // In the bird's own hatch season it IS the chick — "Bred" would read as it breeding.
               const wasChick = season.entries.some(e => e.role === 'chick');
               const stLabel = st === 'none' ? 'No breeding' : st === 'bred' ? (wasChick ? 'Chick' : 'Bred') : st === 'active' ? 'Active' : 'Failed';
+              const stClass = wasChick && st === 'bred' ? 'chick' : st;
               return (
                 <div key={season.seasonYear} className="season-birds">
                   <div className="season-year">
                     <div className="season-yr">{seasonRange(String(season.seasonYear))}</div>
-                    <span className={`season-status st-${st}`}><span className="ss-dot" />{stLabel}</span>
+                    <span className={`season-status st-${stClass}`}><span className="ss-dot" />{stLabel}</span>
                   </div>
                   <div className="season-content">
                     {season.entries.map((e) => {

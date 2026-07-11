@@ -494,6 +494,7 @@ h3.collapsible:hover { color:#1a5276; }
 .st-fail { background:#fbeceb; color:#a4362d; } .st-fail .ss-dot { background:#c0453a; }
 .st-none { background:#eef1f4; color:#5f6c78; } .st-none .ss-dot { background:#93a0ac; }
 .st-active { background:#e9f2fb; color:#215a94; } .st-active .ss-dot { background:#2f6fb0; }
+.st-chick { background:#FFF9C4; color:#000; } .st-chick .ss-dot { background:#FDD835; }
 .season-content { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .clutch-card { background:#fff; border:1px solid #dbe2e9; border-left:4px solid #93a0ac; border-radius:10px; padding:9px 12px; }
 .clutch-card.bred { border-left-color:#2f8f5b; }
