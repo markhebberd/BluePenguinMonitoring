@@ -5768,6 +5768,22 @@ export function EmbeddedPanel() {
   const allPenguins = useAllPenguins();
   const dateStats = useDateStats(); // calendar dates for the embedded day view
 
+  // Registered FM/PM dates + date stats feed DateLink so dates colour green/teal/orange
+  // exactly like the full app (the default context is empty maps → plain dates).
+  const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/crud.php?action=all_fm_dates', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(rows => {
+        const m = new Map<string, { season: number; number: number; partial: boolean }>();
+        if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number), partial: !!Number(r.partial_monitor) });
+        setRegisteredFmDates(m);
+      })
+      .catch(() => {});
+  }, [token, colonyId]);
+  const embedDateCtx = useMemo(() => ({ show: () => {}, hide: () => {}, statsCache: dateStats, registeredFmDates }), [dateStats, registeredFmDates]);
+
   // Sync the colony once into its own IndexedDB. primeFromCache paints instantly from a prior
   // sync (and lets the panel work fully offline); syncDatabase refreshes in the background.
   // Re-runs only on colony change (setActiveColony clears mem + swaps DB).
@@ -5854,8 +5870,9 @@ export function EmbeddedPanel() {
   if (status === 'error') return <div className="embed-state embed-error">Couldn't load colony data<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
   if (status !== 'ready') return <div className="embed-state">Syncing colony…<div className="muted" style={{marginTop:6, fontSize:12}}>{progress}</div></div>;
 
+  let body: React.ReactNode;
   if (view.kind === 'day') {
-    return (
+    body = (
       <div className="embed-day">
         <DayView date={view.id} dates={[...dateStats.keys()].sort()} hideCalendar
           onBoxClick={(box: string, obsTime?: string) => { goBox(box); if (obsTime) setTimeout(() => scrollObs(obsTime), 50); }}
@@ -5863,11 +5880,9 @@ export function EmbeddedPanel() {
           token={token} canEdit={false} allPenguins={allPenguins} />
       </div>
     );
-  }
-
-  if (view.kind === 'box') {
+  } else if (view.kind === 'box') {
     if (!boxData?.location) return <div className="embed-state embed-error">Box {view.id} not found</div>;
-    return (
+    body = (
       <div className="embed-box">
         <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><WatchedTick location={boxData.location} canEdit={false} /><StatusLegend /></div></div>
         <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
@@ -5879,14 +5894,17 @@ export function EmbeddedPanel() {
         </div>
       </div>
     );
+  } else {
+    if (!birdData?.penguin) return <div className="embed-state embed-error">Bird {view.id} not found</div>;
+    body = (
+      <div className="embed-bird">
+        <BirdPage data={birdData} onBirdClick={goBird} onBoxClick={goBox} onSightingClick={(box: string) => goBox(box)} onDayClick={goDay} token={token} canEdit={false} />
+      </div>
+    );
   }
-
-  if (!birdData?.penguin) return <div className="embed-state embed-error">Bird {view.id} not found</div>;
-  return (
-    <div className="embed-bird">
-      <BirdPage data={birdData} onBirdClick={goBird} onBoxClick={goBox} onSightingClick={(box: string) => goBox(box)} onDayClick={goDay} token={token} canEdit={false} />
-    </div>
-  );
+  // Date links (box/bird panels + day view) read stats + registered FM dates from this
+  // context to colour themselves — without it they render plain.
+  return <DateTooltipCtx.Provider value={embedDateCtx}>{body}</DateTooltipCtx.Provider>;
 }
 
 function App() {

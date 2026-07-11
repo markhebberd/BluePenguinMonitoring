@@ -16,6 +16,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .embed-box .obs-col { overflow:visible; }
 .embed-state { padding:40px 16px; text-align:center; color:#666; font-size:15px; }
 .embed-error { color:#b00020; }
+/* Embedded day view: no app header (the -88px reservation leaves a dead strip at the
+   bottom, wrapping the column-flow grid into extra columns) — use the full WebView height. */
+.embed-day .day-page { height:100dvh; }
 
 /* Header */
 header { background:linear-gradient(135deg,#1a5276,#2e86c1); color:#fff; padding:10px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; position:sticky; top:0; z-index:500; }
