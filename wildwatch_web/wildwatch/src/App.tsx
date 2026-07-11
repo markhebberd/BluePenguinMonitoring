@@ -5379,7 +5379,7 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave }: 
   );
 }
 
-function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins: _allPenguins, peekCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean }) {
+function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdClick, onDayClick, externalBird, token, canEdit, allPenguins: _allPenguins, peekCalendar, hideCalendar }: { date: string; dates: string[]; highlightBox?: string | null; onBoxClick: (box: string, date?: string) => void; onBirdClick: (num: string) => void; onDayClick: (day: string) => void; externalBird?: string | null; token?: string; canEdit?: boolean; allPenguins?: any[]; peekCalendar?: boolean; hideCalendar?: boolean }) {
   const data = useDayData(date);
   const loading = !data;
   const [sideBird, setSideBird] = useState<string|null>(null);
@@ -5474,7 +5474,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   return (
     <div className={`day-page${sideBird && sideBirdData?.penguin ? ' day-page-docked' : ''}`} ref={dayPageRef}>
       <div className="day-main">
-      {(!calHidden || peekCalendar) && (
+      {!hideCalendar && (!calHidden || peekCalendar) && (
         <div style={{position:'relative'}}>
           <DayCalendar date={date} dates={sorted} onDayClick={onDayClick} />
           <button onClick={() => setCalHidden(true)} className="cal-toggle" style={{position:'absolute', bottom:-10, right:16}} title="Hide calendar">
@@ -5484,7 +5484,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
           </button>
         </div>
       )}
-      {calHidden && !peekCalendar && (
+      {!hideCalendar && calHidden && !peekCalendar && (
         <button onClick={() => setCalHidden(false)} className="cal-toggle cal-toggle-collapsed" style={{ right: calRight }} title="Show calendar">
           <svg viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="1,1 5,5 9,1" />
@@ -5713,14 +5713,15 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
  */
 export function EmbeddedPanel() {
   const params = new URLSearchParams(window.location.search);
-  const initialKind: 'box'|'bird' = /\/box\//.test(window.location.pathname) ? 'box' : 'bird';
+  const initialKind: 'box'|'bird'|'day' = /\/day\//.test(window.location.pathname) ? 'day'
+    : /\/box\//.test(window.location.pathname) ? 'box' : 'bird';
   const initialId = decodeURIComponent(
-    window.location.pathname.match(/\/(?:box|bird)\/([^/?#]+)/)?.[1]
+    window.location.pathname.match(/\/(?:box|bird|day)\/([^/?#]+)/)?.[1]
     || params.get('peng') || params.get('peng_num') || params.get('box') || '');
   const token = (window as any).__WW_TOKEN__ || params.get('token') || localStorage.getItem('ww_token') || '';
 
   const [colonyId, setEmbedColony] = useState<number>(parseInt(params.get('colony_id') || '1', 10) || 1);
-  const [view, setView] = useState<{ kind: 'box'|'bird'; id: string }>({ kind: initialKind, id: initialId });
+  const [view, setView] = useState<{ kind: 'box'|'bird'|'day'; id: string }>({ kind: initialKind, id: initialId });
   const [status, setStatus] = useState<'loading'|'ready'|'error'>('loading');
   const [errMsg, setErrMsg] = useState('');
   const [progress, setProgress] = useState('');
@@ -5730,6 +5731,7 @@ export function EmbeddedPanel() {
   const birdData = useBirdDetail(status === 'ready' && view.kind === 'bird' ? view.id : null);
   const boxData = useBoxDetail(status === 'ready' && view.kind === 'box' ? view.id : null);
   const allPenguins = useAllPenguins();
+  const dateStats = useDateStats(); // calendar dates for the embedded day view
 
   // Sync the colony once into its own IndexedDB. primeFromCache paints instantly from a prior
   // sync (and lets the panel work fully offline); syncDatabase refreshes in the background.
@@ -5758,7 +5760,7 @@ export function EmbeddedPanel() {
 
   // Navigation is instant — the whole colony is in mem, so no fetch per bird/box.
   // A view-history stack backs the host app's ◀/▶ buttons (window.wwBack/wwForward).
-  const histRef = useRef<{ stack: { kind: 'box'|'bird'; id: string }[]; idx: number }>(
+  const histRef = useRef<{ stack: { kind: 'box'|'bird'|'day'; id: string }[]; idx: number }>(
     { stack: initialId ? [{ kind: initialKind, id: initialId }] : [], idx: initialId ? 0 : -1 });
   // The host app watches document.title (WebChromeClient.onReceivedTitle) to
   // show/hide its ◀/▶ buttons — there's no other JS→native channel here.
@@ -5766,7 +5768,7 @@ export function EmbeddedPanel() {
     const h = histRef.current;
     document.title = `wwnav:${h.idx > 0 ? 1 : 0}:${h.idx < h.stack.length - 1 ? 1 : 0}`;
   };
-  const navTo = (v: { kind: 'box'|'bird'; id: string }) => {
+  const navTo = (v: { kind: 'box'|'bird'|'day'; id: string }) => {
     const h = histRef.current;
     h.stack = h.stack.slice(0, h.idx + 1);
     h.stack.push(v);
@@ -5776,6 +5778,7 @@ export function EmbeddedPanel() {
   };
   const goBird = (num: string) => { if (num) navTo({ kind: 'bird', id: num }); };
   const goBox = (box: string) => { if (box) navTo({ kind: 'box', id: box }); };
+  const goDay = (day: string) => { if (day) navTo({ kind: 'day', id: day }); };
   const scrollObs = (t: string) => { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(t); setScrollToObs(t); }, 10); };
 
   // Tell the host app when the colony sync has finished (it watches document.title) —
@@ -5785,11 +5788,11 @@ export function EmbeddedPanel() {
   // JS bridge for a persistent host WebView: render a new bird/box or switch colony
   // without a page reload (see EMBED-FULLSYNC-PLAN.md Phase 2).
   useEffect(() => {
-    (window as any).wwShow = (kind: 'box'|'bird', id: string) => {
+    (window as any).wwShow = (kind: 'box'|'bird'|'day', id: string) => {
       if (!id) return;
       // Host is opening a fresh panel — start a new history session so ◀ only
       // appears once the user has navigated within the panel.
-      const v = { kind: kind === 'box' ? 'box' : 'bird', id: String(id) } as const;
+      const v = { kind: kind === 'box' ? 'box' : kind === 'day' ? 'day' : 'bird', id: String(id) } as const;
       histRef.current = { stack: [v], idx: 0 };
       setHighlightObs(null); setScrollToObs(null); setView(v);
       updateNavTitle();
@@ -5816,6 +5819,17 @@ export function EmbeddedPanel() {
   if (status === 'error') return <div className="embed-state embed-error">Couldn't load colony data<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;
   if (status !== 'ready') return <div className="embed-state">Syncing colony…<div className="muted" style={{marginTop:6, fontSize:12}}>{progress}</div></div>;
 
+  if (view.kind === 'day') {
+    return (
+      <div className="embed-day">
+        <DayView date={view.id} dates={[...dateStats.keys()].sort()} hideCalendar
+          onBoxClick={(box: string, obsTime?: string) => { goBox(box); if (obsTime) setTimeout(() => scrollObs(obsTime), 50); }}
+          onBirdClick={goBird} onDayClick={goDay}
+          token={token} canEdit={false} allPenguins={allPenguins} />
+      </div>
+    );
+  }
+
   if (view.kind === 'box') {
     if (!boxData?.location) return <div className="embed-state embed-error">Box {view.id} not found</div>;
     return (
@@ -5824,7 +5838,7 @@ export function EmbeddedPanel() {
         <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
         <div className="detail-split">
           <BoxPanel key={view.id} data={boxData} boxName={view.id} allPenguins={allPenguins}
-            onBirdClick={goBird} onDayClick={() => {}}
+            onBirdClick={goBird} onDayClick={goDay}
             highlightObs={highlightObs} scrollToObs={scrollToObs} onScrollToObs={scrollObs}
             token={token} canEdit={false} />
         </div>
@@ -5835,7 +5849,7 @@ export function EmbeddedPanel() {
   if (!birdData?.penguin) return <div className="embed-state embed-error">Bird {view.id} not found</div>;
   return (
     <div className="embed-bird">
-      <BirdPage data={birdData} onBirdClick={goBird} onBoxClick={goBox} onSightingClick={(box: string) => goBox(box)} onDayClick={undefined} token={token} canEdit={false} />
+      <BirdPage data={birdData} onBirdClick={goBird} onBoxClick={goBox} onSightingClick={(box: string) => goBox(box)} onDayClick={goDay} token={token} canEdit={false} />
     </div>
   );
 }
