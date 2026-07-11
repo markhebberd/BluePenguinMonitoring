@@ -3974,9 +3974,24 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
         }
       }
     }
-    return Array.from(byParent.values()).map(e => ({
+    // All returned descendants: walk chipped chicks who returned, then THEIR returned
+    // chicks (grandchicks and beyond), distinct birds. BFS with a visited set so bad
+    // data can't loop forever.
+    const allReturnedDescendants = (root: string): number => {
+      const seen = new Set<string>();
+      const queue = [root];
+      while (queue.length) {
+        for (const kid of byParent.get(queue.pop()!)?.returned || []) {
+          if (seen.has(kid) || kid === root) continue;
+          seen.add(kid); queue.push(kid);
+        }
+      }
+      return seen.size;
+    };
+    return Array.from(byParent.entries()).map(([num, e]) => ({
       bird: e.bird, eggs: e.eggs, chicksProduced: e.chicksProduced,
       chipped: e.chicks.size, fledged: e.chicks.size + e.fledgedUnchipped, returned: e.returned.size,
+      descendants: allReturnedDescendants(num),
     }));
   }, [v]);
 
@@ -3986,6 +4001,7 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
     { key: 'chipped', label: 'Chipped chicks', value: r => r.chipped },
     { key: 'fledged', label: 'Presumed fledged', value: r => r.fledged },
     { key: 'returned', label: 'Returned chicks', value: r => r.returned },
+    { key: 'descendants', label: 'All returned descendants', value: r => r.descendants },
   ];
   // One-way sorting: clicking a column ranks by it, highest first.
   const [sortKey, setSortKey] = useState('chipped');
@@ -4020,6 +4036,7 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
                   <td><strong>{r.chipped}</strong></td>
                   <td>{r.fledged}</td>
                   <td>{r.returned}</td>
+                  <td>{r.descendants}</td>
                 </tr>
               ))}
             </tbody>
