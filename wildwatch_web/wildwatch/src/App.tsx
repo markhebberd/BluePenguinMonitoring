@@ -6039,7 +6039,6 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [weight, setWeight] = useState('');
   const [flipper, setFlipper] = useState('');
   const [observedSex, setObservedSex] = useState('');
-  const [moulting, setMoulting] = useState(false);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -6070,7 +6069,6 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     if (!box.trim()) { setError('Chip box required'); return; }
     if (!chipBy.trim()) { setError('Chipped by is required'); return; }
-    if (!isAdult && !chickSize) { setError('Select chick size (LC / BC / SC)'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
     if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengNum}?`)) return;
     setSaving(true);
@@ -6080,7 +6078,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         pengNum = rechipTarget.peng_num;
       } else {
         const pengRes = await createRecord(token, 'penguins', {
-          chipped_as_adult: isAdult ? 1 : 0, chick_size_code: isAdult ? null : chickSize,
+          chipped_as_adult: isAdult ? 1 : 0, chick_size_code: (!isAdult && chickSize) ? chickSize : null,
         });
         if (!pengRes.success) { setError('Penguin: ' + (pengRes.error || 'failed')); setSaving(false); return; }
         pengNum = pengRes.peng_num;
@@ -6104,8 +6102,8 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
 
       const bio: Record<string, any> = {
         peng_num: pengNum, observation_date: date,
-        observed_sex: observedSex || null,
-        is_moulting: moulting ? 1 : 0,
+        // Sex applies to new adults only — the field is hidden for chicks and rechips.
+        observed_sex: (isAdult && !rechipTarget && observedSex) ? observedSex : null,
         notes: notes.trim() || null,
       };
       if (weight.trim()) bio.weight = parseFloat(weight);
@@ -6170,66 +6168,76 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : `Enter penguin #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
+        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : `New bird #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
+        {/* Field order/rows mirror nestcheck's new-bird dialog; Date is web-only (nestcheck stamps today). */}
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div className="app-field"><label className="req">Chip box</label>
-            <input type="text" value={box} onChange={e => setBox(e.target.value)} /></div>
+          <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
+            <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
+              style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
+              onChange={e => setPit(e.target.value.toUpperCase())} /></div>
         </div>
-        <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
-          <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
-            style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
-            onChange={e => setPit(e.target.value.toUpperCase())} /></div>
         {pit && !pitValid && <div className="app-pit-error">Must be 2 letters then 15 digits (17 chars)</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}
-        <div className="app-row">
-          {!rechipTarget && <div className="app-field"><label className="req">Life stage</label>
-            <div className="app-toggle">
-              <button type="button" className={isAdult ? 'active' : ''} onClick={() => setIsAdult(true)}>Adult</button>
-              <button type="button" className={!isAdult ? 'active' : ''} onClick={() => setIsAdult(false)}>Chick</button>
-            </div></div>}
-          <div className="app-field"><label className="req">Chipped by</label>
-            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="initials"
-              style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
-        </div>
-        {!isAdult && (
-          <div className="app-field"><label>Chick size</label>
-            <div className="app-toggle">
-              {[['LC', 'Little'], ['BC', 'Big'], ['SC', 'Single']].map(([code, label]) => (
-                <button key={code} type="button" className={chickSize === code ? 'active' : ''} onClick={() => setChickSize(chickSize === code ? '' : code)}>{code} · {label}</button>
-              ))}
-            </div></div>
+        {/* Chipped as + Sex share a row; the right column swaps to Chick size for chicks.
+            The whole row is hidden on a rechip (the bird's identity already exists). */}
+        {!rechipTarget && (
+          <div className="app-row">
+            <div className="app-field"><label className="req">Chipped as</label>
+              <div className="app-toggle">
+                <button type="button" className={isAdult ? 'active' : ''} onClick={() => setIsAdult(true)}>Adult</button>
+                <button type="button" className={!isAdult ? 'active' : ''} onClick={() => setIsAdult(false)}>Chick</button>
+              </div></div>
+            {isAdult ? (
+              <div className="app-field"><label>Sex</label>
+                <select value={observedSex} onChange={e => setObservedSex(e.target.value)}>
+                  <option value="">Not recorded</option>
+                  <option value="PM">Probably male</option>
+                  <option value="MM">Maybe male</option>
+                  <option value="U">Unsure</option>
+                  <option value="MF">Maybe female</option>
+                  <option value="PF">Probably female</option>
+                </select></div>
+            ) : (
+              <div className="app-field"><label>Chick size</label>
+                <select value={chickSize} onChange={e => setChickSize(e.target.value)}>
+                  <option value="">Unknown</option>
+                  <option value="SC">Single Chick (SC)</option>
+                  <option value="BC">Big Chick (BC)</option>
+                  <option value="LC">Little Chick (LC)</option>
+                </select></div>
+            )}
+          </div>
+        )}
+        {/* No-scans stand in for unscanned adults, so replacing one only applies to adults. */}
+        {noScanObs && (
+          <div className="app-checks">
+            <label title={`This visit recorded ${noScanObs.no_scan} unscanned adult${noScanObs.no_scan === 1 ? '' : 's'} — count this bird as one of them`}>
+              <input type="checkbox" checked={replaceNoScan} onChange={e => setReplaceNoScan(e.target.checked)} /> Replace no-scan in box {box.trim()}
+            </label>
+          </div>
         )}
         <div className="app-row">
-          <div className="app-field"><label>Weight (g)</label>
-            <input type="number" value={weight} onChange={e => setWeight(e.target.value)} placeholder="—" /></div>
-          <div className="app-field"><label>Flipper (mm)</label>
-            <input type="number" value={flipper} onChange={e => setFlipper(e.target.value)} placeholder="—" /></div>
+          <div className="app-field"><label className="req">Chip box</label>
+            <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="Box name" /></div>
+          <div className="app-field"><label className="req">Chipped by</label>
+            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="Observer name"
+              style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
         </div>
-        <div className="app-field"><label>Sex guess</label>
-          <select value={observedSex} onChange={e => setObservedSex(e.target.value)}>
-            <option value="">—</option>
-            <option value="PM">Probably male</option>
-            <option value="MM">Maybe male</option>
-            <option value="U">Unsure</option>
-            <option value="MF">Maybe female</option>
-            <option value="PF">Probably female</option>
-          </select></div>
-        <div className="app-checks">
-          <label><input type="checkbox" checked={moulting} onChange={e => setMoulting(e.target.checked)} /> Moulting</label>
-          {noScanObs && (
-            <label title={`This visit recorded ${noScanObs.no_scan} unscanned adult${noScanObs.no_scan === 1 ? '' : 's'} — count this bird as one of them`}>
-              <input type="checkbox" checked={replaceNoScan} onChange={e => setReplaceNoScan(e.target.checked)} /> Replace no scan in Box {box.trim()}
-            </label>
-          )}
+        <div className="app-bio-header">Biometric Data (optional)</div>
+        <div className="app-row">
+          <div className="app-field"><label>Weight (g)</label>
+            <input type="number" value={weight} onChange={e => setWeight(e.target.value)} placeholder="e.g. 1250" /></div>
+          <div className="app-field"><label>Flipper (mm)</label>
+            <input type="number" value={flipper} onChange={e => setFlipper(e.target.value)} placeholder="e.g. 185" /></div>
         </div>
         <div className="app-field"><label>Notes</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} /></div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Notes" /></div>
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (!isAdult && !chickSize)}>{saving ? 'Saving…' : rechipTarget ? 'Rechip penguin' : 'Add penguin'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim()}>{saving ? 'Saving…' : rechipTarget ? 'Save rechip' : 'Save chip'}</button>
         </div>
       </div>
     </div>

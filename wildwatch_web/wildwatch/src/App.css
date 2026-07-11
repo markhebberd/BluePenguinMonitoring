@@ -570,6 +570,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .app-toggle button { flex:1; padding:8px 0; border:2px solid #ddd; background:#fff; border-radius:8px; cursor:pointer; font-size:13px; width:auto; }
 .app-toggle button.active { border-color:#1a5276; background:#d4e6f1; color:#1a5276; font-weight:600; }
 .app-checks { display:flex; gap:16px; flex-wrap:wrap; margin:4px 0 12px; }
+.app-bio-header { font-weight:700; font-size:15px; color:#333; margin:12px 0 4px; }
 .app-checks label { display:flex; align-items:center; gap:5px; font-size:13px; color:#333; }
 .app-checks input { width:auto; }
 .app-pit-error { color:#c0392b; font-size:12px; margin:-4px 0 8px; }
