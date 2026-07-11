@@ -4250,39 +4250,16 @@ namespace PenguinMonitor
                     Toast.MakeText(this, "Box not on the server yet — sync first", ToastLength.Short)?.Show();
                     return;
                 }
-                var newVal = !note.Watched;
-                note.Watched = newVal; // optimistic — reverted below if the server says no
+                // Watched lives locally and syncs: flip now, queue the upload. No revert —
+                // an offline toggle simply rides along with the next sync.
+                note.Watched = !note.Watched;
+                note.WatchedPendingUpload = true;
                 UpdateWatchedToggle();
                 _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
-                var boxName = _currentBoxName;
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var client = Http.CreateClient(TimeSpan.FromSeconds(15));
-                        var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
-                        var req = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=observation_locations&id={note.LocationId}&colony_id={colonyId}");
-                        req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                        req.Content = new StringContent(
-                            JsonConvert.SerializeObject(new Dictionary<string, object> { ["watched"] = newVal ? 1 : 0 }),
-                            System.Text.Encoding.UTF8, "application/json");
-                        var resp = await client.SendAsync(req);
-                        if (!resp.IsSuccessStatusCode) throw new Exception($"HTTP {(int)resp.StatusCode}");
-                        RunOnUiThread(() => Toast.MakeText(this,
-                            newVal ? $"Box {boxName} watched ✓" : $"Box {boxName} no longer watched", ToastLength.Short)?.Show());
-                    }
-                    catch (Exception ex)
-                    {
-                        RunOnUiThread(() =>
-                        {
-                            note.Watched = !newVal; // revert
-                            _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
-                            UpdateWatchedToggle();
-                            Toast.MakeText(this, $"Watched update failed: {ex.Message}", ToastLength.Long)?.Show();
-                        });
-                    }
-                });
+                DrawPageLayouts(); // overview's Watched filter reflects the change immediately
+                Toast.MakeText(this, note.Watched ? $"Box {_currentBoxName} watched ✓" : $"Box {_currentBoxName} no longer watched", ToastLength.Short)?.Show();
+                // Opportunistic immediate push; failure just stays queued
+                _ = Task.Run(() => _dataStorageService.UploadPendingWatchedFlags(this, _appSettings, _boxNotes));
             };
             _singleBoxDataTitleLayout.AddView(_watchedToggle);
 

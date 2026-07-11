@@ -299,6 +299,10 @@ namespace PenguinMonitor.Services
                 // Step 1b: Upload any pending biometric edits (independent of pending observations)
                 await UploadPendingBiometrics(colonyState, token, result);
 
+                // Step 1c: watched flags are kept locally and pushed here (offline-safe queue)
+                var localBoxNotes = LoadBoxNotesFromDisk(context);
+                await UploadPendingWatchedFlags(context, appSettings, localBoxNotes);
+
                 // Step 2: Fetch + process in parallel — each task reports its own progress
                 var nzToday = MainActivity.NzToday;
                 bool authFailed = false;
@@ -357,7 +361,18 @@ namespace PenguinMonitor.Services
                     if (serverState?.locations != null)
                     {
                         var boxNotes = new Dictionary<string, BoxNoteData>();
-                        foreach (var loc in serverState.locations) boxNotes[loc.location_name ?? ""] = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1 };
+                        foreach (var loc in serverState.locations)
+                        {
+                            var bn = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1 };
+                            // A locally-toggled watched flag that hasn't reached the server yet
+                            // survives the refresh instead of being clobbered by the server value.
+                            if (localBoxNotes.TryGetValue(bn.BoxName, out var prior) && prior.WatchedPendingUpload)
+                            {
+                                bn.Watched = prior.Watched;
+                                bn.WatchedPendingUpload = true;
+                            }
+                            boxNotes[bn.BoxName] = bn;
+                        }
                         File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
                     }
                     onLineProgress?.Invoke(0, $"{result.BoxCount} boxes ✓");
@@ -900,6 +915,35 @@ namespace PenguinMonitor.Services
                 System.Diagnostics.Debug.WriteLine($"Failed to load predicted breeding data: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Push locally-toggled watched flags to the server. Watched is kept locally and
+        /// synced — a failed push just stays pending for the next sync (offline-safe).
+        /// </summary>
+        internal async Task UploadPendingWatchedFlags(Android.Content.Context context, AppSettings appSettings, Dictionary<string, BoxNoteData>? boxNotes = null)
+        {
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return;
+            var notes = boxNotes ?? LoadBoxNotesFromDisk(context);
+            var colonyId = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
+            bool changed = false;
+            foreach (var n in notes.Values.Where(n => n.WatchedPendingUpload && n.LocationId > 0).ToList())
+            {
+                try
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Post,
+                        $"{WILDWATCH_BASE_URL}/crud.php?action=update&table=observation_locations&id={n.LocationId}&colony_id={colonyId}");
+                    req.Headers.Add("Authorization", $"Bearer {token}");
+                    req.Content = new StringContent(
+                        JsonConvert.SerializeObject(new Dictionary<string, object> { ["watched"] = n.Watched ? 1 : 0 }),
+                        Encoding.UTF8, "application/json");
+                    var resp = await _httpClient.SendAsync(req);
+                    if (resp.IsSuccessStatusCode) { n.WatchedPendingUpload = false; changed = true; }
+                }
+                catch { /* stays pending */ }
+            }
+            if (changed) SaveBoxNotesToDisk(context, notes);
         }
 
         public void SaveBoxNotesToDisk(Android.Content.Context context, Dictionary<string, BoxNoteData> boxNotes)
