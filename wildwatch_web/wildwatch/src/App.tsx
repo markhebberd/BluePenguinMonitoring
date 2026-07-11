@@ -1374,10 +1374,12 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   useEffect(() => { setStatusOverride(null); }, [obs.breeding_status, obsId]);
   const pickStatus = async (val: string) => {
     setStatusPicker(false);
-    if (val === (localObs.breeding_status || '')) return;
-    setStatusOverride(val);
+    // Re-picking the current status clears it.
+    const next = val === (effectiveStatus || '') ? '' : val;
+    if (next === (localObs.breeding_status || '') && statusOverride === null) return;
+    setStatusOverride(next);
     if (obsId && token) {
-      await updateRecord(token, 'observations', obsId, { breeding_status: val });
+      await updateRecord(token, 'observations', obsId, { breeding_status: next });
       setEditCount(c => c + 1);
       onDataChange?.();
     }
@@ -5446,9 +5448,13 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   };
   const pickDayStatus = async (val: string) => {
     const p = dayPicker; setDayPicker(null);
-    if (!p || !token || val === p.cur) return;
-    setStatusOverrides(s => ({ ...s, [p.obsId]: val }));
-    await updateRecord(token, 'observations', p.obsId, { breeding_status: val });
+    if (!p || !token) return;
+    // Re-picking the current status clears it.
+    const cur = statusOverrides[p.obsId] ?? p.cur;
+    const next = val === cur ? '' : val;
+    if (next === cur) return;
+    setStatusOverrides(s => ({ ...s, [p.obsId]: next }));
+    await updateRecord(token, 'observations', p.obsId, { breeding_status: next });
   };
 
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
@@ -6278,9 +6284,6 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
   ];
   const [sortKey, setSortKey] = useState('chipped');
   const [sortDesc, setSortDesc] = useState(true);
-  // Rendering every bird is ~10k DOM cells — cap it and let the user opt into the rest.
-  const CAP = 200;
-  const [showAll, setShowAll] = useState(false);
   const clickSort = (c: typeof COLS[number]) => {
     if (sortKey === c.key) setSortDesc(d => !d);
     else { setSortKey(c.key); setSortDesc(!!c.desc); }
@@ -6322,7 +6325,7 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
                 ))}
               </tr></thead>
               <tbody>
-                {(showAll ? sorted : sorted.slice(0, CAP)).map((r: any) => (
+                {sorted.map((r: any) => (
                   <tr key={r.peng_num}>
                     <td style={{ fontWeight: 600 }}>{r.peng_num}{r.is_dead ? <span title={r.death_date ? `Died ${String(r.death_date).slice(0, 10)}` : 'Dead'}> †</span> : null}</td>
                     <td>{colonyOf(r)}</td>
@@ -6342,11 +6345,6 @@ function AllPenguinsPage({ token, colonyName, onBack }: { token: string; colonyN
                 ))}
               </tbody>
             </table>
-            {!showAll && sorted.length > CAP && (
-              <button className="edit-btn" style={{ marginTop: 8 }} onClick={() => setShowAll(true)}>
-                Show all ({sorted.length})
-              </button>
-            )}
           </div>
         )}
       </div>
