@@ -3265,7 +3265,7 @@ namespace PenguinMonitor
 
                     // Historical view mode
                     if (_appTitleText != null)
-                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer" : "Nestcheck";
+                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer" : $"Nestcheck {CurrentColonyAcronym()}".TrimEnd();
                     if (_exitHistoricalButton != null)
                         _exitHistoricalButton.Visibility = _isHistoricalView ? ViewStates.Visible : ViewStates.Gone;
                     if (_isHistoricalView)
