@@ -5704,8 +5704,8 @@ namespace PenguinMonitor
             var dialog = new AlertDialog.Builder(this)
                 .SetTitle(string.IsNullOrEmpty(nextPengLabel) ? $"New bird: {shortId}" : $"New bird {nextPengLabel}")
                 .SetView(scrollView)
-                .SetPositiveButton("Add new penguin", (EventHandler<DialogClickEventArgs>)null!)
-                .SetNegativeButton("Skip", (s, e) => { SetDialogActive(false); })
+                .SetPositiveButton("Save chip", (EventHandler<DialogClickEventArgs>)null!)
+                .SetNegativeButton("Cancel", (s, e) => { SetDialogActive(false); })
                 .Create();
 
             dialog.Show();
@@ -5771,7 +5771,7 @@ namespace PenguinMonitor
                 rechipSelectedRow.AddView(deselect);
                 rechipSelectedRow.Visibility = ViewStates.Visible;
                 dialog.SetTitle($"Rechip penguin {DisplayPengNum(pd.PengNum)}");
-                addButton.Text = "Rechip penguin";
+                addButton.Text = "Save rechip";
             }
             void UpdateMode()
             {
@@ -5782,7 +5782,7 @@ namespace PenguinMonitor
                 if (rechip)
                 {
                     dialog.SetTitle("Rechip penguin");
-                    addButton.Text = "Rechip penguin";
+                    addButton.Text = "Save rechip";
                 }
                 else
                 {
@@ -5791,7 +5791,7 @@ namespace PenguinMonitor
                     rechipResults.RemoveAllViews();
                     suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
                     dialog.SetTitle(string.IsNullOrEmpty(nextPengLabel) ? $"New bird: {shortId}" : $"New bird {nextPengLabel}");
-                    addButton.Text = "Add new penguin";
+                    addButton.Text = "Save chip";
                 }
             }
             // Belt and braces: enforce mutual exclusivity manually as well as via the group
@@ -5847,9 +5847,18 @@ namespace PenguinMonitor
 
             void DoAdd()
             {
+                // Test/demo chip: save nothing at all — no penguin (so the number doesn't
+                // increment), no chip, no counts. Purely a workflow rehearsal.
+                if (string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase))
+                {
+                    Toast.MakeText(this, "Test chip not saved", ToastLength.Short)?.Show();
+                    dialog.Dismiss();
+                    SetDialogActive(false);
+                    return;
+                }
                 addButton.Enabled = false;
                 bool isRechip = rechipTarget != null;
-                addButton.Text = isRechip ? "Rechipping..." : "Adding...";
+                addButton.Text = "Saving...";
                 var isChick = isRechip ? rechipTarget!.LastKnownLifeStage == LifeStage.Chick : chippedAsChick.Checked;
                 var sexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
                 // Sex applies to new adults only — hidden for chicks and for rechips
@@ -5910,11 +5919,8 @@ namespace PenguinMonitor
                         }
                         }
 
-                        // 2. Create chip record — skipped for the demo placeholder PIT (the
-                        // Settings-button flow): the bird is created chipless, never a fake chip.
-                        bool isPlaceholderPit = string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase);
-                        if (!isPlaceholderPit)
-                        {
+                        // 2. Create chip record (test placeholder PITs never reach here —
+                        // DoAdd exits before saving anything)
                         var chipFields = new Dictionary<string, object>
                         {
                             ["peng_num"] = pengNum,
@@ -5944,10 +5950,9 @@ namespace PenguinMonitor
                             });
                             return;
                         }
-                        }
 
                         // 2b. Rechip: retire the bird's previous chip (like the wildwatch flow)
-                        if (!isPlaceholderPit && isRechip && !string.IsNullOrEmpty(rechipOldPit)
+                        if (isRechip && !string.IsNullOrEmpty(rechipOldPit)
                             && !string.Equals(rechipOldPit, fullPitId, StringComparison.OrdinalIgnoreCase))
                         {
                             try
@@ -6059,19 +6064,35 @@ namespace PenguinMonitor
                     Toast.MakeText(this, "Search and select a penguin to rechip first", ToastLength.Short)?.Show();
                     return;
                 }
-                if (rechipTarget != null)
+                // Confirmation screen listing everything that will be saved, worded the way
+                // the user entered it. "No" just closes this dialog — the input form
+                // underneath stays open with its values intact for editing or Cancel.
+                bool isTestChip = string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase);
+                var summary = new List<string>();
+                summary.Add(rechipTarget != null ? $"Rechip {DisplayPengNum(rechipTarget.PengNum)}"
+                                                 : $"New penguin ({(chippedAsChick.Checked ? "chick" : "adult")})");
+                summary.Add($"PIT: {fullPitId}" + (isTestChip ? " (test chip — nothing will be saved)" : ""));
+                if (rechipTarget == null)
                 {
-                    new AlertDialog.Builder(this)
-                        .SetTitle("Rechip")
-                        .SetMessage($"Are you sure you would like to rechip {DisplayPengNum(rechipTarget.PengNum)}?")
-                        .SetPositiveButton("Yes", (s2, e2) => DoAdd())
-                        .SetNegativeButton("No", (s2, e2) => { })
-                        .Show();
+                    if (chippedAsChick.Checked)
+                        summary.Add($"Chick size: {chickSizeSpinner.SelectedItem?.ToString() ?? "Unknown"}");
+                    else
+                        summary.Add($"Sex: {sexSpinner.SelectedItem?.ToString() ?? "Not recorded"}");
                 }
-                else
-                {
-                    DoAdd();
-                }
+                summary.Add($"Chip box: {chipBoxInput.Text?.Trim()}");
+                summary.Add($"Chipped by: {chippedByInput.Text?.Trim()}");
+                if (!string.IsNullOrWhiteSpace(weightInput.Text)) summary.Add($"Weight: {weightInput.Text} g");
+                if (!string.IsNullOrWhiteSpace(flipperInput.Text)) summary.Add($"Flipper: {flipperInput.Text} mm");
+                if (!string.IsNullOrWhiteSpace(notesInput.Text)) summary.Add($"Notes: {notesInput.Text}");
+                if (replaceNoScanCheck.Visibility == ViewStates.Visible && replaceNoScanCheck.Checked)
+                    summary.Add($"Replaces a no-scan in box {_currentBoxName}");
+
+                new AlertDialog.Builder(this)
+                    .SetTitle(rechipTarget != null ? "Confirm rechip" : "Confirm new penguin")
+                    .SetMessage(string.Join("\n", summary))
+                    .SetPositiveButton("Yes, save", (s2, e2) => DoAdd())
+                    .SetNegativeButton("No", (s2, e2) => { })
+                    .Show();
             };
         }
 
