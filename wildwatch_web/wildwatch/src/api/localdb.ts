@@ -1626,6 +1626,7 @@ export function queryCarryForward(nzDate: string, observedBoxes: Set<string>): a
     const scans = (c.scansByObs.get(latest.observation_id) || []).map((s: any) => enrichScan(s, c));
     results.push({
       box_name: loc.location_name,
+      observation_id: latest.observation_id,
       observation_time_utc: latest.observation_time_utc,
       adults: latest.adults || 0,
       eggs: latest.eggs || 0,

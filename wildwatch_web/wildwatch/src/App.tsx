@@ -1311,6 +1311,42 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
   );
 }
 
+/** The radial ("flower") breeding-status picker, viewport-fixed via portal so
+ *  overflow-clipping ancestors can't crop the ring. Shared by the observation
+ *  card and the day-view row badges. */
+function StatusPickRing({ pos, current, onPick, onClose }: { pos: { x: number; y: number }; current: string; onPick: (s: string) => void; onClose: () => void }) {
+  return createPortal((
+    <>
+      <div className="status-picker-backdrop" onClick={onClose} />
+      <div className="status-picker" style={{ left: pos.x, top: pos.y }} onClick={e => e.stopPropagation()}>
+        {STATUS_PICK_OPTIONS.map((opt, i) => {
+          const n = STATUS_PICK_OPTIONS.length;
+          const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
+          const r = 56;
+          const x = Math.cos(angle) * r, y = Math.sin(angle) * r;
+          const isCur = opt === current;
+          return (
+            <button key={opt} type="button"
+              className={`status-pick-item${DARK_TEXT_STATUSES.has(opt)?' bordered':''}${isCur?' current':''}`}
+              style={{transform:`translate(-50%,-50%) translate(${x}px, ${y}px)`, background:STATUS_COLORS[opt]||'#ccc', color:DARK_TEXT_STATUSES.has(opt)?'#333':'#fff'}}
+              title={STATUS_NAMES[opt]||opt} onClick={() => onPick(opt)}>{opt}</button>
+          );
+        })}
+      </div>
+    </>
+  ), document.body);
+}
+
+/** Clamp a badge's centre so the whole picker ring stays inside the viewport. */
+function ringPos(e: React.MouseEvent): { x: number; y: number } {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const m = 84;
+  return {
+    x: Math.min(Math.max(r.left + r.width / 2, m), window.innerWidth - m),
+    y: Math.min(Math.max(r.top + r.height / 2, m), window.innerHeight - m),
+  };
+}
+
 function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, canEdit, allPenguins, hideDate, onDataChange }: { obs: Observation; onBirdClick?: (tag:string)=>void; onDayClick?: (day:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[]; hideDate?: boolean; onDataChange?: ()=>void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState(false);
@@ -1460,37 +1496,14 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
                     className={`badge ${ds && DARK_TEXT_STATUSES.has(ds)?'bordered':''}${clickable?' clickable':''}`}
                     style={{background:STATUS_COLORS[ds||'']||'#ccc',color:ds && DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}
                     onClick={clickable ? (e) => {
-                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      const m = 84; // keep the whole ring inside the viewport
-                      const x = Math.min(Math.max(r.left + r.width / 2, m), window.innerWidth - m);
-                      const y = Math.min(Math.max(r.top + r.height / 2, m), window.innerHeight - m);
-                      setPickerPos({ x, y });
+                      setPickerPos(ringPos(e));
                       setStatusPicker(v => !v);
                     } : undefined}
                     title={clickable ? 'Change breeding status' : (STATUS_NAMES[ds||'']||undefined)}
                   >{ds || '\u2014'}</span>
-                  {statusPicker && pickerPos && createPortal((
-                    <>
-                      <div className="status-picker-backdrop" onClick={() => setStatusPicker(false)} />
-                      {/* Rendered viewport-fixed via portal so overflow-clipping ancestors and the
-                          box grid's stacking context can't hide or crop the ring. */}
-                      <div className="status-picker" style={{left:pickerPos.x, top:pickerPos.y}} onClick={e => e.stopPropagation()}>
-                        {STATUS_PICK_OPTIONS.map((opt, i) => {
-                          const n = STATUS_PICK_OPTIONS.length;
-                          const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
-                          const r = 56;
-                          const x = Math.cos(angle) * r, y = Math.sin(angle) * r;
-                          const isCur = opt === (effectiveStatus || '');
-                          return (
-                            <button key={opt} type="button"
-                              className={`status-pick-item${DARK_TEXT_STATUSES.has(opt)?' bordered':''}${isCur?' current':''}`}
-                              style={{transform:`translate(-50%,-50%) translate(${x}px, ${y}px)`, background:STATUS_COLORS[opt]||'#ccc', color:DARK_TEXT_STATUSES.has(opt)?'#333':'#fff'}}
-                              title={STATUS_NAMES[opt]||opt} onClick={() => pickStatus(opt)}>{opt}</button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ), document.body)}
+                  {statusPicker && pickerPos && (
+                    <StatusPickRing pos={pickerPos} current={effectiveStatus || ''} onPick={pickStatus} onClose={() => setStatusPicker(false)} />
+                  )}
                 </span>
               );
             })()}
@@ -5423,6 +5436,21 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   const peekHide = () => { clearTimeout(peekTimer.current); peekTimer.current = setTimeout(() => setPeek(null), 250); };
   const peekKeep = () => clearTimeout(peekTimer.current);
 
+  // Quick status change from a day row: clicking the badge opens the same radial
+  // picker as the observation card and writes breeding_status on that observation.
+  const [dayPicker, setDayPicker] = useState<{ obsId: number; cur: string; x: number; y: number } | null>(null);
+  const [statusOverrides, setStatusOverrides] = useState<Record<number, string>>({});
+  const openDayPicker = (o: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDayPicker({ obsId: o.observation_id, cur: o.breeding_status || '', ...ringPos(e) });
+  };
+  const pickDayStatus = async (val: string) => {
+    const p = dayPicker; setDayPicker(null);
+    if (!p || !token || val === p.cur) return;
+    setStatusOverrides(s => ({ ...s, [p.obsId]: val }));
+    await updateRecord(token, 'observations', p.obsId, { breeding_status: val });
+  };
+
   if (loading) return <div className="day-page"><p className="muted">Loading...</p></div>;
   if (!data || data.error) return <div className="day-page"><p className="muted">{data?.error || 'Failed to load'}</p></div>;
 
@@ -5557,7 +5585,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                 // Carry-forward row (orange)
                 const cfScans = (cf.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
                   .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
-                const cfDs = displayStatusOrPrev(cf, box);
+                const cfDs = (cf.observation_id && statusOverrides[cf.observation_id]) || displayStatusOrPrev(cf, box);
                 return (
                   <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}
                     onClick={() => onBoxClick(box, cf.observation_time_utc)} style={{cursor:'pointer'}}>
@@ -5566,7 +5594,10 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                     {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
                     {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
                     {cf.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(cf.chicks, 4))}</span>}
-                    {cfDs && cfDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs)?'bordered':''}`} style={{background:STATUS_COLORS[cfDs]||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{cfDs}</span>}
+                    {cfDs && cfDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs)?'bordered':''}${canEdit && token && cf.observation_id ? ' clickable' : ''}`}
+                      style={{background:STATUS_COLORS[cfDs]||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
+                      title={canEdit && token && cf.observation_id ? 'Change breeding status' : undefined}
+                      onClick={canEdit && token && cf.observation_id ? (e) => openDayPicker(cf, e) : undefined}>{cfDs}</span>}
                     {cfScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={cf.observation_time_utc} />)}
                     {cf.gate_status && <span>{cf.gate_status}</span>}
                     <span className="day-cf-date" onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}>{formatDate(cf.observation_time_utc)}</span>
@@ -5605,7 +5636,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                   const scanCounts: Record<string, number> = {};
                   for (const s of oScans) scanCounts[s.peng_num] = (scanCounts[s.peng_num] || 0) + 1;
                   const hasDupScan = Object.values(scanCounts).some((n: number) => n > 1);
-                  const oDs = displayStatusOrPrev(o, box);
+                  const oDs = (o.observation_id && statusOverrides[o.observation_id]) || displayStatusOrPrev(o, box);
                   const isDup = obs.length > 1;
                   return (
                   <div key={o.observation_id || oi}>
@@ -5616,7 +5647,10 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
                       {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
-                      {oDs && oDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(oDs)?'bordered':''}`} style={{background:STATUS_COLORS[oDs]||'#ccc',color:DARK_TEXT_STATUSES.has(oDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}>{oDs}</span>}
+                      {oDs && oDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(oDs)?'bordered':''}${canEdit && token && o.observation_id ? ' clickable' : ''}`}
+                        style={{background:STATUS_COLORS[oDs]||'#ccc',color:DARK_TEXT_STATUSES.has(oDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
+                        title={canEdit && token && o.observation_id ? 'Change breeding status' : undefined}
+                        onClick={canEdit && token && o.observation_id ? (e) => openDayPicker(o, e) : undefined}>{oDs}</span>}
                       {oScans.map((s: any, si: number) => (
                         <span key={s.scan_id || `${s.peng_num}-${si}`}
                           style={scanCounts[s.peng_num] > 1 ? {outline:'2px solid #F44336', borderRadius:3} : undefined}
@@ -5657,6 +5691,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
         <p className="muted">No activity recorded on this date.</p>
       )}
       {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} />}
+      {dayPicker && <StatusPickRing pos={dayPicker} current={statusOverrides[dayPicker.obsId] ?? dayPicker.cur} onPick={pickDayStatus} onClose={() => setDayPicker(null)} />}
       </div>
 
       {sideBird && sideBirdData?.penguin && (
