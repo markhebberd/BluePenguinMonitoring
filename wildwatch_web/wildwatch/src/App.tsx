@@ -6163,7 +6163,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div className="app-field"><label className="req">PIT id (2 letters + 15 digits)</label>
+          <div className="app-field"><label className="req" title="2 letters + 15 digits">PIT id</label>
             <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
               style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
               onChange={e => setPit(e.target.value.toUpperCase())} /></div>
