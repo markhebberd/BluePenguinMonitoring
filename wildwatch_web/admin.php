@@ -695,10 +695,85 @@ if ($action === 'preview_penguin_delete') {
     exit;
 }
 
+/**
+ * The renumber plan that closes the gap left at $gapNumber in colony $colonyId: the unbroken run
+ * of penguins immediately above the gap that were FIRST chipped within the last 7 days, each
+ * shifted down by one. Stops at the first number that is missing or not a recent-chip candidate —
+ * an established or unchipped bird must never be renumbered. Returns [] when nothing shifts.
+ */
+function computeCompactionPlan(PDO $pdo, int $colonyId, int $gapNumber): array {
+    $prefix = getColonyPrefix($pdo, $colonyId);
+    $cutoff = date('Y-m-d', strtotime('-7 days'));
+    $info = $pdo->prepare(
+        "SELECT (SELECT MIN(chip_date) FROM penguin_chips WHERE peng_num = p.peng_num) AS first_chip,
+            (SELECT COUNT(*) FROM penguin_chips WHERE peng_num = p.peng_num) AS chips,
+            (SELECT COUNT(*) FROM penguin_biometric_data WHERE peng_num = p.peng_num AND (is_deleted = 0 OR is_deleted IS NULL)) AS biometrics,
+            (SELECT COUNT(*) FROM penguin_scans ps JOIN penguin_chips pc ON ps.pit_id = pc.pit_id
+               WHERE pc.peng_num = p.peng_num AND (ps.is_deleted = 0 OR ps.is_deleted IS NULL)) AS scans
+         FROM penguins p WHERE p.colony_id = ? AND p.peng_num = ?");
+    $plan = [];
+    for ($k = $gapNumber + 1; ; $k++) {
+        $pn = $prefix . $k;
+        $info->execute([$colonyId, $pn]);
+        $r = $info->fetch(PDO::FETCH_ASSOC);
+        if (!$r) break;                                                     // no penguin at this number
+        if ($r['first_chip'] === null || $r['first_chip'] < $cutoff) break; // not a ≤7-day candidate
+        $plan[] = [
+            'from' => $pn, 'to' => $prefix . ($k - 1),
+            'chips' => (int)$r['chips'], 'scans' => (int)$r['scans'], 'biometrics' => (int)$r['biometrics'],
+            'first_chip' => $r['first_chip'],
+        ];
+    }
+    return $plan;
+}
+
+/** Numeric suffix of a peng_num ("PT1009" -> 1009). */
+function pengNumSuffix(string $pengNum): int {
+    return (int)preg_replace('/^\D+/', '', $pengNum);
+}
+
+if ($action === 'compact_numbering') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $colonyId = (int)($input['colony_id'] ?? 0);
+    $gap = (int)($input['gap'] ?? 0);
+    if (!$colonyId || !$gap) { http_response_code(400); echo json_encode(['error' => 'colony_id and gap required']); exit; }
+    $prefix = getColonyPrefix($pdo, $colonyId);
+
+    $pdo->beginTransaction();
+    try {
+        // Recompute server-side — a client-supplied plan is never trusted for a primary-key rename.
+        $plan = computeCompactionPlan($pdo, $colonyId, $gap);
+        if (empty($plan)) { $pdo->commit(); echo json_encode(['success' => true, 'renumbered' => 0, 'applied' => []]); exit; }
+
+        // The gap slot must be vacant, or there is nothing to compact into (e.g. it was re-chipped).
+        $occ = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+        $occ->execute([$prefix . $gap]);
+        if ($occ->fetchColumn()) { $pdo->rollBack(); http_response_code(409); echo json_encode(['error' => "$prefix$gap is occupied — nothing to compact into"]); exit; }
+
+        $reason = "Compaction: close gap at $prefix$gap";
+        $applied = [];
+        foreach ($plan as $step) {   // ascending order — each target was vacated by the previous step
+            $moved = wwAuditedRenumberPenguin($pdo, $step['from'], $step['to'], $observer['observer_id'], $reason);
+            $applied[] = ['from' => $step['from'], 'to' => $step['to']] + $moved;
+        }
+        $pdo->commit();
+        echo json_encode(['success' => true, 'renumbered' => count($applied), 'applied' => $applied]);
+    } catch (Exception $e) {
+        $pdo->rollBack(); http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
 if ($action === 'delete_penguin') {
     $input = json_decode(file_get_contents('php://input'), true);
     $pengNum = $input['peng_num'] ?? '';
     if (!$pengNum) { http_response_code(400); echo json_encode(['error' => 'peng_num required']); exit; }
+
+    // Capture colony + number before deletion, so the response can offer to close the gap.
+    $meta = $pdo->prepare("SELECT colony_id FROM penguins WHERE peng_num = ?");
+    $meta->execute([$pengNum]);
+    $delColonyId = (int)($meta->fetchColumn() ?: 0);
+    $delNumber = pengNumSuffix($pengNum);
 
     $pdo->beginTransaction();
     try {
@@ -733,7 +808,18 @@ if ($action === 'delete_penguin') {
         wwAuditedDelete($pdo, 'penguins', $pengNum, $oid, $reason);
 
         $pdo->commit();
-        echo json_encode(['success' => true, 'scans_deleted' => $scansDeleted, 'chips_deleted' => count($pitIds)]);
+
+        // The deletion may have left a fillable gap. Offer the renumber plan so the admin can
+        // decide — nothing is renumbered here; that needs a separate confirmed compact_numbering.
+        $compaction = null;
+        if ($delColonyId && $delNumber) {
+            $plan = computeCompactionPlan($pdo, $delColonyId, $delNumber);
+            if (!empty($plan)) {
+                $prefix = getColonyPrefix($pdo, $delColonyId);
+                $compaction = ['colony_id' => $delColonyId, 'gap' => $delNumber, 'gap_peng' => $prefix . $delNumber, 'plan' => $plan];
+            }
+        }
+        echo json_encode(['success' => true, 'scans_deleted' => $scansDeleted, 'chips_deleted' => count($pitIds), 'compaction' => $compaction]);
     } catch (Exception $e) {
         $pdo->rollBack();
         http_response_code(500);

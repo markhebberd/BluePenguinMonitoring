@@ -8267,6 +8267,8 @@ function RemovePenguin({ token }: { token: string }) {
   const [preview, setPreview] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string|null>(null);
+  const [compaction, setCompaction] = useState<any>(null);   // renumber plan offered after a delete
+  const [compacting, setCompacting] = useState(false);
 
   const search = async () => {
     const num = pengNum.trim().replace('#', '');
@@ -8294,10 +8296,29 @@ function RemovePenguin({ token }: { token: string }) {
     if (d.success) {
       setResult(`Penguin #${num} deleted. ${d.scans_deleted} scans removed, ${d.chips_deleted} chips removed.`);
       setPreview(null); setPengNum('');
+      setCompaction(d.compaction || null);   // if a fillable gap was left, offer to close it
     } else {
       setResult(`Error: ${d.error}`);
     }
     setLoading(false);
+  };
+
+  const runCompaction = async () => {
+    if (!compaction) return;
+    setCompacting(true);
+    const r = await fetch('/api/admin.php?action=compact_numbering', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ colony_id: compaction.colony_id, gap: compaction.gap }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      const moves = (d.applied || []).map((a: any) => `${a.from}→${a.to}`).join(', ');
+      setResult(`Compacted: ${d.renumbered} penguin${d.renumbered === 1 ? '' : 's'} renumbered${moves ? ` (${moves})` : ''}.`);
+      setCompaction(null);
+    } else {
+      setResult(`Compaction failed: ${d.error}`);
+    }
+    setCompacting(false);
   };
 
   return (
@@ -8381,7 +8402,45 @@ function RemovePenguin({ token }: { token: string }) {
         </div>
       )}
 
-      {result && <p style={{color: result.startsWith('Error') ? '#F44336' : '#4CAF50', marginTop:8, fontSize:13}}>{result}</p>}
+      {compaction && (() => {
+        const plan: any[] = compaction.plan || [];
+        const newFree = plan.length ? plan[plan.length - 1].from : null;   // top of the run vacates
+        return (
+          <div className="obs-card" style={{marginBottom:8, border:'1px solid #ffb300', background:'#fff8e1'}}>
+            <h4 style={{margin:'0 0 6px', fontSize:14}}>Numbering gap left by deleting {compaction.gap_peng}</h4>
+            <p style={{fontSize:12, margin:'0 0 8px', color:'#5d4037'}}>
+              Deleting {compaction.gap_peng} left a gap in this colony's numbering. The {plan.length} penguin{plan.length === 1 ? '' : 's'} below
+              {' '}can each be shifted <b>down by one</b> to close it. Only penguins first chipped in the last 7 days are eligible, so
+              {' '}the shift stops at the first established or unchipped bird. This renames each penguin's number — its chips, scans and
+              {' '}biometrics move with it — and every change is recorded in the audit log. It cannot be undone from here.
+            </p>
+            <table style={{fontSize:12, borderCollapse:'collapse', width:'100%'}}>
+              <thead><tr style={{borderBottom:'1px solid #e0c060', textAlign:'left'}}>
+                <th style={{padding:'3px 8px'}}>Renumber</th><th style={{padding:'3px 8px'}}>Carries</th><th style={{padding:'3px 8px'}}>First chipped</th>
+              </tr></thead>
+              <tbody>
+                {plan.map((s, i) => (
+                  <tr key={i} style={{borderBottom:'1px solid #f0e0b0'}}>
+                    <td style={{padding:'3px 8px', fontWeight:600}}>{s.from} <span style={{color:'#999'}}>→</span> {s.to}</td>
+                    <td style={{padding:'3px 8px', color:'#666'}}>{s.chips} chip{s.chips === 1 ? '' : 's'}, {s.scans} scan{s.scans === 1 ? '' : 's'}, {s.biometrics} biometric{s.biometrics === 1 ? '' : 's'}</td>
+                    <td style={{padding:'3px 8px', color:'#666'}}>{s.first_chip}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {newFree && <p style={{fontSize:12, margin:'8px 0 0', color:'#5d4037'}}>After compacting, <b>{newFree}</b> becomes the next free number.</p>}
+            <div style={{display:'flex', gap:8, marginTop:12}}>
+              <button onClick={runCompaction} disabled={compacting}
+                style={{background:'#ff8f00', color:'#fff', border:'none', padding:'8px 20px', borderRadius:4, cursor:'pointer', fontWeight:600}}>
+                {compacting ? 'Compacting…' : `Compact now (${plan.length} renumbered)`}
+              </button>
+              <button className="edit-btn" onClick={() => setCompaction(null)} disabled={compacting}>Leave gap</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {result && <p style={{color: result.startsWith('Error') || result.startsWith('Compaction failed') ? '#F44336' : '#4CAF50', marginTop:8, fontSize:13}}>{result}</p>}
     </div>
   );
 }

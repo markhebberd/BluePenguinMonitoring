@@ -176,6 +176,43 @@ function wwAuditedReplaceSeason($pdo, int $season, array $rows, $observerId, $re
 }
 
 /**
+ * Renumber a penguin: peng_num $from -> $to, carrying its chips and biometrics with it.
+ *
+ * peng_num is a primary key with FK-RESTRICT children (penguin_chips, penguin_biometric_data), so
+ * a straight `UPDATE penguins SET peng_num` is impossible in either order — the parent can't move
+ * while children reference it, and children can't point at a number the parent doesn't have yet.
+ * Instead: create the new parent row, repoint the children, delete the old parent. Every step is
+ * audited, so the whole rename is reconstructable. $to must be vacant. Returns [chips, biometrics].
+ */
+function wwAuditedRenumberPenguin($pdo, $from, $to, $observerId, $reason = null): array {
+    // Copy only writable columns: is_dead is generated (from death_date), updated_at is automatic.
+    $sel = $pdo->prepare("SELECT peng_num, colony_id, chipped_as_adult, sex, vid_for_scanner, created_at, chick_size_code, notes, death_date FROM penguins WHERE peng_num = ?");
+    $sel->execute([$from]);
+    $row = $sel->fetch(PDO::FETCH_ASSOC);
+    if (!$row) throw new RuntimeException("penguin $from not found");
+
+    $clash = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+    $clash->execute([$to]);
+    if ($clash->fetchColumn()) throw new RuntimeException("target peng_num $to is not vacant");
+
+    $row['peng_num'] = $to;
+    wwAuditedInsert($pdo, 'penguins', $row, $observerId, $reason);
+
+    $chips = $pdo->prepare("SELECT pit_id FROM penguin_chips WHERE peng_num = ?");
+    $chips->execute([$from]);
+    $pitIds = $chips->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($pitIds as $pit) wwAuditedUpdate($pdo, 'penguin_chips', $pit, ['peng_num' => $to], $observerId, $reason);
+
+    $bios = $pdo->prepare("SELECT biometric_id FROM penguin_biometric_data WHERE peng_num = ?");
+    $bios->execute([$from]);
+    $bioIds = $bios->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($bioIds as $bid) wwAuditedUpdate($pdo, 'penguin_biometric_data', $bid, ['peng_num' => $to], $observerId, $reason);
+
+    wwAuditedDelete($pdo, 'penguins', $from, $observerId, $reason);   // hard delete, audited with full row
+    return ['chips' => count($pitIds), 'biometrics' => count($bioIds)];
+}
+
+/**
  * Insert-or-update keyed on $keyCols. Audited as an INSERT or a field-level UPDATE depending on
  * which happened, so an upsert is as legible in the log as either primitive alone.
  */
