@@ -6084,7 +6084,6 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [replaceNoScan, setReplaceNoScan] = useState(true);
   // Rechip mode: same form, but the chip goes on an existing bird and its old chip retires.
   // The New penguin / Rechip choice sits at the top of the form (mirrors nestcheck).
   const [mode, setMode] = useState<'new' | 'rechip'>('new');
@@ -6155,8 +6154,9 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       await createRecord(token, 'penguin_biometric_data', bio);
 
       // Swap the day's "no scan" marker for a real scan of the new bird: scan +1, no_scan −1,
-      // so the observation's adults = scans + no-scans balance is preserved.
-      if (noScanObs && replaceNoScan) {
+      // so the observation's adults = scans + no-scans balance is preserved. Asked only
+      // now — after the server confirmed the bird and chip were created.
+      if (noScanObs && confirm(`#${pengNum} saved. This visit recorded ${noScanObs.no_scan} unscanned adult${noScanObs.no_scan === 1 ? '' : 's'} in box ${box.trim()} — replace a no-scan with this bird?`)) {
         try {
           const why = `Replaced a no-scan with ${rechipTarget ? 'rechipped' : 'newly chipped'} #${pengNum}`;
           await createRecord(token, 'penguin_scans', {
@@ -6247,14 +6247,6 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
                   <option value="LC">Little Chick (LC)</option>
                 </select></div>
             )}
-          </div>
-        )}
-        {/* No-scans stand in for unscanned adults, so replacing one only applies to adults. */}
-        {noScanObs && (
-          <div className="app-checks">
-            <label title={`This visit recorded ${noScanObs.no_scan} unscanned adult${noScanObs.no_scan === 1 ? '' : 's'} — count this bird as one of them`}>
-              <input type="checkbox" checked={replaceNoScan} onChange={e => setReplaceNoScan(e.target.checked)} /> Replace no-scan in box {box.trim()}
-            </label>
           </div>
         )}
         <div className="app-row">
