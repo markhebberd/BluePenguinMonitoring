@@ -504,7 +504,9 @@ if ($action === 'preview_date' || $action === 'delete_date') {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { echo json_encode(['error' => 'date required (YYYY-MM-DD)']); exit; }
 
     $colonyId = 1;
-    $utcStart = date('Y-m-d 11:00:00', strtotime($date) - 86400);
+    // Fixed +12 (NZST) window matching the app's date bucketing — the old NZDT-widened
+    // start (11:00) would have deleted an extra hour belonging to the previous NZ day.
+    $utcStart = date('Y-m-d 12:00:00', strtotime($date) - 86400);
     $utcEnd = date('Y-m-d 12:00:00', strtotime($date));
 
     $stmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,

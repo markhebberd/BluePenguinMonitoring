@@ -1673,9 +1673,9 @@ export function queryPreviousObservations(nzDate: string, boxNames: string[]): R
   const out: Record<string, any> = {};
   if (!mem) return out;
   const c = mem;
-  // NZ date D starts at UTC (D-1)T11:00:00 — same window math as queryDay
+  // NZ date D starts at UTC (D-1)T12:00:00 — fixed +12, same window math as queryDay
   const d = new Date(nzDate + 'T00:00:00Z');
-  const utcStart = new Date(d.getTime() - 86400000 + 11 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+  const utcStart = new Date(d.getTime() - 86400000 + 12 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
   for (const box of boxNames) {
     const loc = c.locByName.get(box);
     if (!loc) continue;
@@ -1738,9 +1738,11 @@ export function queryDay(date: string): any {
   if (!mem) return { date, observations: [], chippings: [] };
   const c = mem;
 
-  // NZ date D covers UTC range: (D-1)T11:00:00 to DT12:00:00
+  // NZ date D covers UTC range: (D-1)T12:00:00 to DT12:00:00 — fixed +12 (NZST), matching
+  // utcToNzDate's bucketing exactly. A wider NZDT-aware window would put late-evening
+  // observations (11:00–12:00 UTC) on two consecutive day views.
   const d = new Date(date + 'T00:00:00Z');
-  const utcStart = new Date(d.getTime() - 86400000 + 11 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+  const utcStart = new Date(d.getTime() - 86400000 + 12 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
   const utcEnd = new Date(d.getTime() + 12 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
 
   const dayObs = c.observations

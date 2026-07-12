@@ -13,8 +13,9 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     exit;
 }
 
-// NZ date D covers UTC range: (D-1)T11:00 to DT12:00 (covers both NZST+12 and NZDT+13)
-$utcStart = date('Y-m-d 11:00:00', strtotime($date) - 86400);
+// NZ date D covers UTC range: (D-1)T12:00 to DT12:00 — fixed +12 (NZST), matching the
+// app's date bucketing so an observation appears on exactly one day
+$utcStart = date('Y-m-d 12:00:00', strtotime($date) - 86400);
 $utcEnd = date('Y-m-d 12:00:00', strtotime($date));
 $stmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
     o.breeding_status, o.gate_status, o.notes, o.observer_id,
