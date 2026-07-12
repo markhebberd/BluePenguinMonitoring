@@ -7855,8 +7855,8 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           desc="Observations dated after today (NZ) — almost always a typo." empty="No future-dated observations"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'monitor', label: 'Monitor' }]} />
         <IntegrityCheck rows={iRetired} errorType="retired_tag_scans" title="Retired-tag scans"
-          desc="Scanned via an old (inactive) chip after the bird was rechipped." empty="No retired-tag scans"
-          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'pit_id', label: 'Tag', render: (v: string) => String(v || '').slice(-8) }, { key: 'active_chip_date', label: 'Rechipped' }]} />
+          desc="Scanned via a previous chip after the bird was rechipped (by chip date)." empty="No retired-tag scans"
+          columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'pit_id', label: 'Tag', render: (v: string) => String(v || '').slice(-8) }, { key: 'rechip_date', label: 'Rechipped' }]} />
         <IntegrityCheck rows={iChicksNoScan} errorType="chicks_no_scan" title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />

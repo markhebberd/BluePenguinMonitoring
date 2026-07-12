@@ -1412,7 +1412,9 @@ export function computeFutureObservations(): any[] {
   return rows.sort(byDateDesc);
 }
 
-/** Scans via a retired (inactive) chip after the bird was rechipped. */
+/** Scans via a previous chip after the bird was rechipped. Judged purely by chip dates —
+ *  the bird's newest chip is current, and a scan on any older chip after the newest chip's
+ *  date is flagged. Chips with equal dates can't be ordered, so those birds are skipped. */
 export function computeRetiredTagScans(): any[] {
   if (!mem) return [];
   const c = mem;
@@ -1420,15 +1422,20 @@ export function computeRetiredTagScans(): any[] {
   for (const s of c.scans) {
     if (s.scan_deleted) continue;
     const chip = c.chipByPit.get(s.pit_id);
-    if (!chip || chip.is_active) continue;
-    const active = (c.chipsByPeng.get(chip.peng_num) || []).find((ch: any) => ch.is_active);
-    if (!active || !active.chip_date) continue;
+    if (!chip || !chip.chip_date) continue;
+    const chips = c.chipsByPeng.get(chip.peng_num) || [];
+    if (chips.length < 2) continue;
+    let newest = chips[0];
+    for (const ch of chips) if ((ch.chip_date || '') > (newest.chip_date || '')) newest = ch;
+    if (!newest.chip_date || newest.pit_id === chip.pit_id) continue; // scanned the current chip
+    const rechip_date = newest.chip_date.slice(0, 10);
+    if (chip.chip_date.slice(0, 10) >= rechip_date) continue; // same-day chips — order unknowable
     const obs = c.obsById.get(s.observation_id);
     if (!obs || obs.is_deleted) continue;
     const obs_date = utcToNzDate(obs.observation_time_utc);
-    if (obs_date > active.chip_date.slice(0, 10)) {
+    if (obs_date > rechip_date) {
       const box_name = c.locById.get(obs.location_id)?.location_name || '';
-      rows.push({ obs_date, box_name, peng_num: chip.peng_num, pit_id: chip.pit_id, active_chip_date: active.chip_date.slice(0, 10), _href: obsBirdHref(box_name, obs.observation_time_utc, chip.peng_num) });
+      rows.push({ obs_date, box_name, peng_num: chip.peng_num, pit_id: chip.pit_id, rechip_date, _href: obsBirdHref(box_name, obs.observation_time_utc, chip.peng_num) });
     }
   }
   return rows.sort(byDateDesc);
