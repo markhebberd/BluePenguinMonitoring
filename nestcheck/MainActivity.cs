@@ -718,9 +718,13 @@ namespace PenguinMonitor
             // Show new bird dialog for unknown scans (deferred to avoid dialog collision)
             if (unknownScans.Count > 0)
             {
+                var boxAtFlush = _currentBoxName;
                 new Handler(Looper.MainLooper).PostDelayed(() =>
                 {
-                    ShowNewBirdDialog(unknownScans[0].displayId, unknownScans[0].fullId);
+                    // The flush above counted this unknown bird as an adult — cancelling
+                    // the form takes both the tag and that count back out.
+                    ShowNewBirdDialog(unknownScans[0].displayId, unknownScans[0].fullId,
+                        onCancel: () => RemoveUnsavedScanFromBox(boxAtFlush, unknownScans[0].fullId, decrementAdultCount: true));
                 }, 500);
             }
         }
@@ -5487,9 +5491,13 @@ namespace PenguinMonitor
             dialog.Show();
         }
 
-        private void ShowNewBirdDialog(string shortId, string fullPitId)
+        // onCancel runs when the dialog closes without a completed save — scan-triggered
+        // callers use it to take the provisionally added tag back out of the box, so a
+        // scanned tag only stays in the observation on form completion.
+        private void ShowNewBirdDialog(string shortId, string fullPitId, Action? onCancel = null)
         {
             SetDialogActive(true);
+            bool completed = false;
             // Predict the next penguin number for the title (server assigns the real one on
             // create). Trailing digits handle both bare PT numbers ("1012") and prefixed
             // display forms ("NI7"); the prefix of the highest bird carries into the prediction.
@@ -5706,7 +5714,11 @@ namespace PenguinMonitor
                     dialog.SetTitle($"New bird: {shortId}");
                 Toast.MakeText(this, $"Chip {scanShort} captured ✓", ToastLength.Short)?.Show();
             };
-            dialog.DismissEvent += (s, e) => _newBirdScanCapture = null;
+            dialog.DismissEvent += (s, e) =>
+            {
+                _newBirdScanCapture = null;
+                if (!completed) onCancel?.Invoke();
+            };
 
             // --- Rechip mode wiring ---
             bool suppressRechipSearch = false;
@@ -6003,6 +6015,7 @@ namespace PenguinMonitor
                                 Toast.MakeText(this, $"#{pengNum} {verb} (+1 Adult)", ToastLength.Short)?.Show();
                             }
                             SaveCurrentBoxData();
+                            completed = true; // the tag may now stay in the box
                             dialog.Dismiss();
                             SetDialogActive(false);
                             DrawPageLayouts();
@@ -6825,13 +6838,38 @@ namespace PenguinMonitor
                     {
                         toastMessage += ", Unknown scan ID!";
                         triggerAlertAsync();
-                        ShowNewBirdDialog(displayId, cleanEid);
+                        var boxAtScan = _currentBoxName;
+                        ShowNewBirdDialog(displayId, cleanEid,
+                            onCancel: () => RemoveUnsavedScanFromBox(boxAtScan, cleanEid, decrementAdultCount: false));
                     }
                     DrawPageLayouts();
                     Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
                 });
             }
         }
+        // A scanned unknown tag goes into the box before its new-bird form opens, so the
+        // scan is visible immediately — this takes it back out when the form is cancelled.
+        // decrementAdultCount: the held-scans flush counted the unknown bird as an adult.
+        private void RemoveUnsavedScanFromBox(string boxName, string pitId, bool decrementAdultCount)
+        {
+            var boxData = _colonyState.GetTodayForBox(boxName);
+            var rec = boxData?.ScannedIds.FirstOrDefault(s => s.BirdId == pitId);
+            if (boxData == null || rec == null) return;
+            boxData.ScannedIds.Remove(rec);
+            if (decrementAdultCount)
+            {
+                boxData.Adults = Math.Max(0, boxData.Adults - 1);
+                if (boxName == _currentBoxName && _adultsEditText?[0] != null)
+                    _adultsEditText[0].Text = Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1).ToString();
+            }
+            boxData.WhenDataCollectedUtc = DateTime.UtcNow;
+            _colonyState.SaveBoxObservation(boxName, boxData);
+            SaveToAppDataDir();
+            DrawPageLayouts();
+            var displayId = pitId.Length >= 8 ? pitId.Substring(pitId.Length - 8) : pitId;
+            Toast.MakeText(this, $"Scan {displayId} removed from Box {boxName} — new bird cancelled", ToastLength.Short)?.Show();
+        }
+
         private void ShowSaveFilenameDialog(bool upload = false)
         {
             var now = NzNow;
