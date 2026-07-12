@@ -5440,8 +5440,11 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, on
   const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
   const left = Math.min(pos.x, window.innerWidth - 330);
   const top = pos.y + 170 > window.innerHeight ? Math.max(4, pos.y - 178) : pos.y;
+  // Birds + notes can make the popup much taller than the flip heuristic assumes —
+  // cap it to the space below `top` so it scrolls internally instead of overflowing.
+  const maxHeight = Math.min(window.innerHeight * 0.6, window.innerHeight - top - 8);
   return (
-    <div className="box-peek" style={{ left, top }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+    <div className="box-peek" style={{ left, top, maxHeight }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <div className="box-peek-head">
         <b>Box {box}</b>
         {loc && <WatchedTick location={loc} token={token} canEdit={!!canEdit} />}
