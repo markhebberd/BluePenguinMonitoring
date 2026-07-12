@@ -5430,10 +5430,11 @@ function timeAgo(utc: string): string {
 }
 
 /** Hover popup for a box's date on the day view: location name, the watched toggle,
- *  and the box's last five observations. Kept open while the pointer is over it. */
-function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave }: {
+ *  and the box's last five observations with their scanned birds and notes.
+ *  Kept open while the pointer is over it. */
+function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, onBirdClick }: {
   box: string; token?: string; canEdit?: boolean; pos: { x: number; y: number };
-  onMouseEnter: () => void; onMouseLeave: () => void;
+  onMouseEnter: () => void; onMouseLeave: () => void; onBirdClick?: (num: string) => void;
 }) {
   const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(box));
   const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
@@ -5446,16 +5447,26 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave }: 
         {loc && <WatchedTick location={loc} token={token} canEdit={!!canEdit} />}
       </div>
       {obs.map((o: any) => (
-        <div key={o.observation_id} className="box-peek-row">
-          <span className="box-peek-date">{formatDate(o.observation_time_utc)}</span>
-          {(o.adults || 0) > 0 && <span>{'🐧'.repeat(Math.min(o.adults, 4))}</span>}
-          {(o.eggs || 0) > 0 && <span>{'🥚'.repeat(Math.min(o.eggs, 4))}</span>}
-          {(o.chicks || 0) > 0 && <span>{'🐣'.repeat(Math.min(o.chicks, 4))}</span>}
-          {o.breeding_status && o.breeding_status !== 'NO' && (
-            <span className={`badge ${DARK_TEXT_STATUSES.has(o.breeding_status) ? 'bordered' : ''}`}
-              style={{ background: STATUS_COLORS[o.breeding_status] || '#ccc', color: DARK_TEXT_STATUSES.has(o.breeding_status) ? '#333' : '#fff', fontSize: 10, padding: '1px 5px' }}>{o.breeding_status}</span>
+        <div key={o.observation_id} className="box-peek-obs">
+          <div className="box-peek-row">
+            <span className="box-peek-date">{formatDate(o.observation_time_utc)}</span>
+            {(o.adults || 0) > 0 && <span>{'🐧'.repeat(Math.min(o.adults, 4))}</span>}
+            {(o.eggs || 0) > 0 && <span>{'🥚'.repeat(Math.min(o.eggs, 4))}</span>}
+            {(o.chicks || 0) > 0 && <span>{'🐣'.repeat(Math.min(o.chicks, 4))}</span>}
+            {o.breeding_status && o.breeding_status !== 'NO' && (
+              <span className={`badge ${DARK_TEXT_STATUSES.has(o.breeding_status) ? 'bordered' : ''}`}
+                style={{ background: STATUS_COLORS[o.breeding_status] || '#ccc', color: DARK_TEXT_STATUSES.has(o.breeding_status) ? '#333' : '#fff', fontSize: 10, padding: '1px 5px' }}>{o.breeding_status}</span>
+            )}
+            {o.gate_status && <span className="muted">{o.gate_status}</span>}
+          </div>
+          {(o.scans?.length || 0) > 0 && (
+            <div className="box-peek-birds">
+              {[...o.scans].sort(scanSortMFC).map((s: any, j: number) => (
+                <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={o.observation_time_utc} />
+              ))}
+            </div>
           )}
-          {o.gate_status && <span className="muted">{o.gate_status}</span>}
+          {o.notes && <div className="box-peek-notes">{o.notes}</div>}
         </div>
       ))}
       {obs.length === 0 && <div className="muted">No records</div>}
@@ -5798,7 +5809,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       {totalObs === 0 && totalChips === 0 && (
         <p className="muted">No activity recorded on this date.</p>
       )}
-      {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} />}
+      {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} onBirdClick={handleBirdClick} />}
       {dayPicker && <StatusPickRing pos={dayPicker} current={statusOverrides[dayPicker.obsId] ?? dayPicker.cur} onPick={pickDayStatus} onClose={() => setDayPicker(null)} />}
       </div>
 

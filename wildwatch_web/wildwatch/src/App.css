@@ -591,10 +591,13 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .stalker-ago { color:#888; font-size:11px; margin-left:auto; white-space:nowrap; }
 .watched-tick { color:#ccc; font-size:20px; font-weight:700; line-height:1; user-select:none; }
 .watched-tick.on { color:#4CAF50; }
-.box-peek { position:fixed; z-index:700; background:#fff; border:1px solid #ddd; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.15); padding:8px 12px; font-size:12px; max-width:330px; }
+.box-peek { position:fixed; z-index:700; background:#fff; border:1px solid #ddd; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.15); padding:8px 12px; font-size:12px; max-width:330px; max-height:60vh; overflow-y:auto; }
 .box-peek-head { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:13px; }
+.box-peek-obs + .box-peek-obs { border-top:1px solid #f0f0f0; }
 .box-peek-row { display:flex; align-items:center; gap:6px; padding:2px 0; white-space:nowrap; }
 .box-peek-date { color:#666; min-width:80px; }
+.box-peek-birds { display:flex; flex-wrap:wrap; align-items:center; gap:3px; padding:1px 0 2px 86px; }
+.box-peek-notes { font-size:11px; color:#555; font-style:italic; padding:0 0 3px 86px; }
 .password-field { position:relative; margin-bottom:12px; }
 .password-field input { padding-right:40px; margin-bottom:0; }
 .toggle-pw { position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; cursor:pointer; padding:0; width:auto; line-height:1; opacity:.6; }
