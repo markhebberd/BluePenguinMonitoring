@@ -138,7 +138,7 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   const topName = Object.entries(nameCounts).sort((a, b) => b[1] - a[1])[0];
   const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
   // Full monitor: a box not observed today is excused if its most recent breeding_status (before today) is DCM
-  // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (covers both NZST+12 and NZDT+13)
+  // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (fixed +12, matching utcToNzDate)
   const utcCutoff = nzDate + ' 12:00:00';
   const excluded = c.fmExcluded;
   const excusedBoxes = new Set<string>();
