@@ -1839,16 +1839,17 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
           {(() => {
             const thisSeasonStart = getSeasonStart().toISOString();
             const thisLabel = getSeasonLabel();
-            // Chippings with no matching scan on the chip day become their own sighting card.
-            const scannedPitsByDay = new Map<string, Set<string>>();
+            // Chip and rechip events with no matching scan of the bird on the chip day
+            // become their own sighting card (a same-day scan already shows the bird —
+            // by the bird, not the pit, so a rechip-day scan on either chip suppresses it).
+            const scannedPengsByDay = new Map<string, Set<string>>();
             for (const o of data.observations) {
               const day = toNzDateStr(o.observation_time_utc);
-              if (!scannedPitsByDay.has(day)) scannedPitsByDay.set(day, new Set());
-              for (const s of (o.scans || [])) if (s.pit_id) scannedPitsByDay.get(day)!.add(s.pit_id);
+              if (!scannedPengsByDay.has(day)) scannedPengsByDay.set(day, new Set());
+              for (const s of (o.scans || [])) if (s.peng_num) scannedPengsByDay.get(day)!.add(s.peng_num);
             }
-            const chipEvents = (data.all_penguins || [])
-              .filter((p: any) => p.is_chipped_here && p.chip_date)
-              .filter((p: any) => !scannedPitsByDay.get(p.chip_date)?.has(p.pit_id))
+            const chipEvents = (data.chip_events || [])
+              .filter((p: any) => !scannedPengsByDay.get(p.chip_date)?.has(p.peng_num))
               .map((p: any) => ({ ...p, _chip: true, observation_time_utc: `${p.chip_date} 00:00:00` }));
             const byTimeDesc = (a: any, b: any) => b.observation_time_utc.localeCompare(a.observation_time_utc);
             const thisSeason = [...data.observations, ...chipEvents].filter((o: any) => o.observation_time_utc >= thisSeasonStart).sort(byTimeDesc);

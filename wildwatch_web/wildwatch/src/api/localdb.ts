@@ -685,9 +685,30 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
     }
   }
 
+  // Every chip event at this box — one entry per CHIP (unlike all_penguins' one per
+  // bird), so a rechip done here shows as its own sighting card in the box timeline.
+  // is_rechip: any chip that isn't the bird's earliest.
+  const chip_events: any[] = [];
+  for (const chip of c.chips) {
+    if (!(chip.location_id ? chip.location_id === location.location_id : chip.chip_box === boxName)) continue;
+    if (!chip.chip_date) continue;
+    const peng = c.pengByNum.get(chip.peng_num);
+    const all = c.chipsByPeng.get(chip.peng_num) || [];
+    let first = all[0];
+    for (const ch of all) if ((ch.chip_date || '') < (first?.chip_date || '')) first = ch;
+    chip_events.push({
+      peng_num: chip.peng_num, pit_id: chip.pit_id, sex: peng?.sex || null,
+      life_stage: peng?.life_stage || null, chipped_as_adult: peng?.chipped_as_adult || 0,
+      chick_size_code: peng?.chick_size_code || null, chip_date: chip.chip_date,
+      chip_by: chip.chip_by || null, hasReturned: peng?.hasReturned || false,
+      is_rechip: !!first && chip.pit_id !== first.pit_id,
+    });
+  }
+
   return {
     location, observations,
     all_penguins: Array.from(seenPenguins.values()),
+    chip_events,
     deleted_count: deleted.length,
     deleted: includeDeleted ? deleted : [],
   };
