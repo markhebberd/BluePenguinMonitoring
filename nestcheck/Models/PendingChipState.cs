@@ -1,0 +1,29 @@
+using System;
+
+namespace PenguinMonitor.Models
+{
+    /// <summary>
+    /// Snapshot of an in-progress chipping/rechipping workflow. Chipping a bird can take
+    /// ~15 minutes in the field, and Android may kill the backgrounded app in that time —
+    /// this file lets the app reopen the form exactly where it was, PIT included.
+    /// </summary>
+    public class PendingChipState
+    {
+        public string FullPitId { get; set; } = "";
+        public string BoxName { get; set; } = "";
+        public bool IsRechip { get; set; }
+        public string RechipPengNum { get; set; } = "";
+        public bool IsChick { get; set; }
+        public string ChickSizeCode { get; set; } = "";
+        public string SexCode { get; set; } = "";
+        public string ChipBox { get; set; } = "";
+        public string ChipBy { get; set; } = "";
+        public string Weight { get; set; } = "";
+        public string Flipper { get; set; } = "";
+        public string Notes { get; set; } = "";
+        public DateTime CreatedUtc { get; set; }
+        /// <summary>Number predicted on-device when queued offline. The server honours it if
+        /// still free, else assigns +100 (renamable later) — so field notes stay meaningful.</summary>
+        public string RequestedPengNum { get; set; } = "";
+    }
+}

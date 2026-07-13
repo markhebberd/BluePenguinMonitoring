@@ -303,6 +303,11 @@ namespace PenguinMonitor.Services
                 var localBoxNotes = LoadBoxNotesFromDisk(context);
                 await UploadPendingWatchedFlags(context, appSettings, localBoxNotes);
 
+                // Step 1d: birds chipped while offline — created before the download so the
+                // penguins fetch below returns them with their real numbers
+                var chipReport = await FlushQueuedChips(context, appSettings);
+                if (chipReport != null) result.Error = chipReport;
+
                 // Step 2: Fetch + process in parallel — each task reports its own progress
                 var nzToday = MainActivity.NzToday;
                 bool authFailed = false;
@@ -915,6 +920,109 @@ namespace PenguinMonitor.Services
                 System.Diagnostics.Debug.WriteLine($"Failed to load predicted breeding data: {ex.Message}");
                 return null;
             }
+        }
+
+        // ===== Offline chip queue =====
+        internal const string QUEUED_CHIPS_FILENAME = "queuedChips.json";
+
+        internal List<PendingChipState> LoadQueuedChips(Android.Content.Context context)
+        {
+            try
+            {
+                var p = Path.Combine(context.FilesDir?.AbsolutePath, QUEUED_CHIPS_FILENAME);
+                if (File.Exists(p))
+                    return JsonConvert.DeserializeObject<List<PendingChipState>>(File.ReadAllText(p)) ?? new List<PendingChipState>();
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoadQueuedChips: {ex.Message}"); }
+            return new List<PendingChipState>();
+        }
+
+        internal void SaveQueuedChips(Android.Content.Context context, List<PendingChipState> queue)
+        {
+            try { File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, QUEUED_CHIPS_FILENAME), JsonConvert.SerializeObject(queue)); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"SaveQueuedChips: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Upload birds chipped while offline. Each queued entry creates the penguin (server
+        /// honours the device-predicted number or parks it at +100), its chip, and a biometric
+        /// record. Server-rejected entries (e.g. duplicate PIT) are dropped with the error
+        /// surfaced; connectivity failures keep the entry queued for the next sync.
+        /// </summary>
+        internal async Task<string?> FlushQueuedChips(Android.Content.Context context, AppSettings appSettings)
+        {
+            var queue = LoadQueuedChips(context);
+            if (queue.Count == 0) return null;
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return null;
+            var colonyId = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
+            string? report = null;
+
+            foreach (var q in queue.ToList())
+            {
+                try
+                {
+                    // 1. Penguin (server assigns/parks the number)
+                    var pengFields = new Dictionary<string, object> { ["chipped_as_adult"] = q.IsChick ? 0 : 1 };
+                    if (!string.IsNullOrEmpty(q.ChickSizeCode)) pengFields["chick_size_code"] = q.ChickSizeCode;
+                    if (!string.IsNullOrEmpty(q.RequestedPengNum)) pengFields["requested_peng_num"] = q.RequestedPengNum;
+                    var pengReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins&colony_id={colonyId}");
+                    pengReq.Headers.Add("Authorization", $"Bearer {token}");
+                    pengReq.Content = new StringContent(JsonConvert.SerializeObject(pengFields), Encoding.UTF8, "application/json");
+                    var pengResp = await _httpClient.SendAsync(pengReq);
+                    var pengResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(await pengResp.Content.ReadAsStringAsync());
+                    var pengNum = pengResult != null && pengResult.ContainsKey("peng_num") ? pengResult["peng_num"]?.ToString() : null;
+                    if (string.IsNullOrEmpty(pengNum))
+                    {
+                        // Server rejected (not connectivity): drop and report, don't retry forever
+                        report = $"Queued bird {q.RequestedPengNum} rejected: {pengResult?.GetValueOrDefault("error")}";
+                        queue.Remove(q); SaveQueuedChips(context, queue);
+                        continue;
+                    }
+
+                    // 2. Chip (dated when the bird was actually chipped)
+                    var chipFields = new Dictionary<string, object>
+                    {
+                        ["peng_num"] = pengNum, ["pit_id"] = q.FullPitId,
+                        ["chip_date"] = MainActivity.ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd"),
+                        ["is_active"] = 1, ["chip_box"] = q.ChipBox, ["chip_by"] = q.ChipBy,
+                    };
+                    var chipReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
+                    chipReq.Headers.Add("Authorization", $"Bearer {token}");
+                    chipReq.Content = new StringContent(JsonConvert.SerializeObject(chipFields), Encoding.UTF8, "application/json");
+                    var chipResp = await _httpClient.SendAsync(chipReq);
+                    var chipJson = await chipResp.Content.ReadAsStringAsync();
+                    var chipResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(chipJson);
+                    if (chipResult == null || chipResult.ContainsKey("error"))
+                        report = $"Bird {pengNum} created but chip failed: {chipResult?.GetValueOrDefault("error")}";
+
+                    // 3. Biometrics (optional fields)
+                    var bio = new Dictionary<string, object>();
+                    if (!string.IsNullOrEmpty(q.Weight)) bio["weight"] = q.Weight;
+                    if (!string.IsNullOrEmpty(q.Flipper)) bio["flipper_length"] = q.Flipper;
+                    if (!string.IsNullOrEmpty(q.SexCode)) bio["observed_sex"] = q.SexCode;
+                    if (!string.IsNullOrEmpty(q.Notes)) bio["notes"] = q.Notes;
+                    if (bio.Count > 0)
+                    {
+                        bio["peng_num"] = pengNum;
+                        bio["observation_date"] = MainActivity.ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd");
+                        var bioReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
+                        bioReq.Headers.Add("Authorization", $"Bearer {token}");
+                        bioReq.Content = new StringContent(JsonConvert.SerializeObject(bio), Encoding.UTF8, "application/json");
+                        await _httpClient.SendAsync(bioReq);
+                    }
+
+                    queue.Remove(q);
+                    SaveQueuedChips(context, queue);
+                }
+                catch (Exception ex)
+                {
+                    // Connectivity — stop; everything left stays queued for the next sync
+                    System.Diagnostics.Debug.WriteLine($"FlushQueuedChips: {ex.Message}");
+                    break;
+                }
+            }
+            return report;
         }
 
         /// <summary>

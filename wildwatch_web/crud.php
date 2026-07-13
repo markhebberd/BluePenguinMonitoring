@@ -411,9 +411,24 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
-        // Auto-generate peng_num for new penguins (next number in the requested colony)
+        // Auto-generate peng_num for new penguins (next number in the requested colony).
+        // Offline-queued creates send the number the device predicted (requested_peng_num):
+        // honour it if still free, else park at +100 (then +200, ...) — clearly out-of-band,
+        // renamable on wildwatch — so numbers written down in the field stay traceable.
         if ($table === 'penguins' && !isset($input['peng_num'])) {
-            $input['peng_num'] = wwNextPengNum($pdo, $cid);
+            $req = trim((string)($input['requested_peng_num'] ?? ''));
+            unset($input['requested_peng_num']);
+            if ($req !== '' && preg_match('/^([A-Z]*)(\d+)$/', strtoupper($req), $m)) {
+                $prefix = $m[1] !== '' ? $m[1] : getColonyPrefix($pdo, $cid);
+                $numPart = (int)$m[2];
+                $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+                for ($n = $numPart; ; $n += 100) {
+                    $exists->execute([$prefix . $n]);
+                    if (!$exists->fetchColumn()) { $input['peng_num'] = $prefix . $n; break; }
+                }
+            } else {
+                $input['peng_num'] = wwNextPengNum($pdo, $cid);
+            }
         }
         // New penguins are stamped with their home colony
         if ($table === 'penguins' && !isset($input['colony_id'])) {

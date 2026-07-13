@@ -131,6 +131,33 @@ namespace PenguinMonitor
         private const string PLACEHOLDER_PIT = "LA000000000000000";
         // While the new-bird dialog is open with the placeholder, a real scan lands here
         private Action<string>? _newBirdScanCapture;
+
+        // ===== Pending chip workflow persistence (survives Android killing the app) =====
+        private const string PENDING_CHIP_FILENAME = "pendingChip.json";
+        // Set while the new-bird dialog is open; OnPause invokes it to snapshot the form
+        private Action? _pendingChipCapture;
+        private void SavePendingChip(PendingChipState st)
+        {
+            try { System.IO.File.WriteAllText(System.IO.Path.Combine(FilesDir!.AbsolutePath, PENDING_CHIP_FILENAME), JsonConvert.SerializeObject(st)); } catch { }
+        }
+        private PendingChipState? LoadPendingChip()
+        {
+            try
+            {
+                var p = System.IO.Path.Combine(FilesDir!.AbsolutePath, PENDING_CHIP_FILENAME);
+                return System.IO.File.Exists(p) ? JsonConvert.DeserializeObject<PendingChipState>(System.IO.File.ReadAllText(p)) : null;
+            }
+            catch { return null; }
+        }
+        private void ClearPendingChip()
+        {
+            try
+            {
+                var p = System.IO.Path.Combine(FilesDir!.AbsolutePath, PENDING_CHIP_FILENAME);
+                if (System.IO.File.Exists(p)) System.IO.File.Delete(p);
+            }
+            catch { }
+        }
         private Button? _deleteBoxTagButton;
 
         private TextView? _standaloneDailyLabelWarning;
@@ -231,6 +258,22 @@ namespace PenguinMonitor
             // background) so the first bird/box panel open is instant. Delayed so it doesn't
             // compete with startup work.
             new Handler(Looper.MainLooper).PostDelayed(() => WarmEmbedWebView(), 4000);
+
+            // Reopen an unfinished chipping form — the workflow can take ~15 minutes and
+            // Android may kill the backgrounded app mid-bird. The saved PIT and form values
+            // put the user back exactly where they were.
+            new Handler(Looper.MainLooper).PostDelayed(() =>
+            {
+                var pending = LoadPendingChip();
+                if (pending != null && !string.IsNullOrEmpty(pending.FullPitId))
+                {
+                    if (!string.IsNullOrEmpty(pending.BoxName) && pending.BoxName != _currentBoxName
+                        && _boxNamesAndIndexes != null && _boxNamesAndIndexes.ContainsKey(pending.BoxName))
+                        JumpToBox(pending.BoxName);
+                    var sid = pending.FullPitId.Length >= 8 ? pending.FullPitId.Substring(pending.FullPitId.Length - 8) : pending.FullPitId;
+                    ShowNewBirdDialog(sid, pending.FullPitId, restore: pending);
+                }
+            }, 2500);
         }
         protected override void OnResume()
         {
@@ -263,6 +306,11 @@ namespace PenguinMonitor
             base.OnPause();
             _statusRefreshHandler?.RemoveCallbacks(_statusRefreshRunnable);
             _dataStorageService.StopBackgroundPolling();
+            // A backgrounded app may be killed by Android at any time: capture any unlocked
+            // edits as a local draft (stays local — not flagged for upload until box lock),
+            // and snapshot an in-progress chipping form (PIT included).
+            try { if (!_isBoxLocked && !_appSettings.EditBoxTagsMode && !_isHistoricalView) SaveCurrentBoxData(); } catch { }
+            try { _pendingChipCapture?.Invoke(); } catch { }
         }
 
         /// <summary>
@@ -5494,7 +5542,8 @@ namespace PenguinMonitor
         // onCancel runs when the dialog closes without a completed save — scan-triggered
         // callers use it to take the provisionally added tag back out of the box, so a
         // scanned tag only stays in the observation on form completion.
-        private void ShowNewBirdDialog(string shortId, string fullPitId, Action? onCancel = null)
+        // restore repopulates the form after an Android process-kill mid-chipping.
+        private void ShowNewBirdDialog(string shortId, string fullPitId, Action? onCancel = null, PendingChipState? restore = null)
         {
             SetDialogActive(true);
             bool completed = false;
@@ -5513,7 +5562,17 @@ namespace PenguinMonitor
                         maxNum = n; maxPrefix = m.Groups[1].Value;
                     }
                 }
-                if (maxNum > 0) nextPengLabel = $"#{maxPrefix}{maxNum + 1}";
+                // Birds queued offline hold their predicted numbers too, so a restart can't
+                // double-book a number that's already promised to a queued bird.
+                foreach (var qc in _dataStorageService.LoadQueuedChips(this))
+                {
+                    var qm = Regex.Match(qc.RequestedPengNum ?? "", @"^(.*?)(\d+)$");
+                    if (qm.Success && int.TryParse(qm.Groups[2].Value, out var qn) && qn > maxNum)
+                    {
+                        maxNum = qn; maxPrefix = qm.Groups[1].Value;
+                    }
+                }
+                if (maxNum > 0) nextPengLabel = DisplayPengNum($"{maxPrefix}{maxNum + 1}");
             }
             var scrollView = new ScrollView(this);
             scrollView.SetClipChildren(false);
@@ -5830,6 +5889,110 @@ namespace PenguinMonitor
                 }
             };
 
+            // ---- Kill resilience: persist this workflow (PIT included) so an Android
+            // process kill mid-bird reopens the form exactly where it was. Snapshot on
+            // open and on OnPause; cleared on any intentional dismiss (save or cancel).
+            void CapturePendingChip()
+            {
+                var sizeSel0 = chickSizeSpinner.SelectedItem?.ToString() ?? "";
+                SavePendingChip(new PendingChipState
+                {
+                    FullPitId = fullPitId,
+                    BoxName = _currentBoxName,
+                    IsRechip = modeRechip.Checked,
+                    RechipPengNum = rechipTarget?.PengNum ?? "",
+                    IsChick = chippedAsChick.Checked,
+                    ChickSizeCode = sizeSel0.Contains("(SC)") ? "SC" : sizeSel0.Contains("(BC)") ? "BC" : sizeSel0.Contains("(LC)") ? "LC" : "",
+                    SexCode = ObservedSexOptions.FirstOrDefault(o => o.label == (sexSpinner.SelectedItem?.ToString() ?? "")).code ?? "",
+                    ChipBox = chipBoxInput.Text ?? "",
+                    ChipBy = chippedByInput.Text ?? "",
+                    Weight = weightInput.Text ?? "",
+                    Flipper = flipperInput.Text ?? "",
+                    Notes = notesInput.Text ?? "",
+                    CreatedUtc = DateTime.UtcNow,
+                });
+            }
+            _pendingChipCapture = CapturePendingChip;
+            dialog.DismissEvent += (s, e) => { _pendingChipCapture = null; ClearPendingChip(); };
+
+            // Restore a form snapshot after a process kill
+            if (restore != null)
+            {
+                chipBoxInput.Text = restore.ChipBox;
+                chippedByInput.Text = restore.ChipBy;
+                weightInput.Text = restore.Weight;
+                flipperInput.Text = restore.Flipper;
+                notesInput.Text = restore.Notes;
+                if (restore.IsChick) chippedAsChick.Checked = true;
+                var sexIdx = Array.FindIndex(ObservedSexOptions, o => o.code == restore.SexCode);
+                if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
+                chickSizeSpinner.SetSelection(restore.ChickSizeCode == "SC" ? 1 : restore.ChickSizeCode == "BC" ? 2 : restore.ChickSizeCode == "LC" ? 3 : 0);
+                if (restore.IsRechip)
+                {
+                    modeRechip.Checked = true;
+                    if (!string.IsNullOrEmpty(restore.RechipPengNum) && _remotePenguinData != null)
+                    {
+                        var kv = _remotePenguinData.FirstOrDefault(k => k.Value.PengNum == restore.RechipPengNum && k.Key.Length == 17);
+                        if (kv.Value == null) kv = _remotePenguinData.FirstOrDefault(k => k.Value.PengNum == restore.RechipPengNum);
+                        if (kv.Value != null) SelectRechipTarget(kv.Value, kv.Key);
+                    }
+                }
+                Toast.MakeText(this, "Restored unfinished chipping form", ToastLength.Long)?.Show();
+            }
+            CapturePendingChip(); // the scanned PIT is safe from the moment the form opens
+
+            // Offline path: bank the bird locally; the next sync creates it server-side
+            // (the server honours the predicted number, or parks it at +100 if taken).
+            void QueueChipOffline(bool qIsChick, string qSex, string qChickSize)
+            {
+                var st = new PendingChipState
+                {
+                    FullPitId = fullPitId,
+                    BoxName = _currentBoxName,
+                    IsRechip = false,
+                    IsChick = qIsChick,
+                    ChickSizeCode = qChickSize,
+                    SexCode = qSex,
+                    ChipBox = chipBoxInput.Text?.Trim() ?? "",
+                    ChipBy = chippedByInput.Text?.Trim() ?? "",
+                    Weight = weightInput.Text ?? "",
+                    Flipper = flipperInput.Text ?? "",
+                    Notes = notesInput.Text ?? "",
+                    CreatedUtc = DateTime.UtcNow,
+                    RequestedPengNum = nextPengLabel,
+                };
+                var queue = _dataStorageService.LoadQueuedChips(this);
+                queue.Add(st);
+                _dataStorageService.SaveQueuedChips(this, queue);
+
+                // Provisional local record so badges and the next prediction see this bird
+                if (_remotePenguinData != null && !string.IsNullOrEmpty(fullPitId))
+                {
+                    var pd = new PenguinData
+                    {
+                        ScannedId = shortId,
+                        PengNum = nextPengLabel,
+                        Sex = "",
+                        LastKnownLifeStage = qIsChick ? LifeStage.Chick : LifeStage.Adult,
+                        ChipDate = DateTime.UtcNow,
+                        ChipAs = qIsChick ? "Chick" : "Adult",
+                        ChickSizeCode = qChickSize,
+                    };
+                    _remotePenguinData[fullPitId] = pd;
+                    _remotePenguinData[shortId] = pd;
+                }
+
+                // The bird is physically present — count it now
+                if (qIsChick) _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
+                else _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                SaveCurrentBoxData();
+                completed = true; // queued = the scanned tag stays in the box (onCancel must not remove it)
+                dialog.Dismiss(); // also clears the pending-chip form file
+                SetDialogActive(false);
+                DrawPageLayouts();
+                Toast.MakeText(this, $"Queued — will sync as {nextPengLabel} (+100 if taken)", ToastLength.Long)?.Show();
+            }
+
             void DoAdd()
             {
                 // Test/demo chip: save nothing at all — no penguin (so the number doesn't
@@ -5844,6 +6007,14 @@ namespace PenguinMonitor
                 addButton.Enabled = false;
                 bool isRechip = rechipTarget != null;
                 addButton.Text = "Saving...";
+                // Any failure (offline is the common one in the field) re-arms the Save button
+                // so the user can retry from the same filled-in form; the pending-chip file
+                // keeps everything safe if they leave and come back in coverage.
+                void RestoreSaveButton() => RunOnUiThread(() =>
+                {
+                    addButton.Enabled = true;
+                    addButton.Text = isRechip ? "Save rechip" : "Save chip";
+                });
                 var isChick = isRechip ? rechipTarget!.LastKnownLifeStage == LifeStage.Chick : chippedAsChick.Checked;
                 var sexLabel = sexSpinner.SelectedItem?.ToString() ?? "";
                 // Sex applies to new adults only — hidden for chicks and for rechips
@@ -5900,6 +6071,7 @@ namespace PenguinMonitor
                                     .SetPositiveButton("OK", (s2, e2) => { })
                                     .Show();
                             });
+                            RestoreSaveButton();
                             return;
                         }
                         }
@@ -5929,10 +6101,11 @@ namespace PenguinMonitor
                             {
                                 new AlertDialog.Builder(this)
                                     .SetTitle("Failed to create chip")
-                                    .SetMessage(chipJson)
+                                    .SetMessage(chipJson + "\n\nNote: the penguin record was already created — retrying will make a duplicate bird. Sync and check before retrying.")
                                     .SetPositiveButton("OK", (s3, e3) => { })
                                     .Show();
                             });
+                            RestoreSaveButton();
                             return;
                         }
 
@@ -6047,7 +6220,24 @@ namespace PenguinMonitor
                     catch (Exception ex)
                     {
                         RunOnUiThread(() =>
-                            Toast.MakeText(this, $"Failed: {ex.Message}", ToastLength.Long)?.Show());
+                            {
+                                if (isRechip)
+                                {
+                                    Toast.MakeText(this, $"Failed: {ex.Message} — form kept, retry when back in coverage", ToastLength.Long)?.Show();
+                                }
+                                else
+                                {
+                                    // Offline new bird: offer to queue it for the next sync
+                                    var predicted = string.IsNullOrEmpty(nextPengLabel) ? "the next number" : nextPengLabel;
+                                    new AlertDialog.Builder(this)
+                                        .SetTitle("No connection")
+                                        .SetMessage($"Couldn't reach the server ({ex.Message}).\n\nQueue this bird to sync later? It will sync as {predicted} — or {predicted}+100 if another device takes the number first (renamable on wildwatch).")
+                                        .SetPositiveButton("Queue for sync", (s4, e4) => QueueChipOffline(isChick, sex, chickSize))
+                                        .SetNegativeButton("Keep editing", (s4, e4) => { })
+                                        .Show();
+                                }
+                            });
+                        RestoreSaveButton();
                     }
                 });
             }
@@ -6066,14 +6256,10 @@ namespace PenguinMonitor
                 var summary = new List<string>();
                 summary.Add(rechipTarget != null ? $"Rechip {DisplayPengNum(rechipTarget.PengNum)}"
                                                  : $"New penguin ({(chippedAsChick.Checked ? "chick" : "adult")})");
-                // The bird number is assigned server-side on create — ask the server live so
-                // the preview can't be stale (another device may have chipped since last sync).
-                int birdNumLine = -1;
+                // The predicted number comes from the local bird list (synced every sync) —
+                // display-only; the server still assigns the real number on create.
                 if (rechipTarget == null && !isTestChip)
-                {
-                    birdNumLine = summary.Count;
-                    summary.Add("Bird #: checking server…");
-                }
+                    summary.Add(string.IsNullOrEmpty(nextPengLabel) ? "Bird #: unavailable" : $"Bird #: {nextPengLabel}");
                 summary.Add($"PIT: {fullPitId}" + (isTestChip ? " (test chip — nothing will be saved)" : ""));
                 if (rechipTarget == null)
                 {
@@ -6088,43 +6274,12 @@ namespace PenguinMonitor
                 if (!string.IsNullOrWhiteSpace(flipperInput.Text)) summary.Add($"Flipper: {flipperInput.Text} mm");
                 if (!string.IsNullOrWhiteSpace(notesInput.Text)) summary.Add($"Notes: {notesInput.Text}");
 
-                var confirmDlg = new AlertDialog.Builder(this)
+                new AlertDialog.Builder(this)
                     .SetTitle(rechipTarget != null ? "Confirm rechip" : "Confirm new penguin")
                     .SetMessage(string.Join("\n", summary))
                     .SetPositiveButton("Yes, save", (s2, e2) => DoAdd())
                     .SetNegativeButton("No", (s2, e2) => { })
-                    .Create();
-                confirmDlg.Show();
-
-                if (birdNumLine >= 0)
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        string line;
-                        try
-                        {
-                            var client = Http.CreateClient(TimeSpan.FromSeconds(8));
-                            var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
-                            var req = new HttpRequestMessage(HttpMethod.Get,
-                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=next_peng_num&colony_id={colonyId}");
-                            req.Headers.Add("Authorization", $"Bearer {_appSettings.AuthToken}");
-                            var resp = await client.SendAsync(req);
-                            var d = JsonConvert.DeserializeObject<Dictionary<string, object>>(await resp.Content.ReadAsStringAsync());
-                            var pn = d != null && d.ContainsKey("peng_num") ? d["peng_num"]?.ToString() : null;
-                            line = !string.IsNullOrEmpty(pn) ? $"Bird #: {pn}"
-                                : (string.IsNullOrEmpty(nextPengLabel) ? "Bird #: unavailable" : $"Bird #: {nextPengLabel} (offline estimate)");
-                        }
-                        catch
-                        {
-                            line = string.IsNullOrEmpty(nextPengLabel) ? "Bird #: unavailable" : $"Bird #: {nextPengLabel} (offline estimate)";
-                        }
-                        RunOnUiThread(() =>
-                        {
-                            summary[birdNumLine] = line;
-                            try { confirmDlg.SetMessage(string.Join("\n", summary)); } catch { }
-                        });
-                    });
-                }
+                    .Show();
             };
         }
 
