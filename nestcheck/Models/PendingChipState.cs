@@ -25,5 +25,11 @@ namespace PenguinMonitor.Models
         /// <summary>Number predicted on-device when queued offline. The server honours it if
         /// still free, else assigns +100 (renamable later) — so field notes stay meaningful.</summary>
         public string RequestedPengNum { get; set; } = "";
+
+        // Scan-cleanup intent — so cancelling a restored (post-kill) scan-triggered form
+        // still removes the provisional scan from the box, exactly like a normal cancel.
+        public bool ScanCleanup { get; set; }
+        public string ScanCleanupBox { get; set; } = "";
+        public bool ScanCleanupDecrement { get; set; }
     }
 }

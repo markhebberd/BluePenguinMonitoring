@@ -271,7 +271,8 @@ namespace PenguinMonitor
                         && _boxNamesAndIndexes != null && _boxNamesAndIndexes.ContainsKey(pending.BoxName))
                         JumpToBox(pending.BoxName);
                     var sid = pending.FullPitId.Length >= 8 ? pending.FullPitId.Substring(pending.FullPitId.Length - 8) : pending.FullPitId;
-                    ShowNewBirdDialog(sid, pending.FullPitId, restore: pending);
+                    (string box, bool decrementAdult)? cleanup = pending.ScanCleanup ? (pending.ScanCleanupBox, pending.ScanCleanupDecrement) : null;
+                    ShowNewBirdDialog(sid, pending.FullPitId, scanCleanup: cleanup, restore: pending);
                 }
             }, 2500);
         }
@@ -772,7 +773,7 @@ namespace PenguinMonitor
                     // The flush above counted this unknown bird as an adult — cancelling
                     // the form takes both the tag and that count back out.
                     ShowNewBirdDialog(unknownScans[0].displayId, unknownScans[0].fullId,
-                        onCancel: () => RemoveUnsavedScanFromBox(boxAtFlush, unknownScans[0].fullId, decrementAdultCount: true));
+                        scanCleanup: (boxAtFlush, true));
                 }, 500);
             }
         }
@@ -5539,14 +5540,18 @@ namespace PenguinMonitor
             dialog.Show();
         }
 
-        // onCancel runs when the dialog closes without a completed save — scan-triggered
-        // callers use it to take the provisionally added tag back out of the box, so a
-        // scanned tag only stays in the observation on form completion.
+        // scanCleanup: for scan-triggered callers — on a cancelled (not completed) close, take
+        // the provisionally added scan (and its adult count, if the scan added one) back out
+        // of the box, so a scanned tag only stays in the observation on form completion. It's
+        // structured (not an opaque Action) so it survives a process-kill + restore.
         // restore repopulates the form after an Android process-kill mid-chipping.
-        private void ShowNewBirdDialog(string shortId, string fullPitId, Action? onCancel = null, PendingChipState? restore = null)
+        private void ShowNewBirdDialog(string shortId, string fullPitId, (string box, bool decrementAdult)? scanCleanup = null, PendingChipState? restore = null)
         {
             SetDialogActive(true);
             bool completed = false;
+            Action? onCancel = scanCleanup.HasValue
+                ? () => RemoveUnsavedScanFromBox(scanCleanup.Value.box, fullPitId, scanCleanup.Value.decrementAdult)
+                : (Action?)null;
             // Predict the next penguin number for the title (server assigns the real one on
             // create). Trailing digits handle both bare PT numbers ("1012") and prefixed
             // display forms ("NI7"); the prefix of the highest bird carries into the prediction.
@@ -5910,6 +5915,9 @@ namespace PenguinMonitor
                     Flipper = flipperInput.Text ?? "",
                     Notes = notesInput.Text ?? "",
                     CreatedUtc = DateTime.UtcNow,
+                    ScanCleanup = scanCleanup.HasValue,
+                    ScanCleanupBox = scanCleanup?.box ?? "",
+                    ScanCleanupDecrement = scanCleanup?.decrementAdult ?? false,
                 });
             }
             _pendingChipCapture = CapturePendingChip;
@@ -6995,7 +7003,7 @@ namespace PenguinMonitor
                         triggerAlertAsync();
                         var boxAtScan = _currentBoxName;
                         ShowNewBirdDialog(displayId, cleanEid,
-                            onCancel: () => RemoveUnsavedScanFromBox(boxAtScan, cleanEid, decrementAdultCount: false));
+                            scanCleanup: (boxAtScan, false));
                     }
                     DrawPageLayouts();
                     Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
