@@ -1761,6 +1761,39 @@ export function prevNonIgnObs(boxName: string, beforeTimeUtc: string): any | nul
   return prior[0] || null;
 }
 
+/** Boxes with a bird chipped there in the last `days` NZ days where that bird has NOT
+ *  been scanned again on a later NZ day (anywhere in the colony). Chips in other
+ *  colonies drop out via locById (colony-scoped). Feeds NestCheck's "Chip only"
+ *  overview filter through the embed bridge (window.wwChipOnlyBoxes). */
+export function queryChipOnlyBoxes(days = 30): string[] {
+  if (!mem) return [];
+  const c = mem;
+  const today = utcToNzDate(new Date().toISOString());
+  const cutoff = new Date(Date.parse(today + 'T00:00:00Z') - days * 86400000).toISOString().slice(0, 10);
+  // Latest NZ day each bird was scanned
+  const lastSeen = new Map<string, string>();
+  for (const s of c.scans) {
+    if (s.scan_deleted) continue;
+    const obs = c.obsById.get(s.observation_id);
+    if (!obs || obs.is_deleted) continue;
+    const peng = c.chipByPit.get(s.pit_id)?.peng_num;
+    if (!peng) continue;
+    const day = utcToNzDate(obs.observation_time_utc);
+    if ((lastSeen.get(peng) || '') < day) lastSeen.set(peng, day);
+  }
+  const out = new Set<string>();
+  for (const chip of c.chips) {
+    if (!chip.chip_date) continue;
+    const chipDay = chip.chip_date.slice(0, 10);
+    if (chipDay < cutoff) continue;
+    if ((lastSeen.get(chip.peng_num) || '') > chipDay) continue; // seen on a later day
+    const box = chip.location_id ? c.locById.get(chip.location_id)?.location_name
+      : c.locByName.has(chip.chip_box) ? chip.chip_box : null;
+    if (box) out.add(box);
+  }
+  return [...out].sort();
+}
+
 /** Get observations for a NZ date (same logic as day.php) */
 export function queryDay(date: string): any {
   if (!mem) return { date, observations: [], chippings: [] };

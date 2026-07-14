@@ -2178,6 +2178,7 @@ namespace PenguinMonitor
                 ("2 egg", () => _appSettings.ShowDoubleEggBoxesInMultiboxView, v => { _appSettings.ShowDoubleEggBoxesInMultiboxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
                 ("No scan", () => _appSettings.ShowNoScanBoxesInMultiboxView, v => { _appSettings.ShowNoScanBoxesInMultiboxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
                 ("Watched", () => _appSettings.ShowWatchedBoxesInMultiBoxView, v => { _appSettings.ShowWatchedBoxesInMultiBoxView = v; if (v) _appSettings.ShowAllBoxesInMultiBoxView = false; }),
+                ("Chip only", () => _appSettings.ShowChipOnlyBoxesInMultiBoxView, v => { _appSettings.ShowChipOnlyBoxesInMultiBoxView = v; if (v) { _appSettings.ShowAllBoxesInMultiBoxView = false; RefreshChipOnlyBoxes(redrawOnChange: true); } }),
             })
             {
                 var cb = new CheckBox(this) { Text = text, Checked = getter() };
@@ -2306,7 +2307,8 @@ namespace PenguinMonitor
                             || _appSettings.ShowDCMBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("DCM")
                             || _appSettings.ShowABNBoxesInMultiboxView && mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus.Equals("ABN")
                             || _appSettings.ShowNoScanBoxesInMultiboxView && mostRecentBoxData.ScannedIds.Any(s => s.BirdId.StartsWith("NOSCAN_"))
-                            || _appSettings.ShowWatchedBoxesInMultiBoxView && boxNoteForFilter != null && boxNoteForFilter.Watched;
+                            || _appSettings.ShowWatchedBoxesInMultiBoxView && boxNoteForFilter != null && boxNoteForFilter.Watched
+                            || _appSettings.ShowChipOnlyBoxesInMultiBoxView && _chipOnlyBoxes.Contains(boxName);
 
                 bool hideBoxWithData = _appSettings.HideBoxesWithDataInMultiBoxView && (GetDisplayBoxData(boxName) != null);
                 bool hideDCM = _appSettings.HideDCMInMultiBoxView && ((mostRecentBoxData.BreedingStatus != null && mostRecentBoxData.BreedingStatus == "DCM"));
@@ -3338,6 +3340,7 @@ namespace PenguinMonitor
             if (_appSettings.ShowDoubleEggBoxesInMultiboxView) filters.Add("2 egg");
             if (_appSettings.ShowNoScanBoxesInMultiboxView) filters.Add("no scan");
             if (_appSettings.ShowWatchedBoxesInMultiBoxView) filters.Add("watched");
+            if (_appSettings.ShowChipOnlyBoxesInMultiBoxView) filters.Add("chip only");
 
             return filters.Count > 0 ? string.Join(", ", filters) : "none";
         }
@@ -5235,6 +5238,39 @@ namespace PenguinMonitor
         // (document.title = "wwready:...") — used by the sync modal's web-cache line.
         private Action? _onEmbedReady;
 
+        // "Chip only" overview filter: boxes with a bird chipped there in the last 30 days
+        // that hasn't been seen again on a later day. Computed by the embed's web cache
+        // (window.wwChipOnlyBoxes) — the native side has no chip/scan history — and cached
+        // here because the overview draws synchronously. Refreshed on every wwready signal.
+        private HashSet<string> _chipOnlyBoxes = new HashSet<string>();
+
+        private void RefreshChipOnlyBoxes(bool redrawOnChange = false)
+        {
+            var webView = _embedWebView;
+            if (webView == null) return;
+            try
+            {
+                webView.EvaluateJavascript(
+                    "JSON.stringify(typeof window.wwChipOnlyBoxes==='function'?window.wwChipOnlyBoxes(30):[])",
+                    new JsResultCallback(v =>
+                    {
+                        try
+                        {
+                            // EvaluateJavascript double-encodes: v is a JSON string containing JSON
+                            var inner = JsonConvert.DeserializeObject<string>(v ?? "null");
+                            var boxes = JsonConvert.DeserializeObject<List<string>>(inner ?? "[]") ?? new List<string>();
+                            var next = new HashSet<string>(boxes);
+                            bool changed = !next.SetEquals(_chipOnlyBoxes);
+                            _chipOnlyBoxes = next;
+                            if (changed && redrawOnChange && _appSettings.ShowChipOnlyBoxesInMultiBoxView)
+                                RunOnUiThread(DrawPageLayouts);
+                        }
+                        catch { }
+                    }));
+            }
+            catch { }
+        }
+
         // Manual Sync: clear the HTTP cache and reboot the embed so it re-syncs. The IndexedDB
         // colony cache is deliberately KEPT — the embed's boot sync is incremental (?since=
         // watermark) and self-healing (server row counts ride along on every incremental
@@ -5297,6 +5333,8 @@ namespace PenguinMonitor
                         var cb = _onEmbedReady;
                         _onEmbedReady = null;
                         cb?.Invoke();
+                        // Fresh colony data in the web cache — recompute the Chip-only box list
+                        RunOnUiThread(() => RefreshChipOnlyBoxes(redrawOnChange: true));
                     }
                 }));
                 _embedWebView = webView;

@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -5986,8 +5986,10 @@ export function EmbeddedPanel() {
     };
     (window as any).wwBack = () => step(-1);
     (window as any).wwForward = () => step(1);
+    // NestCheck's "Chip only" overview filter reads this after each wwready signal.
+    (window as any).wwChipOnlyBoxes = (days?: number) => queryChipOnlyBoxes(days || 30);
     updateNavTitle();
-    return () => { delete (window as any).wwShow; delete (window as any).wwSetColony; delete (window as any).wwBack; delete (window as any).wwForward; };
+    return () => { delete (window as any).wwShow; delete (window as any).wwSetColony; delete (window as any).wwBack; delete (window as any).wwForward; delete (window as any).wwChipOnlyBoxes; };
   }, []);
 
   if (status === 'error') return <div className="embed-state embed-error">Couldn't load colony data<div className="muted" style={{marginTop:6, fontSize:12}}>{errMsg}</div></div>;

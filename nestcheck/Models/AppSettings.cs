@@ -294,6 +294,19 @@ namespace PenguinMonitor.Models
                 }
             }
         }
+        private bool showChipOnlyBoxesInMultiBoxView;
+        public bool ShowChipOnlyBoxesInMultiBoxView
+        {
+            get => showChipOnlyBoxesInMultiBoxView;
+            set
+            {
+                if (showChipOnlyBoxesInMultiBoxView != value)
+                {
+                    showChipOnlyBoxesInMultiBoxView = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
         private bool showDCMBoxesInMultiboxView;
         public bool ShowDCMBoxesInMultiboxView
         {
