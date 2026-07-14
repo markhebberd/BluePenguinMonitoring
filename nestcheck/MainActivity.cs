@@ -177,6 +177,19 @@ namespace PenguinMonitor
         private List<LinearLayout?> _scannedIdsLayout;
         private EditText? _manualScanEditText;
 
+        /// <summary>
+        /// Adjust a count field by delta, never below zero. TryParse rather than Parse because
+        /// the user can clear the field entirely — an empty box must read as 0, not throw and
+        /// take down the scan (or queued chip) that was trying to bump it.
+        /// </summary>
+        private void BumpCount(List<EditText?>? field, int delta)
+        {
+            var view = field != null && field.Count > 0 ? field[0] : null;
+            if (view == null) return;
+            int.TryParse(view.Text ?? "0", out int n);
+            view.Text = Math.Max(0, n + delta).ToString();
+        }
+
         private List<EditText?> _adultsEditText;
         private List<EditText?> _eggsEditText;
         private List<EditText?> _chicksEditText;
@@ -262,19 +275,42 @@ namespace PenguinMonitor
             // Reopen an unfinished chipping form — the workflow can take ~15 minutes and
             // Android may kill the backgrounded app mid-bird. The saved PIT and form values
             // put the user back exactly where they were.
-            new Handler(Looper.MainLooper).PostDelayed(() =>
+            new Handler(Looper.MainLooper).PostDelayed(() => TryRestorePendingChip(0), 2500);
+        }
+
+        /// <summary>
+        /// Reopen a chipping form that a process-kill interrupted, on the box it was started on.
+        /// The box list loads asynchronously, so wait for it: opening the form early would land
+        /// the bird's counts on whatever box happened to be showing. Retries for ~10s, then gives
+        /// up on the jump and says so rather than silently using the wrong box.
+        /// </summary>
+        private void TryRestorePendingChip(int attempt)
+        {
+            var pending = LoadPendingChip();
+            if (pending == null || string.IsNullOrEmpty(pending.FullPitId)) return;
+
+            bool needsJump = !string.IsNullOrEmpty(pending.BoxName) && pending.BoxName != _currentBoxName;
+            bool boxKnown = _boxNamesAndIndexes != null && _boxNamesAndIndexes.ContainsKey(pending.BoxName ?? "");
+            if (needsJump && !boxKnown)
             {
-                var pending = LoadPendingChip();
-                if (pending != null && !string.IsNullOrEmpty(pending.FullPitId))
+                if (attempt < 20) // ~10s of 500ms retries while the box list loads
                 {
-                    if (!string.IsNullOrEmpty(pending.BoxName) && pending.BoxName != _currentBoxName
-                        && _boxNamesAndIndexes != null && _boxNamesAndIndexes.ContainsKey(pending.BoxName))
-                        JumpToBox(pending.BoxName);
-                    var sid = pending.FullPitId.Length >= 8 ? pending.FullPitId.Substring(pending.FullPitId.Length - 8) : pending.FullPitId;
-                    (string box, bool decrementAdult)? cleanup = pending.ScanCleanup ? (pending.ScanCleanupBox, pending.ScanCleanupDecrement) : null;
-                    ShowNewBirdDialog(sid, pending.FullPitId, scanCleanup: cleanup, restore: pending);
+                    new Handler(Looper.MainLooper).PostDelayed(() => TryRestorePendingChip(attempt + 1), 500);
+                    return;
                 }
-            }, 2500);
+                // Box list is loaded but doesn't have it (different box set/colony), or it never
+                // loaded. Restore the form — the PIT and the field values are the precious part —
+                // but be loud that its counts will land on the box now showing.
+                Toast.MakeText(this, $"Box {pending.BoxName} not loaded — restoring chip form on {_currentBoxName}", ToastLength.Long)?.Show();
+            }
+            else if (needsJump)
+            {
+                JumpToBox(pending.BoxName);
+            }
+
+            var sid = pending.FullPitId.Length >= 8 ? pending.FullPitId.Substring(pending.FullPitId.Length - 8) : pending.FullPitId;
+            (string box, bool decrementAdult)? cleanup = pending.ScanCleanup ? (pending.ScanCleanupBox, pending.ScanCleanupDecrement) : null;
+            ShowNewBirdDialog(sid, pending.FullPitId, scanCleanup: cleanup, restore: pending);
         }
         protected override void OnResume()
         {
@@ -342,6 +378,19 @@ namespace PenguinMonitor
                     // box-card content path, leaving the breeding string / summary stale.
                     UpdatePreviousObsSummary();
                     UpdateStatusText();
+
+                    // A queued bird the server refused is gone from the queue for good, and one
+                    // parked on a different number won't match the field notes. Neither can be
+                    // left to a toast the user may never see — make it dismiss-to-acknowledge.
+                    if (result.ChipWarnings?.Count > 0)
+                    {
+                        new AlertDialog.Builder(this)
+                            .SetTitle("Queued birds — check")
+                            .SetMessage(string.Join("\n\n", result.ChipWarnings))
+                            .SetPositiveButton("OK", (s, e) => { })
+                            .SetCancelable(false)
+                            .Show();
+                    }
                 });
             }
             catch (Exception ex)
@@ -1350,13 +1399,17 @@ namespace PenguinMonitor
                         else
                         {
                             bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null || result.UploadErrors > 0;
-                            syncDialog.SetTitle(hasErrors ? "Sync — Partial" : "Synced");
-                            if (hasErrors)
+                            // Chip warnings aren't failures — the sync worked, but a queued bird
+                            // needs a human look (rejected, or parked on a different number).
+                            bool hasChipWarnings = result.ChipWarnings?.Count > 0;
+                            syncDialog.SetTitle(hasErrors ? "Sync — Partial" : hasChipWarnings ? "Synced — check birds" : "Synced");
+                            if (hasErrors || hasChipWarnings)
                             {
                                 var details = new List<string>(progressMessages);
                                 if (!string.IsNullOrEmpty(result.Error)) details.Add($"Error: {result.Error}");
                                 if (result.TagSyncResult?.Error != null) details.Add($"Tags: {result.TagSyncResult.Error}");
                                 if (result.UploadErrors > 0) details.Add($"Upload errors: {result.UploadErrors}");
+                                if (hasChipWarnings) details.AddRange(result.ChipWarnings!);
                                 syncDialog.SetMessage(string.Join("\n", details));
                             }
                             var okBtn = syncDialog.GetButton((int)Android.Content.DialogButtonType.Negative);
@@ -4973,7 +5026,7 @@ namespace PenguinMonitor
             noScanBtn.LayoutParameters = noScanBtnParams;
             noScanBtn.Click += (s, e) =>
             {
-                _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                BumpCount(_adultsEditText, 1);
                 var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
                 var noScanId = $"NOSCAN_{boxData.ScannedIds.Count(s2 => s2.BirdId.StartsWith("NOSCAN_")) + 1}";
                 boxData.ScannedIds.Add(new ScanRecord { BirdId = noScanId, Timestamp = DateTime.UtcNow });
@@ -5991,8 +6044,8 @@ namespace PenguinMonitor
                 }
 
                 // The bird is physically present — count it now
-                if (qIsChick) _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
-                else _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                if (qIsChick) BumpCount(_chicksEditText, 1);
+                else BumpCount(_adultsEditText, 1);
                 SaveCurrentBoxData();
                 completed = true; // queued = the scanned tag stays in the box (onCancel must not remove it)
                 dialog.Dismiss(); // also clears the pending-chip form file
@@ -6044,115 +6097,129 @@ namespace PenguinMonitor
                         // them within it (e.g. NI7) and stamps penguins.colony_id.
                         var colonyId = _appSettings.SelectedColonyId > 0 ? _appSettings.SelectedColonyId : 1;
 
-                        // 1. Create penguin record — skipped for a rechip (bird already exists)
+                        var today = NzNow.ToString("yyyy-MM-dd");
                         string? pengNum;
-                        if (isRechip)
+
+                        if (!isRechip)
                         {
-                            pengNum = rechipTarget!.PengNum;
+                            // New bird: penguin + chip + biometrics land in ONE server transaction.
+                            // Three separate creates used to be able to half-succeed — a drop after
+                            // the penguin create left a chipless bird, and a retry made a second
+                            // one. The server keys on pit_id, so this is safe to retry as-is.
+                            var birdFields = new Dictionary<string, object>
+                            {
+                                ["pit_id"] = fullPitId,
+                                ["chipped_as_adult"] = isChick ? 0 : 1,
+                                ["chip_date"] = today,
+                                ["observation_date"] = today,
+                                ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
+                                ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
+                            };
+                            if (!string.IsNullOrEmpty(chickSize)) birdFields["chick_size_code"] = chickSize;
+                            if (!string.IsNullOrEmpty(weightInput.Text)) birdFields["weight"] = weightInput.Text;
+                            if (!string.IsNullOrEmpty(flipperInput.Text)) birdFields["flipper_length"] = flipperInput.Text;
+                            // sex is an observation (observed_sex), not truth on the penguin record
+                            if (!string.IsNullOrEmpty(sex)) birdFields["observed_sex"] = sex;
+                            if (!string.IsNullOrWhiteSpace(notesInput.Text)) birdFields["notes"] = notesInput.Text.Trim();
+
+                            var birdReq = new HttpRequestMessage(HttpMethod.Post,
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create_chipped_bird&colony_id={colonyId}");
+                            birdReq.Headers.Add("Authorization", $"Bearer {token}");
+                            birdReq.Content = new StringContent(
+                                JsonConvert.SerializeObject(birdFields), System.Text.Encoding.UTF8, "application/json");
+                            var birdResp = await client.SendAsync(birdReq);
+                            var birdJson = await birdResp.Content.ReadAsStringAsync();
+                            var birdResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(birdJson);
+
+                            pengNum = birdResult?.ContainsKey("peng_num") == true ? birdResult["peng_num"]?.ToString() : null;
+                            if (string.IsNullOrEmpty(pengNum))
+                            {
+                                RunOnUiThread(() =>
+                                {
+                                    new AlertDialog.Builder(this)
+                                        .SetTitle("Failed to save bird")
+                                        .SetMessage(birdJson + "\n\nNothing was saved — safe to retry.")
+                                        .SetPositiveButton("OK", (s2, e2) => { })
+                                        .Show();
+                                });
+                                RestoreSaveButton();
+                                return;
+                            }
                         }
                         else
                         {
-                        var pengFields = new Dictionary<string, object>
-                        {
-                            ["chipped_as_adult"] = isChick ? 0 : 1,
-                        };
-                        // sex goes to biometric data as observed_sex, not penguin table
-                        if (!string.IsNullOrEmpty(chickSize)) pengFields["chick_size_code"] = chickSize;
+                            pengNum = rechipTarget!.PengNum;
 
-                        var pengReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins&colony_id={colonyId}");
-                        pengReq.Headers.Add("Authorization", $"Bearer {token}");
-                        pengReq.Content = new StringContent(
-                            JsonConvert.SerializeObject(pengFields), System.Text.Encoding.UTF8, "application/json");
-                        var pengResp = await client.SendAsync(pengReq);
-                        var pengJson = await pengResp.Content.ReadAsStringAsync();
-                        var pengResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(pengJson);
-
-                        pengNum = pengResult?.ContainsKey("peng_num") == true ? pengResult["peng_num"]?.ToString() : null;
-                        if (string.IsNullOrEmpty(pengNum))
-                        {
-                            RunOnUiThread(() =>
+                            // 1. New chip for the existing bird (test placeholder PITs never reach
+                            // here — DoAdd exits before saving anything)
+                            var chipFields = new Dictionary<string, object>
                             {
-                                new AlertDialog.Builder(this)
-                                    .SetTitle("Failed to create penguin")
-                                    .SetMessage(pengJson)
-                                    .SetPositiveButton("OK", (s2, e2) => { })
-                                    .Show();
-                            });
-                            RestoreSaveButton();
-                            return;
-                        }
-                        }
-
-                        // 2. Create chip record (test placeholder PITs never reach here —
-                        // DoAdd exits before saving anything)
-                        var chipFields = new Dictionary<string, object>
-                        {
-                            ["peng_num"] = pengNum,
-                            ["pit_id"] = fullPitId,
-                            ["chip_date"] = NzNow.ToString("yyyy-MM-dd"),
-                            ["is_active"] = 1,
-                            ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
-                            ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
-                        };
-                        var chipReq = new HttpRequestMessage(HttpMethod.Post,
-                            $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
-                        chipReq.Headers.Add("Authorization", $"Bearer {token}");
-                        chipReq.Content = new StringContent(
-                            JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
-                        var chipResp = await client.SendAsync(chipReq);
-                        var chipJson = await chipResp.Content.ReadAsStringAsync();
-                        var chipResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(chipJson);
-                        if (chipResult == null || chipResult.ContainsKey("error"))
-                        {
-                            RunOnUiThread(() =>
+                                ["peng_num"] = pengNum,
+                                ["pit_id"] = fullPitId,
+                                ["chip_date"] = today,
+                                ["is_active"] = 1,
+                                ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
+                                ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
+                            };
+                            var chipReq = new HttpRequestMessage(HttpMethod.Post,
+                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
+                            chipReq.Headers.Add("Authorization", $"Bearer {token}");
+                            chipReq.Content = new StringContent(
+                                JsonConvert.SerializeObject(chipFields), System.Text.Encoding.UTF8, "application/json");
+                            var chipResp = await client.SendAsync(chipReq);
+                            var chipJson = await chipResp.Content.ReadAsStringAsync();
+                            var chipResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(chipJson);
+                            if (chipResult == null || chipResult.ContainsKey("error"))
                             {
-                                new AlertDialog.Builder(this)
-                                    .SetTitle("Failed to create chip")
-                                    .SetMessage(chipJson + "\n\nNote: the penguin record was already created — retrying will make a duplicate bird. Sync and check before retrying.")
-                                    .SetPositiveButton("OK", (s3, e3) => { })
-                                    .Show();
-                            });
-                            RestoreSaveButton();
-                            return;
-                        }
-
-                        // 2b. Rechip: retire the bird's previous chip (like the wildwatch flow)
-                        if (isRechip && !string.IsNullOrEmpty(rechipOldPit)
-                            && !string.Equals(rechipOldPit, fullPitId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try
-                            {
-                                var retireReq = new HttpRequestMessage(HttpMethod.Post,
-                                    $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguin_chips&id={Uri.EscapeDataString(rechipOldPit)}&colony_id={colonyId}");
-                                retireReq.Headers.Add("Authorization", $"Bearer {token}");
-                                retireReq.Content = new StringContent(
-                                    JsonConvert.SerializeObject(new Dictionary<string, object> { ["is_active"] = 0 }),
-                                    System.Text.Encoding.UTF8, "application/json");
-                                await client.SendAsync(retireReq);
+                                RunOnUiThread(() =>
+                                {
+                                    new AlertDialog.Builder(this)
+                                        .SetTitle("Failed to create chip")
+                                        .SetMessage(chipJson)
+                                        .SetPositiveButton("OK", (s3, e3) => { })
+                                        .Show();
+                                });
+                                RestoreSaveButton();
+                                return;
                             }
-                            catch (Exception rex)
-                            {
-                                RunOnUiThread(() => Toast.MakeText(this,
-                                    $"New chip saved, but retiring old chip failed: {rex.Message}", ToastLength.Long)?.Show());
-                            }
-                        }
 
-                        // 3. Create biometric record if any data entered
-                        var bioFields = new Dictionary<string, object>();
-                        if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
-                        if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["flipper_length"] = flipperInput.Text;
-                        if (!string.IsNullOrEmpty(sex)) bioFields["observed_sex"] = sex;
-                        if (bioFields.Count > 0)
-                        {
-                            bioFields["peng_num"] = pengNum;
-                            bioFields["observation_date"] = NzNow.ToString("yyyy-MM-dd");
-                            var bioReq = new HttpRequestMessage(HttpMethod.Post,
-                                $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
-                            bioReq.Headers.Add("Authorization", $"Bearer {token}");
-                            bioReq.Content = new StringContent(
-                                JsonConvert.SerializeObject(bioFields), System.Text.Encoding.UTF8, "application/json");
-                            await client.SendAsync(bioReq);
+                            // 2. Retire the bird's previous chip (like the wildwatch flow)
+                            if (!string.IsNullOrEmpty(rechipOldPit)
+                                && !string.Equals(rechipOldPit, fullPitId, StringComparison.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    var retireReq = new HttpRequestMessage(HttpMethod.Post,
+                                        $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=update&table=penguin_chips&id={Uri.EscapeDataString(rechipOldPit)}&colony_id={colonyId}");
+                                    retireReq.Headers.Add("Authorization", $"Bearer {token}");
+                                    retireReq.Content = new StringContent(
+                                        JsonConvert.SerializeObject(new Dictionary<string, object> { ["is_active"] = 0 }),
+                                        System.Text.Encoding.UTF8, "application/json");
+                                    await client.SendAsync(retireReq);
+                                }
+                                catch (Exception rex)
+                                {
+                                    RunOnUiThread(() => Toast.MakeText(this,
+                                        $"New chip saved, but retiring old chip failed: {rex.Message}", ToastLength.Long)?.Show());
+                                }
+                            }
+
+                            // 3. Biometrics, if any were entered
+                            var bioFields = new Dictionary<string, object>();
+                            if (!string.IsNullOrEmpty(weightInput.Text)) bioFields["weight"] = weightInput.Text;
+                            if (!string.IsNullOrEmpty(flipperInput.Text)) bioFields["flipper_length"] = flipperInput.Text;
+                            if (!string.IsNullOrWhiteSpace(notesInput.Text)) bioFields["notes"] = notesInput.Text.Trim();
+                            if (bioFields.Count > 0)
+                            {
+                                bioFields["peng_num"] = pengNum;
+                                bioFields["observation_date"] = today;
+                                var bioReq = new HttpRequestMessage(HttpMethod.Post,
+                                    $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
+                                bioReq.Headers.Add("Authorization", $"Bearer {token}");
+                                bioReq.Content = new StringContent(
+                                    JsonConvert.SerializeObject(bioFields), System.Text.Encoding.UTF8, "application/json");
+                                await client.SendAsync(bioReq);
+                            }
                         }
 
                         // 4. Update local penguin data cache
@@ -6187,12 +6254,12 @@ namespace PenguinMonitor
                             // Increment adult or chick count
                             if (isChick)
                             {
-                                _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
+                                BumpCount(_chicksEditText, 1);
                                 Toast.MakeText(this, $"#{pengNum} {verb} (+1 Chick)", ToastLength.Short)?.Show();
                             }
                             else
                             {
-                                _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                                BumpCount(_adultsEditText, 1);
                                 Toast.MakeText(this, $"#{pengNum} {verb} (+1 Adult)", ToastLength.Short)?.Show();
                             }
                             SaveCurrentBoxData();
@@ -6215,7 +6282,7 @@ namespace PenguinMonitor
                                     .SetPositiveButton("Yes, replace", (s3, e3) =>
                                     {
                                         replaceBox!.ScannedIds.Remove(noScanEntry);
-                                        _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                                        BumpCount(_adultsEditText, -1);
                                         SaveCurrentBoxData();
                                         DrawPageLayouts();
                                         Toast.MakeText(this, $"No-scan in box {_currentBoxName} replaced by #{pengNum}", ToastLength.Short)?.Show();
@@ -6313,18 +6380,18 @@ namespace PenguinMonitor
                             if (isNoScan)
                             {
                                 // Mirror the +1 Adult applied when the no-scan was added
-                                _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                                BumpCount(_adultsEditText, -1);
                             }
                             else if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinData) && (
                                 LifeStage.Adult == penguinData.LastKnownLifeStage ||
                                 LifeStage.Returnee == penguinData.LastKnownLifeStage ||
                                 NzNow > penguinData.ChipDate.AddMonths(3)))
                             {
-                                _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                                BumpCount(_adultsEditText, -1);
                             }
                             else if (_remotePenguinData.TryGetValue(scanToRemove.BirdId, out var penguinChick) && LifeStage.Chick == penguinChick.LastKnownLifeStage)
                             {
-                                _chicksEditText[0].Text = "" + Math.Max(0, int.Parse(_chicksEditText[0].Text ?? "0") - 1);
+                                BumpCount(_chicksEditText, -1);
                             }
                             SaveCurrentBoxData();
                             buildScannedIdsLayout(boxData.ScannedIds);
@@ -6419,12 +6486,12 @@ namespace PenguinMonitor
                             {
                                 if (LifeStage.Adult == penguinData.LastKnownLifeStage || LifeStage.Returnee == penguinData.LastKnownLifeStage || NzNow > penguinData.ChipDate.AddMonths(3))
                                 {
-                                    _adultsEditText[0].Text = "" + Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1);
+                                    BumpCount(_adultsEditText, -1);
                                     targetBoxData.Adults++;
                                 }
                                 else if (LifeStage.Chick == penguinData.LastKnownLifeStage)
                                 {
-                                    _chicksEditText[0].Text = "" + Math.Max(0, int.Parse(_chicksEditText[0].Text ?? "0") - 1);
+                                    BumpCount(_chicksEditText, -1);
                                     targetBoxData.Chicks++;
                                 }
                             }
@@ -6972,14 +7039,14 @@ namespace PenguinMonitor
                         if (penguin.LastKnownLifeStage == LifeStage.Chick)
                         {
                             // Still a chick (a chick chipped >3 months ago is derived as a returnee/adult instead)
-                            _chicksEditText[0].Text = (int.Parse(_chicksEditText[0].Text ?? "0") + 1).ToString();
+                            BumpCount(_chicksEditText, 1);
                             toastMessage += $" (+1 Chick)";
                             SaveCurrentBoxData();
                         }
                         else if (penguin.LastKnownLifeStage == LifeStage.Adult ||
                                  penguin.LastKnownLifeStage == LifeStage.Returnee)
                         {
-                            _adultsEditText[0].Text = (int.Parse(_adultsEditText[0].Text ?? "0") + 1).ToString();
+                            BumpCount(_adultsEditText, 1);
                             SaveCurrentBoxData();
 
                             bool unsexed = !penguin.Sex.Equals("f", StringComparison.OrdinalIgnoreCase) && !penguin.Sex.Equals("m", StringComparison.OrdinalIgnoreCase);
@@ -7023,7 +7090,7 @@ namespace PenguinMonitor
             {
                 boxData.Adults = Math.Max(0, boxData.Adults - 1);
                 if (boxName == _currentBoxName && _adultsEditText?[0] != null)
-                    _adultsEditText[0].Text = Math.Max(0, int.Parse(_adultsEditText[0].Text ?? "0") - 1).ToString();
+                    BumpCount(_adultsEditText, -1);
             }
             boxData.WhenDataCollectedUtc = DateTime.UtcNow;
             _colonyState.SaveBoxObservation(boxName, boxData);

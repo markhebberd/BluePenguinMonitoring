@@ -88,6 +88,93 @@ if ($action === 'next_peng_num' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     exit;
 }
 
+/** The peng_num to give a new penguin. Offline-queued creates send the number the device
+ *  predicted ($req): honour it if still free, else park at +100 (then +200, ...) — clearly
+ *  out-of-band and renamable on wildwatch — so numbers written down in the field stay
+ *  traceable. No request (or an unparseable one) => next in sequence. Returns prefixed. */
+function wwResolvePengNum($pdo, int $colonyId, string $req): string {
+    $req = trim($req);
+    if ($req !== '' && preg_match('/^([A-Z]*)(\d+)$/', strtoupper($req), $m)) {
+        $prefix = $m[1] !== '' ? $m[1] : getColonyPrefix($pdo, $colonyId);
+        $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
+        for ($n = (int)$m[2]; ; $n += 100) {
+            $exists->execute([$prefix . $n]);
+            if (!$exists->fetchColumn()) return $prefix . $n;
+        }
+    }
+    return wwNextPengNum($pdo, $colonyId);
+}
+
+/**
+ * Create a chipped bird — penguin + chip + biometrics — in ONE transaction.
+ *
+ * The field app queues chippings while offline and replays them on the next sync. Doing that
+ * as three separate creates meant a connection drop between them left half a bird behind, and
+ * the replay then made a SECOND penguin for the same PIT. So: all-or-nothing, and idempotent —
+ * pit_id is the natural key, so a replay of a chipping that already landed just returns the
+ * peng_num it landed as. Retrying is therefore always safe, however the first attempt died.
+ */
+if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $cbRole = $observer['role'] ?? 'viewer';
+    if ($cbRole !== 'admin' && $cbRole !== 'editor') { http_response_code(403); echo json_encode(['error'=>'Editors only']); exit; }
+
+    $in = json_decode(file_get_contents('php://input'), true);
+    if (!$in || !is_array($in)) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); exit; }
+    $pit = trim((string)($in['pit_id'] ?? ''));
+    if ($pit === '') { http_response_code(400); echo json_encode(['error'=>'pit_id required']); exit; }
+
+    $cid = (int)($_GET['colony_id'] ?? 1);
+    requireColonyAccess($pdo, $observer, $cid, true); // the new bird is stamped with this colony
+    $viewPrefix = getColonyPrefix($pdo, $cid);
+    $pdo->beginTransaction();
+    try {
+        // Idempotency: this PIT is already chipped, so the bird exists — hand back its number
+        // rather than minting a duplicate. Covers "insert landed, response never arrived".
+        $dup = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE pit_id = ?");
+        $dup->execute([$pit]);
+        if ($existing = $dup->fetchColumn()) {
+            $pdo->commit();
+            echo json_encode(['success'=>true, 'replayed'=>true, 'peng_num'=>displayPengNum($existing, $viewPrefix)]);
+            exit;
+        }
+
+        $pengNum = wwResolvePengNum($pdo, $cid, (string)($in['requested_peng_num'] ?? ''));
+        $obsId = $observer['observer_id'];
+        $reason = $in['_reason'] ?? 'Offline chipping synced from NestCheck';
+
+        $penguin = ['peng_num'=>$pengNum, 'colony_id'=>$cid, 'chipped_as_adult'=>!empty($in['chipped_as_adult']) ? 1 : 0];
+        if (!empty($in['chick_size_code'])) $penguin['chick_size_code'] = $in['chick_size_code'];
+        wwAuditedInsert($pdo, 'penguins', $penguin, $obsId, $reason);
+
+        $chip = [
+            'peng_num'  => $pengNum,
+            'pit_id'    => $pit,
+            'chip_date' => $in['chip_date'] ?? date('Y-m-d'),
+            'is_active' => 1,
+        ];
+        foreach (['chip_box', 'chip_by'] as $f) if (isset($in[$f])) $chip[$f] = $in[$f];
+        wwAuditedInsert($pdo, 'penguin_chips', $chip, $obsId, $reason);
+
+        $bio = [];
+        foreach (['weight', 'flipper_length', 'observed_sex', 'notes'] as $f) {
+            if (isset($in[$f]) && $in[$f] !== '') $bio[$f] = $in[$f];
+        }
+        if ($bio) {
+            $bio['peng_num'] = $pengNum;
+            $bio['observation_date'] = $in['observation_date'] ?? ($in['chip_date'] ?? date('Y-m-d'));
+            wwAuditedInsert($pdo, 'penguin_biometric_data', stripRetiredColumns('penguin_biometric_data', $bio), $obsId, $reason);
+        }
+
+        $pdo->commit();
+        echo json_encode(['success'=>true, 'peng_num'=>displayPengNum($pengNum, $viewPrefix)]);
+    } catch (Exception $e) {
+        $pdo->rollBack(); // nothing partial survives — the app can safely retry the whole thing
+        http_response_code(400);
+        echo json_encode(['success'=>false, 'error'=>$e->getMessage()]);
+    }
+    exit;
+}
+
 $table = $_GET['table'] ?? '';
 $id = $_GET['id'] ?? null;
 
@@ -411,24 +498,12 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
-        // Auto-generate peng_num for new penguins (next number in the requested colony).
-        // Offline-queued creates send the number the device predicted (requested_peng_num):
-        // honour it if still free, else park at +100 (then +200, ...) — clearly out-of-band,
-        // renamable on wildwatch — so numbers written down in the field stay traceable.
+        // Auto-generate peng_num for new penguins (next number in the requested colony, or the
+        // device-predicted number honoured/parked — see wwResolvePengNum).
         if ($table === 'penguins' && !isset($input['peng_num'])) {
-            $req = trim((string)($input['requested_peng_num'] ?? ''));
+            $req = (string)($input['requested_peng_num'] ?? '');
             unset($input['requested_peng_num']);
-            if ($req !== '' && preg_match('/^([A-Z]*)(\d+)$/', strtoupper($req), $m)) {
-                $prefix = $m[1] !== '' ? $m[1] : getColonyPrefix($pdo, $cid);
-                $numPart = (int)$m[2];
-                $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
-                for ($n = $numPart; ; $n += 100) {
-                    $exists->execute([$prefix . $n]);
-                    if (!$exists->fetchColumn()) { $input['peng_num'] = $prefix . $n; break; }
-                }
-            } else {
-                $input['peng_num'] = wwNextPengNum($pdo, $cid);
-            }
+            $input['peng_num'] = wwResolvePengNum($pdo, $cid, $req);
         }
         // New penguins are stamped with their home colony
         if ($table === 'penguins' && !isset($input['colony_id'])) {

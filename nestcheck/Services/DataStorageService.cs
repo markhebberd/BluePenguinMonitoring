@@ -150,6 +150,10 @@ namespace PenguinMonitor.Services
             public int BiometricsUploaded { get; set; }
             public int BiometricUploadErrors { get; set; }
             public string? Error { get; set; }
+            /// <summary>Non-fatal notes from the offline-chip flush (e.g. a bird the server
+            /// rejected). Kept out of Error so the sync still counts as successful — a queued-chip
+            /// problem must not read as a failed download or stop background polling.</summary>
+            public List<string>? ChipWarnings { get; set; }
             public bool AuthFailed { get; set; }
             /// <summary>
             /// Server-detected conflicts: box already has today's data.
@@ -305,8 +309,8 @@ namespace PenguinMonitor.Services
 
                 // Step 1d: birds chipped while offline — created before the download so the
                 // penguins fetch below returns them with their real numbers
-                var chipReport = await FlushQueuedChips(context, appSettings);
-                if (chipReport != null) result.Error = chipReport;
+                var chipWarnings = await FlushQueuedChips(context, appSettings);
+                if (chipWarnings.Count > 0) result.ChipWarnings = chipWarnings;
 
                 // Step 2: Fetch + process in parallel — each task reports its own progress
                 var nzToday = MainActivity.NzToday;
@@ -943,86 +947,107 @@ namespace PenguinMonitor.Services
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"SaveQueuedChips: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Upload birds chipped while offline. Each queued entry creates the penguin (server
-        /// honours the device-predicted number or parks it at +100), its chip, and a biometric
-        /// record. Server-rejected entries (e.g. duplicate PIT) are dropped with the error
-        /// surfaced; connectivity failures keep the entry queued for the next sync.
-        /// </summary>
-        internal async Task<string?> FlushQueuedChips(Android.Content.Context context, AppSettings appSettings)
-        {
-            var queue = LoadQueuedChips(context);
-            if (queue.Count == 0) return null;
-            var token = appSettings.AuthToken;
-            if (string.IsNullOrEmpty(token)) return null;
-            var colonyId = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
-            string? report = null;
+        // Only one flush at a time. A manual sync and a background sync can overlap, and two
+        // flushes reading the same queue file would POST the same birds twice.
+        private static readonly SemaphoreSlim _chipFlushLock = new SemaphoreSlim(1, 1);
 
-            foreach (var q in queue.ToList())
+        /// <summary>
+        /// Upload birds chipped while offline. Each queued entry goes up as ONE atomic
+        /// create_chipped_bird call (penguin + chip + biometrics in a single server transaction),
+        /// so a connection drop mid-flush can never leave half a bird behind. The server keys on
+        /// pit_id, so replaying an entry whose first attempt actually landed just returns the
+        /// peng_num it landed as — retrying is always safe.
+        ///
+        /// Connectivity failures keep the entry queued for the next sync. Only a definitive
+        /// server rejection drops it, and never silently: the reason comes back as a warning.
+        /// </summary>
+        internal async Task<List<string>> FlushQueuedChips(Android.Content.Context context, AppSettings appSettings)
+        {
+            var warnings = new List<string>();
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return warnings;
+            if (LoadQueuedChips(context).Count == 0) return warnings;
+            if (!await _chipFlushLock.WaitAsync(0)) return warnings; // another sync is already flushing
+
+            try
             {
-                try
+                var queue = LoadQueuedChips(context); // re-read under the lock
+                var colonyId = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
+
+                foreach (var q in queue.ToList())
                 {
-                    // 1. Penguin (server assigns/parks the number)
-                    var pengFields = new Dictionary<string, object> { ["chipped_as_adult"] = q.IsChick ? 0 : 1 };
-                    if (!string.IsNullOrEmpty(q.ChickSizeCode)) pengFields["chick_size_code"] = q.ChickSizeCode;
-                    if (!string.IsNullOrEmpty(q.RequestedPengNum)) pengFields["requested_peng_num"] = q.RequestedPengNum;
-                    var pengReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguins&colony_id={colonyId}");
-                    pengReq.Headers.Add("Authorization", $"Bearer {token}");
-                    pengReq.Content = new StringContent(JsonConvert.SerializeObject(pengFields), Encoding.UTF8, "application/json");
-                    var pengResp = await _httpClient.SendAsync(pengReq);
-                    var pengResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(await pengResp.Content.ReadAsStringAsync());
-                    var pengNum = pengResult != null && pengResult.ContainsKey("peng_num") ? pengResult["peng_num"]?.ToString() : null;
-                    if (string.IsNullOrEmpty(pengNum))
+                    var chipDate = MainActivity.ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd");
+                    var fields = new Dictionary<string, object>
                     {
-                        // Server rejected (not connectivity): drop and report, don't retry forever
-                        report = $"Queued bird {q.RequestedPengNum} rejected: {pengResult?.GetValueOrDefault("error")}";
-                        queue.Remove(q); SaveQueuedChips(context, queue);
-                        continue;
+                        ["pit_id"] = q.FullPitId,
+                        ["chipped_as_adult"] = q.IsChick ? 0 : 1,
+                        ["chip_date"] = chipDate,
+                        ["observation_date"] = chipDate,
+                        ["chip_box"] = q.ChipBox,
+                        ["chip_by"] = q.ChipBy,
+                    };
+                    if (!string.IsNullOrEmpty(q.ChickSizeCode)) fields["chick_size_code"] = q.ChickSizeCode;
+                    if (!string.IsNullOrEmpty(q.RequestedPengNum)) fields["requested_peng_num"] = q.RequestedPengNum;
+                    if (!string.IsNullOrEmpty(q.Weight)) fields["weight"] = q.Weight;
+                    if (!string.IsNullOrEmpty(q.Flipper)) fields["flipper_length"] = q.Flipper;
+                    if (!string.IsNullOrEmpty(q.SexCode)) fields["observed_sex"] = q.SexCode;
+                    if (!string.IsNullOrEmpty(q.Notes)) fields["notes"] = q.Notes;
+
+                    System.Net.HttpStatusCode status;
+                    Dictionary<string, object>? body;
+                    try
+                    {
+                        var req = new HttpRequestMessage(HttpMethod.Post,
+                            $"{WILDWATCH_BASE_URL}/crud.php?action=create_chipped_bird&colony_id={colonyId}");
+                        req.Headers.Add("Authorization", $"Bearer {token}");
+                        req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
+                        var resp = await _httpClient.SendAsync(req);
+                        status = resp.StatusCode;
+                        var raw = await resp.Content.ReadAsStringAsync();
+                        body = JsonConvert.DeserializeObject<Dictionary<string, object>>(raw);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Connectivity, or a response we can't parse (proxy/HTML error page). The
+                        // transaction rolled back either way — stop; everything left stays queued
+                        // and replays safely on the next sync.
+                        System.Diagnostics.Debug.WriteLine($"FlushQueuedChips: {ex.Message}");
+                        break;
                     }
 
-                    // 2. Chip (dated when the bird was actually chipped)
-                    var chipFields = new Dictionary<string, object>
+                    var pengNum = body != null && body.ContainsKey("peng_num") ? body["peng_num"]?.ToString() : null;
+                    if (string.IsNullOrEmpty(pengNum))
                     {
-                        ["peng_num"] = pengNum, ["pit_id"] = q.FullPitId,
-                        ["chip_date"] = MainActivity.ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd"),
-                        ["is_active"] = 1, ["chip_box"] = q.ChipBox, ["chip_by"] = q.ChipBy,
-                    };
-                    var chipReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
-                    chipReq.Headers.Add("Authorization", $"Bearer {token}");
-                    chipReq.Content = new StringContent(JsonConvert.SerializeObject(chipFields), Encoding.UTF8, "application/json");
-                    var chipResp = await _httpClient.SendAsync(chipReq);
-                    var chipJson = await chipResp.Content.ReadAsStringAsync();
-                    var chipResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(chipJson);
-                    if (chipResult == null || chipResult.ContainsKey("error"))
-                        report = $"Bird {pengNum} created but chip failed: {chipResult?.GetValueOrDefault("error")}";
+                        // Not a per-bird problem: expired session, lost editor rights, server
+                        // fault. Retrying WILL help, so keep the queue intact — dropping birds
+                        // because a token went stale would be real field data lost.
+                        if (status != System.Net.HttpStatusCode.BadRequest)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"FlushQueuedChips: {(int)status}, keeping queue");
+                            break;
+                        }
 
-                    // 3. Biometrics (optional fields)
-                    var bio = new Dictionary<string, object>();
-                    if (!string.IsNullOrEmpty(q.Weight)) bio["weight"] = q.Weight;
-                    if (!string.IsNullOrEmpty(q.Flipper)) bio["flipper_length"] = q.Flipper;
-                    if (!string.IsNullOrEmpty(q.SexCode)) bio["observed_sex"] = q.SexCode;
-                    if (!string.IsNullOrEmpty(q.Notes)) bio["notes"] = q.Notes;
-                    if (bio.Count > 0)
+                        // 400: the server rolled back and definitively refused this bird.
+                        // Retrying can't help, so drop it — but never silently: say enough
+                        // that the bird can be re-entered by hand.
+                        var why = body?.GetValueOrDefault("error")?.ToString() ?? "unknown error";
+                        var who = string.IsNullOrEmpty(q.RequestedPengNum) ? q.FullPitId : q.RequestedPengNum;
+                        warnings.Add($"Queued bird {who} (PIT {q.FullPitId}, box {q.BoxName}) rejected: {why}");
+                    }
+                    else if (pengNum != q.RequestedPengNum && !string.IsNullOrEmpty(q.RequestedPengNum))
                     {
-                        bio["peng_num"] = pengNum;
-                        bio["observation_date"] = MainActivity.ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd");
-                        var bioReq = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_biometric_data&colony_id={colonyId}");
-                        bioReq.Headers.Add("Authorization", $"Bearer {token}");
-                        bioReq.Content = new StringContent(JsonConvert.SerializeObject(bio), Encoding.UTF8, "application/json");
-                        await _httpClient.SendAsync(bioReq);
+                        // The predicted number was taken, so the server parked it out-of-band.
+                        // Surface it — the field notes say one number and the database another.
+                        warnings.Add($"Bird written down as {q.RequestedPengNum} synced as {pengNum} (number was taken — rename on wildwatch).");
                     }
 
                     queue.Remove(q);
                     SaveQueuedChips(context, queue);
                 }
-                catch (Exception ex)
-                {
-                    // Connectivity — stop; everything left stays queued for the next sync
-                    System.Diagnostics.Debug.WriteLine($"FlushQueuedChips: {ex.Message}");
-                    break;
-                }
             }
-            return report;
+            finally { _chipFlushLock.Release(); }
+
+            return warnings;
         }
 
         /// <summary>
