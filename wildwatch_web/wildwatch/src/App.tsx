@@ -4890,20 +4890,21 @@ function AgeBarChart({ quarters, color, xLabel, hideFirst }: { quarters: number[
   );
 }
 
-/** Age distribution: two separate charts for chick-chipped and adult-chipped penguins. */
+/** Age distribution for adult-chipped penguins. */
 function PenguinAgeCharts() {
   const v = useDbVersion();
   const allPenguins = useAllPenguins();
-  const data = useMemo(() => {
+  const adultQs = useMemo(() => {
     const firstSeen = new Map<string, number>();
     const lastSeen = new Map<string, number>();
+    const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
     for (const loc of queryAllLocations()) {
       const bd = queryBoxDetailSync(loc.location_name);
       if (!bd?.observations?.length) continue;
       for (const obs of bd.observations) {
         const t = parseDate(obs.observation_time_utc).getTime();
         for (const s of obs.scans || []) {
-          if (!s.peng_num) continue;
+          if (!s.peng_num || !adultChipped.has(s.peng_num)) continue;
           const prev = firstSeen.get(s.peng_num);
           if (prev === undefined || t < prev) firstSeen.set(s.peng_num, t);
           const prevL = lastSeen.get(s.peng_num);
@@ -4911,35 +4912,23 @@ function PenguinAgeCharts() {
         }
       }
     }
-    const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
-    const chickQs: number[] = [];
-    const adultQs: number[] = [];
+    const qs: number[] = [];
     for (const [num, first] of firstSeen) {
       const last = lastSeen.get(num)!;
       if (last <= first) continue;
-      const quarters = Math.floor((last - first) / (1000 * 60 * 60 * 24 * 365.25 / 4));
-      if (adultChipped.has(num)) adultQs.push(quarters);
-      else chickQs.push(quarters);
+      qs.push(Math.floor((last - first) / (1000 * 60 * 60 * 24 * 365.25 / 4)));
     }
-    return { chickQs, adultQs };
+    return qs;
   }, [v, allPenguins]);
 
-  const { chickQs, adultQs } = data;
-  if (chickQs.length + adultQs.length === 0) return <div className="report-card"><h3>Penguin ages</h3><p className="muted">No data available</p></div>;
+  if (adultQs.length === 0) return <div className="report-card"><h3>Penguin ages</h3><p className="muted">No data available</p></div>;
 
   return (
-    <>
-      <div className="report-card">
-        <h3>Chick-chipped penguin ages</h3>
-        <p className="muted">Time between earliest and most recent scan for penguins chipped as chicks (n={chickQs.length})</p>
-        <AgeBarChart quarters={chickQs} color="#DAA520" xLabel="Time between first and last scan" hideFirst />
-      </div>
-      <div className="report-card">
-        <h3>Adult-chipped penguin ages</h3>
-        <p className="muted">Time between earliest and most recent scan for penguins chipped as adults (n={adultQs.length})</p>
-        <AgeBarChart quarters={adultQs} color="#2196F3" xLabel="Time between first and last scan" />
-      </div>
-    </>
+    <div className="report-card">
+      <h3>Adult-chipped penguin ages</h3>
+      <p className="muted">Time between earliest and most recent scan for penguins chipped as adults (n={adultQs.length})</p>
+      <AgeBarChart quarters={adultQs} color="#2196F3" xLabel="Time between first and last scan" />
+    </div>
   );
 }
 
