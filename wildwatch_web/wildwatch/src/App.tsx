@@ -4890,19 +4890,23 @@ function AgeBarChart({ quarters, color, xLabel, hideFirst }: { quarters: number[
   );
 }
 
-/** Age distribution for adult-chipped penguins. */
+/** Age distribution for the initial cohort of adult-chipped penguins — birds first
+ *  scanned in the colony's earliest season (same cohort as the survival report). */
 function PenguinAgeCharts() {
   const v = useDbVersion();
   const allPenguins = useAllPenguins();
-  const adultQs = useMemo(() => {
+  const { adultQs, firstSeason } = useMemo(() => {
     const firstSeen = new Map<string, number>();
     const lastSeen = new Map<string, number>();
     const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
+    let firstSeason = '';
     for (const loc of queryAllLocations()) {
       const bd = queryBoxDetailSync(loc.location_name);
       if (!bd?.observations?.length) continue;
       for (const obs of bd.observations) {
         const t = parseDate(obs.observation_time_utc).getTime();
+        const season = getSeasonLabel(parseDate(obs.observation_time_utc));
+        if (!firstSeason || season < firstSeason) firstSeason = season;
         for (const s of obs.scans || []) {
           if (!s.peng_num || !adultChipped.has(s.peng_num)) continue;
           const prev = firstSeen.get(s.peng_num);
@@ -4914,11 +4918,12 @@ function PenguinAgeCharts() {
     }
     const qs: number[] = [];
     for (const [num, first] of firstSeen) {
+      if (getSeasonLabel(new Date(first)) !== firstSeason) continue; // initial cohort only
       const last = lastSeen.get(num)!;
       if (last <= first) continue;
       qs.push(Math.floor((last - first) / (1000 * 60 * 60 * 24 * 365.25 / 4)));
     }
-    return qs;
+    return { adultQs: qs, firstSeason };
   }, [v, allPenguins]);
 
   if (adultQs.length === 0) return <div className="report-card"><h3>Penguin ages</h3><p className="muted">No data available</p></div>;
@@ -4926,7 +4931,7 @@ function PenguinAgeCharts() {
   return (
     <div className="report-card">
       <h3>Adult-chipped penguin ages</h3>
-      <p className="muted">Time between earliest and most recent scan for penguins chipped as adults (n={adultQs.length})</p>
+      <p className="muted">Time between earliest and most recent scan for adult-chipped penguins in the initial cohort — birds first scanned in {seasonRange(firstSeason)} (n={adultQs.length})</p>
       <AgeBarChart quarters={adultQs} color="#2196F3" xLabel="Time between first and last scan" />
     </div>
   );
