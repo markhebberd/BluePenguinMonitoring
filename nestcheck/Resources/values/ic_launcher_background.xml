@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#2C3E50</color>
+    <!-- Adaptive icon background: white, matching the logo's own backdrop so the nest art
+         sits on a clean white field under any launcher mask (circle/squircle/rounded). -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>
