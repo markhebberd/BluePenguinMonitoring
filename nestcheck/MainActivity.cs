@@ -3404,7 +3404,10 @@ namespace PenguinMonitor
 
                     // Historical view mode
                     if (_appTitleText != null)
-                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer" : $"Nestcheck {CurrentColonyAcronym()}".TrimEnd();
+                        // PT (Tarakohe, the home colony) shows a bare "Nestcheck"; other colonies
+                        // keep their acronym so it's obvious at a glance you're not in PT.
+                        _appTitleText.Text = _isHistoricalView ? "Json Nest Viewer"
+                            : $"Nestcheck {(CurrentColonyAcronym() == "PT" ? "" : CurrentColonyAcronym())}".TrimEnd();
                     if (_exitHistoricalButton != null)
                         _exitHistoricalButton.Visibility = _isHistoricalView ? ViewStates.Visible : ViewStates.Gone;
                     if (_isHistoricalView)
@@ -4569,7 +4572,7 @@ namespace PenguinMonitor
             var adultsLabel = _uiFactory.CreateDataLabel("Adults");
             var eggsLabel = _uiFactory.CreateDataLabel("Eggs");
             var chicksLabel = _uiFactory.CreateDataLabel("Chicks");
-            var breedingChance = _uiFactory.CreateDataLabel("BR%");
+            var breedingChance = _uiFactory.CreateDataLabel("Nest");
             var gateLabel = _uiFactory.CreateDataLabel("Gate");
 
             headingsLayout.AddView(adultsLabel);
