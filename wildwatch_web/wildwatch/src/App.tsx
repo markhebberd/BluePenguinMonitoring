@@ -6401,7 +6401,20 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
   const exportCsv = () => {
     const boxesByPit = computeBoxesSeenByPit();
     const lines: string[] = [];
-    for (const r of rows || []) {
+    // Sorted by penguin number ascending so rows come out in chipping order (peng_num is
+    // sequential), independent of the table's current sort. Prefix then number, so a mixed
+    // list (e.g. PT/NI) groups by colony and orders numerically within each.
+    // Tarakohe (PT) birds export as a bare number; every other colony prepends its acronym.
+    // colony_prefix comes from the server payload; fall back to any prefix left on peng_num.
+    const acronymOf = (r: any): string => r.colony_prefix || String(r.peng_num).match(/^[A-Z]+/)?.[0] || '';
+    const bareNum = (r: any): string => String(r.peng_num).replace(/^[A-Z]+/, '');
+    const pengOut = (r: any): string => acronymOf(r) === 'PT' ? bareNum(r) : `${acronymOf(r)}${bareNum(r)}`;
+    const pengKey = (r: any): [string, number] => [String(r.peng_num).replace(/\d+$/, ''), parseInt(String(r.peng_num).replace(/^\D+/, ''), 10) || 0];
+    const ordered = [...(rows || [])].sort((a, b) => {
+      const [pa, na] = pengKey(a), [pb, nb] = pengKey(b);
+      return pa.localeCompare(pb) || na - nb;
+    });
+    for (const r of ordered) {
       const activePits = (r.pits || []).filter((p: any) => p.is_active);
       if (!activePits.length) continue;
       const chipBox = String(r.first_chip_box || '');
@@ -6420,8 +6433,9 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
       const field = `${chipBox}-${middle}${end}`
         .replace(/-{2,}/g, '-').replace(/ {2,}/g, ' ')
         .replace(/^-+/, '').replace(/-+$/, '').slice(0, 16);
-      // Stored pit_ids carry an "LA" prefix; the reader wants the bare 15 digits.
-      for (const p of activePits) lines.push(`${String(p.pit_id).replace(/^[A-Za-z]+/, '')},${field}`);
+      // peng_num leads each row (the sequential penguin number), then the bare 15-digit tag
+      // (stored pit_ids carry an "LA" prefix the reader doesn't want), then the activity field.
+      for (const p of activePits) lines.push(`${pengOut(r)},${String(p.pit_id).replace(/^[A-Za-z]+/, '')},${field}`);
     }
     const url = URL.createObjectURL(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
     const a = document.createElement('a');
@@ -6577,7 +6591,46 @@ function FieldDiff({ name, value }: { name: string; value: any }) {
   );
 }
 
-function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
+// Tables crud.php's update action (→ db_write.php wwAuditedUpdate) accepts; a Revert is
+// just an audited update setting each field back to its old value, so it's limited to these.
+const REVERTABLE_TABLES = new Set(['observations', 'penguins', 'penguin_scans', 'penguin_biometric_data', 'penguin_chips', 'observation_locations']);
+// Audit keys that aren't real columns (display/count helpers) — never send them in a revert.
+const NON_COLUMN_AUDIT_KEYS = new Set(['scans', 'box']);
+
+/** An UPDATE audit entry can be undone by writing each changed field back to its "old"
+ *  value. Returns the {column: old} map, or null if there's nothing revertible. */
+function revertFields(fields: any): Record<string, any> | null {
+  if (!fields || typeof fields !== 'object') return null;
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (NON_COLUMN_AUDIT_KEYS.has(k)) continue;
+    if (v && typeof v === 'object' && !Array.isArray(v) && 'old' in (v as any)) out[k] = (v as any).old;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function RevertButton({ entry, fields, token, onReverted }: { entry: any; fields: any; token: string; onReverted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const revert = revertFields(fields);
+  if (!revert) return null;
+  const onClick = async () => {
+    const lines = Object.entries(revert).map(([k, oldV]) => `  ${fieldLabel(k)}: ${auditValue((fields[k] as any).new)} → ${auditValue(oldV)}`);
+    if (!window.confirm(`Revert this change on ${entry.table_name} #${entry.record_id}?\n\n${lines.join('\n')}\n\nThis is itself recorded as an audited edit.`)) return;
+    setBusy(true);
+    try {
+      const res = await updateRecord(token, entry.table_name, entry.record_id, revert, `Revert of change #${entry.audit_id} (${entry.nz_time || ''} by ${entry.observer_name || 'unknown'})`);
+      if (res?.error) { alert(`Revert failed: ${res.error}`); return; }
+      onReverted();
+    } catch (e: any) {
+      alert(`Revert failed: ${e?.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <button className="edit-btn" style={{ fontSize: 11, padding: '1px 8px' }} disabled={busy} onClick={onClick}>{busy ? 'Reverting…' : 'Revert'}</button>;
+}
+
+function ChangeDateGroup({ date, entries, token, onReverted }: { date: string; entries: any[]; token: string; onReverted: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   return <div style={{marginBottom:4}}>
@@ -6596,6 +6649,9 @@ function ChangeDateGroup({ date, entries }: { date: string; entries: any[] }) {
               <span>{e.table_name === '__sql_console' ? 'SQL console' : e.table_name === '__import' ? (fields?.filename || 'Import') : e.table_name === 'date_mappings' ? `Date table · season ${String(e.record_id).slice(-2)}` : `${e.table_name}${e.box_name ? ` · Box ${e.box_name}` : ''} #${e.record_id}`}</span>
               <span style={{color:'#1a6b8f', fontWeight:600}}>{e.observer_name || 'unknown user'}</span>
               {e.change_reason && <span style={{fontStyle:'italic', color:'#666'}}>"{e.change_reason}"</span>}
+              {e.action === 'UPDATE' && REVERTABLE_TABLES.has(e.table_name) && (
+                <span style={{marginLeft:'auto'}}><RevertButton entry={e} fields={fields} token={token} onReverted={onReverted} /></span>
+              )}
             </div>
             {e.table_name === '__sql_console' && fields?.sql && (
               <div style={{fontSize:11, marginTop:2, fontFamily:'monospace', color:'#555', whiteSpace:'pre-wrap', wordBreak:'break-word'}}>{fields.sql}</div>
@@ -7765,7 +7821,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           }
           return <div style={{marginTop:8}}>
             {Array.from(byDate.entries()).map(([date, entries]) => (
-              <ChangeDateGroup key={date + changesUser} date={date} entries={entries} />
+              <ChangeDateGroup key={date + changesUser} date={date} entries={entries} token={token} onReverted={loadRecentChanges} />
             ))}
           </div>;
         })()}

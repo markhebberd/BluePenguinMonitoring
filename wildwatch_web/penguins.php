@@ -25,7 +25,7 @@ if (isset($_GET['all'])) {
         $where = 'WHERE p.colony_id IN (' . implode(',', array_fill(0, count($colonyIds), '?')) . ')';
         $args = $colonyIds;
     }
-    $stmt = $pdo->prepare("SELECT p.peng_num, p.sex, p.is_dead, p.death_date, p.chipped_as_adult, p.chick_size_code, c.colony_name
+    $stmt = $pdo->prepare("SELECT p.peng_num, p.sex, p.is_dead, p.death_date, p.chipped_as_adult, p.chick_size_code, c.colony_name, c.colony_prefix
         FROM penguins p
         JOIN colonies c ON c.colony_id = p.colony_id
         $where");
