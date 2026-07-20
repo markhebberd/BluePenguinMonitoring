@@ -79,7 +79,7 @@ namespace PenguinMonitor
             {
                 var token = _appSettings?.AuthToken;
                 if (!string.IsNullOrEmpty(token))
-                    _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
+                    StartPolling(token);
             }
         }
 
@@ -87,6 +87,31 @@ namespace PenguinMonitor
         private Handler? _statusRefreshHandler;
         private Java.Lang.Runnable? _statusRefreshRunnable;
         private DateTime _lastSyncCheckUtc = DateTime.MinValue;
+        // A cold start adopts the server's current change-watermark and reports "no changes",
+        // so anything edited while the app was closed is never pulled by the incremental
+        // poller. Force one full sync on launch when the last full sync is older than this.
+        private const double SyncStaleMinutes = 5;
+        // A change the poller detected but DoSilentSync had to defer (a box was unlocked or a
+        // dialog was open) — the watermark already advanced past it, so it must be retried on
+        // the next poll once unblocked, or the change is lost silently.
+        private bool _pendingSilentSync;
+
+        // Single place the background poller is (re)started, so the retry-on-unblock logic
+        // below can't drift between call sites.
+        private void StartPolling(string token)
+        {
+            _dataStorageService.StartBackgroundPolling(token,
+                () => DoSilentSync(token),
+                () =>
+                {
+                    _lastSyncCheckUtc = DateTime.UtcNow;
+                    RunOnUiThread(() => UpdateStatusText());
+                    // Retry a sync the guard deferred, now that we may be unblocked.
+                    if (_pendingSilentSync && !_dialogActive && _isBoxLocked)
+                        _ = DoSilentSync(token);
+                },
+                async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
+        }
 
         // UI Components
         private ScrollView? _rootScrollView;
@@ -319,7 +344,7 @@ namespace PenguinMonitor
             var token = _appSettings?.AuthToken;
             if (!string.IsNullOrEmpty(token) && _colonyState?.LastSyncedUtc > DateTime.MinValue)
             {
-                _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
+                StartPolling(token);
                 _ = Task.Run(async () =>
                 {
                     try
@@ -364,7 +389,11 @@ namespace PenguinMonitor
 
         private async Task DoSilentSync(string token)
         {
-            if (_dialogActive || !_isBoxLocked) return;
+            // Don't clobber in-progress editing, but remember that a sync is owed — the poller
+            // retries it once the box is locked / the dialog closes (otherwise the change the
+            // poller already consumed from the watermark is lost for good).
+            if (_dialogActive || !_isBoxLocked) { _pendingSilentSync = true; return; }
+            _pendingSilentSync = false;
             try
             {
                 var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
@@ -1387,7 +1416,7 @@ namespace PenguinMonitor
                     {
                         var token = _appSettings?.AuthToken;
                         if (!string.IsNullOrEmpty(token))
-                            _dataStorageService.StartBackgroundPolling(token, () => DoSilentSync(token), () => { _lastSyncCheckUtc = DateTime.UtcNow; RunOnUiThread(() => { UpdateStatusText(); }); }, async () => { if (_colonyState?.PendingUploadCount > 0) { RunOnUiThread(() => TryBackgroundUpload()); } });
+                            StartPolling(token);
                     }
 
                     if (syncDialog != null)
@@ -6615,9 +6644,14 @@ namespace PenguinMonitor
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)
                     Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
 
-                // Flag for auto-download after UI is built
-                var lastSyncNzDate = _colonyState.LastSyncedUtc > DateTime.MinValue ? ToNzTime(_colonyState.LastSyncedUtc).Date : DateTime.MinValue;
-                _shouldAutoDownloadBirdStats = (_remotePenguinData == null || _remotePenguinData.Count == 0 || lastSyncNzDate < NzToday);
+                // Flag for auto-download after UI is built. Trigger a full sync when the last
+                // one is stale (not just "not today"): the incremental poller adopts the
+                // server's watermark on a cold start and reports no changes, so a same-day
+                // relaunch would otherwise never pull edits made while the app was closed
+                // (e.g. another observer's afternoon visit missed by an evening relaunch).
+                var syncAgeMin = _colonyState.LastSyncedUtc > DateTime.MinValue
+                    ? (DateTime.UtcNow - _colonyState.LastSyncedUtc).TotalMinutes : double.MaxValue;
+                _shouldAutoDownloadBirdStats = (_remotePenguinData == null || _remotePenguinData.Count == 0 || syncAgeMin > SyncStaleMinutes);
             }
             catch (Exception ex)
             {
