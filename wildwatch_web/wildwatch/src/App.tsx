@@ -3201,7 +3201,7 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
     <div className={`entry-page${sideBird && sideBirdData?.penguin ? ' entry-page-docked' : ''}`}>
       <div className="entry-header">
         <button className="back-btn" onClick={onBack}>&larr; Back</button>
-        <h2>Enter Observation Data</h2>
+        <h2>Enter observation data</h2>
       </div>
 
       {/* Persistent context: season + box */}
@@ -4147,7 +4147,7 @@ function DistinctAdultsChart() {
 
   return (
     <div className="report-card">
-      <h3>Distinct Adults Scanned per Season</h3>
+      <h3>Distinct adults scanned per season</h3>
       <p className="muted">Number of unique adult penguins scanned each breeding season (Apr–Mar)</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[0.25, 0.5, 0.75, 1].map(frac => (
@@ -4194,7 +4194,7 @@ function PeakAdultsChart({ onDayClick }: { onDayClick?: (day: string) => void })
 
   return (
     <div className="report-card">
-      <h3>Most Adults on a Single Day per Season</h3>
+      <h3>Most adults on a single day per season</h3>
       <p className="muted">Highest total adults present across the colony on any one day each breeding season (Apr–Mar)</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[0.25, 0.5, 0.75, 1].map(frac => (
@@ -4231,7 +4231,7 @@ function FirstEggReport({ onDayClick }: { onDayClick?: (day: string) => void }) 
   const fmt = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
   return (
     <div className="report-card">
-      <h3>First Egg Each Season</h3>
+      <h3>First egg each season</h3>
       <p className="muted">The earliest egg recorded anywhere in the colony each breeding season (Apr–Mar), newest first</p>
       <table className="guess-rank-table mini-list-table">
         <thead><tr><th>Season</th><th>First egg</th><th>Boxes</th></tr></thead>
@@ -4282,7 +4282,7 @@ function EggArrivalChart() {
 
   return (
     <div className="report-card">
-      <h3>Eggs in Colony</h3>
+      <h3>Eggs in colony</h3>
       <p className="muted">Total eggs across all boxes over each breeding season — shows laying, hatching, and loss</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {/* Grid lines */}
@@ -4368,7 +4368,7 @@ function ChickSexChart() {
 
   return (
     <div className="report-card">
-      <h3>Chick Size vs Sex</h3>
+      <h3>Chick size vs sex</h3>
       <p className="muted">Sex distribution of penguins chipped as LC, BC, or SC chicks</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {/* Grid lines */}
@@ -4497,13 +4497,13 @@ function ChickSexBothReturnedChart() {
     return { groups, pairs, bothReturnedTotal };
   }, [allPenguins]);
 
-  if (!result) return <div className="report-card"><h3>Chick Size vs Sex — One Male, One Female Returned</h3><p className="muted">No data available</p></div>;
+  if (!result) return <div className="report-card"><h3>Chick size vs sex — one male, one female returned</h3><p className="muted">No data available</p></div>;
 
   const { groups, pairs, bothReturnedTotal } = result;
 
   if (!pairs || pairs === 0) return (
     <div className="report-card">
-      <h3>Chick Size vs Sex — One Male, One Female Returned</h3>
+      <h3>Chick size vs sex — one male, one female returned</h3>
       <p className="muted">Waiting for the first pair of male/female chicks to both return to the colony. No nests yet where both the BC and LC returned and one was confirmed male, one female.</p>
       {bothReturnedTotal > 0 && <p className="muted">{bothReturnedTotal} nest{bothReturnedTotal !== 1 ? 's' : ''} where both chicks returned (any sex combination).</p>}
     </div>
@@ -4524,7 +4524,7 @@ function ChickSexBothReturnedChart() {
 
   return (
     <div className="report-card">
-      <h3>Chick Size vs Sex — One Male, One Female Returned</h3>
+      <h3>Chick size vs sex — one male, one female returned</h3>
       <p className="muted">From nests where both BC and LC returned and one was male, one female ({pairs} pairs)</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {[0.25, 0.5, 0.75, 1].map(frac => (
@@ -4628,7 +4628,7 @@ function ChickReturnChart() {
   return (
     <>
     <div className="report-card">
-      <h3>Chick Return Rate by Size</h3>
+      <h3>Chick return rate by size</h3>
       <p className="muted">Percentage of chicks that returned to the colony in a later season, by size at chipping</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="report-chart">
         {/* Grid lines */}
@@ -4724,7 +4724,7 @@ function ChickReturnChart() {
       {data.points && data.points.length > 0 && (() => {
         const pts = (data.points as { size: string; age: number; peng_num: string }[]).filter(p => p.age > 0);
         if (pts.length === 0) return null;
-        return <AgeHistogramCard title="Age at First Return" blurb={`How old penguins were when first scanned back at the colony (n=${pts.length})`} xLabel="Age at first return (months)" months={pts.map(p => Math.round(p.age * 12))} color="#2196F3" />;
+        return <AgeHistogramCard title="Age at first return" blurb={`How old penguins were when first scanned back at the colony (n=${pts.length})`} xLabel="Age at first return (months)" months={pts.map(p => Math.round(p.age * 12))} color="#2196F3" />;
       })()}
       <BreedingAgeHistograms />
     </>
@@ -4835,8 +4835,8 @@ function BreedingAgeHistograms() {
 
   return (
     <>
-      <AgeHistogramCard title="Age at First Egg" blurb={`Age of chick-chipped birds the first time they were a parent in a breeding window that produced an egg — using the box view's breeding-window detection (n=${eggMonths.length}, from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
-      <AgeHistogramCard title="Age at First Chipped Offspring" blurb={`Age of chick-chipped birds the first time a breeding window they parented produced a chipped chick — a subset of the first-egg birds (n=${chickMonths.length}, from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
+      <AgeHistogramCard title="Age at first egg" blurb={`Age of chick-chipped birds the first time they were a parent in a breeding window that produced an egg — using the box view's breeding-window detection (n=${eggMonths.length}, from chip date)`} xLabel="Age at first egg (months)" months={eggMonths} color="#E91E63" />
+      <AgeHistogramCard title="Age at first chipped offspring" blurb={`Age of chick-chipped birds the first time a breeding window they parented produced a chipped chick — a subset of the first-egg birds (n=${chickMonths.length}, from chip date)`} xLabel="Age at first chipped offspring (months)" months={chickMonths} color="#4CAF50" />
     </>
   );
 }
@@ -6106,7 +6106,7 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
     return (
       <div className="login-page" onClick={onClose}>
         <div className="login-card" onClick={e => e.stopPropagation()}>
-          <h2>Password Changed</h2>
+          <h2>Password changed</h2>
           <p style={{textAlign:'center', color:'#4CAF50', fontSize:'16px', margin:'20px 0'}}>Your password has been updated.</p>
           <button onClick={onClose}>Done</button>
         </div>
@@ -6117,7 +6117,7 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card" onClick={e => e.stopPropagation()}>
-        <h2>Change Password</h2>
+        <h2>Change password</h2>
         <form onSubmit={handleSubmit}>
           <div className="password-field">
             <input type={showCurrent ? 'text' : 'password'} placeholder="Current password" value={current} onChange={e => setCurrent(e.target.value)} required />
@@ -7828,7 +7828,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
-        <h3>Delete Observations by Date</h3>
+        <h3>Delete observations by date</h3>
         <p className="muted">Preview and delete all observations from a specific date, then re-sync from server</p>
         <DateSearch dates={observationDates || []} onDayClick={previewDate} />
         {datePreview?.loading && <p className="muted" style={{marginTop:8}}>Loading {formatDate(datePreview.date)}...</p>}
@@ -7937,7 +7937,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
-        <h3>Disk Write Test</h3>
+        <h3>Disk write test</h3>
         {serverDisk && <p className="muted">Account: {serverDisk.files_mb} MB files + {serverDisk.db_mb} MB DB = {serverDisk.used_mb} MB / {serverDisk.quota_mb} MB ({serverDisk.pct}%) · {serverDisk.observations} observations · {serverDisk.penguins} penguins</p>}
         <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
           {[1, 10, 100, 1000, 5000].map(mb => (
@@ -8365,7 +8365,7 @@ function RegionsAndColonies({ token }: { token: string }) {
 
   return (
     <div className="admin-section">
-      <h3>Regions & Colonies</h3>
+      <h3>Regions & colonies</h3>
       {!regions && <button className="edit-btn" onClick={load} disabled={loading}>{loading ? 'Loading...' : 'Load'}</button>}
 
       {regions && (<>
@@ -8480,7 +8480,7 @@ function RenumberPenguin({ token }: { token: string }) {
   const box = { padding: '4px 8px', fontSize: 13, border: '1px solid #ccc', borderRadius: 4, width: 100 };
   return (
     <div>
-      <h3>Renumber Penguin</h3>
+      <h3>Renumber penguin</h3>
       <p className="muted" style={{fontSize:12, margin:'0 0 8px'}}>
         Rename gives the first penguin the second number (which must be free). Swap trades the two penguins' numbers.
         Chips, scans, biometrics and audit history follow each bird. A bare number means the colony you are viewing.
@@ -8558,7 +8558,7 @@ function RemovePenguin({ token }: { token: string }) {
 
   return (
     <div>
-      <h3>Remove Penguin</h3>
+      <h3>Remove penguin</h3>
       <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
         <input type="text" value={pengNum} onChange={e => setPengNum(e.target.value)} placeholder="Penguin #"
           onKeyDown={e => e.key === 'Enter' && search()}
