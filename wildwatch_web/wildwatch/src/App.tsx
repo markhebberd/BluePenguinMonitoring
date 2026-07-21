@@ -6393,11 +6393,14 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
     { key: 'pits', label: 'PIT ids', value: r => r.pits?.[0]?.pit_id || '' },
   ];
   // CSV for the EID reader: pit_id, then a ≤16-char activity field — the chipping box, then
-  // boxes the bird has been seen in (most recent first, as many as fit), ending with
-  // chick size (if any) + sex confidence + sex: confirmed birds get the bare letter ("-M"),
-  // unconfirmed get "U" plus the majority observed-sex guess if one exists ("-UM", "-U",
-  // "-LCUM"). Doubled separators left by an empty middle collapse so any wasted characters
-  // sit at the end.
+  // boxes the bird has been seen in (most recent first, as many as fit), ending with:
+  //  - chicks: chick size + 2-digit breeding-season year (e.g. "BC23", "SC24")
+  //  - adults: sex — confirmed birds get the bare letter ("-M"), unconfirmed get "U" plus the
+  //    majority observed-sex guess if one exists ("-UM", "-U").
+  // The reader import requires each activity field to be UNIQUE (duplicates import with no
+  // history). Most boxes fledge two chicks a year, so the year alone can't dedupe siblings;
+  // any remaining collisions get trailing hyphens appended (bdot's convention: "12-F-",
+  // "12-F--"), trimmed to keep the field ≤16 chars.
   const exportCsv = () => {
     const boxesByPit = computeBoxesSeenByPit();
     const lines: string[] = [];
@@ -6414,15 +6417,25 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
       const [pa, na] = pengKey(a), [pb, nb] = pengKey(b);
       return pa.localeCompare(pb) || na - nb;
     });
+    // Pass 1: build each row's base activity field and tally how many rows share it.
+    type Entry = { peng: string; pit: string; base: string };
+    const entries: Entry[] = [];
+    const baseCount = new Map<string, number>();
     for (const r of ordered) {
       const activePits = (r.pits || []).filter((p: any) => p.is_active);
       if (!activePits.length) continue;
       const chipBox = String(r.first_chip_box || '');
-      const s = (r.sex || '').toUpperCase();
-      const m = r.guess_m || 0, f = r.guess_f || 0;
-      const sexPart = (s === 'M' || s === 'F') ? s : `U${m > f ? 'M' : f > m ? 'F' : ''}`;
-      const suffix = `${r.chick_size_code || ''}${sexPart}`;
-      const end = `-${suffix}`;
+      // Chicks end with size + breeding-season year (BC23); adults end with sex (M/F/UM/UF/U).
+      let suffix: string;
+      if (!r.chipped_as_adult) {
+        const yr = r.first_chip_date ? getSeasonLabel(parseDate(r.first_chip_date)).slice(-2) : '';
+        suffix = `${r.chick_size_code || ''}${yr}`;
+      } else {
+        const s = (r.sex || '').toUpperCase();
+        const m = r.guess_m || 0, f = r.guess_f || 0;
+        suffix = (s === 'M' || s === 'F') ? s : `U${m > f ? 'M' : f > m ? 'F' : ''}`;
+      }
+      const end = suffix ? `-${suffix}` : '';
       const seen = (boxesByPit.get(activePits[0].pit_id) || []).filter(b => b !== chipBox);
       let middle = '';
       for (const b of seen) {
@@ -6430,12 +6443,34 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
         if (`${chipBox}-${cand}${end}`.length > 16) break;
         middle = cand;
       }
-      const field = `${chipBox}-${middle}${end}`
+      const base = `${chipBox}-${middle}${end}`
         .replace(/-{2,}/g, '-').replace(/ {2,}/g, ' ')
         .replace(/^-+/, '').replace(/-+$/, '').slice(0, 16);
-      // peng_num leads each row (the sequential penguin number), then the bare 15-digit tag
-      // (stored pit_ids carry an "LA" prefix the reader doesn't want), then the activity field.
-      for (const p of activePits) lines.push(`${pengOut(r)},${String(p.pit_id).replace(/^[A-Za-z]+/, '')},${field}`);
+      for (const p of activePits) {
+        entries.push({ peng: pengOut(r), pit: String(p.pit_id).replace(/^[A-Za-z]+/, ''), base });
+        baseCount.set(base, (baseCount.get(base) || 0) + 1);
+      }
+    }
+    // Pass 2: the reader import needs every activity field unique. A base used by just one
+    // row stays clean; rows that share a base get a trailing letter (12-BC23a, 12-BC23b, …),
+    // trimmed to keep the field ≤16 chars. peng_num order makes the lettering deterministic.
+    const used = new Set<string>();
+    const nextIdx = new Map<string, number>();
+    for (const e of entries) {
+      let field = e.base;
+      if ((baseCount.get(e.base) || 0) > 1 || used.has(field)) {
+        let i = nextIdx.get(e.base) || 0;
+        do {
+          const suf = i < 26 ? String.fromCharCode(97 + i) : String(i + 1);
+          field = (e.base.length + suf.length > 16 ? e.base.slice(0, 16 - suf.length) : e.base) + suf;
+          i++;
+        } while (used.has(field));
+        nextIdx.set(e.base, i);
+      }
+      used.add(field);
+      // peng_num, then the bare 15-digit tag (stored pit_ids carry an "LA" prefix the reader
+      // doesn't want), then the unique activity field.
+      lines.push(`${e.peng},${e.pit},${field}`);
     }
     const url = URL.createObjectURL(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
     const a = document.createElement('a');
