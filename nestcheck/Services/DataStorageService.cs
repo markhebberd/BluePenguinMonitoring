@@ -146,6 +146,7 @@ namespace PenguinMonitor.Services
             public int BoxCount { get; set; }
             public int Uploaded { get; set; }
             public int UploadErrors { get; set; }
+            public int Reconciled { get; set; } // pending boxes matched to identical server data before upload
             public int BiometricCount { get; set; }
             public int BiometricsUploaded { get; set; }
             public int BiometricUploadErrors { get; set; }
@@ -168,6 +169,65 @@ namespace PenguinMonitor.Services
             var t = o.WhenDataCollectedUtc;
             if (t == default || t.Year < 2000) t = DateTime.UtcNow;
             return t.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        }
+
+        // Last 8 chars, upper — pit ids may be stored full or short; compare on the shared tail.
+        public static string Pit8(string? id) { id = (id ?? "").ToUpperInvariant(); return id.Length >= 8 ? id.Substring(id.Length - 8) : id; }
+
+        // A content fingerprint of an observation (ignores time/observer/id): counts, statuses,
+        // notes, no-scan count, and the exact set of scanned birds. Two observations with the
+        // same signature carry the same data. Shared by the download-first reconcile and the
+        // conflict-dialog guard so "identical" means the same thing in both.
+        public static string BoxSignature(BoxObservation o)
+        {
+            string N(string? s) => (s ?? "").Trim();
+            bool IsNoScan(string? id) => (id ?? "").StartsWith("NOSCAN", StringComparison.OrdinalIgnoreCase);
+            int noScan = o.ScannedIds.Count(s => IsNoScan(s.BirdId));
+            var pits = o.ScannedIds.Where(s => !IsNoScan(s.BirdId)).Select(s => Pit8(s.BirdId)).OrderBy(x => x, StringComparer.Ordinal);
+            return $"{o.Adults}|{o.Eggs}|{o.Chicks}|{N(o.BreedingStatus).ToUpperInvariant()}|{N(o.GateStatus).ToUpperInvariant()}|{N(o.Notes)}|{noScan}|{string.Join(",", pits)}";
+        }
+
+        // Download-first reconcile: before uploading, pull current server state and drop any
+        // pending box whose data already matches the server. On a patchy connection a write can
+        // commit server-side while the reply is lost, leaving the box queued; without this it
+        // would re-upload and the server would report its own saved row back as a "replace"
+        // conflict. Adopting the server row (with its observation_id) resolves it silently and
+        // stops the box re-uploading. Returns the number reconciled.
+        internal async Task<int> ReconcilePendingBeforeUpload(ColonyState colonyState, AppSettings appSettings, string token)
+        {
+            var pending = colonyState.PendingObservations
+                .Where(p => p.IsPendingUpload && !string.IsNullOrEmpty(p.BoxName)).ToList();
+            if (pending.Count == 0) return 0;
+
+            var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{WILDWATCH_SYNC_URL}?colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
+            req.Headers.Add("Authorization", $"Bearer {token}");
+            var resp = await _httpClient.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return 0;
+            var json = await resp.Content.ReadAsStringAsync();
+            var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
+            if (serverState?.boxes == null) return 0;
+
+            var nzToday = MainActivity.NzToday;
+            int reconciled = 0;
+            foreach (var p in pending)
+            {
+                if (!serverState.boxes.TryGetValue(p.BoxName!, out var b)) continue;
+                var serverObs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
+                    b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                serverObs.BoxName = p.BoxName;
+                if (b.scans != null) foreach (var s in b.scans) serverObs.ScannedIds.Add(new ScanRecord { BirdId = s.pit_id ?? "" });
+                for (int ns = 0; ns < b.no_scan; ns++) serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
+                // Only a server row for the same NZ day can be the twin of a pending box.
+                if (MainActivity.ToNzTime(serverObs.WhenDataCollectedUtc).Date != nzToday) continue;
+                if (BoxSignature(serverObs) != BoxSignature(p)) continue; // genuinely different — leave it to upload/conflict
+
+                colonyState.PendingObservations.Remove(p);
+                serverObs.IsPendingUpload = false;
+                colonyState.TodayBoxes[p.BoxName!] = serverObs; // adopt the server copy incl. its observation_id
+                reconciled++;
+            }
+            return reconciled;
         }
 
         // ===== Main Sync: Upload pending, download fresh state =====
@@ -219,6 +279,12 @@ namespace PenguinMonitor.Services
                     }
                     catch { }
                 }
+
+                // Step 0: Download-first reconcile — drop pending boxes whose data already
+                // matches the server (a lost reply on a patchy connection re-queues an
+                // observation the server already saved), so we never re-upload them or get
+                // asked to replace identical data.
+                result.Reconciled = await ReconcilePendingBeforeUpload(colonyState, appSettings, token);
 
                 // Step 1: Upload ALL pending observations — server detects conflicts
                 var pendingBoxes = new List<object>();

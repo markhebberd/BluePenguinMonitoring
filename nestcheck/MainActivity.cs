@@ -1545,6 +1545,42 @@ namespace PenguinMonitor
             dialog?.Show();
         }
 
+        // True when a server observation carries the same data as our pending one. Uses the same
+        // signature as the download-first reconcile (DataStorageService.BoxSignature) so the two
+        // agree on what "identical" means — build a BoxObservation from the server row and compare.
+        private bool ObsContentEqual(DataStorageService.SyncConflictObs server, BoxObservation local)
+        {
+            var s = BoxObservation.FromServerData(server.observation_id, 0, server.observation_time_utc ?? "",
+                server.adults, server.eggs, server.chicks, server.breeding_status, server.gate_status,
+                server.notes ?? "", server.monitor_filename, server.observer_name);
+            if (server.scans != null)
+                foreach (var sc in server.scans) s.ScannedIds.Add(new ScanRecord { BirdId = sc.pit_id ?? "" });
+            for (int ns = 0; ns < server.no_scan; ns++) s.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
+            return DataStorageService.BoxSignature(s) == DataStorageService.BoxSignature(local);
+        }
+
+        // Adopt the server's copy of a box (data already equals ours): drop the pending upload
+        // and store the server row — crucially with its observation_id — so it's no longer
+        // re-uploaded and future edits confirm against it.
+        private void AdoptServerObs(string boxName, DataStorageService.SyncConflictObs server)
+        {
+            _colonyState.PendingObservations.RemoveAll(p => p.BoxName == boxName && p.IsPendingUpload);
+            var restored = BoxObservation.FromServerData(
+                server.observation_id, 0, server.observation_time_utc ?? "",
+                server.adults, server.eggs, server.chicks,
+                server.breeding_status, server.gate_status, server.notes ?? "",
+                server.monitor_filename, server.observer_name);
+            restored.BoxName = boxName;
+            if (server.scans != null)
+                foreach (var scan in server.scans)
+                    restored.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+            for (int ns = 0; ns < server.no_scan; ns++)
+                restored.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
+            restored.IsPendingUpload = false;
+            if (MainActivity.ToNzTime(restored.WhenDataCollectedUtc).Date == NzToday)
+                _colonyState.TodayBoxes[boxName] = restored;
+        }
+
         private void ShowConflictDialog(List<DataStorageService.SyncConflict> conflicts)
         {
             // Filter out conflicts where server data hasn't changed since local confirmation
@@ -1563,6 +1599,33 @@ namespace PenguinMonitor
             // Deduplicate by box name — keep only the latest conflict per box
             var seen = new HashSet<string>();
             conflicts = conflicts.Where(c => seen.Add(c.box_name ?? "")).ToList();
+
+            // Never ask to replace data with an identical copy. On a patchy connection a write
+            // can commit server-side while the reply is lost, so the box stays queued and
+            // re-uploads; the server then reports its own just-saved row as a "conflict". When
+            // the server's data matches our pending data exactly, adopt the server copy (records
+            // its observation_id and clears the pending box), so it resolves silently instead of
+            // prompting — and never re-conflicts, since the box now knows the server id.
+            bool resolvedAny = false;
+            var stillConflicting = new List<DataStorageService.SyncConflict>();
+            foreach (var c in conflicts)
+            {
+                var boxName = c.box_name ?? "";
+                var localPending = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                if (c.server != null && localPending != null && ObsContentEqual(c.server, localPending))
+                {
+                    AdoptServerObs(boxName, c.server);
+                    resolvedAny = true;
+                }
+                else stillConflicting.Add(c);
+            }
+            if (resolvedAny)
+            {
+                DataStorageService.SaveColonyState(this, _colonyState);
+                UpdateSyncButtonLabel();
+                DrawPageLayouts();
+            }
+            conflicts = stillConflicting;
 
             if (conflicts.Count == 0) return;
 
