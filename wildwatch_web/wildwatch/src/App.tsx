@@ -5433,16 +5433,21 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, on
 }) {
   const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(box));
   const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
-  // Keep a comfortable minimum width to the right of the click, then let the popup grow to
-  // fit each observation on one line, capped by whatever space is actually left in the window.
-  const left = Math.min(pos.x, window.innerWidth - 340);
-  const maxWidth = window.innerWidth - left - 8;
+  // Grow the popup toward whichever side of the cursor has more room, using that whole side's
+  // width. Anchoring only to the right (and capping to the right-hand space) squeezed a
+  // right-half box into a narrow column and forced the bird minis to wrap; this lets it widen
+  // leftward instead. It wraps only when one observation genuinely can't fit the larger side.
+  const PEEK_PAD = 8;
+  const roomRight = window.innerWidth - pos.x - PEEK_PAD;
+  const roomLeft = pos.x - PEEK_PAD;
+  const horiz = roomRight >= roomLeft ? { left: pos.x } : { right: window.innerWidth - pos.x };
+  const maxWidth = Math.max(roomRight, roomLeft);
   const top = pos.y + 170 > window.innerHeight ? Math.max(4, pos.y - 178) : pos.y;
   // Birds + notes can make the popup much taller than the flip heuristic assumes —
   // cap it to the space below `top` so it scrolls internally instead of overflowing.
   const maxHeight = Math.min(window.innerHeight * 0.6, window.innerHeight - top - 8);
   return (
-    <div className="box-peek" style={{ left, top, maxHeight, maxWidth }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+    <div className="box-peek" style={{ ...horiz, top, maxHeight, maxWidth }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <div className="box-peek-head">
         <b>Box {box}</b>
         {loc && <WatchedTick location={loc} token={token} canEdit={!!canEdit} />}
