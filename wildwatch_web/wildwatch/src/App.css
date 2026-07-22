@@ -529,6 +529,9 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section h3 { font-size:15px; color:#1a5276; font-weight:600; margin-bottom:8px; }
 .partner-card { background:#fff; border-radius:6px; padding:10px; margin-bottom:8px; }
 .partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.partner-head.collapsible { cursor:pointer; user-select:none; }
+.partner-head.collapsible:hover .muted { color:#1a5276; }
+.partner-toggle { color:#888; font-size:12px; width:12px; flex:none; }
 .partner-sightings { padding-left:8px; }
 .partner-row { display:flex; gap:10px; align-items:center; font-size:12px; padding:2px 0; }
 /* Shared sightings split by season, with breeding-window groups in a black box */

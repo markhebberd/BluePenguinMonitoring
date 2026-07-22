@@ -2311,15 +2311,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               bySeason.get(label)!.push(s);
             }
             const seasonList = Array.from(bySeason.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+            const partnerKey = `partner-${pt.is_no_scan ? 'noscan' : pt.peng_num}`;
+            const partnerOpen = !!expandedSections[partnerKey];
             return (
               <div key={pi} className="partner-card">
-                <div className="partner-head">
+                <div className="partner-head collapsible" onClick={() => toggleSection(partnerKey)}>
+                  <span className="partner-toggle">{partnerOpen ? '▾' : '▸'}</span>
                   <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''} with</span>
                   {pt.is_no_scan
                     ? <span className="scan no-scan">No scan</span>
                     : <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />}
                 </div>
-                {seasonList.map(([label, seasonSightings]) => {
+                {partnerOpen && seasonList.map(([label, seasonSightings]) => {
                   const windowGroups = new Map<string, { win: any; rows: any[] }>();
                   const loose: any[] = [];
                   for (const s of seasonSightings) {
