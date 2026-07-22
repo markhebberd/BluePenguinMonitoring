@@ -171,8 +171,16 @@ namespace PenguinMonitor.Services
             return t.ToString("yyyy-MM-ddTHH:mm:ssZ");
         }
 
-        // Last 8 chars, upper — pit ids may be stored full or short; compare on the shared tail.
-        public static string Pit8(string? id) { id = (id ?? "").ToUpperInvariant(); return id.Length >= 8 ? id.Substring(id.Length - 8) : id; }
+        // Full tag identity: upper-cased with any leading alpha prefix (e.g. "LA") stripped, so a
+        // 15-digit tag and its "LA"+15 form compare equal. Free-text manual entry was removed, so
+        // every scan is now a full tag (scanner or search) — we compare the whole number, not a tail.
+        public static string PitFull(string? id)
+        {
+            id = (id ?? "").ToUpperInvariant();
+            int i = 0;
+            while (i < id.Length && char.IsLetter(id[i])) i++;
+            return id.Substring(i);
+        }
 
         // A content fingerprint of an observation (ignores time/observer/id): counts, statuses,
         // notes, no-scan count, and the exact set of scanned birds. Two observations with the
@@ -183,7 +191,7 @@ namespace PenguinMonitor.Services
             string N(string? s) => (s ?? "").Trim();
             bool IsNoScan(string? id) => (id ?? "").StartsWith("NOSCAN", StringComparison.OrdinalIgnoreCase);
             int noScan = o.ScannedIds.Count(s => IsNoScan(s.BirdId));
-            var pits = o.ScannedIds.Where(s => !IsNoScan(s.BirdId)).Select(s => Pit8(s.BirdId)).OrderBy(x => x, StringComparer.Ordinal);
+            var pits = o.ScannedIds.Where(s => !IsNoScan(s.BirdId)).Select(s => PitFull(s.BirdId)).OrderBy(x => x, StringComparer.Ordinal);
             return $"{o.Adults}|{o.Eggs}|{o.Chicks}|{N(o.BreedingStatus).ToUpperInvariant()}|{N(o.GateStatus).ToUpperInvariant()}|{N(o.Notes)}|{noScan}|{string.Join(",", pits)}";
         }
 

@@ -200,7 +200,7 @@ namespace PenguinMonitor
         private Button? _tagModeRemoveTagButton;
 
         private List<LinearLayout?> _scannedIdsLayout;
-        private EditText? _manualScanEditText;
+        private EditText? _penguinSearchEditText;
 
         /// <summary>
         /// Adjust a count field by delta, never below zero. TryParse rather than Parse because
@@ -5084,33 +5084,32 @@ namespace PenguinMonitor
                 }
             }
 
-            // Add manual input section at the bottom
-            // Search field with dropdown results
+            // Penguin search field with dropdown results (select to add a scan)
             var searchContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             var searchContainerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             searchContainerParams.SetMargins(0, 12, 0, 0);
             searchContainer.LayoutParameters = searchContainerParams;
 
-            _manualScanEditText = new EditText(this)
+            _penguinSearchEditText = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapCharacters,
                 Hint = "Search penguin # or pit ID",
                 TextSize = 14
             };
-            _manualScanEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
-            _manualScanEditText.SetHintTextColor(UIFactory.TEXT_SECONDARY);
-            _manualScanEditText.SetPadding(12, 12, 12, 12);
-            _manualScanEditText.Background = _uiFactory.CreateRoundedBackground(Color.White, 8);
+            _penguinSearchEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
+            _penguinSearchEditText.SetHintTextColor(UIFactory.TEXT_SECONDARY);
+            _penguinSearchEditText.SetPadding(12, 12, 12, 12);
+            _penguinSearchEditText.Background = _uiFactory.CreateRoundedBackground(Color.White, 8);
 
             var editTextParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             editTextParams.SetMargins(0, 0, 0, 0);
-            _manualScanEditText.LayoutParameters = editTextParams;
+            _penguinSearchEditText.LayoutParameters = editTextParams;
 
             // Search + No scan button row
             var searchRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
             searchRow.SetGravity(GravityFlags.CenterVertical);
-            _manualScanEditText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-            searchRow.AddView(_manualScanEditText);
+            _penguinSearchEditText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            searchRow.AddView(_penguinSearchEditText);
 
             var noScanBtn = new Button(this) { Text = "No scan", TextSize = 12 };
             noScanBtn.SetTextColor(Color.Black);
@@ -5143,10 +5142,10 @@ namespace PenguinMonitor
             var _searchResultsLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             searchContainer.AddView(_searchResultsLayout);
 
-            _manualScanEditText.TextChanged += (s, e) =>
+            _penguinSearchEditText.TextChanged += (s, e) =>
             {
                 _searchResultsLayout.RemoveAllViews();
-                var query = _manualScanEditText.Text?.Trim().ToUpper() ?? "";
+                var query = _penguinSearchEditText.Text?.Trim().ToUpper() ?? "";
                 if (query.Length < 1 || _remotePenguinData == null) return;
 
                 // Search: exact peng# match first, then pit_id substring, then peng# prefix
@@ -5177,10 +5176,10 @@ namespace PenguinMonitor
                     var resultView = CreateScanBadge(fullPitId, () =>
                     {
                         AddScannedId(fullPitId, 0, isManualEntry: true);
-                        _manualScanEditText.Text = "";
+                        _penguinSearchEditText.Text = "";
                         _searchResultsLayout.RemoveAllViews();
                         var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
-                        imm?.HideSoftInputFromWindow(_manualScanEditText.WindowToken, 0);
+                        imm?.HideSoftInputFromWindow(_penguinSearchEditText.WindowToken, 0);
                     }, textSize: 12);
                     resultView.SetPadding(12, 8, 12, 8);
                     var resultParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -7526,29 +7525,6 @@ namespace PenguinMonitor
                         spinner.SetSelection(position);
                 }
             }
-        }
-        private void OnManualAddClick(object? sender, EventArgs e)
-        {
-            if (_manualScanEditText == null) return;
-
-            var inputText = _manualScanEditText.Text?.Trim() ?? "";
-
-            if (string.IsNullOrEmpty(inputText))
-            {
-                Toast.MakeText(this, "Please enter a scan number", ToastLength.Short)?.Show();
-                return;
-            }
-
-            // Validate 8-digit alphanumeric
-            var cleanInput = new string(inputText.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
-            
-            if (cleanInput.Length != 8)
-            {
-                Toast.MakeText(this, "Scan number must be exactly 8 digits/letters", ToastLength.Short)?.Show();
-                _manualScanEditText.RequestFocus();
-                return;
-            }
-            AddScannedId(cleanInput, 0, isManualEntry: true);
         }
         private void OnDataClick(object? sender, EventArgs e)
         {
