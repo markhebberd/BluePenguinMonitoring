@@ -5427,12 +5427,16 @@ function timeAgo(utc: string): string {
 /** Hover popup for a box's date on the day view: location name, the watched toggle,
  *  and the box's last five observations with their scanned birds and notes.
  *  Kept open while the pointer is over it. */
-function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, onBirdClick }: {
+function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, onBirdClick, viewDate }: {
   box: string; token?: string; canEdit?: boolean; pos: { x: number; y: number };
-  onMouseEnter: () => void; onMouseLeave: () => void; onBirdClick?: (num: string) => void;
+  onMouseEnter: () => void; onMouseLeave: () => void; onBirdClick?: (num: string) => void; viewDate?: string;
 }) {
   const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(box));
-  const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
+  // Show the box's history LEADING UP TO the day being viewed — the 5 most recent observations
+  // strictly before it (the viewed day itself is already on the page). Newest first.
+  const obs = (queryBoxDetailSync(box)?.observations || [])
+    .filter((o: any) => !viewDate || toNzDateStr(o.observation_time_utc) < viewDate)
+    .slice(0, 5);
   // Grow the popup toward whichever side of the cursor has more room, using that whole side's
   // width. Anchoring only to the right (and capping to the right-hand space) squeezed a
   // right-half box into a narrow column and forced the bird minis to wrap; this lets it widen
@@ -5813,7 +5817,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       {totalObs === 0 && totalChips === 0 && (
         <p className="muted">No activity recorded on this date.</p>
       )}
-      {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} onBirdClick={handleBirdClick} />}
+      {peek && <BoxPeekPopup box={peek.box} token={token} canEdit={canEdit} pos={peek} onMouseEnter={peekKeep} onMouseLeave={peekHide} onBirdClick={handleBirdClick} viewDate={date} />}
       {dayPicker && <StatusPickRing pos={dayPicker} current={statusOverrides[dayPicker.obsId] ?? dayPicker.cur} onPick={pickDayStatus} onClose={() => setDayPicker(null)} />}
       </div>
 
