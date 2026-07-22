@@ -9002,6 +9002,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   // Date stats are precomputed in localdb on sync — just read the cache
   const dateStatsCache = useDateStats();
+  // The day-view calendar reads its populated-day list from the LOCAL date-stats cache (same
+  // source as the day data itself), so it paints as fast as the observations on refresh instead
+  // of lagging behind the server overview fetch. Falls back to the server list only until the
+  // local cache has primed (cold first load), so the calendar is never briefly empty.
+  const dayDates = useMemo(
+    () => (dateStatsCache.size ? [...dateStatsCache.keys()].sort() : (stats?.observation_dates || [])),
+    [dateStatsCache, stats]
+  );
 
   // FM dates registered in the enter-date workflow (all seasons), keyed by NZ date.
   const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
@@ -9431,11 +9439,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="colony-toolbar">
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
         <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-        <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
       </div>
-      <DayView date={selectedDay} dates={stats?.observation_dates || []} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
+      <DayView date={selectedDay} dates={dayDates} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
     </div>
   ) : null;
 
