@@ -527,7 +527,7 @@ h3.collapsible:hover { color:#1a5276; }
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .bird-section { margin-bottom:20px; }
 .bird-section h3 { font-size:15px; color:#1a5276; font-weight:600; margin-bottom:8px; }
-.partner-card { background:#fff; border-radius:6px; padding:8px 10px; margin-bottom:4px; }
+.partner-card { background:#fff; border-radius:6px; padding:4px 10px; margin-bottom:2px; }
 .partner-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .partner-head:last-child { margin-bottom:0; }
 .partner-head.collapsible { cursor:pointer; user-select:none; }
