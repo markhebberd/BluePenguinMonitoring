@@ -5433,13 +5433,16 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, on
 }) {
   const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(box));
   const obs = (queryBoxDetailSync(box)?.observations || []).slice(0, 5); // newest first
-  const left = Math.min(pos.x, window.innerWidth - 330);
+  // Keep a comfortable minimum width to the right of the click, then let the popup grow to
+  // fit each observation on one line, capped by whatever space is actually left in the window.
+  const left = Math.min(pos.x, window.innerWidth - 340);
+  const maxWidth = window.innerWidth - left - 8;
   const top = pos.y + 170 > window.innerHeight ? Math.max(4, pos.y - 178) : pos.y;
   // Birds + notes can make the popup much taller than the flip heuristic assumes —
   // cap it to the space below `top` so it scrolls internally instead of overflowing.
   const maxHeight = Math.min(window.innerHeight * 0.6, window.innerHeight - top - 8);
   return (
-    <div className="box-peek" style={{ left, top, maxHeight }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+    <div className="box-peek" style={{ left, top, maxHeight, maxWidth }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <div className="box-peek-head">
         <b>Box {box}</b>
         {loc && <WatchedTick location={loc} token={token} canEdit={!!canEdit} />}
@@ -5456,14 +5459,12 @@ function BoxPeekPopup({ box, token, canEdit, pos, onMouseEnter, onMouseLeave, on
                 style={{ background: STATUS_COLORS[o.breeding_status] || '#ccc', color: DARK_TEXT_STATUSES.has(o.breeding_status) ? '#333' : '#fff', fontSize: 10, padding: '1px 5px' }}>{o.breeding_status}</span>
             )}
             {o.gate_status && <span className="muted">{o.gate_status}</span>}
+            {/* Scanned birds share this row — they stay inline while there's room and only
+                wrap once the popup reaches its width cap. */}
+            {[...(o.scans || [])].sort(scanSortMFC).map((s: any, j: number) => (
+              <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={o.observation_time_utc} />
+            ))}
           </div>
-          {(o.scans?.length || 0) > 0 && (
-            <div className="box-peek-birds">
-              {[...o.scans].sort(scanSortMFC).map((s: any, j: number) => (
-                <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={o.observation_time_utc} />
-              ))}
-            </div>
-          )}
           {o.notes && <div className="box-peek-notes">{o.notes}</div>}
         </div>
       ))}
