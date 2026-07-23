@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
-import { getSeasonStart, getSeasonLabel } from './config';
+import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -6818,6 +6818,118 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
   );
 }
 
+/** Which boxes are DCM over time — one row per box ever recorded DCM, one column per period. DCM
+ *  carries forward: a box counts as DCM from a DCM observation until its next NON-DCM status
+ *  (blank statuses don't end it), so the carried-forward periods with no observation still show.
+ *  Built from the local cache. */
+function DcmBoxesChart() {
+  const v = useDbVersion();
+  const [gran, setGran] = useState<'season' | 'month'>('season');
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const seasonYearOfNz = (nz: string): number => { const [y, m, d] = nz.split('-').map(Number); return getSeasonStart(new Date(y, m - 1, d)).getFullYear(); };
+
+  const { boxes, intervals, minNz, maxNz } = useMemo(() => {
+    const todayNz = toNzDateStr(new Date().toISOString());
+    // Per box: DCM intervals [start, end) in NZ dates (end exclusive).
+    const intervals = new Map<string, { start: string; end: string }[]>();
+    let minNz: string | null = null, maxNz: string | null = null;
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      const box = String(loc.location_name);
+      const sorted = [...bd.observations].sort((a, b) => String(a.observation_time_utc).localeCompare(String(b.observation_time_utc)));
+      let runStart: string | null = null;
+      const ivs: { start: string; end: string }[] = [];
+      for (const o of sorted) {
+        const st = (o.breeding_status || '').trim().toUpperCase();
+        if (!st) continue; // blank status carries the previous one forward — doesn't end a run
+        const nz = toNzDateStr(o.observation_time_utc);
+        if (st === 'DCM') {
+          if (runStart === null) runStart = nz;
+        } else if (runStart !== null) {
+          ivs.push({ start: runStart, end: nz }); runStart = null;
+        }
+      }
+      if (runStart !== null) ivs.push({ start: runStart, end: todayNz > runStart ? todayNz : runStart }); // still DCM → through today
+      if (!ivs.length) continue;
+      intervals.set(box, ivs);
+      for (const iv of ivs) { if (minNz === null || iv.start < minNz) minNz = iv.start; if (maxNz === null || iv.end > maxNz) maxNz = iv.end; }
+    }
+    const boxes = [...intervals.keys()].sort((a, b) => (parseInt(a, 10) || 1e9) - (parseInt(b, 10) || 1e9) || a.localeCompare(b));
+    return { boxes, intervals, minNz, maxNz };
+  }, [v]);
+
+  // Contiguous timeline columns, each with its [start, end) NZ-date bounds for overlap testing.
+  const columns = useMemo(() => {
+    if (!minNz || !maxNz) return [] as { key: string; label: string; start: string; end: string }[];
+    const out: { key: string; label: string; start: string; end: string }[] = [];
+    const seasonStartStr = (Y: number) => `${Y}-${pad2(SEASON_START_MONTH)}-${pad2(SEASON_START_DAY)}`;
+    if (gran === 'season') {
+      for (let y = seasonYearOfNz(minNz); y <= seasonYearOfNz(maxNz); y++)
+        out.push({ key: String(y), label: `${pad2(y % 100)}/${pad2((y + 1) % 100)}`, start: seasonStartStr(y), end: seasonStartStr(y + 1) });
+    } else {
+      const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const [fy, fm] = minNz.slice(0, 7).split('-').map(Number);
+      const [ly, lm] = maxNz.slice(0, 7).split('-').map(Number);
+      for (let i = fy * 12 + (fm - 1); i <= ly * 12 + (lm - 1); i++) {
+        const y = Math.floor(i / 12), m = i % 12;
+        const key = `${y}-${pad2(m + 1)}`;
+        const end = m === 11 ? `${y + 1}-01-01` : `${y}-${pad2(m + 2)}-01`;
+        out.push({ key, label: `${MON[m]} ${pad2(y % 100)}`, start: `${key}-01`, end });
+      }
+    }
+    return out;
+  }, [gran, minNz, maxNz]);
+
+  const isDcm = (box: string, col: { start: string; end: string }): boolean => {
+    for (const iv of intervals.get(box) || []) if (iv.start < col.end && iv.end > col.start) return true;
+    return false;
+  };
+
+  return (
+    <div className="report-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>Which boxes are DCM over time</h3>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['season', 'month'] as const).map(g => (
+            <button key={g} className="edit-btn" onClick={() => setGran(g)}
+              style={{ background: gran === g ? '#1a6b8f' : undefined, color: gran === g ? '#fff' : undefined }}>
+              {g === 'season' ? 'Per season' : 'Per month'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="muted">One row per box ever recorded DCM ({boxes.length}); a filled cell means the box was DCM in that {gran === 'season' ? 'season' : 'month'}, carried forward until its next non-DCM status.</p>
+      {boxes.length === 0 ? <p className="muted">No DCM boxes recorded.</p> : (
+        <div style={{ overflow: 'auto', maxHeight: '70vh', border: '1px solid #eee', borderRadius: 6 }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th style={{ position: 'sticky', left: 0, top: 0, zIndex: 3, background: '#fff', padding: '4px 8px', textAlign: 'left', borderRight: '1px solid #eee', borderBottom: '1px solid #eee' }}>Box</th>
+                {columns.map(c => (
+                  <th key={c.key} style={{ position: 'sticky', top: 0, zIndex: 2, background: '#fff', padding: '3px 4px', whiteSpace: 'nowrap', fontWeight: 500, color: '#666', borderBottom: '1px solid #eee' }}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {boxes.map(box => (
+                <tr key={box}>
+                  <td style={{ position: 'sticky', left: 0, zIndex: 1, background: '#fff', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap', borderRight: '1px solid #eee' }}>{box}</td>
+                  {columns.map(c => {
+                    const dcm = isDcm(box, c);
+                    return <td key={c.key} title={dcm ? `Box ${box} · DCM · ${c.label}` : undefined}
+                      style={{ minWidth: 18, height: 18, background: dcm ? '#8D6E63' : undefined, borderRight: '1px solid #f3f3f3', borderBottom: '1px solid #f3f3f3' }} />;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel({ token, observationDates, checkTarget }: {
   token: string; observationDates?: string[];
   // A header pin was clicked: jump to the validation tab and scroll to this check. The nonce
@@ -7923,6 +8035,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <RenumberPenguin token={token} />
+      </div>
+
+      <div style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
+        <DcmBoxesChart />
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
