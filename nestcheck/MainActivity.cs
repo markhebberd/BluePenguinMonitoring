@@ -135,6 +135,8 @@ namespace PenguinMonitor
         private CheckBox _setTimeActiveSessionCheckBox;
         private TextView _boxSavedTimeTextView;
         private Spinner _boxSetSelector;
+        // Trails the filter sentence with the count of boxes currently shown, e.g. "(74)".
+        private TextView? _boxCountLabel;
 
         // Single box data 
         private bool _isBoxLocked;
@@ -2236,6 +2238,11 @@ namespace PenguinMonitor
                 filterSentenceLayout.AddView(hideButton);
             }
 
+            // Count of boxes currently shown, filled in after the box loop below.
+            _boxCountLabel = new TextView(this) { Text = "", TextSize = 18 };
+            _boxCountLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
+            filterSentenceLayout.AddView(_boxCountLabel);
+
             _overviewFiltersLayout.AddView(filterSentenceLayout);
 
             // Show filters checkboxes layout
@@ -2436,6 +2443,7 @@ namespace PenguinMonitor
                 var empty = new TextView(this) { Text = "No boxes to show." };
                 _multiBoxViewCard.AddView(empty);
             }
+            if (_boxCountLabel != null) _boxCountLabel.Text = $" ({visibleBoxCount})";
         }
         private void createBreedingDatesCard()
         {
