@@ -6756,6 +6756,150 @@ function ChangeDateGroup({ date, entries, token, onReverted }: { date: string; e
   </div>;
 }
 
+/** Season breeding report — one row per box (per clutch), ordered by box number, with the
+ *  breeding calendar across the columns in date order: 1st egg, 2nd egg, hatch, guard ends
+ *  (PG), chip window opens, fledge. Dates derive from the estimated laid date using the same
+ *  offsets as nestcheck's Next Breeding Dates; the second egg is laid ~2 days after the first.
+ *  Hatch switches to the observed midpoint once chicks have actually been recorded. Dates that
+ *  have already passed are dimmed a touch; the next one due is bold. Built entirely from the
+ *  local cache. */
+function SeasonBreedingReport() {
+  const v = useDbVersion();
+  const [seasonYear, setSeasonYear] = useState<number>(() => getSeasonStart().getFullYear());
+
+  const { rows, seasons } = useMemo(() => {
+    const seasons = new Set<number>();
+    const all: any[] = [];
+    for (const loc of queryAllLocations()) {
+      const bd = queryBoxDetailSync(loc.location_name);
+      if (!bd?.observations?.length) continue;
+      const box = String(loc.location_name);
+      const sObs = [...bd.observations].sort((a: any, b: any) =>
+        parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+      // Segment over the box's whole history: a clutch laid just after 1 April needs the
+      // pre-season empty check to anchor its laid estimate.
+      const clutches = segmentClutches(sObs);
+      clutches.forEach((c, i) => {
+        const y = getSeasonStart(new Date(c.start)).getFullYear();
+        seasons.add(y);
+        if (y !== seasonYear) return;
+        // Observed hatch: midpoint between the last egg-only check and the first check with
+        // chicks, both inside this clutch. Beats the +38d prediction once it has happened.
+        let hatch: number | null = null, hatchObserved = false;
+        const inClutch = sObs.filter(o => {
+          const t = parseDate(o.observation_time_utc).getTime();
+          return t >= c.start && t <= (c.end ?? Infinity);
+        });
+        const firstChick = inClutch.find(o => (o.chicks || 0) > 0);
+        if (firstChick) {
+          const ft = parseDate(firstChick.observation_time_utc).getTime();
+          const before = [...inClutch].reverse().find(o =>
+            parseDate(o.observation_time_utc).getTime() < ft && (o.chicks || 0) === 0);
+          const bt = before ? parseDate(before.observation_time_utc).getTime() : null;
+          hatch = bt === null ? ft : bt + Math.ceil((ft - bt) / 2 / DAY) * DAY;
+          hatchObserved = true;
+        } else if (c.laid !== null) {
+          hatch = c.laid + BREEDING_OFFSETS.hatch * DAY;
+        }
+        const latest = inClutch[inClutch.length - 1];
+        all.push({
+          box, boxNum: parseInt(box, 10),
+          attempt: i, // index within the box's whole history; renumbered per season below
+          clutch: c, hatch, hatchObserved,
+          twoEggs: (c.maxEggs || 2) >= 2,
+          status: latest ? displayStatusOrPrev(latest, box) : null,
+          startObsTime: c.startObsTime,
+        });
+      });
+    }
+    all.sort((a, b) => (isNaN(a.boxNum) ? 1e9 : a.boxNum) - (isNaN(b.boxNum) ? 1e9 : b.boxNum)
+      || String(a.box).localeCompare(String(b.box)) || a.clutch.start - b.clutch.start);
+    // Renumber attempts within the season so a box's second clutch reads "2nd", not "5th".
+    const seen = new Map<string, number>();
+    for (const r of all) { const n = (seen.get(r.box) || 0) + 1; seen.set(r.box, n); r.attempt = n; }
+    return { rows: all, seasons: [...seasons].sort((a, b) => b - a) };
+  }, [v, seasonYear]);
+
+  const now = Date.now();
+  /** A milestone cell. Past dates go slightly grey (still near-black); the next one due is
+   *  bold. `est` marks a date predicted from the laid estimate rather than observed. */
+  const Cell = ({ t, next, est, title }: { t: number | null; next?: boolean; est?: boolean; title?: string }) => {
+    if (t === null) return <td style={{ color: '#bbb' }}>—</td>;
+    const past = t < now;
+    return <td title={title || (est ? 'Predicted from the estimated laid date' : 'From observations')}
+      style={{ whiteSpace: 'nowrap', color: past ? '#4a4a4a' : '#111', fontWeight: next ? 700 : 400 }}>{fmtMs(t)}</td>;
+  };
+
+  return (
+    <div className="report-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>Breeding report — {seasonRange(String(seasonYear))}</h3>
+        <select value={seasonYear} onChange={e => setSeasonYear(parseInt(e.target.value, 10))} style={{ fontSize: 13, padding: '3px 6px' }}>
+          {(seasons.length ? seasons : [seasonYear]).map(y => <option key={y} value={y}>{seasonRange(String(y))}</option>)}
+        </select>
+      </div>
+      <p className="muted">
+        One row per breeding attempt ({rows.length}), by box number. Dates come from the estimated
+        laid date (2nd egg +2d, hatch +{BREEDING_OFFSETS.hatch}d, guard ends +{BREEDING_OFFSETS.pg}d,
+        chip +{BREEDING_OFFSETS.chip}d, fledge +{BREEDING_OFFSETS.fledge}d); an observed hatch
+        replaces the predicted one. Past dates are dimmed, the next one due is bold.
+      </p>
+      {rows.length === 0 ? <p className="muted">No breeding attempts recorded this season.</p> : (
+        <table className="guess-rank-table mini-list-table">
+          <thead>
+            <tr>
+              <th>Box</th><th>1st egg</th><th>2nd egg</th><th>Hatch</th><th>PG (guard ends)</th>
+              <th>Chip from</th><th>Fledge</th><th>Eggs / chicks</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const c = r.clutch as Clutch;
+              const off = (n: number) => c.laid === null ? null : c.laid + n * DAY;
+              const active = clutchActive(c);
+              const parts: (number | null)[] = [off(0), r.twoEggs ? off(2) : null, r.hatch,
+                off(BREEDING_OFFSETS.pg), off(BREEDING_OFFSETS.chip), off(BREEDING_OFFSETS.fledge)];
+              // Only a running clutch has a "next" milestone to highlight.
+              const nextIdx = active ? parts.findIndex(p => p !== null && p >= now) : -1;
+              const unc = c.laidUncertainty !== null && c.laidUncertainty > 0
+                ? `± ${c.laidUncertainty} day${c.laidUncertainty !== 1 ? 's' : ''}` : '';
+              return (
+                <tr key={`${r.box}-${c.start}`}>
+                  <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
+                    <a className="day-box-link" href={`/?box=${encodeURIComponent(r.box)}&obs=${encodeURIComponent(r.startObsTime)}`}>Box {r.box}</a>
+                    {r.attempt > 1 && <span className="muted" style={{ fontWeight: 400 }}> ({ordinal(r.attempt)})</span>}
+                  </td>
+                  {c.laid === null
+                    ? <td colSpan={2} style={{ color: '#999', fontStyle: 'italic', whiteSpace: 'nowrap' }}
+                        title="No empty check before the eggs — the laid date can't be estimated">
+                        eggs found {fmtMs(c.start)}
+                      </td>
+                    : <>
+                        <Cell t={parts[0]} next={nextIdx === 0} est title={`Estimated laid date${unc ? ` ${unc}` : ''}`} />
+                        <Cell t={parts[1]} next={nextIdx === 1} est title={`Second egg, ~2 days after the first${unc ? ` ${unc}` : ''}`} />
+                      </>}
+                  <Cell t={parts[2]} next={nextIdx === 2} est={!r.hatchObserved}
+                    title={r.hatchObserved ? 'Observed: midpoint of the last egg-only check and the first chick check' : undefined} />
+                  <Cell t={parts[3]} next={nextIdx === 3} est />
+                  <Cell t={parts[4]} next={nextIdx === 4} est />
+                  <Cell t={parts[5]} next={nextIdx === 5} est />
+                  <td style={{ whiteSpace: 'nowrap', color: '#4a4a4a' }}>{c.maxEggs} / {c.maxChicks}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {active
+                      ? (r.status && <span className={`badge ${DARK_TEXT_STATUSES.has(r.status) ? 'bordered' : ''}`}
+                          style={{ background: STATUS_COLORS[r.status] || '#ccc', color: DARK_TEXT_STATUSES.has(r.status) ? '#333' : '#fff' }}>{r.status}</span>)
+                      : <span style={{ color: '#4a4a4a' }}>Ended{c.end !== null ? ` ${fmtMs(c.end)}` : ''}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 /** Reports page body: the report cards grouped into tabs (mirrors AdminPanel's tab bar).
  *  The active tab is persisted to the URL's ?tab= param, just like the admin page. */
 function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void }) {
@@ -6792,6 +6936,7 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
       </div>
 
       <div style={{ display: tab === 'breeding' ? undefined : 'none' }}>
+        <SeasonBreedingReport />
         <ChickReturnChart />
         <ChickSexChart />
         <ChickSexBothReturnedChart />
