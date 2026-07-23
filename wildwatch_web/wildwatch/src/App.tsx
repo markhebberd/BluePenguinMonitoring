@@ -4015,6 +4015,9 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
     return [...rows].sort((a, b) => (col.value(b) - col.value(a)) || byPeng(a, b));
   }, [rows, sortKey]);
   const arrow = (key: string) => sortKey === key ? ' ▼' : '';
+  // Just the podium by default — the full ranking is a long tail nobody reads at a glance.
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? sorted : sorted.slice(0, 3);
 
   return (
     <div className="report-card">
@@ -4031,7 +4034,7 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
               ))}
             </tr></thead>
             <tbody>
-              {sorted.map((r: any, i: number) => (
+              {shown.map((r: any, i: number) => (
                 <tr key={r.bird.peng_num}>
                   <td>{i + 1}</td>
                   <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
@@ -4045,6 +4048,8 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
               ))}
             </tbody>
           </table>
+          {sorted.length > 3 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>
+            {showAll ? 'Show top 3' : `Show all (${sorted.length})`}</button>}
         </div>
       )}
     </div>
@@ -4080,6 +4085,10 @@ function UnproductiveParentsReport({ onOpenBird }: { onOpenBird: (num: string) =
       .slice(0, 25);
   }, [v]);
 
+  // Worst 3 by default; the rest of the top 25 is behind the toggle.
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? rows : rows.slice(0, 3);
+
   return (
     <div className="report-card">
       <h3>Chronically unproductive parents</h3>
@@ -4088,7 +4097,7 @@ function UnproductiveParentsReport({ onOpenBird }: { onOpenBird: (num: string) =
         <table className="guess-rank-table count-cols">
           <thead><tr><th>Penguin</th><th>Egg windows</th><th>Chipped chicks</th></tr></thead>
           <tbody>
-            {rows.map((r: any) => (
+            {shown.map((r: any) => (
               <tr key={r.bird.peng_num}>
                 <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
                 <td>{r.windows}</td>
@@ -4098,6 +4107,8 @@ function UnproductiveParentsReport({ onOpenBird }: { onOpenBird: (num: string) =
           </tbody>
         </table>
       )}
+      {rows.length > 3 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>
+        {showAll ? 'Show worst 3' : `Show all (${rows.length})`}</button>}
     </div>
   );
 }
@@ -6812,8 +6823,12 @@ function SeasonBreedingReport() {
         });
       });
     }
-    all.sort((a, b) => (isNaN(a.boxNum) ? 1e9 : a.boxNum) - (isNaN(b.boxNum) ? 1e9 : b.boxNum)
-      || String(a.box).localeCompare(String(b.box)) || a.clutch.start - b.clutch.start);
+    // Earliest first egg first — the season reads as the laying order. A clutch with no laid
+    // estimate falls back to the date its eggs were found; box number breaks ties.
+    const laidOf = (r: any) => r.clutch.laid ?? r.clutch.start;
+    all.sort((a, b) => laidOf(a) - laidOf(b)
+      || (isNaN(a.boxNum) ? 1e9 : a.boxNum) - (isNaN(b.boxNum) ? 1e9 : b.boxNum)
+      || String(a.box).localeCompare(String(b.box)));
     // Renumber attempts within the season so a box's second clutch reads "2nd", not "5th".
     const seen = new Map<string, number>();
     for (const r of all) { const n = (seen.get(r.box) || 0) + 1; seen.set(r.box, n); r.attempt = n; }
@@ -6839,7 +6854,7 @@ function SeasonBreedingReport() {
         </select>
       </div>
       <p className="muted">
-        One row per breeding attempt ({rows.length}), by box number. Dates come from the estimated
+        One row per breeding attempt ({rows.length}), earliest first egg first. Dates come from the estimated
         laid date (2nd egg +2d, hatch +{BREEDING_OFFSETS.hatch}d, guard ends +{BREEDING_OFFSETS.pg}d,
         chip +{BREEDING_OFFSETS.chip}d, fledge +{BREEDING_OFFSETS.fledge}d); an observed hatch
         replaces the predicted one. Past dates are dimmed, the next one due is bold.
