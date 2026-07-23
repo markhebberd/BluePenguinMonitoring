@@ -1322,8 +1322,8 @@ function StatusPickRing({ pos, current, onPick, onClose }: { pos: { x: number; y
         <button type="button"
           className={`status-pick-item bordered${current ? '' : ' current'}`}
           style={{ transform: 'translate(-50%,-50%)', background: STATUS_COLORS[''], color: '#333' }}
-          title="Double-click to clear the status"
-          onDoubleClick={() => onPick('')}>Clear</button>
+          title="Clear the status"
+          onClick={() => onPick('')}>Clear</button>
         {STATUS_PICK_OPTIONS.map((opt, i) => {
           const n = STATUS_PICK_OPTIONS.length;
           const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
