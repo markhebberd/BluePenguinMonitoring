@@ -16,7 +16,7 @@
  * ─────────────────────────────────────────────────────────────────────────────────
  */
 import {
-  BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, INCUBATION_DAYS, COURTSHIP_LEAD_DAYS,
+  BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS,
   MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT,
   CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS,
 } from '../breedingConstants';
@@ -65,8 +65,8 @@ const egHalve = (lo: number, hi: number) => ({
   unc: Math.floor((hi - lo) / 2 / DAY_MS),
 });
 const egBoxOnly = egHalve(egT(EG.empty), egT(EG.egg));
-const egChickLo = egT(EG.noChicks) - INCUBATION_DAYS * DAY_MS;
-const egChickHi = egT(EG.chicks) - INCUBATION_DAYS * DAY_MS;
+const egChickLo = egT(EG.noChicks) - BREEDING_OFFSETS.hatch * DAY_MS;
+const egChickHi = egT(EG.chicks) - BREEDING_OFFSETS.hatch * DAY_MS;
 const egLo = Math.max(egT(EG.empty), egChickLo), egHi = Math.min(egT(EG.egg), egChickHi);
 const egBoth = egHalve(egLo, egHi);
 const egPlural = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
@@ -169,9 +169,9 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       </ul>
       <p>And two come from the hatch, which is usually what sharpens the answer:</p>
       <ul>
-        <li><b>Laying was at least {INCUBATION_DAYS} days before the first check with chicks</b> — the time from first egg to first chick.</li>
+        <li><b>Laying was at least {BREEDING_OFFSETS.hatch} days before the first check with chicks</b> — the time from first egg to first chick.</li>
         <li>
-          <b>And no more than {INCUBATION_DAYS} days before the last check that still had
+          <b>And no more than {BREEDING_OFFSETS.hatch} days before the last check that still had
           no chicks</b>, which is the bound that does the real work: it turns “somewhere in a
           fortnight” into “within a day or two”.
         </li>
@@ -185,27 +185,19 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <em> out</em> — the chipped-chick one does exactly that back in step 5 — but not to date
         one, and an estimate is only as honest as its weakest input.
       </p>
-      <p>
-        Incubation is {INCUBATION_DAYS} days here and {BREEDING_OFFSETS.hatch} in the predicted
-        hatch date below, which is deliberate rather than an oversight: the real figure sits
-        between the two, and the two uses want opposite roundings. Predicting a hatch can round to
-        the likelier day. Dating laying from one sets a hard bound that decides whether the records
-        can be reconciled at all, so it takes the lenient day — a bound one too tight throws out
-        real broods over a rounding.
-      </p>
       <div className="eg">
         <span className="eg-title">Example — the hatch doing the work</span>
         A box was empty on {egDate(egT(EG.empty))} and held an egg on {egDate(egT(EG.egg))}. On
         the box alone that puts laying somewhere in a fortnight:
         {' '}<b>{egDate(egBoxOnly.laid)} ± {egPlural(egBoxOnly.unc)}</b>. But the same box still had
         no chicks on {egDate(egT(EG.noChicks))} and had them on {egDate(egT(EG.chicks))}. Stepped
-        back {INCUBATION_DAYS} days, that puts laying between {egDate(egChickLo)} and
+        back {BREEDING_OFFSETS.hatch} days, that puts laying between {egDate(egChickLo)} and
         {' '}{egDate(egChickHi)} — so the only dates satisfying everything run
         {' '}{egDate(egLo)}–{egDate(egHi)}. Laid <b>{egDate(egBoth.laid)}, ± {egPlural(egBoth.unc)}</b>,
         out of exactly the same records.
       </div>
       <p>
-        Where the two disagree outright — an empty box fewer than {INCUBATION_DAYS} days before a
+        Where the two disagree outright — an empty box fewer than {BREEDING_OFFSETS.hatch} days before a
         chick that needs a whole incubation — one of the records is simply wrong. The box’s own
         contents were seen directly, so the chick evidence is dropped rather than averaged in, and
         the estimate falls back to the laying window alone.

@@ -4,7 +4,7 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
-import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, INCUBATION_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -756,8 +756,8 @@ function estimateLaidFrom(ev: LaidEvidence): { laid: number | null; unc: number 
   // age, not a dated event. Those are good enough to rule a breeding window out (they gate
   // whether chicks may start an attempt at all) but not to date one, so they stay out of here.
   const hatchedBetween = ev.firstChickT !== null && ev.lastNoChickT !== null;
-  const chickHi = hatchedBetween ? ev.firstChickT! - INCUBATION_DAYS * DAY : null;
-  const chickLo = hatchedBetween ? ev.lastNoChickT! - INCUBATION_DAYS * DAY : null;
+  const chickHi = hatchedBetween ? ev.firstChickT! - BREEDING_OFFSETS.hatch * DAY : null;
+  const chickLo = hatchedBetween ? ev.lastNoChickT! - BREEDING_OFFSETS.hatch * DAY : null;
 
   // Every bound at once, not the better of two: each is a fact about the same unknown, so the
   // answer is where they all agree. Whichever end was watched more closely is what tightens it.

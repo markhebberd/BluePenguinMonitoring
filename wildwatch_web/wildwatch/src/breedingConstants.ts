@@ -33,17 +33,6 @@ export const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
 /** Little penguins lay the second egg about this many days after the first. */
 export const SECOND_EGG_LAG_DAYS = 2;
 
-/**
- * First egg to first chick, used to date laying BACKWARDS from an observed hatch.
- *
- * A day under BREEDING_OFFSETS.hatch, deliberately. Incubation isn't really a whole
- * number — nearer 37½ — and the two uses pull opposite ways. Predicting a hatch date can
- * round to the likelier day; dating laying from one sets a hard bound that decides whether
- * the records can be reconciled at all, and a bound one day too tight rejects real broods
- * over rounding. So this end takes the lenient value.
- */
-export const INCUBATION_DAYS = 37;
-
 
 /**
  * How long a box must have gone unchecked before chicks found with no egg phase are
