@@ -1478,6 +1478,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   }, [highlight]);
   const obsId = obs.observation_id;
   const localObs = obs;
+  const dayNote = getDayNote(toNzDateStr(obs.observation_time_utc));
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
@@ -1583,8 +1584,10 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   return (
     <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}${highlight ? ' obs-pinned' : ''}`} style={deleting ? {opacity: 0.4, pointerEvents: 'none'} : undefined}>
       <div className="obs-top">
-        {/* The day's note isn't repeated per card — hovering the date shows it with the day's stats. */}
-        {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b></span>}
+        {/* The day's note (what the day's monitor was) sits beside the date, the way the
+            old per-observation monitor_filename did — one shared value, shown per card. */}
+        {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b>
+          {dayNote && <span className="obs-day-note"> · {dayNote}</span>}</span>}
         <span className="obs-top-right">
           {canEdit && editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
           {canEdit && obsId && !editing && <button className="edit-btn" onClick={startEdit}>Edit</button>}
@@ -6220,13 +6223,13 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                     onClick={() => onBoxClick(box, cf.observation_time_utc)} style={{cursor:'pointer'}}>
                     <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, cf.observation_time_utc))}
                       onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}><b>Box {box}</b></a>
+                    <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs || '')?'bordered':''}${canEdit && token && cf.observation_id ? ' clickable' : ''}`}
+                      style={{background:STATUS_COLORS[cfDs || '']||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs || '')?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
+                      title={canEdit && token && cf.observation_id ? 'Change breeding status' : undefined}
+                      onClick={canEdit && token && cf.observation_id ? (e) => openDayPicker(cf, e) : undefined}>{cfDs || '\u2014'}</span>
                     {cf.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(cf.adults, 4))}</span>}
                     {cf.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(cf.eggs, 4))}</span>}
                     {cf.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(cf.chicks, 4))}</span>}
-                    {cfDs && cfDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(cfDs)?'bordered':''}${canEdit && token && cf.observation_id ? ' clickable' : ''}`}
-                      style={{background:STATUS_COLORS[cfDs]||'#ccc',color:DARK_TEXT_STATUSES.has(cfDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
-                      title={canEdit && token && cf.observation_id ? 'Change breeding status' : undefined}
-                      onClick={canEdit && token && cf.observation_id ? (e) => openDayPicker(cf, e) : undefined}>{cfDs}</span>}
                     {cfScans.map((s: any) => <PenguinMini key={s.peng_num} scan={s} onClick={() => handleBirdClick(s.peng_num)} observationDate={cf.observation_time_utc} />)}
                     {cf.gate_status && <span>{cf.gate_status}</span>}
                     <span className="day-cf-date" onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}>{formatDate(cf.observation_time_utc)}</span>
@@ -6273,13 +6276,15 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {oi === 0 && <a className="day-box-link" href={`/box/${box}`} onClick={e => navClick(e, () => onBoxClick(box, o.observation_time_utc))}
                         onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}><b>Box {box}</b></a>}
                       {oi > 0 && <span className="day-box-link" style={{opacity:0.4}} onMouseEnter={e => peekShow(box, e)} onMouseLeave={peekHide}>Box {box}</span>}
+                      {/* Nest status leads every row and is always shown \u2014 NO and a blank
+                          status are as much a result as I or G, so neither is hidden. */}
+                      <span className={`badge ${DARK_TEXT_STATUSES.has(oDs || '')?'bordered':''}${canEdit && token && o.observation_id ? ' clickable' : ''}`}
+                        style={{background:STATUS_COLORS[oDs || '']||'#ccc',color:DARK_TEXT_STATUSES.has(oDs || '')?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
+                        title={canEdit && token && o.observation_id ? 'Change breeding status' : undefined}
+                        onClick={canEdit && token && o.observation_id ? (e) => openDayPicker(o, e) : undefined}>{oDs || '\u2014'}</span>
                       {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
                       {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
-                      {oDs && oDs !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(oDs)?'bordered':''}${canEdit && token && o.observation_id ? ' clickable' : ''}`}
-                        style={{background:STATUS_COLORS[oDs]||'#ccc',color:DARK_TEXT_STATUSES.has(oDs)?'#333':'#fff',fontSize:10,padding:'1px 5px'}}
-                        title={canEdit && token && o.observation_id ? 'Change breeding status' : undefined}
-                        onClick={canEdit && token && o.observation_id ? (e) => openDayPicker(o, e) : undefined}>{oDs}</span>}
                       {oScans.map((s: any, si: number) => (
                         <span key={s.scan_id || `${s.peng_num}-${si}`}
                           style={scanCounts[s.peng_num] > 1 ? {outline:'2px solid #F44336', borderRadius:3} : undefined}
