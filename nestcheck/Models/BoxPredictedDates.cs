@@ -10,29 +10,34 @@
         public string chipWindowFinish { get; set; }
         public int uncertaintyDays { get; set; }
 
-        // Next two upcoming milestones for this box's current clutch, with the laid-date
-        // uncertainty (± days) appended once. A milestone stays listed until it is past
-        // even at maximum uncertainty. estHatchDate is blank once chicks are present.
+        // The milestone nearest today for this box's current clutch — the one the observer
+        // is either about to see or has just missed, whichever is closer ("Hatch 2 days ago",
+        // "PG in 7 days ±3d"). estHatchDate is blank once chicks are present.
         public string breedingDateStatus()
         {
             try
             {
-                var parts = new List<string>();
-                void consider(string label, string dateStr, bool alwaysShow = false)
+                DateTime today = MainActivity.NzToday;
+                (string label, DateTime date)? closest = null;
+                void consider(string label, string dateStr)
                 {
-                    if (parts.Count >= 2 || string.IsNullOrEmpty(dateStr)) return;
-                    DateTime d = DateTime.Parse(dateStr);
-                    if (alwaysShow || d.AddDays(uncertaintyDays) >= MainActivity.NzToday)
-                        parts.Add(label + getDateString(d));
+                    if (string.IsNullOrEmpty(dateStr) || !DateTime.TryParse(dateStr, out DateTime d)) return;
+                    if (closest == null ||
+                        Math.Abs((d.Date - today).TotalDays) < Math.Abs((closest.Value.date - today).TotalDays))
+                        closest = (label, d.Date);
                 }
 
                 consider("Hatch", estHatchDate);
                 consider("PG", estPGDate);
                 consider("Chip", chipWindowStart);
-                consider("Fledge", estFledgeDate, alwaysShow: parts.Count == 0);
+                consider("Fledge", estFledgeDate);
 
-                if (parts.Count == 0) return "";
-                return string.Join(", ", parts) + (uncertaintyDays > 1 ? " ±" + uncertaintyDays + "d" : "");
+                if (closest == null) return "";
+                var (bestLabel, bestDate) = closest.Value;
+                // ± is a prediction's error bar, so it only means anything ahead of the date —
+                // a milestone in the past either happened or it didn't.
+                string uncertainty = bestDate > today && uncertaintyDays > 0 ? " ±" + uncertaintyDays + "d" : "";
+                return bestLabel + getDateString(bestDate) + uncertainty;
             }
             catch { return ""; }
         }

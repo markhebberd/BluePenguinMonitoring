@@ -3324,17 +3324,6 @@ namespace PenguinMonitor
             actionRow.AddView(_syncButton);
             actionRow.AddView(authButton);
             _settingsCard.AddView(actionRow);
-
-            // Manual rechip / new-penguin entry with a placeholder PIT (no scanner needed)
-            var rechipButton = _uiFactory.CreateStyledButton("Rechip / new penguin", UIFactory.PRIMARY_BLUE);
-            var rechipParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            rechipParams.SetMargins(8, 8, 8, 8);
-            rechipButton.LayoutParameters = rechipParams;
-            rechipButton.Click += (s, e) =>
-            {
-                ShowNewBirdDialog(PLACEHOLDER_PIT.Substring(PLACEHOLDER_PIT.Length - 8), PLACEHOLDER_PIT);
-            };
-            _settingsCard.AddView(rechipButton);
         }
 
         private void UpdateBoxSetsSelector()
