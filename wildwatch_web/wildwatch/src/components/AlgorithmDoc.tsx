@@ -225,11 +225,13 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <li>
           <b>The breeding window</b> — from laying to the check that ended the attempt: the
           offspring gone, or <code>ABN</code>. Not from the discovery, which only records when
-          someone happened to look, and not to a predicted fledge, which would close the window
-          while the box plainly still held chicks. An attempt still running has no observed end
-          yet, so there the predicted fledge (laid + {BREEDING_OFFSETS.fledge} days) stands in —
-          it’s what eventually stops a box nobody has revisited reading as “current”. This is the
-          window drawn on the box page, and the one chicks are matched against.
+          someone happened to look. The end carries one guard: a box is often last seen holding
+          chicks and then not checked for weeks, and ending the window at that eventual empty
+          check would credit the attempt with months nobody watched. So it never runs past the
+          later of the predicted fledge (laid + {BREEDING_OFFSETS.fledge} days) and the last check
+          that actually found offspring — a window stretches while the box demonstrably still held
+          chicks, never through a blind gap. This is the window drawn on the box page, and the one
+          chicks are matched against.
         </li>
         <li>
           <b>The attendance window</b> — from {COURTSHIP_LEAD_DAYS} days before the <em>earliest
