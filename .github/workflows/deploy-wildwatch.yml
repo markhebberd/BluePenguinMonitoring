@@ -13,6 +13,7 @@ on:
     paths:
       - 'wildwatch_web/**'
       - 'scripts/check-no-raw-writes.sh'
+      - 'scripts/check-algorithm-doc.mjs'
       - '.github/workflows/deploy-wildwatch.yml'
   workflow_dispatch:
 
@@ -29,6 +30,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: No raw writes outside the data gateway
         run: scripts/check-no-raw-writes.sh
+      # The admin page publishes a plain-English account of how breeding families are
+      # detected. This fails the deploy if the algorithm changed without that account
+      # being re-read — the explanation can't quietly become fiction.
+      - name: Breeding-algorithm explanation still matches the code
+        run: node scripts/check-algorithm-doc.mjs
 
   deploy:
     needs: check

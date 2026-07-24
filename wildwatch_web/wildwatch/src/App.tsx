@@ -4,6 +4,7 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -24,6 +25,7 @@ function lazyWithReload<T extends React.ComponentType<any>>(factory: () => Promi
     }));
 }
 const DiskHistoryChart = lazyWithReload(() => import('./components/DiskHistoryChart'));
+const AlgorithmDoc = lazyWithReload(() => import('./components/AlgorithmDoc'));
 import type { BoxTag } from './types';
 import './App.css';
 
@@ -40,8 +42,8 @@ interface Observation {
   edit_count?:string|number;
 }
 interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; chick_size_code?:string|null; }
-const DAY = 86400000;
-const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
+// The algorithm's tunable numbers live in one module so the admin page's Algorithm
+// tab can quote the same values the code runs on. See src/breedingConstants.ts.
 
 /** C# GetEstimatedBreedingDates: find probable laid date from observation history.
  *  Walk backwards from most recent obs with eggs/chicks to find when offspring first appeared.
@@ -63,7 +65,7 @@ function estimateLaidDate(observations: Observation[]): number | null {
     if (older.eggs + older.chicks === 0) {
       if (older.breeding_status === 'ABN') return null;
       let adjustedFound = whenOffspringFound;
-      if (mostRecent.eggs > 1) adjustedFound -= 2 * DAY;
+      if (mostRecent.eggs > 1) adjustedFound -= SECOND_EGG_LAG_DAYS * DAY;
       const whenNotFound = parseDate(older.observation_time_utc).getTime();
       const uncertainty = (adjustedFound - whenNotFound) / 2;
       return whenNotFound + Math.ceil(uncertainty / DAY) * DAY;
@@ -727,7 +729,7 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
       // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
       let laid: number | null = null, laidUncertainty: number | null = null;
       if (prevEmpty !== null && !abn) {
-        const found = (o.eggs || 0) > 1 ? t - 2 * DAY : t;
+        const found = (o.eggs || 0) > 1 ? t - SECOND_EGG_LAG_DAYS * DAY : t;
         laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
         laidUncertainty = Math.floor((found - prevEmpty) / 2 / DAY); // matches reports.php uncertaintyDays
       }
@@ -742,7 +744,7 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
     c.windowStart = c.start;
     c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
     c.windowEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.fledge * DAY);
-    c.attendStart = (c.laid !== null ? c.laid - (c.laidUncertainty || 0) * DAY : c.windowStart) - 30 * DAY;
+    c.attendStart = (c.laid !== null ? c.laid - (c.laidUncertainty || 0) * DAY : c.windowStart) - COURTSHIP_LEAD_DAYS * DAY;
   }
   return clutches;
 }
@@ -840,7 +842,7 @@ function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<stri
     const a = sexOf(cands[i].bird), b = sexOf(cands[j].bird);
     if (!a || !b || a.sex === b.sex || (!a.confirmed && !b.confirmed)) continue;
     const coN = co.get([cands[i].key, cands[j].key].sort().join('|')) || 0;
-    const score = coN * 1000 + cands[i].n + cands[j].n;
+    const score = coN * COPRESENCE_WEIGHT + cands[i].n + cands[j].n;
     // Equal evidence (typically two once-seen birds): the pair seen nearest laying wins,
     // so the answer doesn't depend on which bird happened to be encountered first.
     const near = (nearest.get(cands[i].key) ?? Infinity) + (nearest.get(cands[j].key) ?? Infinity);
@@ -919,7 +921,7 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   // (crossing months) with a mid-height dot; a single egg is just its date.
   const laidText = (() => {
     if (!twoEggs) return d(0);
-    const a = d(0), b = d(2), sp = a.indexOf(' ');
+    const a = d(0), b = d(SECOND_EGG_LAG_DAYS), sp = a.indexOf(' ');
     return b.endsWith(a.slice(sp + 1)) ? `${a.slice(0, sp)}·${b}` : `${a}·${b}`;
   })();
   const parts = [
@@ -1001,8 +1003,8 @@ interface BoxFamily {
   female: string;    // pit8 of the female parent, '' if none detected
   parents: any[];    // parent bird objects (0-2)
   chicks: any[];     // this-season chicks chipped in the nest (bird objects)
-  failedEggs: number;   // eggs that never became a chick (final stage), capped at 4
-  plainChicks: number;  // unchipped chicks assumed to have died (final stage), capped at 4
+  failedEggs: number;   // eggs that never became a chick (final stage), capped at MAX_OFFSPRING_SHOWN
+  plainChicks: number;  // unchipped chicks assumed to have died (final stage), capped at MAX_OFFSPRING_SHOWN
   fledgedUnchipped: number; // unchipped chicks a monitor recorded as presumed fledged
 }
 interface BoxSeasonData {
@@ -1115,8 +1117,8 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
       const parents = pair ? [birdMap.get(male), birdMap.get(female)].filter(Boolean) : [];
       const chicks = birds.filter(b => chickFamily.get(b.pit_id.slice(-8)) === ci);
       // Offspring at FINAL life stage: egg that never hatched, chick never chipped.
-      const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), 4);
-      const unchipped = Math.max(0, Math.min(clutch.maxChicks, 4) - chicks.length);
+      const failedEggs = Math.min(Math.max(0, clutch.maxEggs - clutch.maxChicks), MAX_OFFSPRING_SHOWN);
+      const unchipped = Math.max(0, Math.min(clutch.maxChicks, MAX_OFFSPRING_SHOWN) - chicks.length);
       // Of the never-chipped chicks, those a monitor logged as presumed-fledged (summed
       // over this clutch's observations) render as fledged rather than assumed-died. Cap
       // at the unchipped count so an over-entry can't invent chicks.
@@ -7631,7 +7633,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
-  const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
+  const ADMIN_TABS = ['io', 'validation', 'algorithm', 'users', 'database', 'system'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
   const [adminTab, setAdminTab] = useState<AdminTab>(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
@@ -8047,7 +8049,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
+        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['algorithm', 'Algorithm'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -8751,6 +8753,16 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           desc="The spreadsheet's chip weight disagreed with the weight already stored on the chip-day biometric. The existing database weight was kept and the flipper length was still added — worth reconciling by hand." empty="None"
           columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'sheet_weight', label: 'Sheet (g)' }, { key: 'db_weight', label: 'Kept in DB (g)' }, { key: 'flipper', label: 'Flipper added (mm)' }]} />
       </div>
+
+      {/* Mounted only when open — the explanation is a code-split chunk nobody needs
+          until they ask for it. Nothing here holds state, so unmounting costs nothing. */}
+      {adminTab === 'algorithm' && (
+        <div className="admin-section">
+          <Suspense fallback={<p className="muted">Loading…</p>}>
+            <AlgorithmDoc seasonStartMonth={SEASON_START_MONTH} seasonStartDay={SEASON_START_DAY} />
+          </Suspense>
+        </div>
+      )}
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <BackupsPanel token={token} />
