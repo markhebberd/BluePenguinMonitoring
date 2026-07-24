@@ -38,8 +38,12 @@ export const SECOND_EGG_LAG_DAYS = 2;
  * How long a box must have gone unchecked before chicks found with no egg phase are
  * believed to be a real breeding attempt rather than stale data. Shorter than that and
  * the eggs would have been seen, so the chicks can't be new.
+ *
+ * A day under BREEDING_OFFSETS.hatch on purpose. Incubation isn't the whole number the
+ * offset has to be — nearer 37½ — and this test throws data away, so it errs on the side
+ * of letting a real brood through rather than excluding one over the rounding.
  */
-export const CHICK_START_MIN_GAP_DAYS = 35;
+export const CHICK_START_MIN_GAP_DAYS = 37;
 
 /**
  * The same test when the chicks found are already microchipped. A chipped chick is close
