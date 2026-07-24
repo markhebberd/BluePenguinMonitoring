@@ -1030,20 +1030,22 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
     const a = d(0), b = d(SECOND_EGG_LAG_DAYS), sp = a.indexOf(' ');
     return b.endsWith(a.slice(sp + 1)) ? `${a.slice(0, sp)}·${b}` : `${a}·${b}`;
   })();
+  // The ± is the laid date's own uncertainty (half the gap between the last empty check and
+  // the first egg), so it sits with that date rather than trailing the whole sentence, where
+  // it read as if it qualified fledging too.
+  const unc = clutch.laidUncertainty !== null && clutch.laidUncertainty > 0
+    ? ` ± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
   const parts = [
-    { text: laidText, t: t(0) },
+    { text: laidText + unc, t: t(0) },
     ...(clutch.maxChicks === 0 ? [{ text: `Hatch ${d(BREEDING_OFFSETS.hatch)}`, t: t(BREEDING_OFFSETS.hatch) }] : []),
     { text: `Guard ends ${d(BREEDING_OFFSETS.pg)}`, t: t(BREEDING_OFFSETS.pg) },
     { text: `Chip ${d(BREEDING_OFFSETS.chip)} – ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.chip) },
     { text: `Fledge ${d(BREEDING_OFFSETS.fledge)}`, t: t(BREEDING_OFFSETS.fledge) },
   ];
   const nextIdx = parts.findIndex(p => p.t >= Date.now()); // the stage coming up next
-  const unc = clutch.laidUncertainty !== null && clutch.laidUncertainty > 0
-    ? `± ${clutch.laidUncertainty} day${clutch.laidUncertainty !== 1 ? 's' : ''}` : '';
   return (
     <span className="clutch-predictions">
       {parts.map((p, i) => <span key={i}>{i > 0 ? ', ' : ''}{(i === nextIdx || i === 0) ? <b>{p.text}</b> : p.text}</span>)}
-      {unc ? `, ${unc}` : ''}
     </span>
   );
 }
