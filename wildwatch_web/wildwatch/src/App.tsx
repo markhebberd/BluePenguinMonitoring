@@ -750,16 +750,20 @@ function detectClutchPair(c: Clutch, sObs: Observation[], birdMap: Map<string, a
   return null;
 }
 
+/** Best-known sex: the confirmed value, else the majority biometric guess, else null.
+ *  Same rule detectClutchPair scores pairs with (it additionally tracks confirmed-ness). */
+function guessedSex(b: any): 'M' | 'F' | null {
+  const s = (b?.sex || '').toUpperCase();
+  if (s === 'M' || s === 'F') return s;
+  const g = observedSexGuess(b?.peng_num);
+  return g.m > g.f ? 'M' : g.f > g.m ? 'F' : null;
+}
+
 /** Display sort rank by sex: M first, F second, unsexed last. An unsexed bird with a
  *  majority biometric sex guess (rendered as UM/UF) ranks with the confirmed sex. */
 function sexSortOrder(b: any): number {
-  const s = (b.sex || '').toUpperCase();
-  if (s === 'M') return 0;
-  if (s === 'F') return 1;
-  const g = observedSexGuess(b.peng_num);
-  if (g.m > g.f) return 0;
-  if (g.f > g.m) return 1;
-  return 2;
+  const s = guessedSex(b);
+  return s === 'M' ? 0 : s === 'F' ? 1 : 2;
 }
 
 const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
@@ -5236,6 +5240,200 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   );
 }
 
+/** Philanderers & philandereuses — the inverse of the pair-bond report. Two readings,
+ *  toggled at the top:
+ *   • "Shared sightings" — every bird ever co-scanned in the same observation. The literal
+ *     reading, so it ranks sociable birds: own chicks, siblings and box visitors all count.
+ *   • "Breeding partners" — distinct DETECTED mates across clutches (same nest-family
+ *     detection as the pair bond / top parents reports), plus how often the bird ran two
+ *     mates in one season and how often it swapped mate while the old one was still alive. */
+function PhilandererReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
+  const v = useDbVersion();
+  const [mode, setMode] = useState<'shared' | 'mates'>('mates');
+  const [sex, setSex] = useState<'all' | 'M' | 'F'>('all');
+
+  const data = useMemo(() => {
+    // Shared sightings: distinct co-scanned birds, and how many observations the bird
+    // shared with anyone at all.
+    if (mode === 'shared') {
+      const info = new Map<string, any>();
+      const withOthers = new Map<string, Map<string, number>>();
+      const sharedObs = new Map<string, number>();
+      const boxes = new Map<string, Set<string>>();
+      for (const loc of queryAllLocations()) {
+        const box = String(loc.location_name).trim();
+        const bd = queryBoxDetailSync(box);
+        for (const o of bd?.observations || []) {
+          // One entry per bird — a bird scanned twice in one observation is one presence.
+          const present = new Map<string, any>();
+          for (const s of o.scans || []) if (s.peng_num && !present.has(s.peng_num)) present.set(s.peng_num, s);
+          for (const [num, s] of present) if (!info.has(num)) info.set(num, s);
+          if (present.size < 2) continue;
+          for (const num of present.keys()) {
+            sharedObs.set(num, (sharedObs.get(num) || 0) + 1);
+            if (!boxes.has(num)) boxes.set(num, new Set());
+            boxes.get(num)!.add(box);
+            let m = withOthers.get(num);
+            if (!m) { m = new Map(); withOthers.set(num, m); }
+            for (const other of present.keys()) if (other !== num) m.set(other, (m.get(other) || 0) + 1);
+          }
+        }
+      }
+      return Array.from(withOthers.entries()).map(([num, m]) => ({
+        bird: info.get(num),
+        n: m.size,
+        sightings: sharedObs.get(num) || 0,
+        boxes: boxes.get(num)?.size || 0,
+        top: Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8)
+          .map(([n2, c]) => ({ bird: info.get(n2), label: `×${c}` })),
+      }));
+    }
+
+    // Breeding partners: mates from detected nest families, with two-timing and divorce counts.
+    const deathOf = new Map<string, string | null>(computeAllPenguinsRows().map((p: any) => [p.peng_num, p.death_date]));
+    const info = new Map<string, any>();
+    const mates = new Map<string, Map<string, { bird: any; seasons: Set<string>; boxes: Set<string> }>>();
+    const bySeason = new Map<string, Map<string, Set<string>>>(); // bird -> season -> mates that season
+    const clutches = new Map<string, number>();
+    for (const loc of queryAllLocations()) {
+      const box = String(loc.location_name).trim();
+      const bd = queryBoxDetailSync(box);
+      if (!bd?.observations?.length) continue;
+      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+        for (const fam of sd.families) {
+          // Solo-parent fallbacks tell us nothing about mate choice — need both slots filled.
+          const ps = fam.parents.filter((p: any) => p?.peng_num);
+          if (ps.length < 2) continue;
+          for (const a of ps) {
+            if (!info.has(a.peng_num)) info.set(a.peng_num, a);
+            clutches.set(a.peng_num, (clutches.get(a.peng_num) || 0) + 1);
+            let mm = mates.get(a.peng_num);
+            if (!mm) { mm = new Map(); mates.set(a.peng_num, mm); }
+            let ss = bySeason.get(a.peng_num);
+            if (!ss) { ss = new Map(); bySeason.set(a.peng_num, ss); }
+            let sset = ss.get(sd.label);
+            if (!sset) { sset = new Set(); ss.set(sd.label, sset); }
+            for (const b of ps) {
+              if (b.peng_num === a.peng_num) continue;
+              let e = mm.get(b.peng_num);
+              if (!e) { e = { bird: b, seasons: new Set(), boxes: new Set() }; mm.set(b.peng_num, e); }
+              e.seasons.add(sd.label);
+              e.boxes.add(box);
+              sset.add(b.peng_num);
+            }
+          }
+        }
+      }
+    }
+    return Array.from(mates.entries()).map(([num, mm]) => {
+      const seasons = Array.from(bySeason.get(num) || []).sort((a, b) => a[0].localeCompare(b[0]));
+      const twoTimed = seasons.filter(([, set]) => set.size >= 2).length;
+      // Divorce: between two seasons the bird bred in, a mate is dropped while still alive.
+      // Deaths are the innocent explanation for a switch, so they don't count.
+      let divorces = 0;
+      for (let i = 1; i < seasons.length; i++) {
+        const start = new Date(parseInt(seasons[i][0], 10), SEASON_START_MONTH - 1, SEASON_START_DAY).getTime();
+        for (const old of seasons[i - 1][1]) {
+          if (seasons[i][1].has(old)) continue;
+          const d = deathOf.get(old);
+          if (!d || parseDate(d).getTime() > start) { divorces++; break; }
+        }
+      }
+      return {
+        bird: info.get(num),
+        n: mm.size,
+        clutches: clutches.get(num) || 0,
+        twoTimed,
+        divorces,
+        top: Array.from(mm.values())
+          .sort((a, b) => b.seasons.size - a.seasons.size)
+          .slice(0, 8)
+          .map(e => ({ bird: e.bird, label: `${e.seasons.size}s` })),
+      };
+    });
+  }, [v, mode]);
+
+  const COLS: { key: string; label: string; value: (r: any) => number }[] = mode === 'shared'
+    ? [{ key: 'n', label: 'Birds seen with', value: r => r.n },
+       { key: 'sightings', label: 'Shared sightings', value: r => r.sightings },
+       { key: 'boxes', label: 'Boxes', value: r => r.boxes }]
+    : [{ key: 'n', label: 'Mates', value: r => r.n },
+       { key: 'twoTimed', label: 'Two-timed seasons', value: r => r.twoTimed },
+       { key: 'divorces', label: 'Divorces', value: r => r.divorces },
+       { key: 'clutches', label: 'Clutches', value: r => r.clutches }];
+  // One-way sorting, as on the parent leaderboards: clicking a column ranks by it, highest first.
+  const [sortKey, setSortKey] = useState('n');
+  const rows = useMemo(() => {
+    const col = COLS.find(c => c.key === sortKey) || COLS[0];
+    return data
+      .filter((r: any) => r.bird && (sex === 'all' || guessedSex(r.bird) === sex))
+      .filter((r: any) => r.n >= 2) // one partner is a faithful bird, not a philanderer
+      .sort((a: any, b: any) => (col.value(b) - col.value(a))
+        || (COLS[0].value(b) - COLS[0].value(a))
+        || (parseInt(a.bird.peng_num) || 0) - (parseInt(b.bird.peng_num) || 0));
+  }, [data, sortKey, sex, mode]);
+
+  // Podium by default, like the other leaderboards — the tail is long and rarely read.
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? rows : rows.slice(0, 3);
+  const arrow = (key: string) => sortKey === key ? ' ▼' : '';
+
+  return (
+    <div className="report-card">
+      <h3>Philanderers &amp; philandereuses</h3>
+      <div className="group-method-row">
+        <button className={mode === 'mates' ? 'active' : ''}
+          onClick={() => { setMode('mates'); setSortKey('n'); setShowAll(false); }}>Breeding partners</button>
+        <button className={mode === 'shared' ? 'active' : ''}
+          onClick={() => { setMode('shared'); setSortKey('n'); setShowAll(false); }}>Shared sightings</button>
+        <span style={{ width: 12 }} />
+        {([['all', 'Both'], ['M', '♂ Philanderers'], ['F', '♀ Philandereuses']] as const).map(([id, label]) => (
+          <button key={id} className={sex === id ? 'active' : ''} onClick={() => { setSex(id); setShowAll(false); }}>{label}</button>
+        ))}
+      </div>
+      <p className="muted">
+        {mode === 'mates'
+          ? 'Birds detected as a parent alongside more than one mate, ranked by distinct mates. Two-timed seasons are seasons with two or more mates; a divorce is a mate dropped between seasons while still alive (deaths don’t count). Click a column to sort.'
+          : 'Birds co-scanned in the same observation with the most others — the literal shared-sighting count, so a bird’s own chicks, siblings and passing visitors all count towards it. Click a column to sort.'}
+      </p>
+      <p className="muted" style={{ fontSize: 12 }}>
+        With only a couple of checks per clutch, an extra "mate" is often just a bird standing in the box, and unsexed
+        birds fill a pair slot on a guessed sex — so some of this ranking is detection artefact, not infidelity.
+      </p>
+      {rows.length === 0 ? <p className="muted">No data available</p> : (
+        <div className="table-scroll">
+          <table className="guess-rank-table mini-list-table">
+            <thead><tr>
+              <th>Penguin</th>
+              {COLS.map(c => (
+                <th key={c.key} className="clickable" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(c.key)}>{c.label}{arrow(c.key)}</th>
+              ))}
+              <th>{mode === 'mates' ? 'Mates (seasons)' : 'Seen with (times)'}</th>
+            </tr></thead>
+            <tbody>
+              {shown.map((r: any) => (
+                <tr key={r.bird.peng_num}>
+                  <td><PenguinMini scan={r.bird} onClick={() => onOpenBird(r.bird.peng_num)} /></td>
+                  {COLS.map((c, ci) => <td key={c.key}>{ci === 0 ? <strong>{c.value(r)}</strong> : c.value(r)}</td>)}
+                  <td>
+                    <div className="group-members">
+                      {r.top.map((t: any, ti: number) => (
+                        <PenguinMini key={ti} scan={t.bird} title={t.label} onClick={() => onOpenBird(t.bird.peng_num)} />
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length > 3 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>
+            {showAll ? 'Show top 3' : `Show all (${rows.length})`}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Non-breeding "floaters": birds scanned at multiple boxes but never detected as a breeding parent. */
 function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   const v = useDbVersion();
@@ -6966,6 +7164,7 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
 
       <div style={{ display: tab === 'social' ? undefined : 'none' }}>
         <PairBondReport onOpenBird={onOpenBird} />
+        <PhilandererReport onOpenBird={onOpenBird} />
         <FloaterReport onOpenBird={onOpenBird} />
         <PenguinGroupsReport onOpenBird={onOpenBird} />
       </div>
