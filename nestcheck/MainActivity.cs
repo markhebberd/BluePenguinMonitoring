@@ -4031,36 +4031,45 @@ namespace PenguinMonitor
                 layout.AddView(notesText);
             }
 
-            // Badge row: box link first, then scan badges
-            var scansRow = new LinearLayout(this);
-            scansRow.SetPadding(0, 6, 0, 0);
-            var flowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            flowParams.SetMargins(0, 2, 4, 2);
+            // Badge block: box link on its own line, then the scan mini-views wrapping below it.
+            // A plain horizontal row squeezes the badges and wraps text inside a single mini-view;
+            // a FlowLayout keeps each badge whole and moves any overflow to the next line instead.
+            var badgeBlock = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            badgeBlock.SetPadding(0, 6, 0, 0);
+            var density = Resources?.DisplayMetrics?.Density ?? 2f;
 
-            // Box link badge — always first (unless suppressed)
+            // Box link badge — always first (unless suppressed), on its own line
             if (showBoxLink && !string.IsNullOrEmpty(obs.BoxName))
             {
                 var boxName = obs.BoxName;
                 var boxBadge = new TextView(this) { Text = $"Box {boxName}", TextSize = 14 };
                 boxBadge.SetPadding(8, 3, 8, 3);
-                boxBadge.LayoutParameters = flowParams;
+                var boxParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                boxParams.SetMargins(0, 0, 0, (int)(4 * density));
+                boxBadge.LayoutParameters = boxParams;
                 boxBadge.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 4);
                 boxBadge.SetTextColor(Color.White);
                 boxBadge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 boxBadge.Clickable = true;
                 boxBadge.Click += (s, e) => ShowBoxPanel(boxName);
-                scansRow.AddView(boxBadge);
+                badgeBlock.AddView(boxBadge);
             }
 
+            var scanFlow = new PenguinMonitor.UI.FlowLayout(this)
+            {
+                HorizontalSpacing = (int)(6 * density),
+                VerticalSpacing = (int)(4 * density),
+            };
+            scanFlow.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             foreach (var s in obs.ScannedIds)
             {
                 var badgeBirdId = s.BirdId;
                 var badge = CreateScanBadge(badgeBirdId, () => ShowBirdPanel(badgeBirdId), textSize: 14);
-                badge.LayoutParameters = flowParams;
-                scansRow.AddView(badge);
+                scanFlow.AddView(badge);
             }
+            badgeBlock.AddView(scanFlow);
 
-            layout.AddView(scansRow);
+            layout.AddView(badgeBlock);
 
             return layout;
         }
