@@ -2332,7 +2332,7 @@ namespace PenguinMonitor
             // Done button (visible when either filter panel is open)
             if (_appSettings.ShowFiltersVisible || _appSettings.HideFiltersVisible)
             {
-                var doneButton = _uiFactory.CreateStyledButton("Done", UIFactory.SUCCESS_GREEN);
+                var doneButton = _uiFactory.CreateStyledButton("Hide filters", UIFactory.SUCCESS_GREEN);
                 var navDensity = Resources?.DisplayMetrics?.Density ?? 2;
                 doneButton.SetPadding((int)(12 * navDensity), (int)(8 * navDensity), (int)(12 * navDensity), (int)(8 * navDensity));
                 var doneParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
