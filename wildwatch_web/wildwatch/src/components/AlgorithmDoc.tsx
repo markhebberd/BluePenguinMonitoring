@@ -17,7 +17,7 @@
  */
 import {
   BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS,
-  MAX_OFFSPRING_SHOWN,
+  MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE,
   CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS,
 } from '../breedingConstants';
 import { ALGORITHM_DOC } from '../algorithmFingerprint';
@@ -268,41 +268,39 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         unsexed. A valid pair is <b>one male and one female where at least one of the two sexes is
         confirmed</b> — two guesses never form a pair, however strong each guess is on its own.
       </p>
-      <h4>Ranking the candidates</h4>
+      <h4>Scoring the candidates</h4>
       <p>
-        Every possible pair is ranked on these, in order. They are <em>not</em> added together: each
-        one is settled before the next is looked at, because the kinds of evidence aren’t
-        interchangeable. Twenty solo visits don’t add up to one record of two birds in the box
-        together.
+        Every possible pair scores each kind of evidence, times its weight, added up. Two phases
+        matter: <b>I&amp;G</b> is incubation and guard, from laying to the end of guard, when the
+        parents are genuinely attending the nest; <b>pre-breeding</b> is earlier the same season,
+        during courtship and nest-building.
       </p>
-      <ol>
-        <li><b>Shared sightings while the nest was being attended</b> — both birds recorded together (one observation, or chipped at the box the same day) inside the attendance window. Nothing beats this.</li>
-        <li><b>Shared sightings at any other time</b> this season — the same evidence, from outside the window, which is where the search reaches when nothing better exists.</li>
-        <li><b>Implied shared sightings</b> — see below.</li>
-        <li><b>Sightings during incubation and guard</b>, when parents are actually attending the nest.</li>
-        <li><b>Sightings earlier this season</b>, before laying — courtship and nest-building.</li>
-        <li><b>Having bred at this box before</b>, in an earlier season.</li>
-        <li><b>Anything else</b> — sightings after guard, when both parents are feeding at sea and the nest is unattended.</li>
-      </ol>
+      <table className="stages">
+        <thead><tr><th>Evidence</th><th>Weight</th><th>Counting</th></tr></thead>
+        <tbody>
+          <tr><td>Shared sighting in I&amp;G</td><td>×{PAIR_WEIGHTS.sharedIg}</td><td>Both birds recorded together: one observation, or chipped at the box the same day</td></tr>
+          <tr><td>Sighting in I&amp;G</td><td>×{PAIR_WEIGHTS.ig}</td><td>Either bird, per sighting</td></tr>
+          <tr><td>Shared sighting pre-breeding</td><td>×{PAIR_WEIGHTS.sharedPre}</td><td>Both birds together, before laying</td></tr>
+          <tr><td>Sighting pre-breeding</td><td>×{PAIR_WEIGHTS.pre}</td><td>Either bird, since the start of this season</td></tr>
+          <tr><td>Bred at this box before</td><td>×{PAIR_WEIGHTS.bred}</td><td>Per bird, from an earlier season</td></tr>
+          <tr><td>After guard</td><td>—</td><td>Scores nothing: both parents are at sea. Still makes a bird a candidate</td></tr>
+        </tbody>
+      </table>
       <p>
-        Pairs level on all of it are separated by whichever was seen closest to laying, so the answer
-        never depends on which bird happened to be scanned first.
+        Because the terms add, plenty of weak evidence can outweigh a little strong evidence — a
+        pair seen together once but never again can lose to a pair recorded through the whole of
+        incubation. Pairs that score exactly alike are separated by whichever was seen closest to
+        laying, so the answer never depends on which bird happened to be scanned first.
       </p>
-      <div className="eg">
-        <span className="eg-title">Example</span>
-        #118 (confirmed female) and #201 (unsexed, but 3 of 4 biometrics say male) were scanned in
-        the box together twice. #77 (confirmed male) and #92 (confirmed female) were each in the box
-        far more often, right through incubation, but never on the same day. The first pair wins:
-        shared sightings are settled first, and 2 beats 0 — nothing lower down is consulted.
-      </div>
       <h4>Unidentified adults</h4>
       <p>
         An unchipped bird can perfectly well be a parent; it just can’t be named, and the algorithm
         never invents one. But where a monitor recorded an adult they couldn’t identify beside one
         half of a pair already known to breed together, that unnamed bird was most likely the
-        partner — so the observation counts toward that pair as well. It ranks below a real shared
-        sighting, and it only applies to a pair that already has one: with no established partner,
-        an unnamed adult points at nobody in particular.
+        partner — so the observation counts as a shared sighting at {IMPLIED_SHARE_CONFIDENCE * 100}%
+        of the weight, in whichever phase it fell. A good inference is never worth as much as
+        reading the chip. It only applies to a pair that already has a real shared sighting: with no
+        established partner, an unnamed adult points at nobody in particular.
       </p>
       <h4>When there’s no pair</h4>
       <p>

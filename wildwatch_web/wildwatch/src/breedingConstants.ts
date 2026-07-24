@@ -60,3 +60,29 @@ export const COURTSHIP_LEAD_DAYS = 30;
  * number rendering a nest full of chicks.
  */
 export const MAX_OFFSPRING_SHOWN = 4;
+
+/**
+ * What each kind of evidence is worth when scoring a candidate breeding pair. Every
+ * candidate's terms are summed, so a lot of weak evidence CAN outweigh a little strong
+ * evidence — deliberately, because a nest watched twice all season shouldn't be answered
+ * with the same confidence as one watched weekly.
+ *
+ * I&G is incubation and guard, from laying to the end of guard, when the parents are
+ * actually attending the nest. Pre-breeding is earlier in the same season: courtship and
+ * nest-building. Sightings after guard score nothing — both parents are at sea by then —
+ * but they still make a bird a candidate, so a barely-monitored nest gets an answer.
+ */
+export const PAIR_WEIGHTS = {
+  sharedIg: 1,    // both birds recorded together during incubation or guard
+  ig: 0.8,        // either bird recorded during incubation or guard
+  sharedPre: 0.6, // both birds recorded together before laying
+  pre: 0.4,       // either bird recorded before laying, this season
+  bred: 0.2,      // per bird that bred at this box in an earlier season
+};
+
+/**
+ * How much of a shared sighting an *implied* one is worth — an unidentified adult recorded
+ * beside one half of a pair already known to breed together (it was probably the partner).
+ * Half: a good inference, never as good as reading the chip.
+ */
+export const IMPLIED_SHARE_CONFIDENCE = 0.5;

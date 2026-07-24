@@ -145,11 +145,27 @@ environment — mailboxes are far larger than config, and keeping those forever 
 - Tick **"Send run details by email"** and **"only when the script terminates abnormally"** —
   that's the failure alarm, and it costs nothing.
 
+## What the nightly run does
+
+```
+download dump ─> archive forever ─> mirror git repo ─> fetch rebuild kit
+                                                          │
+        drop+recreate the INACTIVE slot ──> restore into it from empty
+                                                          │
+              verify (tables, row counts vs last night, freshness)
+                                                          │
+                     flip the live slot ──> smoke test ──> status page
+```
+
+Archiving happens before the restore, so a night where the restore fails still captures the
+dump, the code and the kit. The live slot only flips after the checks pass, so a bad night keeps
+serving yesterday's good copy instead of blanking the site.
+
 ## What she sees
 
-- `http://192.168.1.109:8080/status/` — last night's report: downloaded, archived, restored into
-  an empty database, row counts (with last night's for comparison), latest observation date,
-  and a green **RESTORE VERIFIED** / red **RESTORE FAILED** badge.
+- `http://192.168.1.109:8080/status/` — last night's report: downloaded, archived, repo mirrored,
+  kit fetched, restored into an empty database, row counts (with last night's for comparison),
+  latest observation date, and a green **RESTORE VERIFIED** / red **RESTORE FAILED** badge.
 - `http://192.168.1.109:8080/` — Wildwatch itself, her normal login (the observer accounts and
   password hashes come out of the restored backup, so logging in is *itself* part of the proof).
 
