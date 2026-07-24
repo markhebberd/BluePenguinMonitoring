@@ -537,7 +537,13 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     // Then check for changes in background
     const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() });
     const data = await resp.json();
-    const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0;
+    // Verifications ride every snapshot in full, so "did any arrive" says nothing about change —
+    // compare id:updated_at against what's cached. Without this a verdict-only edit (which moves no
+    // observation/scan/penguin row) is dropped and the watermark advances past it, stranding the
+    // cache on the pre-edit verification forever.
+    const verSig = (rows: any[]) => (rows || []).map((r: any) => `${r.verification_id}:${r.updated_at}`).sort().join(',');
+    const verChanged = verSig(data.verifications) !== verSig(mem?.verifications || []);
+    const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0 || verChanged;
     if (hasChanges) {
       onProgress?.('Syncing changes...');
       await storeSnapshot(data, false);
