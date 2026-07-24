@@ -36,11 +36,24 @@ foreach ($tables as $table) {
     $createSql = $create['Create Table'] ?? $create['Create View'] ?? '';
     $sql .= "DROP TABLE IF EXISTS `$table`;\n$createSql;\n\n";
 
-    $rows = $pdo->query("SELECT * FROM `$table`")->fetchAll();
-    if (empty($rows)) continue;
+    // Skip generated columns (penguins.is_dead). MariaDB refuses an INSERT that names
+    // one — "ERROR 1906 ... has been ignored" — which aborts a restore partway through,
+    // so a dump that includes them is not restorable. The column is recomputed from its
+    // expression on insert, so nothing is lost by leaving it out.
+    $colStmt = $pdo->prepare(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            AND (EXTRA IS NULL OR EXTRA NOT LIKE '%GENERATED%')
+          ORDER BY ORDINAL_POSITION"
+    );
+    $colStmt->execute([$table]);
+    $cols = $colStmt->fetchAll(PDO::FETCH_COLUMN);
+    if (empty($cols)) continue;
 
-    $cols = array_keys($rows[0]);
     $colList = implode(', ', array_map(function($c) { return "`$c`"; }, $cols));
+
+    $rows = $pdo->query("SELECT $colList FROM `$table`")->fetchAll();
+    if (empty($rows)) continue;
 
     // Batch inserts in groups of 500
     foreach (array_chunk($rows, 500) as $chunk) {
