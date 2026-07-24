@@ -60,10 +60,3 @@ export const COURTSHIP_LEAD_DAYS = 30;
  * number rendering a nest full of chicks.
  */
 export const MAX_OFFSPRING_SHOWN = 4;
-
-/**
- * Weight given to co-presence when scoring a candidate pair. Two birds recorded
- * in the box together outrank any number of separate visits, so this sits above
- * any plausible sighting count.
- */
-export const COPRESENCE_WEIGHT = 1000;

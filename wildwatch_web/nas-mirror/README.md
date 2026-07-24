@@ -1,15 +1,23 @@
 # Wildwatch NAS mirror
 
-A LAN-only, plain-HTTP copy of Wildwatch running on a Synology NAS, rebuilt every night
-from that night's backup. It does two jobs at once:
+A complete third copy of Wildwatch on a Synology NAS, at a second physical site, that rebuilds
+itself every night and serves the result on the LAN. It does three jobs:
 
 1. **Backup destination** — pulls `https://wildwatch.co.nz/api/backup.php` nightly and keeps
    every dump forever under `backups/YYYY/MM/YYYY-MM-DD.sql.gz`. Nothing is ever pruned.
 2. **Proof the backup restores** — wipes a database, restores that dump into it *from empty*,
    verifies it, and only then points the site at it. If you can browse the colony at
    `http://<nas-ip>:8080`, the backup is provably good — not "the file was 680 KB and exited 0".
+3. **A location you can rebuild production from** — alongside the data it mirrors the source
+   repo and pulls a nightly kit of everything else the VPS needs (secrets, nginx and mail
+   config, DKIM keys, cron, package list, live DNS). See [REBUILD.md](REBUILD.md).
 
 A backup you have never restored is a hypothesis. This turns it into a nightly test.
+
+**Trust posture:** this NAS holds the production credentials and the unredacted database —
+same keys as live, deliberately, because a copy you have to reconstruct secrets for is not a
+location you can rebuild from. Treat the NAS as production infrastructure: it is now one of
+the two machines where a compromise means a full compromise.
 
 ## Verified before writing this
 
@@ -24,6 +32,9 @@ Run locally against the real `2026-06-30` production dump:
 | API unauthenticated | `GET /api/snapshot.php` → **401** (up, demanding a login) |
 | API with a key | `GET /api/colonies.php` → 200 |
 | `secrets.php` symlink into the mounted `shared/` dir | resolves inside the container |
+| Anonymous `git clone --mirror` of the GitHub repo (it is **public** — no credential needed) | 26 MB, `06464a6` @ 2026-07-24 |
+| Same clone via a throwaway container, for a NAS with no git package | works (`alpine/git`, `safe.directory='*'`) |
+| `rebuild-kit.sh` with every source path absent (wrong host / not root) | **exits 1**, emits nothing — it refuses to ship a technically-valid, practically-empty kit |
 
 ## Layout on the NAS
 
@@ -32,13 +43,17 @@ Run locally against the real `2026-06-30` production dump:
 ├── nas-mirror/          <- this directory (docker-compose.yml, Dockerfile, .env)
 ├── app/                 <- SPA dist at the root, PHP API in app/api/  (rsynced from the Mac)
 ├── shared/
-│   ├── secrets.php      <- DB credentials; app/api/secrets.php is a symlink to this
+│   ├── secrets.php      <- local DB credentials; app/api/secrets.php is a symlink to this
 │   ├── active_db        <- "ww_a" or "ww_b" — which restore slot is live
-│   └── nas.env          <- WW_API_KEY (production read key), chmod 600 root
-├── backups/YYYY/MM/     <- the archive. Never pruned.
+│   ├── nas.env          <- WW_API_KEY (production key), chmod 600 root
+│   └── id_nas           <- SSH key for fetching the rebuild kit from the VPS
+├── backups/YYYY/MM/     <- database dumps. Never pruned.           ~680 KB/night
+├── kits/YYYY/MM/        <- server config + secrets from the VPS.   small, also kept forever
+├── repo.git             <- bare mirror of the GitHub repo          26 MB, updated nightly
+├── mac-kit/             <- hand-copied irreplaceables (see REBUILD.md)
 ├── status/index.html    <- nightly report, served at /status/
 ├── logs/nightly.log
-└── bin/nightly.sh
+└── bin/{nightly.sh,rebuild-kit.sh}
 ```
 
 Two database slots (`ww_a`, `ww_b`) alternate. Each night the **inactive** one is dropped,
@@ -49,9 +64,10 @@ night therefore leaves yesterday's good copy serving, and never blanks the site.
 
 - A Synology that can run **Container Manager** (DSM 7.2+, x86_64 or arm64 — most Plus/Value
   models; not the older ARMv7 boxes). Non-Docker fallback below.
-- ~1 GB of disk for the app + database. The archive grows at **~680 KB/night ≈ 250 MB/year**,
-  so "forever" is genuinely fine.
-- Outbound HTTPS from the NAS. **No port forward, no reverse-proxy entry, no QuickConnect rule.**
+- ~1 GB of disk. The archive grows at **~680 KB/night ≈ 250 MB/year** for dumps plus a small
+  config kit, so "forever" is genuinely fine; the repo mirror is a flat 26 MB.
+- Outbound HTTPS **and SSH** from the NAS. **No port forward, no reverse-proxy entry, no
+  QuickConnect rule** — nothing inbound, ever.
 
 ## Setup
 
@@ -92,9 +108,37 @@ chmod +x bin/nightly.sh
 docker compose -f nas-mirror/docker-compose.yml --env-file nas-mirror/.env up -d --build
 ```
 
-**4. First run:** `/volume1/wildwatch/bin/nightly.sh` — takes a few seconds, prints each step.
+**4. Let the NAS fetch the rebuild kit from the VPS.** On the **NAS**, as root:
 
-**5. DSM → Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script**
+```bash
+ssh-keygen -t ed25519 -N '' -C nas-rebuild-kit -f /volume1/wildwatch/shared/id_nas
+cat /volume1/wildwatch/shared/id_nas.pub
+```
+
+On the **VPS**, install the kit script and pin the key to it — same forced-command pattern the
+CI deploy key already uses, so a stolen NAS key can only ever produce a kit:
+
+```bash
+sudo install -m 700 -o root -g root rebuild-kit.sh /usr/local/bin/rebuild-kit.sh   # from repo bin/
+# append to /home/mark/.ssh/authorized_keys, one line:
+command="sudo /usr/local/bin/rebuild-kit.sh",restrict ssh-ed25519 AAAA... nas-rebuild-kit
+```
+
+It needs `sudo` to read `secrets.php`, `/etc/postfix/sasl_passwd` and the DKIM keys; `mark` has
+passwordless sudo. Test it from the NAS before scheduling anything:
+
+```bash
+ssh -i /volume1/wildwatch/shared/id_nas mark@wildwatch.co.nz > /tmp/kit.tar.gz
+tar -tzf /tmp/kit.tar.gz | head        # should list kit/files/var/www/wildwatch/shared/secrets.php
+```
+
+To include the Maildirs as well, make the forced command
+`command="sudo /usr/local/bin/rebuild-kit.sh --with-mail"` and set `KIT_KEEP=7` in the task's
+environment — mailboxes are far larger than config, and keeping those forever will hurt.
+
+**5. First run:** `/volume1/wildwatch/bin/nightly.sh` — takes a few seconds, prints each step.
+
+**6. DSM → Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script**
 - User: **root**, daily at **03:30** (production's own backup cron runs 03:15 UTC — pick a time
   after wildwatch.co.nz has finished its own night's work)
 - Command: `/volume1/wildwatch/bin/nightly.sh`
@@ -111,25 +155,26 @@ docker compose -f nas-mirror/docker-compose.yml --env-file nas-mirror/.env up -d
 
 Anything she edits there vanishes at 03:30 when the slot is rebuilt. The status page says so.
 
-## Two things to decide before you hand her the API key
+## Consequences of it holding the real keys
 
-**1. `backup.php` dumps the entire database — all colonies, all observers.** Not just hers. Once
-this runs, her NAS holds every colony's observations plus every observer's email and password
-hash, forever, on hardware you don't control. Options:
+This is the intended design — a third location that needs a secret you don't have there isn't a
+third location — but it is worth being explicit about what follows, because these are now facts
+about the system rather than open questions:
 
-- Accept it (she's already a trusted admin) — simplest, and the honest default if she's effectively
-  a co-owner of the data.
-- Give the NAS its **own** key rather than the shared `API_KEY`: `requireReadAuth()` in
-  [config.php:175-177](../config.php#L175-L177) also accepts a per-observer `api_key`, so
-  `UPDATE observers SET api_key='<new>' WHERE observer_id=<nas-service-account>` gives you a key
-  you can revoke on its own without rotating everything else. Recommended either way.
-- Sanitise after restore: `UPDATE observers SET password_hash='!disabled', email=NULL` in the
-  restored slot — but then she can't log in, which removes the best part of the proof.
-- Encrypt the archive at rest (`age -r <your pubkey>`) after restoring, so the forever-archive is
-  unreadable on her NAS while the live mirror still works. Add ~3 lines to `nightly.sh` if you want it.
-
-**2. The key is a read key for production.** On the NAS it must stay in `shared/nas.env`,
-`chmod 600`, root-owned — not in the Task Scheduler command line, which DSM logs in plain text.
+- **Her NAS is production infrastructure.** It holds the production API key, the DB passwords,
+  the SMTP2GO relay credential and the DKIM signing keys, plus every colony's data and every
+  observer's email and password hash. Whoever can reach that box can act as wildwatch.co.nz,
+  including sending mail that passes DKIM. Worth saying to her in those words, once.
+- **Keep the secrets out of DSM's own logs.** `shared/nas.env`, `shared/id_nas` and the kit
+  archives are root-owned `chmod 600`/`400`. Never put a key in the Task Scheduler command line —
+  DSM stores and mails that in plain text.
+- **The SSH key is scoped even though the payload isn't.** The forced command means the NAS can
+  only ask for a kit, never get a shell — so a stolen NAS key doesn't add a way *in* to the VPS
+  beyond the secrets the kit already contains.
+- **Rotation now means three places**, not two: VPS, Mac, NAS. `shared/nas.env` and
+  `shared/secrets.php` are the NAS copies to update.
+- **DSM's own protections still matter here** — disable the admin account, 2FA on any account
+  that can log in, and keep Container Manager updated. This box is now worth attacking.
 
 ## Keeping it in sync with production
 

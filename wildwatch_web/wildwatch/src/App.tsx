@@ -4,7 +4,7 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
-import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -900,38 +900,82 @@ function boxSightings(observations: Observation[], allPenguinsInBox?: any[]): Bo
   return out.sort((a, b) => a.t - b.t);
 }
 
-/** Detect the breeding pair for one clutch. Any bird SIGHTED inside the clutch window
- *  is a candidate — a single sighting is better than nothing — but the scoring means a
- *  once-seen bird only wins a slot when no better-evidenced bird exists. A valid pair
- *  is one M + one F where at least one sex is confirmed — the other may come from
- *  majority biometric sex guesses (M+F, M+UF, F+UM; never UM+UF). Birds actually
- *  present together (same observation, or chipped at the box on the same day) outrank
- *  pairs that merely share the window; ties break on combined sighting counts. */
-function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<string, any>, excluded: (b: any) => boolean): { male: string; female: string } | null {
-  const counts = new Map<string, number>();
-  const co = new Map<string, number>();
-  // Parents attend the nest from courtship/nest-building (attendStart) through the end
-  // of guard: a male seen only pre-egg is still a parent, but after guard both feed at
-  // sea, so later sightings are no evidence.
-  const groups = new Map<string, string[]>();
-  // How close a bird's best sighting sits to laying — parents are at the nest around
-  // then. Only used to break ties between equally-evidenced birds.
+/** What the season says for or against one candidate pair, kept as separate kinds of evidence
+ *  rather than added up. Candidates are ranked by strict priority down this list: a single
+ *  shared sighting beats any quantity of weaker evidence, because the kinds aren't
+ *  interchangeable — twenty solo visits are not worth one record of two birds in the box
+ *  together. */
+interface PairEvidence {
+  sharedIg: number; // recorded together while the nest was being attended — the best evidence there is
+  shared: number;   // recorded together at all: one observation, or chipped at the box the same day
+  implied: number;  // one of them recorded beside an unidentified adult (see below)
+  ig: number;       // sightings during incubation and guard, when parents attend the nest
+  pre: number;      // sightings earlier this season, before laying — courtship and nest-building
+  bred: number;     // how many of the two bred at this box in an earlier season (0–2)
+  post: number;     // anything left: after guard, when both parents feed at sea
+  near: number;     // combined distance from laying — the last resort, so the answer can't
+                    // depend on which bird happened to be encountered first
+}
+const betterEvidence = (a: PairEvidence, b: PairEvidence): boolean =>
+  a.sharedIg !== b.sharedIg ? a.sharedIg > b.sharedIg
+  : a.shared !== b.shared ? a.shared > b.shared
+  : a.implied !== b.implied ? a.implied > b.implied
+  : a.ig !== b.ig ? a.ig > b.ig
+  : a.pre !== b.pre ? a.pre > b.pre
+  : a.bred !== b.bred ? a.bred > b.bred
+  : a.post !== b.post ? a.post > b.post
+  : a.near < b.near;
+
+interface PairContext {
+  noScanByGroup: Map<string, number>;  // observation → adults present but not identified
+  bredBefore: Set<string>;             // pit8s that were a parent here in an earlier season
+}
+
+/** Detect the breeding pair for one clutch. Every bird sighted at the box this season is a
+ *  candidate; where in the attempt it was seen is weight, not a filter, so when there's no
+ *  well-attended pair the search still reaches the birds that were only ever seen at the
+ *  edges. A valid pair is one M + one F where at least one sex is confirmed — the other may
+ *  come from majority biometric sex guesses (M+F, M+UF, F+UM; never UM+UF). */
+function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<string, any>, excluded: (b: any) => boolean, ctx: PairContext): { male: string; female: string } | null {
   const anchor = c.laid ?? c.windowStart;
-  const nearest = new Map<string, number>();
+  const per = new Map<string, { ig: number; pre: number; post: number; near: number }>();
+  const groups = new Map<string, string[]>();
+  const groupT = new Map<string, number>();   // when each co-presence group happened
   for (const s of sightings) {
-    if (s.t < c.attendStart || s.t > c.guardEnd) continue;
-    counts.set(s.key, (counts.get(s.key) || 0) + 1);
-    const d = Math.abs(s.t - anchor);
-    if (d < (nearest.get(s.key) ?? Infinity)) nearest.set(s.key, d);
+    const e = per.get(s.key) ?? { ig: 0, pre: 0, post: 0, near: Infinity };
+    if (s.t >= anchor && s.t <= c.guardEnd) e.ig++;      // incubation and guard
+    else if (s.t < anchor) e.pre++;                       // before laying, this season
+    else e.post++;                                        // after guard: the nest is empty of adults
+    e.near = Math.min(e.near, Math.abs(s.t - anchor));
+    per.set(s.key, e);
     if (!groups.has(s.group)) groups.set(s.group, []);
     groups.get(s.group)!.push(s.key);
+    groupT.set(s.group, s.t);
   }
-  for (const present of groups.values()) {
+  const co = new Map<string, number>(), coIg = new Map<string, number>();
+  for (const [g, present] of groups) {
+    // A shared sighting while the nest was actually being attended is the strongest thing the
+    // record can say; one from outside that window still counts, just below it.
+    const attended = (groupT.get(g) ?? 0) >= c.attendStart && (groupT.get(g) ?? 0) <= c.guardEnd;
     for (let i = 0; i < present.length; i++) for (let j = i + 1; j < present.length; j++) {
       const key = [present[i], present[j]].sort().join('|');
       co.set(key, (co.get(key) || 0) + 1);
+      if (attended) coIg.set(key, (coIg.get(key) || 0) + 1);
     }
   }
+  // An unchipped bird can perfectly well be a parent; it just can't be named. Where a monitor
+  // recorded an adult they couldn't identify beside one of a pair we already know breeds
+  // together, the unnamed bird was most likely the partner — so those observations back that
+  // pair too. Only ever a nudge behind a real shared sighting, and only for a pair that has
+  // one: with no established partner an unnamed adult points at nobody in particular.
+  const impliedFor = (a: string, b: string): number => {
+    let n = 0;
+    for (const [g, present] of groups) {
+      if (!(ctx.noScanByGroup.get(g) || 0)) continue;
+      if (present.includes(a) !== present.includes(b)) n++;
+    }
+    return n;
+  };
   const sexOf = (b: any): { sex: string; confirmed: boolean } | null => {
     const s = (b.sex || '').toUpperCase();
     if (s === 'M' || s === 'F') return { sex: s, confirmed: true };
@@ -940,33 +984,39 @@ function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<stri
     if (g.f > g.m) return { sex: 'F', confirmed: false };
     return null;
   };
-  const cands = Array.from(counts.entries())
-    .map(([key, n]) => ({ key, n, bird: birdMap.get(key) }))
+  const cands = Array.from(per.entries())
+    .map(([key, e]) => ({ key, e, bird: birdMap.get(key) }))
     .filter(x => x.bird && !excluded(x.bird));
-  let best: { male: string; female: string; score: number; near: number } | null = null;
+  let best: { male: string; female: string; ev: PairEvidence } | null = null;
   for (let i = 0; i < cands.length; i++) for (let j = i + 1; j < cands.length; j++) {
     const a = sexOf(cands[i].bird), b = sexOf(cands[j].bird);
     if (!a || !b || a.sex === b.sex || (!a.confirmed && !b.confirmed)) continue;
-    const coN = co.get([cands[i].key, cands[j].key].sort().join('|')) || 0;
-    const score = coN * COPRESENCE_WEIGHT + cands[i].n + cands[j].n;
-    // Equal evidence (typically two once-seen birds): the pair seen nearest laying wins,
-    // so the answer doesn't depend on which bird happened to be encountered first.
-    const near = (nearest.get(cands[i].key) ?? Infinity) + (nearest.get(cands[j].key) ?? Infinity);
-    if (!best || score > best.score || (score === best.score && near < best.near)) {
-      best = { male: a.sex === 'M' ? cands[i].key : cands[j].key, female: a.sex === 'F' ? cands[i].key : cands[j].key, score, near };
+    const pk = [cands[i].key, cands[j].key].sort().join('|');
+    const shared = co.get(pk) || 0;
+    const x = cands[i].e, y = cands[j].e;
+    const ev: PairEvidence = {
+      sharedIg: coIg.get(pk) || 0,
+      shared,
+      implied: shared > 0 ? impliedFor(cands[i].key, cands[j].key) : 0,
+      ig: x.ig + y.ig,
+      pre: x.pre + y.pre,
+      bred: (ctx.bredBefore.has(cands[i].key) ? 1 : 0) + (ctx.bredBefore.has(cands[j].key) ? 1 : 0),
+      post: x.post + y.post,
+      near: x.near + y.near,
+    };
+    if (!best || betterEvidence(ev, best.ev)) {
+      best = { male: a.sex === 'M' ? cands[i].key : cands[j].key, female: a.sex === 'F' ? cands[i].key : cands[j].key, ev };
     }
   }
   if (best) return { male: best.male, female: best.female };
-  // No full pair — fall back to the best-evidenced single bird in the window as a
-  // lone parent. Sex needn't be known (it's a guess either way); slot it by whatever
-  // sex signal exists, defaulting to the male slot. The family box shows just that
-  // bird + the offspring.
-  let solo: { key: string; sex: string; n: number; near: number } | null = null;
+  // No valid pair — fall back to the best-evidenced single bird as a lone parent, ranked the
+  // same way (nothing to share a sighting with, so those terms are zero). Sex needn't be known;
+  // slot it by whatever signal exists, defaulting to the male slot.
+  let solo: { key: string; sex: string; ev: PairEvidence } | null = null;
   for (const cd of cands) {
-    const near = nearest.get(cd.key) ?? Infinity;
-    if (!solo || cd.n > solo.n || (cd.n === solo.n && near < solo.near)) {
-      solo = { key: cd.key, sex: sexOf(cd.bird)?.sex || '', n: cd.n, near };
-    }
+    const ev: PairEvidence = { sharedIg: 0, shared: 0, implied: 0, ig: cd.e.ig, pre: cd.e.pre,
+      bred: ctx.bredBefore.has(cd.key) ? 1 : 0, post: cd.e.post, near: cd.e.near };
+    if (!solo || betterEvidence(ev, solo.ev)) solo = { key: cd.key, sex: sexOf(cd.bird)?.sex || '', ev };
   }
   if (solo) return { male: solo.sex === 'F' ? '' : solo.key, female: solo.sex === 'F' ? solo.key : '' };
   return null;
@@ -1180,7 +1230,18 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
   // overview shows it with "No breeding observed".
   for (const label of seasonObsMap.keys()) if (!seasonBirds.has(label)) seasonBirds.set(label, new Map());
 
-  const seasons = Array.from(seasonBirds.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  // Adults a monitor saw but couldn't name, per observation. Pair detection uses them to
+  // corroborate a known pair — the group key matches the one boxSightings builds.
+  const noScanByGroup = new Map<string, number>();
+  for (const o of observations) {
+    const n = Number(o.no_scan) || 0;
+    if (n) noScanByGroup.set(`o${o.observation_id ?? o.observation_time_utc}`, n);
+  }
+  // OLDEST season first, so each season's detection can see who already bred here: a bird
+  // with a breeding history at this box outranks a stranger on equal evidence. The result is
+  // flipped back to newest-first at the end, which is the order every screen displays.
+  const seasons = Array.from(seasonBirds.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const bredBefore = new Set<string>();
   const result: BoxSeasonData[] = [];
   for (const [label, birdMap] of seasons) {
     const seasonYear = parseInt(label);
@@ -1203,7 +1264,8 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     // attended it even when no observation was recorded that day (e.g. an adult chipped
     // while guarding chicks). Same-day scan/chip pairs are already deduped to one visit.
     const sSightings = seasonSightMap.get(label) || [];
-    const pairs = clutches.map(c => detectClutchPair(c, sSightings, birdMap, chippedThisSeason));
+    const pairs = clutches.map(c => detectClutchPair(c, sSightings, birdMap, chippedThisSeason,
+      { noScanByGroup, bredBefore: new Set(bredBefore) }));
     const parentKeys = new Set<string>();
     for (const pair of pairs) if (pair) { if (pair.male) parentKeys.add(pair.male); if (pair.female) parentKeys.add(pair.female); }
 
@@ -1247,8 +1309,9 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     });
 
     result.push({ label, seasonYear, seasonStart, seasonEnd, seasonObs: sObsChrono, seasonSightings: sSightings, birds, birdMap, clutches, families, parentKeys, chickFamily, isCurrent: label === currentLabel });
+    for (const k of parentKeys) bredBefore.add(k);   // established here; later seasons weigh it
   }
-  return result;
+  return result.reverse();   // newest season first, the order every screen renders
 }
 
 function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs,

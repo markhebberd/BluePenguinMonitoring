@@ -17,7 +17,7 @@
  */
 import {
   BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS,
-  MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT,
+  MAX_OFFSPRING_SHOWN,
   CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS,
 } from '../breedingConstants';
 import { ALGORITHM_DOC } from '../algorithmFingerprint';
@@ -234,22 +234,31 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <li>
           <b>The attendance window</b> — from {COURTSHIP_LEAD_DAYS} days before the <em>earliest
           plausible</em> laid date (the estimate minus its uncertainty) through the end of guard
-          (laid + {BREEDING_OFFSETS.pg} days). This one, and only this one, decides who the parents are.
+          (laid + {BREEDING_OFFSETS.pg} days). This is when a bird in the box means something for
+          parentage.
         </li>
       </ul>
       <p>
         Both ends of the attendance window are deliberate. It opens early because courtship and
         nest-building run for about a month before laying, so a male seen only before the eggs
         appeared is still a parent. It closes at the end of guard because after that both parents
-        are at sea and the nest is unattended — a bird recorded in the box past then is evidence
-        of nothing.
+        are at sea and the nest is unattended — a bird recorded in the box past then is weak
+        evidence.
+      </p>
+      <p>
+        Weak, though, is not worthless. The attendance window <em>ranks</em> candidates rather than
+        excluding them (step 9): a bird seen only outside it can still be named a parent when
+        nothing better exists, which is the difference between a thin answer and no answer at all
+        on a nest that was rarely visited.
       </p>
 
       <h3>9. Choosing the pair</h3>
       <p>
-        Every bird sighted inside the attendance window is a candidate, excluding birds that were
-        chipped as chicks in this same season (they are the offspring, not the parents). A single
-        sighting is enough to be a candidate — the scoring below decides whether it’s enough to win.
+        <b>Every</b> bird sighted at the box this season is a candidate, excluding birds chipped as
+        chicks in this same season (they’re the offspring, not the parents). Where in the attempt a
+        bird was seen is weight, not a gate: a bird seen only outside the attendance window can
+        still take a slot, but only once no better-evidenced bird exists. That way a poorly watched
+        nest still gets its best available answer instead of none.
       </p>
       <h4>Sex</h4>
       <p>
@@ -259,32 +268,49 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         unsexed. A valid pair is <b>one male and one female where at least one of the two sexes is
         confirmed</b> — two guesses never form a pair, however strong each guess is on its own.
       </p>
-      <h4>Scoring</h4>
-      <p>Each possible pair scores:</p>
-      <ul>
-        <li><b>Co-presence × {COPRESENCE_WEIGHT}</b> — the number of times both birds were recorded in the box <em>together</em> (same observation, or chipped there the same day).</li>
-        <li><b>plus</b> the two birds’ total sighting counts in the window.</li>
-      </ul>
+      <h4>Ranking the candidates</h4>
       <p>
-        The multiplier means a pair actually seen together always beats a pair that merely shared
-        the season. When two pairs score identically — typically two once-seen birds — the pair
-        sighted closest to the laid date wins, so the answer doesn’t depend on which bird happened
-        to be scanned first.
+        Every possible pair is ranked on these, in order. They are <em>not</em> added together: each
+        one is settled before the next is looked at, because the kinds of evidence aren’t
+        interchangeable. Twenty solo visits don’t add up to one record of two birds in the box
+        together.
+      </p>
+      <ol>
+        <li><b>Shared sightings while the nest was being attended</b> — both birds recorded together (one observation, or chipped at the box the same day) inside the attendance window. Nothing beats this.</li>
+        <li><b>Shared sightings at any other time</b> this season — the same evidence, from outside the window, which is where the search reaches when nothing better exists.</li>
+        <li><b>Implied shared sightings</b> — see below.</li>
+        <li><b>Sightings during incubation and guard</b>, when parents are actually attending the nest.</li>
+        <li><b>Sightings earlier this season</b>, before laying — courtship and nest-building.</li>
+        <li><b>Having bred at this box before</b>, in an earlier season.</li>
+        <li><b>Anything else</b> — sightings after guard, when both parents are feeding at sea and the nest is unattended.</li>
+      </ol>
+      <p>
+        Pairs level on all of it are separated by whichever was seen closest to laying, so the answer
+        never depends on which bird happened to be scanned first.
       </p>
       <div className="eg">
         <span className="eg-title">Example</span>
         #118 (confirmed female) and #201 (unsexed, but 3 of 4 biometrics say male) were scanned in
-        the box together twice, {5} sightings between them → {2 * COPRESENCE_WEIGHT + 5}.
-        #77 (confirmed male) and #92 (confirmed female) were each in the box often but never on
-        the same day, 9 sightings between them → 9. The first pair wins.
+        the box together twice. #77 (confirmed male) and #92 (confirmed female) were each in the box
+        far more often, right through incubation, but never on the same day. The first pair wins:
+        shared sightings are settled first, and 2 beats 0 — nothing lower down is consulted.
       </div>
+      <h4>Unidentified adults</h4>
+      <p>
+        An unchipped bird can perfectly well be a parent; it just can’t be named, and the algorithm
+        never invents one. But where a monitor recorded an adult they couldn’t identify beside one
+        half of a pair already known to breed together, that unnamed bird was most likely the
+        partner — so the observation counts toward that pair as well. It ranks below a real shared
+        sighting, and it only applies to a pair that already has one: with no established partner,
+        an unnamed adult points at nobody in particular.
+      </p>
       <h4>When there’s no pair</h4>
       <p>
         If no valid male–female pair exists, the best-evidenced single candidate becomes a
-        <b> lone parent</b> — most sightings, ties broken by nearest to laying. Its sex needn’t be
-        known; it fills the male slot unless something says female. The family then shows one adult
-        and the offspring. If not one candidate bird was sighted, the attempt has no parents at all,
-        which is normal for a box of unchipped birds.
+        <b> lone parent</b>, ranked the same way. Its sex needn’t be known; it fills the male slot
+        unless something says female. The family then shows one adult and the offspring. If not one
+        candidate bird was sighted, the attempt has no parents at all, which is normal for a box of
+        unchipped birds.
       </p>
 
       <h3>10. Matching chicks to an attempt</h3>
