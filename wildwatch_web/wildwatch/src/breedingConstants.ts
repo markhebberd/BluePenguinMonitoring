@@ -81,6 +81,17 @@ export const PAIR_WEIGHTS = {
 };
 
 /**
+ * Most pre-breeding sightings that count for one bird (and for one pair's shared ones).
+ *
+ * Without it, courtship outvotes incubation. Pre-breeding visits are many and brief where
+ * I&G sightings are few — so at ×{@link PAIR_WEIGHTS.pre} apiece a bird seen a dozen times
+ * during courtship and never once on the nest can outscore the bird that actually sat the
+ * eggs. Beyond the first couple of visits, more of them say nothing new about who bred:
+ * courtship shows interest in a box, incubation shows a parent.
+ */
+export const PRE_BREEDING_SIGHTINGS_CAP = 2;
+
+/**
  * How much of a shared sighting an *implied* one is worth — an unidentified adult recorded
  * beside one half of a pair already known to breed together (it was probably the partner).
  * Half: a good inference, never as good as reading the chip.

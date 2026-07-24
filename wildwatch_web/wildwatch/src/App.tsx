@@ -4,7 +4,7 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
-import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -907,15 +907,16 @@ function boxSightings(observations: Observation[], allPenguinsInBox?: any[]): Bo
  *  they still make a bird a candidate. */
 interface PairEvidence {
   sharedIg: number;   // recorded together during incubation or guard
-  sharedPre: number;  // recorded together before laying
+  sharedPre: number;  // recorded together before laying (capped)
   impliedIg: number;  // one of them beside an unidentified adult, during incubation or guard
   impliedPre: number; // the same, before laying
   ig: number;         // sightings during incubation and guard, either bird
-  pre: number;        // sightings before laying this season, either bird
+  pre: number;        // sightings before laying this season, either bird (capped per bird)
   bred: number;       // how many of the two bred at this box in an earlier season (0–2)
   near: number;       // combined distance from laying — separates pairs that score alike, so
                       // the answer can't depend on which bird happened to be encountered first
 }
+const capPre = (n: number) => Math.min(n, PRE_BREEDING_SIGHTINGS_CAP);
 const evidenceScore = (e: PairEvidence): number =>
   PAIR_WEIGHTS.sharedIg * (e.sharedIg + IMPLIED_SHARE_CONFIDENCE * e.impliedIg)
   + PAIR_WEIGHTS.ig * e.ig
@@ -1001,10 +1002,12 @@ function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<stri
     const implied = (sharedIg + sharedPre) > 0 ? impliedFor(cands[i].key, cands[j].key) : { ig: 0, pre: 0 };
     const x = cands[i].e, y = cands[j].e;
     const ev: PairEvidence = {
-      sharedIg, sharedPre,
-      impliedIg: implied.ig, impliedPre: implied.pre,
+      sharedIg,
+      // Courtship is capped, per bird and for the pair: see PRE_BREEDING_SIGHTINGS_CAP.
+      sharedPre: capPre(sharedPre),
+      impliedIg: implied.ig, impliedPre: Math.min(implied.pre, PRE_BREEDING_SIGHTINGS_CAP),
       ig: x.ig + y.ig,
-      pre: x.pre + y.pre,
+      pre: capPre(x.pre) + capPre(y.pre),
       bred: (ctx.bredBefore.has(cands[i].key) ? 1 : 0) + (ctx.bredBefore.has(cands[j].key) ? 1 : 0),
       near: x.near + y.near,
     };
@@ -1019,7 +1022,7 @@ function detectClutchPair(c: Clutch, sightings: BoxSighting[], birdMap: Map<stri
   let solo: { key: string; sex: string; ev: PairEvidence } | null = null;
   for (const cd of cands) {
     const ev: PairEvidence = { sharedIg: 0, sharedPre: 0, impliedIg: 0, impliedPre: 0,
-      ig: cd.e.ig, pre: cd.e.pre, bred: ctx.bredBefore.has(cd.key) ? 1 : 0, near: cd.e.near };
+      ig: cd.e.ig, pre: capPre(cd.e.pre), bred: ctx.bredBefore.has(cd.key) ? 1 : 0, near: cd.e.near };
     if (!solo || betterEvidence(ev, solo.ev)) solo = { key: cd.key, sex: sexOf(cd.bird)?.sex || '', ev };
   }
   if (solo) return { male: solo.sex === 'F' ? '' : solo.key, female: solo.sex === 'F' ? solo.key : '' };

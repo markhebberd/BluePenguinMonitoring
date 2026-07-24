@@ -17,7 +17,7 @@
  */
 import {
   BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS,
-  MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE,
+  MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP,
   CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS,
 } from '../breedingConstants';
 import { ALGORITHM_DOC } from '../algorithmFingerprint';
@@ -280,8 +280,8 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <tbody>
           <tr><td>Shared sighting in I&amp;G</td><td>×{PAIR_WEIGHTS.sharedIg}</td><td>Both birds recorded together: one observation, or chipped at the box the same day</td></tr>
           <tr><td>Sighting in I&amp;G</td><td>×{PAIR_WEIGHTS.ig}</td><td>Either bird, per sighting</td></tr>
-          <tr><td>Shared sighting pre-breeding</td><td>×{PAIR_WEIGHTS.sharedPre}</td><td>Both birds together, before laying</td></tr>
-          <tr><td>Sighting pre-breeding</td><td>×{PAIR_WEIGHTS.pre}</td><td>Either bird, since the start of this season</td></tr>
+          <tr><td>Shared sighting pre-breeding</td><td>×{PAIR_WEIGHTS.sharedPre}</td><td>Both birds together, before laying — at most {PRE_BREEDING_SIGHTINGS_CAP}</td></tr>
+          <tr><td>Sighting pre-breeding</td><td>×{PAIR_WEIGHTS.pre}</td><td>Either bird, since the start of this season — at most {PRE_BREEDING_SIGHTINGS_CAP} per bird</td></tr>
           <tr><td>Bred at this box before</td><td>×{PAIR_WEIGHTS.bred}</td><td>Per bird, from an earlier season</td></tr>
           <tr><td>After guard</td><td>—</td><td>Scores nothing: both parents are at sea. Still makes a bird a candidate</td></tr>
         </tbody>
@@ -291,6 +291,14 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         pair seen together once but never again can lose to a pair recorded through the whole of
         incubation. Pairs that score exactly alike are separated by whichever was seen closest to
         laying, so the answer never depends on which bird happened to be scanned first.
+      </p>
+      <p>
+        Pre-breeding is capped at {PRE_BREEDING_SIGHTINGS_CAP} sightings per bird for a reason
+        worth stating. Courtship visits are many and brief where nest attendance is sparse, so
+        uncapped they simply outvote it: a bird seen a dozen times around the box in spring and
+        never once during incubation would be named a parent over the bird that actually sat the
+        eggs. Past the first visit or two, more courtship says nothing new about who bred — it
+        shows interest in a box, where incubation shows a parent.
       </p>
       <h4>Unidentified adults</h4>
       <p>
