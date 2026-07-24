@@ -1,0 +1,48 @@
+# Wildwatch NAS mirror — LAN-only, HTTP, restored nightly from the previous night's backup.
+# Run from /volume1/wildwatch/nas-mirror on the Synology (Container Manager / docker compose).
+#
+# Deliberately NOT exposed to the internet: no reverse proxy entry, no QuickConnect rule,
+# no port forward. The only network traffic that leaves the house is the nightly outbound
+# HTTPS pull from wildwatch.co.nz.
+
+services:
+  db:
+    image: mariadb:11.8          # matches production (MariaDB 11.8.x)
+    container_name: wildwatch-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?set DB_ROOT_PASS in .env}
+      MARIADB_USER: ww
+      MARIADB_PASSWORD: ${DB_APP_PASS:?set DB_APP_PASS in .env}
+      MARIADB_DATABASE: ww_a     # created empty; the nightly restore fills ww_a / ww_b
+    volumes:
+      - dbdata:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    # No ports: — the DB is reachable only from the web container and `docker exec`.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    container_name: wildwatch-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:80"
+    volumes:
+      # SPA build + PHP API, rsynced from the dev machine. Read-only to the container.
+      - ${WW_ROOT:-/volume1/wildwatch}/app:/var/www/html:ro
+      # Nightly status page (written by bin/nightly.sh).
+      - ${WW_ROOT:-/volume1/wildwatch}/status:/var/www/html/status:ro
+      # Which slot (ww_a / ww_b) is live, read fresh on every request by secrets.php.
+      - ${WW_ROOT:-/volume1/wildwatch}/shared:/var/www/shared:ro
+      # Credentials, mounted over the API dir so they never live in the rsynced tree.
+      - ${WW_ROOT:-/volume1/wildwatch}/shared/secrets.php:/var/www/html/api/secrets.php:ro
+
+volumes:
+  dbdata:

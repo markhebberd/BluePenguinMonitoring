@@ -33,17 +33,24 @@ export const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
 /** Little penguins lay the second egg about this many days after the first. */
 export const SECOND_EGG_LAG_DAYS = 2;
 
+/**
+ * First egg to first chick, used to date laying BACKWARDS from an observed hatch.
+ *
+ * A day under BREEDING_OFFSETS.hatch, deliberately. Incubation isn't really a whole
+ * number — nearer 37½ — and the two uses pull opposite ways. Predicting a hatch date can
+ * round to the likelier day; dating laying from one sets a hard bound that decides whether
+ * the records can be reconciled at all, and a bound one day too tight rejects real broods
+ * over rounding. So this end takes the lenient value.
+ */
+export const INCUBATION_DAYS = 37;
+
 
 /**
  * How long a box must have gone unchecked before chicks found with no egg phase are
  * believed to be a real breeding attempt rather than stale data. Shorter than that and
  * the eggs would have been seen, so the chicks can't be new.
- *
- * A day under BREEDING_OFFSETS.hatch on purpose. Incubation isn't the whole number the
- * offset has to be — nearer 37½ — and this test throws data away, so it errs on the side
- * of letting a real brood through rather than excluding one over the rounding.
  */
-export const CHICK_START_MIN_GAP_DAYS = 37;
+export const CHICK_START_MIN_GAP_DAYS = 35;
 
 /**
  * The same test when the chicks found are already microchipped. A chipped chick is close
