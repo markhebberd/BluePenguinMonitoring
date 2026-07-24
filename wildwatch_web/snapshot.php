@@ -155,7 +155,7 @@ if ($since) {
         'edit_counts' => $editCounts,
         'fm_excluded_boxes' => $fmExcludedBoxes,
         '_counts' => getTotalCounts($pdo, $colonyId),
-    ], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId)));
+    ], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId), getObservers($pdo)));
     exit;
 }
 
@@ -217,7 +217,7 @@ $json = json_encode(array_merge([
     'edit_counts' => $editCounts,
     'fm_excluded_boxes' => $fmExcludedBoxes,
     '_counts' => getTotalCounts($pdo, $colonyId),
-], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId)));
+], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId), getObservers($pdo)));
 
 // Manual gzip with known Content-Length for accurate client progress
 $gz = gzencode($json, 6);

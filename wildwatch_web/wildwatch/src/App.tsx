@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT } from './breedingConstants';
@@ -40,6 +40,7 @@ interface Observation {
   fledged_unchipped?:number;
   scans: Scan[];
   edit_count?:string|number;
+  observer_id?:number|string|null;
 }
 interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_stage:string|null; chipped_as_adult:number; chip_date:string; chip_by:string|null; chick_size_code?:string|null; }
 // The algorithm's tunable numbers live in one module so the admin page's Algorithm
@@ -1481,6 +1482,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const obsId = obs.observation_id;
   const localObs = obs;
   const dayNote = getDayNote(toNzDateStr(obs.observation_time_utc));
+  const recordedBy = getObserverName(obs.observer_id);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [birdSearch, setBirdSearch] = useState('');
@@ -1591,6 +1593,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b>
           {dayNote && <span className="obs-day-note"> · {dayNote}</span>}</span>}
         <span className="obs-top-right">
+          {/* Who recorded it — observations.observer_id, named from the cached observers list. */}
+          {recordedBy && <span className="obs-by">{recordedBy}</span>}
           {canEdit && editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
           {canEdit && obsId && !editing && <button className="edit-btn" onClick={startEdit}>Edit</button>}
           {editing && <>

@@ -151,4 +151,4 @@ echo json_encode([
     'locations'    => $locations,
     'biometrics'   => $biometrics,
     'edit_counts'  => $editCounts,
-]);
+] + getObservers($pdo));
