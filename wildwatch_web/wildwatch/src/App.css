@@ -424,14 +424,19 @@ h3.collapsible:hover { color:#1a5276; }
 .day-row-cf .day-box-link { color:#e65100; }
 .day-cf-date { font-size:10px; font-style:italic; }
 .day-header-row { display:flex; align-items:center; flex-wrap:wrap; gap:6px 14px; }
+/* The stats sentence takes the room it needs but yields it: without min-width:0 a flex item
+   refuses to shrink below its content, so the Changed/Stalker buttons were pushed onto a row
+   of their own even when the line had space left. It wraps internally instead. */
+.day-stats { flex:0 1 auto; min-width:0; }
 @media (min-width:900px) { .day-stats .date-stats-date { margin-right:16px; } }
-/* The day's note, edited in place beside the day's stats. */
-.day-note { font-size:13px; font-weight:normal; color:#455a64; font-style:italic; }
+/* The day's note, edited in place at the end of the day's stats sentence — inline, so it
+   continues that line rather than claiming a row of its own. */
+.day-note { font-size:13px; font-weight:normal; color:#455a64; font-style:italic; white-space:nowrap; }
 .day-note-editable { cursor:text; border-bottom:1px dashed transparent; }
 .day-note-editable:hover { border-bottom-color:#b0bec5; }
 .day-note-empty { color:#90a4ae; font-style:normal; font-size:12px; }
-.day-note-input { font-size:13px; font-weight:normal; font-family:inherit; color:#455a64; padding:2px 6px;
-  border:1px solid #90caf9; border-radius:4px; min-width:220px; max-width:100%; flex:1; }
+.day-note-input { font-size:13px; font-weight:normal; font-family:inherit; color:#455a64; padding:1px 6px;
+  border:1px solid #90caf9; border-radius:4px; width:15em; max-width:100%; vertical-align:baseline; }
 .day-cf-toggles { display:flex; gap:12px; }
 .day-cf-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:4px; }
 .day-changed-toggle { font-size:12px; font-weight:normal; cursor:pointer; white-space:nowrap; background:none; border:1px solid #cfd8dc; border-radius:4px; padding:2px 8px; color:#1a5276; }

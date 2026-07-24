@@ -6127,8 +6127,12 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       {(totalObs > 0 || totalChips > 0) && (
         <div className="day-section">
           <h3 className="day-header-row">
-            <span className="day-stats"><DateStatsLine stats={{ ...(getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, label:null, isFullMonitor:false, totalLocations:0 }), chipped: totalChips }} showDate date={date} hideLabel /></span>
-            <DayNoteEditor date={date} token={token} canEdit={canEdit} />
+            {/* The note sits inside the stats span, where the read-only label used to be, so it
+                flows on with the sentence instead of becoming a flex item that wraps to its own row. */}
+            <span className="day-stats">
+              <DateStatsLine stats={{ ...(getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, label:null, isFullMonitor:false, totalLocations:0 }), chipped: totalChips }} showDate date={date} hideLabel />
+              {' '}<DayNoteEditor date={date} token={token} canEdit={canEdit} />
+            </span>
             <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
               Changed {changedExpanded ? '▴' : '▾'}
             </button>
