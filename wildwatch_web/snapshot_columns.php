@@ -19,9 +19,7 @@ const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, locati
 const SNAP_COLS_LOC  = 'location_id, location_name, persistent_notes, watched, pit_id, latitude, longitude, accuracy';
 const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted';
 
-// Human-verified breeding truth (2026-07-24-breeding-verifications.sql). Verifier names come from
-// the observer joins (oa/oc/ob) so the client shows "verified by <name>" without an observers table.
-// Aliases: v = breeding_verifications, vc = _chicks, d = _disagreements.
-const SNAP_COLS_VER       = 'v.verification_id, v.observation_id, v.male_peng_num, v.female_peng_num, v.adults_verified_by, oa.observer_name AS adults_verified_by_name, v.adults_verified_at, v.adults_notes, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_verified_by, oc.observer_name AS chicks_verified_by_name, v.chicks_verified_at, v.chicks_notes, v.created_at, v.updated_at';
-const SNAP_COLS_VER_CHICK = 'vc.id, vc.verification_id, vc.peng_num';
-const SNAP_COLS_DISAG     = 'd.disagreement_id, d.observation_id, d.subject, d.reason, d.raised_by, ob.observer_name AS raised_by_name, d.raised_at';
+// Human-verified breeding truth (single table). Reviewer names come from the observer joins
+// (oa/oc) so the client shows "accepted by <name>" without an observers table. chicks is a JSON
+// array of peng_nums (prefix-stripped per element in getVerificationData). Alias v = breeding_verifications.
+const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.male_peng_num, v.female_peng_num, v.adults_reviewed_by, oa.observer_name AS adults_reviewed_by_name, v.adults_reviewed_at, v.adults_note, v.chicks_verdict, v.chicks, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_reviewed_by, oc.observer_name AS chicks_reviewed_by_name, v.chicks_reviewed_at, v.chicks_note, v.created_at, v.updated_at';

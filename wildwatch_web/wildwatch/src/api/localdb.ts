@@ -37,10 +37,12 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 // Old single-colony cache is replaced by per-colony DBs — remove it once to reclaim the space.
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
-const DB_VERSION = 2; // v2: breeding verification stores
-const CACHE_VERSION = 15; // Bump to force all clients to full re-sync (v15: breeding verifications)
+const DB_VERSION = 3; // v3: single breeding_verifications store (dropped chicks/disagreements stores)
+const CACHE_VERSION = 16; // Bump to force all clients to full re-sync (v16: verification single-table)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics',
-  'verifications', 'verification_chicks', 'disagreements', 'meta'] as const;
+  'verifications', 'meta'] as const;
+// Stores from earlier DB versions that no longer exist; dropped on upgrade.
+const OBSOLETE_STORES = ['verification_chicks', 'disagreements'];
 
 // Locations excluded from Full Monitor detection. Now configured per-colony (colonies.fm_excluded_boxes,
 // delivered in the snapshot). This is only the fallback when a snapshot predates that field.
@@ -92,8 +94,6 @@ interface MemCache {
   locations: any[];
   biometrics: any[];
   verifications: any[];
-  verification_chicks: any[];
-  disagreements: any[];
   // Pre-built indexes
   obsById: Map<number, any>;            // observation_id → observation
   obsByLocation: Map<number, any[]>;   // location_id → observations
@@ -106,10 +106,8 @@ interface MemCache {
   scansByPit: Map<string, any[]>;      // pit_id → scans
   bioByPeng: Map<string, any[]>;       // peng_num → biometrics
   // Precomputed date stats
-  // Breeding verification (human ground truth)
+  // Breeding verification (human ground truth): one row per verified clutch, chicks inline (JSON)
   verByObs: Map<number, any>;          // anchor observation_id → verification
-  chicksByVer: Map<number, any[]>;     // verification_id → chick rows
-  disagByObs: Map<number, any[]>;      // anchor observation_id → disagreements
   dateStats: Map<string, any>;         // NZ date string → stats
   observationDates: string[];          // sorted NZ dates with data
   obsByNzDate: Map<string, any[]>;     // NZ date string → observations
@@ -188,12 +186,10 @@ function buildDateStats(c: MemCache): void {
   c.observationDates = [...c.obsByNzDate.keys()].sort();
 }
 
-function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[]; verifications?: any[]; verification_chicks?: any[]; disagreements?: any[] }, fmExcludedRaw?: string | null): MemCache {
+function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[]; verifications?: any[] }, fmExcludedRaw?: string | null): MemCache {
   const cache: MemCache = {
     ...data,
     verifications: data.verifications || [],
-    verification_chicks: data.verification_chicks || [],
-    disagreements: data.disagreements || [],
     fmExcludedRaw,
     fmExcluded: parseFmExcluded(fmExcludedRaw),
     obsById: new Map(),
@@ -207,21 +203,11 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     scansByPit: new Map(),
     bioByPeng: new Map(),
     verByObs: new Map(),
-    chicksByVer: new Map(),
-    disagByObs: new Map(),
     dateStats: new Map(),
     observationDates: [],
     obsByNzDate: new Map(),
   };
   for (const v of cache.verifications) cache.verByObs.set(v.observation_id, v);
-  for (const c of cache.verification_chicks) {
-    if (!cache.chicksByVer.has(c.verification_id)) cache.chicksByVer.set(c.verification_id, []);
-    cache.chicksByVer.get(c.verification_id)!.push(c);
-  }
-  for (const d of cache.disagreements) {
-    if (!cache.disagByObs.has(d.observation_id)) cache.disagByObs.set(d.observation_id, []);
-    cache.disagByObs.get(d.observation_id)!.push(d);
-  }
   for (const l of data.locations) { cache.locByName.set(l.location_name, l); cache.locById.set(l.location_id, l); }
   for (const p of data.penguins) cache.pengByNum.set(p.peng_num, p);
   for (const c of data.chips) {
@@ -289,11 +275,12 @@ function openDB(): Promise<IDBDatabase> {
             : store === 'locations' ? 'location_id'
             : store === 'biometrics' ? 'biometric_id'
             : store === 'verifications' ? 'verification_id'
-            : store === 'verification_chicks' ? 'id'
-            : store === 'disagreements' ? 'disagreement_id'
             : 'key';
           db.createObjectStore(store, { keyPath });
         }
+      }
+      for (const store of OBSOLETE_STORES) {
+        if (db.objectStoreNames.contains(store)) db.deleteObjectStore(store);
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -371,16 +358,16 @@ function applyEditCounts(observations: any[], editCounts: Record<string, number>
 async function loadMemFromIDB(): Promise<void> {
   const db = await openDB();
   console.time('loadMemFromIDB:getAll');
-  const [observations, scans, penguins, chips, locations, biometrics, verifications, verification_chicks, disagreements] = await Promise.all([
+  const [observations, scans, penguins, chips, locations, biometrics, verifications] = await Promise.all([
     getAll(db, 'observations'), getAll(db, 'scans'), getAll(db, 'penguins'),
     getAll(db, 'chips'), getAll(db, 'locations'), getAll(db, 'biometrics'),
-    getAll(db, 'verifications'), getAll(db, 'verification_chicks'), getAll(db, 'disagreements'),
+    getAll(db, 'verifications'),
   ]);
   console.timeEnd('loadMemFromIDB:getAll');
   console.log(`loadMemFromIDB: ${observations.length} obs, ${scans.length} scans, ${penguins.length} penguins, ${locations.length} locations`);
   const fmExcluded = await getMeta(db, 'fm_excluded_boxes');
   console.time('loadMemFromIDB:buildIndexes');
-  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics, verifications, verification_chicks, disagreements }, fmExcluded);
+  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics, verifications }, fmExcluded);
   console.timeEnd('loadMemFromIDB:buildIndexes');
   notifySubscribers();
 }
@@ -421,8 +408,6 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       putAll(db, 'locations', data.locations),
       putAll(db, 'biometrics', data.biometrics),
       putAll(db, 'verifications', data.verifications || []),
-      putAll(db, 'verification_chicks', data.verification_chicks || []),
-      putAll(db, 'disagreements', data.disagreements || []),
     ]);
     console.timeEnd('idb-write');
     await setMeta(db, 'snapshot_time', data.snapshot_time);
@@ -431,7 +416,7 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
     mem = buildIndexes({
       observations, scans: data.scans, penguins: data.penguins,
       chips: data.chips, locations: data.locations, biometrics: data.biometrics,
-      verifications: data.verifications, verification_chicks: data.verification_chicks, disagreements: data.disagreements,
+      verifications: data.verifications,
     }, data.fm_excluded_boxes);
     console.timeEnd('buildIndexes');
     notifySubscribers();
@@ -445,9 +430,9 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       for (const id of deletedScanIds) store.delete(id);
       await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
     }
-    // Verification tables ride every snapshot in full, so replace their stores wholesale —
-    // this is how a deleted verification/disagreement or cleared chick row leaves the cache.
-    await clearStores(db, ['verifications', 'verification_chicks', 'disagreements']);
+    // Verifications ride every snapshot in full, so replace the store wholesale — this is how a
+    // deleted verification leaves the cache.
+    await clearStores(db, ['verifications']);
     await Promise.all([
       putAll(db, 'observations', observations),
       putAll(db, 'scans', activeScans),
@@ -456,8 +441,6 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       putAll(db, 'locations', data.locations),
       putAll(db, 'biometrics', data.biometrics),
       putAll(db, 'verifications', data.verifications || []),
-      putAll(db, 'verification_chicks', data.verification_chicks || []),
-      putAll(db, 'disagreements', data.disagreements || []),
     ]);
     // Also update edit counts for observations already in IDB
     if (data.edit_counts && Object.keys(data.edit_counts).length > 0 && mem) {
@@ -752,14 +735,11 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
   }
 
   // Human-verified breeding truth for this box's clutches, keyed by the anchor observation.
-  // Each verification carries its chick peng_nums inline so the UI needs no second lookup.
+  // chicks is already an inline array on each verification (from the snapshot's JSON column).
   const verifications: any[] = [];
-  const disagreements: any[] = [];
   for (const o of boxObs) {
     const v = c.verByObs.get(o.observation_id);
-    if (v) verifications.push({ ...v, chicks: (c.chicksByVer.get(v.verification_id) || []).map((r: any) => r.peng_num) });
-    const ds = c.disagByObs.get(o.observation_id);
-    if (ds) disagreements.push(...ds);
+    if (v) verifications.push(v);
   }
 
   return {
@@ -767,7 +747,6 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
     all_penguins: Array.from(seenPenguins.values()),
     chip_events,
     verifications,
-    disagreements,
     deleted_count: deleted.length,
     deleted: includeDeleted ? deleted : [],
   };

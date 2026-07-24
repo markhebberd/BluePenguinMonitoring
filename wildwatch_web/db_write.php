@@ -31,8 +31,6 @@ const WW_TABLE_KEYS = [
     'validation_dismissals' => 'id',
     'observers'             => 'observer_id',
     'breeding_verifications'                => 'verification_id',
-    'breeding_verification_chicks'          => 'id',
-    'breeding_verification_disagreements'   => 'disagreement_id',
 ];
 
 /** Tables whose primary key is a natural string, not an auto-increment id. For these
@@ -189,6 +187,22 @@ function wwAuditedReplaceSeason($pdo, int $season, array $rows, $observerId, $re
  * the log's content is a snapshot; only the lookup key follows the bird.
  * $to must be vacant. Returns [chips, biometrics] carried, for reporting.
  */
+/** Rewrite peng_nums inside breeding_verifications.chicks (a JSON array, no FK, so renumbers must
+ *  reach it explicitly). $map is old=>new applied SIMULTANEOUSLY, so a swap (a=>b, b=>a) is correct.
+ *  Renumbers touch few rows; each rewrite is audited. male/female cascade via their FKs, not here. */
+function wwRewriteVerificationChicks($pdo, array $map, $observerId, $reason = null): void {
+    foreach ($pdo->query("SELECT verification_id, chicks FROM breeding_verifications WHERE chicks IS NOT NULL")->fetchAll() as $r) {
+        $arr = json_decode($r['chicks'], true);
+        if (!is_array($arr)) continue;
+        $changed = false;
+        $new = array_map(function ($pn) use ($map, &$changed) {
+            if (array_key_exists($pn, $map)) { $changed = true; return $map[$pn]; }
+            return $pn;
+        }, $arr);
+        if ($changed) wwAuditedUpdate($pdo, 'breeding_verifications', $r['verification_id'], ['chicks' => json_encode($new)], $observerId, $reason);
+    }
+}
+
 function wwAuditedRenumberPenguin($pdo, $from, $to, $observerId, $reason = null): array {
     $sel = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
     $sel->execute([$from]);
@@ -207,6 +221,8 @@ function wwAuditedRenumberPenguin($pdo, $from, $to, $observerId, $reason = null)
     $pdo->prepare("UPDATE penguins SET peng_num = ? WHERE peng_num = ?")->execute([$to, $from]);
     $pdo->prepare("UPDATE audit_log SET record_id = ? WHERE table_name = 'penguins' AND record_id = ?")
         ->execute([$to, $from]);
+    // male/female verification FKs cascaded; the chicks JSON has no FK, so rewrite it here.
+    wwRewriteVerificationChicks($pdo, [$from => $to], $observerId, $reason);
     wwAudit($pdo, 'penguins', $to, 'UPDATE',
         ['peng_num' => ['old' => $from, 'new' => $to], 'chips_carried' => $chips, 'biometrics_carried' => $bios],
         $observerId, $reason);
@@ -249,6 +265,8 @@ function wwAuditedSwapPenguins($pdo, $a, $b, $observerId, $reason = null): array
         $repoint->execute([$dst, $src]);
     }
 
+    // Verification male/female cascaded through the temp dance; swap the chicks JSON in one map.
+    wwRewriteVerificationChicks($pdo, [$a => $b, $b => $a], $observerId, $reason);
     wwAudit($pdo, 'penguins', $b, 'UPDATE', ['peng_num' => ['old' => $a, 'new' => $b], 'swapped_with' => $a] + $counts['a'], $observerId, $reason);
     wwAudit($pdo, 'penguins', $a, 'UPDATE', ['peng_num' => ['old' => $b, 'new' => $a], 'swapped_with' => $b] + $counts['b'], $observerId, $reason);
     return [$b => $counts['a'], $a => $counts['b']];

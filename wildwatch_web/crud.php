@@ -176,27 +176,32 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
 }
 
 /**
- * Save (or clear) one half of a breeding verification, anchored to a clutch's first-egg
- * observation. Atomic and audited: the verification row is upserted through the gateway, and the
- * chicks half additionally replaces its child rows (delete-then-insert, each audited — the
- * wwAuditedReplaceSeason pattern). Clearing the last verified half deletes the row (its chick rows
- * first, for the RESTRICT FK), keeping chk_bv_verified_half satisfied.
+ * Record a verdict on one half of a breeding verification, anchored to a clutch's first-egg
+ * observation. Each half (adults / offspring) is accepted, rejected, or cleared independently;
+ * the row is upserted through the audited gateway. Clearing the last remaining verdict deletes
+ * the row (chk_bv_reviewed requires at least one).
  *
- * Body: { observation_id, half:'adults'|'chicks', clear?:bool,
- *         adults: male_peng_num, female_peng_num, adults_notes
- *         chicks: chicks:[peng_num...], dead_eggs, dead_chicks, fledged_unchipped, chicks_notes }
- * peng_nums arrive display-stripped and are re-prefixed with dbPengNum; the peng_num FKs reject
- * any that isn't a real bird.
+ * ACCEPT snapshots the algorithm's detected data as the fixture + drift baseline; REJECT records
+ * a note (required) and holds no data for that half. Body:
+ *   { observation_id, half:'adults'|'chicks', verdict:'accepted'|'rejected'|'clear', note?,
+ *     accept adults: male_peng_num, female_peng_num
+ *     accept chicks: chicks:[peng_num...], dead_eggs, dead_chicks, fledged_unchipped }
+ * peng_nums arrive display-stripped and are re-prefixed with dbPengNum. male/female are FK'd; the
+ * chicks list is stored as a JSON array of prefixed peng_nums (renumber-maintained in db_write.php).
  */
 if ($action === 'save_verification' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $svRole = $observer['role'] ?? 'viewer';
     if ($svRole !== 'admin' && $svRole !== 'editor') { http_response_code(403); echo json_encode(['error'=>'Editors only']); exit; }
     $in = json_decode(file_get_contents('php://input'), true);
     if (!is_array($in)) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); exit; }
-    $obsId = (int)($in['observation_id'] ?? 0);
-    $half  = $in['half'] ?? '';
-    $clear = !empty($in['clear']);
-    if (!$obsId || !in_array($half, ['adults','chicks'], true)) { http_response_code(400); echo json_encode(['error'=>'observation_id and half required']); exit; }
+    $obsId   = (int)($in['observation_id'] ?? 0);
+    $half    = $in['half'] ?? '';
+    $verdict = $in['verdict'] ?? '';
+    if (!$obsId || !in_array($half, ['adults','chicks'], true) || !in_array($verdict, ['accepted','rejected','clear'], true)) {
+        http_response_code(400); echo json_encode(['error'=>'observation_id, half and verdict required']); exit;
+    }
+    $note = trim((string)($in['note'] ?? ''));
+    if ($verdict === 'rejected' && $note === '') { http_response_code(400); echo json_encode(['error'=>'A reason is required to reject']); exit; }
 
     // Colony access via the anchor observation.
     $cs = $pdo->prepare("SELECT ol.colony_id FROM observations o JOIN observation_locations ol ON ol.location_id = o.location_id WHERE o.observation_id = ?");
@@ -207,64 +212,47 @@ if ($action === 'save_verification' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $oid = $observer['observer_id'];
     $now = date('Y-m-d H:i:s');
     $pref = function($p) use ($pdo, $cid) { return ($p === null || $p === '') ? null : dbPengNum($pdo, (int)$cid, (string)$p); };
+    $clear = $verdict === 'clear';
+
+    // The half's column set. Accept snapshots the detected data; reject holds a note only; clear nulls all.
+    if ($half === 'adults') {
+        $male = $verdict === 'accepted' ? $pref($in['male_peng_num'] ?? null) : null;
+        $female = $verdict === 'accepted' ? $pref($in['female_peng_num'] ?? null) : null;
+        if ($verdict === 'accepted' && $male !== null && $female !== null && $male === $female) { http_response_code(400); echo json_encode(['error'=>'A bird cannot be both parents']); exit; }
+        $fields = $clear
+            ? ['adults_verdict'=>null,'male_peng_num'=>null,'female_peng_num'=>null,'adults_reviewed_by'=>null,'adults_reviewed_at'=>null,'adults_note'=>null]
+            : ['adults_verdict'=>$verdict,'male_peng_num'=>$male,'female_peng_num'=>$female,'adults_reviewed_by'=>$oid,'adults_reviewed_at'=>$now,'adults_note'=>$note !== '' ? $note : null];
+    } else {
+        $chicksJson = null;
+        if ($verdict === 'accepted') {
+            $list = array_values(array_filter(array_map($pref, is_array($in['chicks'] ?? null) ? $in['chicks'] : [])));
+            $chicksJson = json_encode($list);
+        }
+        $fields = $clear
+            ? ['chicks_verdict'=>null,'chicks'=>null,'dead_eggs'=>0,'dead_chicks'=>0,'fledged_unchipped'=>0,'chicks_reviewed_by'=>null,'chicks_reviewed_at'=>null,'chicks_note'=>null]
+            : ['chicks_verdict'=>$verdict,'chicks'=>$chicksJson,
+               'dead_eggs'=>$verdict==='accepted'?(int)($in['dead_eggs']??0):0,'dead_chicks'=>$verdict==='accepted'?(int)($in['dead_chicks']??0):0,'fledged_unchipped'=>$verdict==='accepted'?(int)($in['fledged_unchipped']??0):0,
+               'chicks_reviewed_by'=>$oid,'chicks_reviewed_at'=>$now,'chicks_note'=>$note !== '' ? $note : null];
+    }
 
     try {
         $pdo->beginTransaction();
         $ex = $pdo->prepare("SELECT * FROM breeding_verifications WHERE observation_id = ?");
         $ex->execute([$obsId]);
         $existing = $ex->fetch();
+        $otherVerdict = $existing ? ($half === 'adults' ? $existing['chicks_verdict'] : $existing['adults_verdict']) : null;
 
-        // The half's column set (verified or cleared).
-        if ($half === 'adults') {
-            $male = $pref($in['male_peng_num'] ?? null);
-            $female = $pref($in['female_peng_num'] ?? null);
-            if (!$clear && $male !== null && $female !== null && $male === $female) throw new Exception('A bird cannot be both parents');
-            $fields = $clear
-                ? ['male_peng_num'=>null,'female_peng_num'=>null,'adults_verified_by'=>null,'adults_verified_at'=>null,'adults_notes'=>null]
-                : ['male_peng_num'=>$male,'female_peng_num'=>$female,'adults_verified_by'=>$oid,'adults_verified_at'=>$now,'adults_notes'=>$in['adults_notes'] ?? null];
-        } else {
-            $fields = $clear
-                ? ['dead_eggs'=>0,'dead_chicks'=>0,'fledged_unchipped'=>0,'chicks_verified_by'=>null,'chicks_verified_at'=>null,'chicks_notes'=>null]
-                : ['dead_eggs'=>(int)($in['dead_eggs'] ?? 0),'dead_chicks'=>(int)($in['dead_chicks'] ?? 0),'fledged_unchipped'=>(int)($in['fledged_unchipped'] ?? 0),'chicks_verified_by'=>$oid,'chicks_verified_at'=>$now,'chicks_notes'=>$in['chicks_notes'] ?? null];
-        }
-
-        $verId = $existing ? (int)$existing['verification_id'] : null;
-        $otherVerifiedBy = $existing ? ($half === 'adults' ? $existing['chicks_verified_by'] : $existing['adults_verified_by']) : null;
-
-        // Removing a verification's chick rows (audited hard deletes) — needed before deleting the
-        // row (RESTRICT), and when replacing or clearing the chicks half.
-        $deleteChickRows = function($vid) use ($pdo, $oid) {
-            $cur = $pdo->prepare("SELECT id FROM breeding_verification_chicks WHERE verification_id = ?");
-            $cur->execute([$vid]);
-            foreach ($cur->fetchAll() as $r) wwAuditedDelete($pdo, 'breeding_verification_chicks', $r['id'], $oid, 'Replace verified chicks');
-        };
-
-        if ($clear && $existing && $otherVerifiedBy === null) {
-            // Both halves would be unverified → remove the row entirely.
-            $deleteChickRows($verId);
-            wwAuditedDelete($pdo, 'breeding_verifications', $verId, $oid, 'Cleared verification');
-            $verId = null;
+        if ($clear && $existing && $otherVerdict === null) {
+            wwAuditedDelete($pdo, 'breeding_verifications', (int)$existing['verification_id'], $oid, 'Cleared verification');
         } elseif ($clear && !$existing) {
             // Nothing to clear.
         } elseif ($existing) {
-            wwAuditedUpdate($pdo, 'breeding_verifications', $verId, $fields, $oid);
+            wwAuditedUpdate($pdo, 'breeding_verifications', (int)$existing['verification_id'], $fields, $oid);
         } else {
-            $verId = (int)wwAuditedInsert($pdo, 'breeding_verifications', array_merge(['observation_id'=>$obsId], $fields), $oid);
+            wwAuditedInsert($pdo, 'breeding_verifications', array_merge(['observation_id'=>$obsId], $fields), $oid);
         }
-
-        // Chick child rows follow the chicks half.
-        if ($half === 'chicks' && $verId !== null) {
-            $deleteChickRows($verId);
-            if (!$clear) {
-                foreach (($in['chicks'] ?? []) as $pn) {
-                    $pnDb = $pref($pn);
-                    if ($pnDb !== null) wwAuditedInsert($pdo, 'breeding_verification_chicks', ['verification_id'=>$verId, 'peng_num'=>$pnDb], $oid);
-                }
-            }
-        }
-
         $pdo->commit();
-        echo json_encode(['success'=>true, 'verification_id'=>$verId]);
+        echo json_encode(['success'=>true]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);
@@ -279,9 +267,9 @@ $id = $_GET['id'] ?? null;
 // two can't drift apart — a table here that the gateway won't write is rejected at startup.
 $tables = array_intersect_key(WW_TABLE_KEYS, array_flip([
     'observations', 'penguins', 'penguin_scans', 'penguin_biometric_data', 'penguin_chips', 'observation_locations',
-    // Breeding verification: the row itself is edited/cleared via save_verification (below); the
-    // generic table access here covers history reads and disagreement create/delete.
-    'breeding_verifications', 'breeding_verification_disagreements',
+    // Breeding verification is written via save_verification (below); generic access here is for
+    // history reads only.
+    'breeding_verifications',
 ]));
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
@@ -366,11 +354,9 @@ function requireWriteColony($pdo, $observer, $table, $id, $input) {
             $locId = $col("SELECT location_id FROM observations WHERE observation_id = ?", $obsId);
             if ($locId) $colonyId = $col("SELECT colony_id FROM observation_locations WHERE location_id = ?", $locId);
         }
-    } elseif ($table === 'breeding_verifications' || $table === 'breeding_verification_disagreements') {
-        // Both anchor to an observation; resolve its colony. On create the observation_id is in the
-        // body; on update/delete it's read from the existing row.
-        $pk = $table === 'breeding_verifications' ? 'verification_id' : 'disagreement_id';
-        $obsId = $id ? $col("SELECT observation_id FROM $table WHERE $pk = ?", $id)
+    } elseif ($table === 'breeding_verifications') {
+        // Anchored to an observation; resolve its colony (used by the history read path).
+        $obsId = $id ? $col("SELECT observation_id FROM breeding_verifications WHERE verification_id = ?", $id)
                      : ($input['observation_id'] ?? null);
         if ($obsId) {
             $locId = $col("SELECT location_id FROM observations WHERE observation_id = ?", $obsId);
@@ -622,11 +608,6 @@ function handleCreate($pdo, $table, $pk, $observer) {
         // Prepend colony prefix to bare peng_num on penguin/chip/bio creates
         if (in_array($table, ['penguins', 'penguin_chips', 'penguin_biometric_data']) && isset($input['peng_num'])) {
             $input['peng_num'] = dbPengNum($pdo, $cid, $input['peng_num']);
-        }
-        // A disagreement's author is the authenticated observer, never a client-supplied value.
-        if ($table === 'breeding_verification_disagreements') {
-            unset($input['raised_by'], $input['raised_at']);
-            $input['raised_by'] = $observer['observer_id'];
         }
         $newId = wwAuditedInsert($pdo, $table, $input, $observer['observer_id'], $reason);
         // Natural-key tables (penguins, penguin_chips) have no auto-increment id to return.

@@ -36,40 +36,27 @@ $fmStmt->execute([$colonyId]);
 $fmExcludedBoxes = $fmStmt->fetchColumn();
 if ($fmExcludedBoxes === false) $fmExcludedBoxes = '0,AA,AB,AC';
 
-/** Human-verified breeding truth for the colony — verifications, their chick rows, and
- *  disagreements. Tiny (≤ one verification per verified clutch), so it's fetched in FULL on
- *  every snapshot (full and incremental): the client replaces its three stores wholesale,
- *  which handles deletes without a full reload. peng_num columns are prefix-stripped to match
- *  the stripped penguins/chips the client already holds. */
+/** Human-verified breeding truth for the colony — one row per verified clutch. Tiny, so it's
+ *  fetched in FULL on every snapshot (full and incremental): the client replaces its store
+ *  wholesale, which handles deletes without a full reload. peng_num columns (and each element of
+ *  the chicks JSON array) are prefix-stripped to match the stripped penguins the client holds. */
 function getVerificationData($pdo, $colonyId, $viewPrefix) {
     $ver = $pdo->prepare("SELECT " . SNAP_COLS_VER . " FROM breeding_verifications v
         JOIN observations o ON o.observation_id = v.observation_id
         JOIN observation_locations ol ON ol.location_id = o.location_id
-        LEFT JOIN observers oa ON oa.observer_id = v.adults_verified_by
-        LEFT JOIN observers oc ON oc.observer_id = v.chicks_verified_by
+        LEFT JOIN observers oa ON oa.observer_id = v.adults_reviewed_by
+        LEFT JOIN observers oc ON oc.observer_id = v.chicks_reviewed_by
         WHERE ol.colony_id = ?");
     $ver->execute([$colonyId]);
     $verRows = $ver->fetchAll();
     stripPengPrefix($verRows, $viewPrefix, 'male_peng_num');
     stripPengPrefix($verRows, $viewPrefix, 'female_peng_num');
-
-    $chick = $pdo->prepare("SELECT " . SNAP_COLS_VER_CHICK . " FROM breeding_verification_chicks vc
-        JOIN breeding_verifications v ON v.verification_id = vc.verification_id
-        JOIN observations o ON o.observation_id = v.observation_id
-        JOIN observation_locations ol ON ol.location_id = o.location_id
-        WHERE ol.colony_id = ?");
-    $chick->execute([$colonyId]);
-    $chickRows = $chick->fetchAll();
-    stripPengPrefix($chickRows, $viewPrefix);
-
-    $dis = $pdo->prepare("SELECT " . SNAP_COLS_DISAG . " FROM breeding_verification_disagreements d
-        JOIN observations o ON o.observation_id = d.observation_id
-        JOIN observation_locations ol ON ol.location_id = o.location_id
-        LEFT JOIN observers ob ON ob.observer_id = d.raised_by
-        WHERE ol.colony_id = ?");
-    $dis->execute([$colonyId]);
-
-    return ['verifications' => $verRows, 'verification_chicks' => $chickRows, 'disagreements' => $dis->fetchAll()];
+    foreach ($verRows as &$vr) {
+        $arr = json_decode($vr['chicks'] ?? 'null', true);
+        $vr['chicks'] = is_array($arr) ? array_map(fn($pn) => displayPengNum((string)$pn, $viewPrefix), $arr) : [];
+    }
+    unset($vr);
+    return ['verifications' => $verRows];
 }
 
 function getTotalCounts($pdo, $colonyId) {
@@ -137,8 +124,7 @@ if ($since) {
         COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
         COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
         COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01'),
-        COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01'),
-        COALESCE((SELECT MAX(raised_at) FROM breeding_verification_disagreements), '2000-01-01')
+        COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01')
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
