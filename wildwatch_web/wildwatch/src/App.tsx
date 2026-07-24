@@ -679,9 +679,9 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
 
 /** One breeding attempt in a season. A clutch starts when eggs appear after an empty
  *  check — or chicks do, after a monitoring gap long enough to have hidden the egg
- *  phase — and its window ends at ABN, egg removal / offspring absence (implies death),
- *  or fledge (laid + 87d), whichever comes first. A later egg appearance after an empty
- *  check is a SECOND clutch with its own family. */
+ *  phase — and its window runs from laying until the check that ends it: ABN, or egg
+ *  removal / offspring absence (implies death or fledging). A later egg appearance after
+ *  an empty check is a SECOND clutch with its own family. */
 interface Clutch {
   laid: number | null;      // estimated laid time; null when un-estimable
   laidUncertainty: number | null; // ± days on the laid estimate (half the plausible-laying range)
@@ -691,8 +691,8 @@ interface Clutch {
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
   startObsId: number | null;// that observation's id — the anchor a verification is keyed to
   end: number | null;       // obs that ended the attempt; null = still running
-  windowStart: number;      // breeding window: egg appearance …
-  windowEnd: number;        // … fledge (laid + 87d) or earlier failure
+  windowStart: number;      // breeding window: laying (estimated), or discovery when un-estimable …
+  windowEnd: number;        // … the check that ended it; predicted fledge while still running
   guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
   attendStart: number;      // courtship/nest-building start: COURTSHIP_LEAD_DAYS before the EARLIEST
                             // plausible laid date. Attendance from here to guardEnd is
@@ -842,9 +842,14 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
   });
   for (const c of clutches) {
     const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
-    c.windowStart = c.start;
+    // The attempt runs from laying to the check that ended it — offspring gone, or ABN. Not
+    // from the discovery, which is only when someone happened to look, and not to a predicted
+    // fledge, which would cut a window short while the box plainly still held chicks. A window
+    // still running has no observed end, so there the predicted fledge stands in: it's what
+    // eventually stops an unrevisited box reading as "current".
+    c.windowStart = anchor;
     c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
-    c.windowEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.fledge * DAY);
+    c.windowEnd = c.end ?? (anchor + BREEDING_OFFSETS.fledge * DAY);
     c.attendStart = (c.laid !== null ? c.laid - (c.laidUncertainty || 0) * DAY : c.windowStart) - COURTSHIP_LEAD_DAYS * DAY;
   }
   return clutches;

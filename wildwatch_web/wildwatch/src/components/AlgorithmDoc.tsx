@@ -223,9 +223,13 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       <p>The algorithm uses two date ranges per attempt, and they are not the same range:</p>
       <ul>
         <li>
-          <b>The breeding window</b> — discovery through fledge (laid + {BREEDING_OFFSETS.fledge} days),
-          cut short by whatever ended the attempt. This is the window drawn on the box page and the
-          one chicks are matched against.
+          <b>The breeding window</b> — from laying to the check that ended the attempt: the
+          offspring gone, or <code>ABN</code>. Not from the discovery, which only records when
+          someone happened to look, and not to a predicted fledge, which would close the window
+          while the box plainly still held chicks. An attempt still running has no observed end
+          yet, so there the predicted fledge (laid + {BREEDING_OFFSETS.fledge} days) stands in —
+          it’s what eventually stops a box nobody has revisited reading as “current”. This is the
+          window drawn on the box page, and the one chicks are matched against.
         </li>
         <li>
           <b>The attendance window</b> — from {COURTSHIP_LEAD_DAYS} days before the <em>earliest
