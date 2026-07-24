@@ -22,7 +22,9 @@ $stmt = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
     COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
     COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
-    COALESCE((SELECT MAX(updated_at) FROM colonies), '2000-01-01')
+    COALESCE((SELECT MAX(updated_at) FROM colonies), '2000-01-01'),
+    COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01'),
+    COALESCE((SELECT MAX(raised_at) FROM breeding_verification_disagreements), '2000-01-01')
 ) as wm");
 $wm = $stmt->fetch()['wm'];
 
@@ -35,8 +37,10 @@ $c = $pdo->query("SELECT
     (SELECT COUNT(*) FROM penguins) AS p,
     (SELECT COUNT(*) FROM penguin_chips) AS ch,
     (SELECT COUNT(*) FROM observation_locations) AS l,
-    (SELECT COUNT(*) FROM penguin_biometric_data) AS b")->fetch();
-$wm .= "|{$c['o']}:{$c['s']}:{$c['p']}:{$c['ch']}:{$c['l']}:{$c['b']}";
+    (SELECT COUNT(*) FROM penguin_biometric_data) AS b,
+    (SELECT COUNT(*) FROM breeding_verifications) AS v,
+    (SELECT COUNT(*) FROM breeding_verification_disagreements) AS d")->fetch();
+$wm .= "|{$c['o']}:{$c['s']}:{$c['p']}:{$c['ch']}:{$c['l']}:{$c['b']}:{$c['v']}:{$c['d']}";
 
 $lastWm = $_GET['wm'] ?? '';
 echo json_encode(['changed' => $lastWm !== '' && $lastWm !== $wm, 'wm' => $wm]);

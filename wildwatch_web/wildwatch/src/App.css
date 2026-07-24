@@ -496,7 +496,7 @@ h3.collapsible:hover { color:#1a5276; }
 .st-active { background:#e9f2fb; color:#215a94; } .st-active .ss-dot { background:#2f6fb0; }
 .st-chick { background:#FFF9C4; color:#000; } .st-chick .ss-dot { background:#FDD835; }
 .season-content { display:flex; flex-direction:column; gap:10px; min-width:0; }
-.clutch-card { background:#fff; border:1px solid #dbe2e9; border-left:4px solid #93a0ac; border-radius:10px; padding:9px 12px; }
+.clutch-card { position:relative; background:#fff; border:1px solid #dbe2e9; border-left:4px solid #93a0ac; border-radius:10px; padding:9px 12px; }
 .clutch-card.bred { border-left-color:#2f8f5b; }
 .clutch-card.fail { border-left-color:#c0453a; }
 .clutch-card.active { border-left-color:#2f6fb0; }
@@ -595,6 +595,46 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .stalker-ago { color:#888; font-size:11px; margin-left:auto; white-space:nowrap; }
 .watched-tick { color:#ccc; font-size:20px; font-weight:700; line-height:1; user-select:none; }
 .watched-tick.on { color:#4CAF50; }
+
+/* ---- Breeding verification: per-clutch tick + modal ---- */
+.verify-tick { position:absolute; top:7px; right:9px; font-size:16px; font-weight:700; line-height:1; user-select:none; }
+.verify-tick.clickable { cursor:pointer; }
+.verify-tick.vt-grey { color:#c3ccd4; }
+.verify-tick.vt-green { color:#2f8f5b; }
+.verify-tick.vt-red { color:#c0453a; }
+.verify-orphans { background:#fbeceb; border:1px solid #e6b8b3; color:#a3382f; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
+
+.verify-backdrop { position:fixed; inset:0; z-index:2200; }
+.verify-modal { position:fixed; z-index:2201; width:320px; max-width:calc(100vw - 20px); max-height:80vh; overflow-y:auto;
+  background:#fff; border:1px solid #d3dae0; border-radius:10px; box-shadow:0 8px 26px rgba(0,0,0,.22); padding:10px 12px; font-size:12px; }
+.verify-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.verify-close { color:#98a4b0; font-weight:700; }
+.verify-err { background:#fbeceb; border:1px solid #e6b8b3; color:#a3382f; border-radius:6px; padding:4px 8px; margin-bottom:6px; }
+.verify-section { border-top:1px solid #eef1f4; padding-top:8px; margin-top:8px; }
+.verify-section:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+.verify-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#7d8a96; font-weight:700; margin-bottom:5px; }
+.verify-lbl .vt-green { color:#2f8f5b; text-transform:none; letter-spacing:0; }
+.verify-lbl .vt-red { color:#c0453a; text-transform:none; letter-spacing:0; }
+.verify-row { display:flex; align-items:center; gap:6px; margin-bottom:5px; }
+.verify-row label { width:16px; color:#5a6672; }
+.verify-row select { flex:1; }
+.verify-modal select, .verify-modal input[type=text], .verify-notes, .verify-disadd input { width:100%; box-sizing:border-box; padding:4px 6px; border:1px solid #cfd7de; border-radius:6px; font-size:12px; }
+.verify-notes { margin-top:4px; }
+.verify-chick { display:inline-flex; align-items:center; gap:4px; margin:0 10px 4px 0; }
+.verify-counts { display:flex; gap:8px; margin:6px 0; }
+.verify-counts label { display:flex; flex-direction:column; font-size:10px; color:#7d8a96; gap:2px; flex:1; }
+.verify-counts input { width:100%; box-sizing:border-box; padding:3px 5px; border:1px solid #cfd7de; border-radius:6px; }
+.verify-actions { display:flex; gap:8px; margin-top:6px; }
+.verify-actions button, .verify-disadd button { padding:4px 12px; border:none; border-radius:6px; background:#2f6fb0; color:#fff; font-size:12px; cursor:pointer; }
+.verify-actions button:disabled { opacity:.55; cursor:default; }
+.verify-clear { background:transparent; color:#c0453a; border:1px solid #e0b6b1; }
+button.verify-clear { background:transparent; color:#c0453a; border:1px solid #e0b6b1; }
+.verify-by { color:#98a4b0; font-size:11px; margin-top:4px; }
+.verify-view { color:#3a444e; }
+.verify-dis { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:4px; }
+.verify-dis .verify-clear { color:#c0453a; cursor:pointer; }
+.verify-disadd { display:flex; gap:6px; align-items:center; margin-top:6px; }
+.verify-disadd select { width:auto; flex:none; }
 /* Grows to fit each observation on one line (width:max-content) up to the space available to
    its right (max-width set inline from the click position). Only when that runs out do the
    birds wrap. */

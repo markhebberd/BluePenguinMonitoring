@@ -1,6 +1,6 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies } from './api/boxtags';
+import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
@@ -630,6 +630,7 @@ interface Clutch {
   laidFailed: boolean;      // eggs already present at first check — data needs fixing
   start: number;            // first obs with offspring present (egg appearance)
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
+  startObsId: number | null;// that observation's id — the anchor a verification is keyed to
   end: number | null;       // obs that ended the attempt; null = still running
   windowStart: number;      // breeding window: egg appearance …
   windowEnd: number;        // … fledge (laid + 87d) or earlier failure
@@ -676,7 +677,7 @@ function segmentClutches(sObs: Observation[]): Clutch[] {
         laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
         laidUncertainty = Math.floor((found - prevEmpty) / 2 / DAY); // matches reports.php uncertaintyDays
       }
-      current = { laid, laidUncertainty, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, end: null,
+      current = { laid, laidUncertainty, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
       if (abn) { current.end = t; current = null; awaitingEmpty = true; }
@@ -1128,12 +1129,18 @@ function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs
   );
 }
 
-function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick, children }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void; children?: React.ReactNode }) {
+function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeasonClick, children, boxName, verifications = [], disagreements = [], token, canEdit = false, onDataChange }: { observations: Observation[]; onBirdClick: (tag:string)=>void; allPenguinsInBox?: any[]; onSeasonClick?: (obsTime: string) => void; children?: React.ReactNode; boxName?: string; verifications?: any[]; disagreements?: any[]; token?: string; canEdit?: boolean; onDataChange?: () => void }) {
   const seasonData = computeBoxFamilies(observations, allPenguinsInBox);
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
   const [prevExpanded, setPrevExpanded] = useState(false);
+  // Which clutch's verify modal is open, plus the click point to anchor it near the tick.
+  const [openVerify, setOpenVerify] = useState<{ key: string; pos: { x: number; y: number } } | null>(null);
   const currentSeasons: React.ReactNode[] = [];
   const previousSeasons: React.ReactNode[] = [];
+  // Verifications whose anchor observation no longer starts any detected clutch — the algorithm
+  // has re-segmented away from the verified truth, so surface them as a drift warning.
+  const allStartIds = new Set(seasonData.flatMap(sd => sd.clutches.map(c => c.startObsId).filter((x): x is number => x != null)));
+  const orphanVerifications = verifications.filter(v => !allStartIds.has(v.observation_id));
 
   seasonData.forEach(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, seasonSightings, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
         if (birds.length === 0 && sObsChrono.length === 0 && !isCurrent) return;
@@ -1264,13 +1271,30 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           </div>
         ) : null;
         const renderClutch = (ci: number) => {
-          const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = families[ci];
+          const fam = families[ci];
+          const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = fam;
           const active = clutchActive(clutch);
           // green = a chipped chick; blue = eggs still active; red = eggs, no chipped chick.
           const cardStatus = famChicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
           const inNest = aggSlots([`w${ci}`]); // non-pair birds seen inside this window
+          // Human verification for this clutch, matched by its anchor observation.
+          const clutchVer = clutch.startObsId != null ? (verifications.find(v => v.observation_id === clutch.startObsId) || null) : null;
+          const clutchDis = clutch.startObsId != null ? disagreements.filter(d => d.observation_id === clutch.startObsId) : [];
+          const vState = computeClutchVerify(fam, clutchVer, clutchDis);
+          const vKey = `${label}:${ci}`;
+          const showTick = canEdit || !!clutchVer || clutchDis.length > 0;
           return (
             <div key={`cl${ci}`} className={`clutch-card ${cardStatus}`}>
+              {showTick && (
+                <BreedingVerifyTick state={vState} canEdit={canEdit}
+                  onOpen={(e) => setOpenVerify({ key: vKey, pos: { x: Math.min(e.clientX + 8, window.innerWidth - 340), y: e.clientY + 8 } })} />
+              )}
+              {openVerify?.key === vKey && (
+                <BreedingVerifyModal pos={openVerify.pos} fam={fam} state={vState} box={boxName || ''}
+                  candidates={birds} token={token} canEdit={canEdit}
+                  onClose={() => setOpenVerify(null)}
+                  onChanged={() => { setOpenVerify(null); onDataChange?.(); }} />
+              )}
               {clutches.length > 1 && (
                 <div className={`clutch-label${clutch.startObsTime ? ' clickable' : ''}`}
                   title="Go to where the egg/chick was first detected"
@@ -1325,6 +1349,11 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
   const prevCount = previousSeasons.length;
   return (
     <div className="all-birds">
+      {orphanVerifications.length > 0 && (
+        <div className="verify-orphans" title="A verified clutch's anchor observation no longer starts a detected breeding window — the algorithm has re-segmented away from the saved truth.">
+          {'✗'} {orphanVerifications.length} verified clutch{orphanVerifications.length !== 1 ? 'es' : ''} no longer detected
+        </div>
+      )}
       {currentSeasons}
       {prevCount > 0 && isMobile ? (
         <>
@@ -1837,7 +1866,9 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
         <div className="obs-col obs-col-overview">
           <h3 className="obs-section-head">Breeding history</h3>
           <AllScannedBirds observations={data.observations} onBirdClick={onBirdClick} allPenguinsInBox={data.all_penguins}
-            onSeasonClick={(t: string) => onScrollToObs(t)}>
+            onSeasonClick={(t: string) => onScrollToObs(t)} boxName={boxName}
+            verifications={data.verifications} disagreements={data.disagreements}
+            token={token} canEdit={canEdit} onDataChange={onDataChange}>
             {(() => {
               const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
               if (chipped.length === 0 && !canEdit) return null;
@@ -2519,6 +2550,189 @@ function WatchedTick({ location, token, canEdit }: { location: any; token?: stri
     <span className={`watched-tick${watched ? ' on' : ''}${canEdit ? ' clickable' : ''}`}
       title={watched ? 'Watched box' : 'Not watched'} onClick={toggle}>✓</span>
   );
+}
+
+// ============ Breeding verification (human ground truth) ============
+
+type VerifyTick = 'grey' | 'green' | 'red';
+
+/** The pair the algorithm currently assigns to this family, as peng_nums (null per empty slot). */
+function detectedPair(fam: BoxFamily): { male: string | null; female: string | null } {
+  const nm = (k: string) => k ? (fam.parents.find((p: any) => p.pit_id.slice(-8) === k)?.peng_num ?? null) : null;
+  return { male: nm(fam.male), female: nm(fam.female) };
+}
+const pengSetEq = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(x => b.has(x));
+
+interface ClutchVerify {
+  verification: any | null;
+  disagreements: any[];
+  adultsVerified: boolean; adultsMatch: boolean;
+  chicksVerified: boolean; chicksMatch: boolean;
+  offspringVerifiable: boolean;   // window detected closed
+  tick: VerifyTick;
+}
+
+/** Aggregate tick state for one clutch: grey = verifiable data still unverified; green = every
+ *  currently-verifiable half verified AND still matching the algorithm; red = a disagreement was
+ *  raised, or a verified half no longer matches (drift). Match rules per the plan: adults exact on
+ *  both slots; offspring on the chipped-chick set AND all three outcome counts. */
+function computeClutchVerify(fam: BoxFamily, verification: any | null, disagreements: any[]): ClutchVerify {
+  const offspringVerifiable = !clutchActive(fam.clutch);
+  const det = detectedPair(fam);
+  const adultsVerified = !!verification && verification.adults_verified_by != null;
+  const adultsMatch = adultsVerified
+    && (verification.male_peng_num ?? null) === det.male
+    && (verification.female_peng_num ?? null) === det.female;
+  const chicksVerified = !!verification && verification.chicks_verified_by != null;
+  const detChicks = new Set<string>(fam.chicks.map((c: any) => c.peng_num).filter(Boolean));
+  const verChicks = new Set<string>(verification?.chicks || []);
+  const chicksMatch = chicksVerified
+    && pengSetEq(detChicks, verChicks)
+    && Number(verification.dead_eggs) === fam.failedEggs
+    && Number(verification.dead_chicks) === fam.plainChicks
+    && Number(verification.fledged_unchipped) === fam.fledgedUnchipped;
+  const drift = (adultsVerified && !adultsMatch) || (chicksVerified && !chicksMatch);
+  let tick: VerifyTick;
+  if (disagreements.length > 0 || drift) tick = 'red';
+  else if (adultsVerified && adultsMatch && (!offspringVerifiable || (chicksVerified && chicksMatch))) tick = 'green';
+  else tick = 'grey';
+  return { verification, disagreements, adultsVerified, adultsMatch, chicksVerified, chicksMatch, offspringVerifiable, tick };
+}
+
+/** Tick beside a breeding-window card. Editors always click (to verify); viewers click only when
+ *  there's something recorded to view. */
+function BreedingVerifyTick({ state, canEdit, onOpen }: { state: ClutchVerify; canEdit: boolean; onOpen: (e: React.MouseEvent) => void }) {
+  const viewable = !!state.verification || state.disagreements.length > 0;
+  const clickable = canEdit || viewable;
+  const title = state.tick === 'green' ? 'Verified — algorithm still agrees'
+    : state.tick === 'red' ? (state.disagreements.length ? 'Disagreement raised — click to review' : 'Verified data no longer detected — click to review')
+    : 'Click to verify this breeding window';
+  return (
+    <span className={`verify-tick vt-${state.tick}${clickable ? ' clickable' : ''}`} title={title}
+      onClick={clickable ? onOpen : undefined}>{state.tick === 'red' ? '✗' : '✓'}</span>
+  );
+}
+
+/** Verify/approve/disagree modal, anchored near the clicked tick (portal, like StatusPickRing). */
+function BreedingVerifyModal({ pos, fam, state, box, candidates, token, canEdit, onClose, onChanged }: {
+  pos: { x: number; y: number }; fam: BoxFamily; state: ClutchVerify; box: string; candidates: any[];
+  token?: string; canEdit: boolean; onClose: () => void; onChanged: () => void;
+}) {
+  const obsId = fam.clutch.startObsId;
+  const v = state.verification;
+  const det = detectedPair(fam);
+  const detChicks = fam.chicks.map((c: any) => c.peng_num).filter(Boolean);
+  const [male, setMale] = useState<string>(v?.male_peng_num ?? det.male ?? '');
+  const [female, setFemale] = useState<string>(v?.female_peng_num ?? det.female ?? '');
+  const [adultsNotes, setAdultsNotes] = useState<string>(v?.adults_notes ?? '');
+  const [chickSel, setChickSel] = useState<Set<string>>(new Set(v?.chicks_verified_by != null ? (v.chicks || []) : detChicks));
+  const [deadEggs, setDeadEggs] = useState<number>(v?.chicks_verified_by != null ? Number(v.dead_eggs) : fam.failedEggs);
+  const [deadChicks, setDeadChicks] = useState<number>(v?.chicks_verified_by != null ? Number(v.dead_chicks) : fam.plainChicks);
+  const [fledged, setFledged] = useState<number>(v?.chicks_verified_by != null ? Number(v.fledged_unchipped) : fam.fledgedUnchipped);
+  const [offNotes, setOffNotes] = useState<string>(v?.chicks_notes ?? '');
+  const [disReason, setDisReason] = useState('');
+  const [disSubject, setDisSubject] = useState<'adults' | 'chicks'>('adults');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  if (obsId == null) return null; // no anchor observation → can't verify
+
+  const run = (fn: () => Promise<any>) => async () => {
+    setBusy(true); setErr('');
+    try { const r = await fn(); if (r && r.error) { setErr(r.error); return; } onChanged(); }
+    catch (e: any) { setErr(e?.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  const saveAdults = run(async () => {
+    if (male && female && male === female) return { error: 'A bird cannot be both parents' };
+    return saveVerification(token!, { observation_id: obsId, half: 'adults', male_peng_num: male || null, female_peng_num: female || null, adults_notes: adultsNotes || null });
+  });
+  const clearAdults = run(() => saveVerification(token!, { observation_id: obsId, half: 'adults', clear: true }));
+  const saveOffspring = run(() => saveVerification(token!, { observation_id: obsId, half: 'chicks', chicks: [...chickSel], dead_eggs: deadEggs, dead_chicks: deadChicks, fledged_unchipped: fledged, chicks_notes: offNotes || null }));
+  const clearOffspring = run(() => saveVerification(token!, { observation_id: obsId, half: 'chicks', clear: true }));
+  const addDisagreement = run(async () => {
+    if (!disReason.trim()) return { error: 'A reason is required' };
+    const r = await createRecord(token!, 'breeding_verification_disagreements', { observation_id: obsId, subject: disSubject, reason: disReason.trim() });
+    setDisReason(''); return r;
+  });
+  const delDisagreement = (id: number) => run(() => deleteRecord(token!, 'breeding_verification_disagreements', id))();
+
+  const birdOpt = (b: any) => <option key={b.pit_id} value={b.peng_num || ''}>{`#${b.peng_num}${b.sex ? ' ' + b.sex : ''}`}</option>;
+  const fmtD = (s?: string) => s ? parseDate(s).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland' }) : '';
+  const flag = (verified: boolean, match: boolean) => verified
+    ? (match ? <span className="vt-green">{'✓'}</span> : <span className="vt-red">{'✗'} no longer detected</span>)
+    : null;
+
+  return createPortal((
+    <>
+      <div className="verify-backdrop" onClick={onClose} />
+      <div className="verify-modal" style={{ left: pos.x, top: pos.y }} onClick={e => e.stopPropagation()}>
+        <div className="verify-head"><b>Verify breeding — Box {box}</b><span className="verify-close clickable" onClick={onClose}>{'✕'}</span></div>
+        {err && <div className="verify-err">{err}</div>}
+
+        <div className="verify-section">
+          <div className="verify-lbl">Adults {flag(state.adultsVerified, state.adultsMatch)}</div>
+          {canEdit ? (<>
+            <div className="verify-row"><label>{'♂'}</label>
+              <select value={male} onChange={e => setMale(e.target.value)}><option value="">{'—'}</option>{candidates.map(birdOpt)}</select></div>
+            <div className="verify-row"><label>{'♀'}</label>
+              <select value={female} onChange={e => setFemale(e.target.value)}><option value="">{'—'}</option>{candidates.map(birdOpt)}</select></div>
+            <input className="verify-notes" placeholder="Why (optional)" value={adultsNotes} onChange={e => setAdultsNotes(e.target.value)} />
+            <div className="verify-actions">
+              <button disabled={busy} onClick={saveAdults}>{state.adultsVerified ? 'Update' : 'Verify'} adults</button>
+              {state.adultsVerified && <button className="verify-clear" disabled={busy} onClick={clearAdults}>Clear</button>}
+            </div>
+          </>) : (
+            <div className="verify-view">{v ? `♂ ${v.male_peng_num || '—'}   ♀ ${v.female_peng_num || '—'}` : 'Not verified'}</div>
+          )}
+          {state.adultsVerified && <div className="verify-by">verified by {v.adults_verified_by_name || '?'} on {fmtD(v.adults_verified_at)}</div>}
+        </div>
+
+        {state.offspringVerifiable ? (
+          <div className="verify-section">
+            <div className="verify-lbl">Offspring {flag(state.chicksVerified, state.chicksMatch)}</div>
+            {canEdit ? (<>
+              {detChicks.length > 0 ? detChicks.map((pn: string) => (
+                <label key={pn} className="verify-chick"><input type="checkbox" checked={chickSel.has(pn)}
+                  onChange={e => { const n = new Set(chickSel); if (e.target.checked) n.add(pn); else n.delete(pn); setChickSel(n); }} /> #{pn}</label>
+              )) : <div className="muted">No chipped chicks detected</div>}
+              <div className="verify-counts">
+                <label>Dead eggs<input type="number" min={0} value={deadEggs} onChange={e => setDeadEggs(Math.max(0, +e.target.value || 0))} /></label>
+                <label>Dead chicks<input type="number" min={0} value={deadChicks} onChange={e => setDeadChicks(Math.max(0, +e.target.value || 0))} /></label>
+                <label>Fledged unchipped<input type="number" min={0} value={fledged} onChange={e => setFledged(Math.max(0, +e.target.value || 0))} /></label>
+              </div>
+              <input className="verify-notes" placeholder="Why (optional)" value={offNotes} onChange={e => setOffNotes(e.target.value)} />
+              <div className="verify-actions">
+                <button disabled={busy} onClick={saveOffspring}>{state.chicksVerified ? 'Update' : 'Approve'} offspring</button>
+                {state.chicksVerified && <button className="verify-clear" disabled={busy} onClick={clearOffspring}>Clear</button>}
+              </div>
+            </>) : (
+              <div className="verify-view">{state.chicksVerified ? `chicks: ${(v.chicks || []).map((c: string) => '#' + c).join(', ') || 'none'}; dead eggs ${v.dead_eggs}, dead chicks ${v.dead_chicks}, fledged unchipped ${v.fledged_unchipped}` : 'Not approved'}</div>
+            )}
+            {state.chicksVerified && <div className="verify-by">verified by {v.chicks_verified_by_name || '?'} on {fmtD(v.chicks_verified_at)}</div>}
+          </div>
+        ) : (
+          <div className="verify-section muted">Offspring can be approved once the breeding window has closed.</div>
+        )}
+
+        <div className="verify-section">
+          <div className="verify-lbl">Disagreements{state.disagreements.length ? ` (${state.disagreements.length})` : ''}</div>
+          {state.disagreements.map((d: any) => (
+            <div key={d.disagreement_id} className="verify-dis">
+              <span><b>{d.subject}</b>: {d.reason} <span className="muted">— {d.raised_by_name || '?'}</span></span>
+              {canEdit && <span className="verify-clear clickable" title="Remove" onClick={() => delDisagreement(d.disagreement_id)}>{'✕'}</span>}
+            </div>
+          ))}
+          {canEdit && (
+            <div className="verify-disadd">
+              <select value={disSubject} onChange={e => setDisSubject(e.target.value as any)}><option value="adults">adults</option><option value="chicks">chicks</option></select>
+              <input placeholder="Reason it looks wrong" value={disReason} onChange={e => setDisReason(e.target.value)} />
+              <button disabled={busy} onClick={addDisagreement}>Flag</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  ), document.body);
 }
 
 /** Parse flexible date input into YYYY-MM-DD. Accepts d/m/yy, dd/mm/yyyy, d-m-yy, d m yy, yyyy-mm-dd, yy-m-d etc. */

@@ -79,6 +79,20 @@ export async function deleteRecord(token: string, table: string, id: number, rea
   return result;
 }
 
+/** Save (or clear) one half of a breeding verification for a clutch, anchored to its
+ *  first-egg observation. The server upserts the verification row and, for the chicks half,
+ *  replaces its chick rows — all through the audited gateway in one transaction. */
+export async function saveVerification(token: string, body: Record<string, any>) {
+  const r = await fetch(`/api/crud.php?action=save_verification&${colonyQS()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const result = await r.json();
+  triggerSync();
+  return result;
+}
+
 export async function fetchHistory(token: string, table: string, id: number) {
   const r = await fetch(`/api/crud.php?action=history&table=${table}&id=${id}`, {
     headers: { 'Authorization': `Bearer ${token}` }

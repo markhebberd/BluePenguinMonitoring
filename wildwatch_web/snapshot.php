@@ -36,6 +36,42 @@ $fmStmt->execute([$colonyId]);
 $fmExcludedBoxes = $fmStmt->fetchColumn();
 if ($fmExcludedBoxes === false) $fmExcludedBoxes = '0,AA,AB,AC';
 
+/** Human-verified breeding truth for the colony — verifications, their chick rows, and
+ *  disagreements. Tiny (≤ one verification per verified clutch), so it's fetched in FULL on
+ *  every snapshot (full and incremental): the client replaces its three stores wholesale,
+ *  which handles deletes without a full reload. peng_num columns are prefix-stripped to match
+ *  the stripped penguins/chips the client already holds. */
+function getVerificationData($pdo, $colonyId, $viewPrefix) {
+    $ver = $pdo->prepare("SELECT " . SNAP_COLS_VER . " FROM breeding_verifications v
+        JOIN observations o ON o.observation_id = v.observation_id
+        JOIN observation_locations ol ON ol.location_id = o.location_id
+        LEFT JOIN observers oa ON oa.observer_id = v.adults_verified_by
+        LEFT JOIN observers oc ON oc.observer_id = v.chicks_verified_by
+        WHERE ol.colony_id = ?");
+    $ver->execute([$colonyId]);
+    $verRows = $ver->fetchAll();
+    stripPengPrefix($verRows, $viewPrefix, 'male_peng_num');
+    stripPengPrefix($verRows, $viewPrefix, 'female_peng_num');
+
+    $chick = $pdo->prepare("SELECT " . SNAP_COLS_VER_CHICK . " FROM breeding_verification_chicks vc
+        JOIN breeding_verifications v ON v.verification_id = vc.verification_id
+        JOIN observations o ON o.observation_id = v.observation_id
+        JOIN observation_locations ol ON ol.location_id = o.location_id
+        WHERE ol.colony_id = ?");
+    $chick->execute([$colonyId]);
+    $chickRows = $chick->fetchAll();
+    stripPengPrefix($chickRows, $viewPrefix);
+
+    $dis = $pdo->prepare("SELECT " . SNAP_COLS_DISAG . " FROM breeding_verification_disagreements d
+        JOIN observations o ON o.observation_id = d.observation_id
+        JOIN observation_locations ol ON ol.location_id = o.location_id
+        LEFT JOIN observers ob ON ob.observer_id = d.raised_by
+        WHERE ol.colony_id = ?");
+    $dis->execute([$colonyId]);
+
+    return ['verifications' => $verRows, 'verification_chicks' => $chickRows, 'disagreements' => $dis->fetchAll()];
+}
+
 function getTotalCounts($pdo, $colonyId) {
     $c = function($sql, $params = []) use ($pdo) {
         $s = $pdo->prepare($sql); $s->execute($params); return (int)$s->fetchColumn();
@@ -100,7 +136,9 @@ if ($since) {
         COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
         COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
         COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
-        COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01')
+        COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01'),
+        COALESCE((SELECT MAX(raised_at) FROM breeding_verification_disagreements), '2000-01-01')
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
@@ -108,7 +146,7 @@ if ($since) {
     $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows, $viewPrefix);
     $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
     $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
-    echo json_encode([
+    echo json_encode(array_merge([
         'incremental' => true,
         'since' => $ts,
         'snapshot_time' => $snapshotTime,
@@ -121,7 +159,7 @@ if ($since) {
         'edit_counts' => $editCounts,
         'fm_excluded_boxes' => $fmExcludedBoxes,
         '_counts' => getTotalCounts($pdo, $colonyId),
-    ]);
+    ], getVerificationData($pdo, $colonyId, $viewPrefix)));
     exit;
 }
 
@@ -170,7 +208,7 @@ $viewPrefix = getColonyPrefix($pdo, $colonyId);
 $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows, $viewPrefix);
 $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
 $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
-$json = json_encode([
+$json = json_encode(array_merge([
     'incremental' => false,
     'snapshot_time' => $fullWm,
     'query_ms' => $elapsed,
@@ -183,7 +221,7 @@ $json = json_encode([
     'edit_counts' => $editCounts,
     'fm_excluded_boxes' => $fmExcludedBoxes,
     '_counts' => getTotalCounts($pdo, $colonyId),
-]);
+], getVerificationData($pdo, $colonyId, $viewPrefix)));
 
 // Manual gzip with known Content-Length for accurate client progress
 $gz = gzencode($json, 6);
