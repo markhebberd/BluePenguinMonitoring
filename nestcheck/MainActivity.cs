@@ -145,7 +145,6 @@ namespace PenguinMonitor
         private bool _suppressColonySwitch;
         // Track server observation IDs that user already confirmed locally (fallback for non-optimistic paths)
         private Dictionary<string, int> _confirmedAgainstServerObsId = new();
-        private bool _highOffspringCountConfirmed;
         private LinearLayout? _singleBoxDataOuterLayout;
         private LinearLayout? _singleBoxDataTitleLayout;
         private LinearLayout _singleBoxDataContentLayout;
@@ -4290,7 +4289,6 @@ namespace PenguinMonitor
                 {
                     // Unlock — enter edit mode
                     _dataChangedSinceUnlock = false;
-                    _highOffspringCountConfirmed = false;
                     if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
                     if (!_appSettings.EditBoxTagsMode)
                         _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
@@ -4317,6 +4315,36 @@ namespace PenguinMonitor
                         return;
                     }
 
+                    // The box is finished, so its counts have settled — sanity-check them once here
+                    // rather than while the user is still editing. Cancel drops back into edit mode.
+                    var highValueWarning = GetHighValueWarning();
+                    if (highValueWarning != null)
+                    {
+                        // Not cancelable: dismissing without a choice would leave the box locked
+                        // but never committed for upload.
+                        new AlertDialog.Builder(this)
+                            .SetTitle("High Value Confirmation")
+                            .SetMessage(highValueWarning)
+                            .SetPositiveButton("Yes, that's right", (s2, e2) => FinishLock())
+                            .SetNegativeButton("Go back", (s2, e2) =>
+                            {
+                                // Draft-save first: the redraw repopulates the fields from stored data,
+                                // so without this the counts being queried would be thrown away.
+                                // _dataChangedSinceUnlock stays true so the next lock still commits.
+                                SaveCurrentBoxData();
+                                _isBoxLocked = false;
+                                _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                                DrawPageLayouts();
+                            })
+                            .SetCancelable(false)
+                            .Show();
+                        return;
+                    }
+                    FinishLock();
+                }
+
+                void FinishLock()
+                {
                     // All zeros and no prior today data — confirm empty
                     if (_colonyState.GetTodayForBox(_currentBoxName) == null && dataCardHasZeroData())
                     {
@@ -4958,7 +4986,6 @@ namespace PenguinMonitor
         private void OnDataChanged(object? sender, TextChangedEventArgs e)
         {
             if (!_suppressDataChanged && !_isBoxLocked) _dataChangedSinceUnlock = true;
-            CheckForHighOffspringCount();
             if ((int.TryParse(_eggsEditText?[0].Text ?? "0", out int eggs) && eggs > 0) || (int.TryParse(_chicksEditText?[0].Text ?? "0", out int chicks) && chicks > 0))
             {
                 var spinner = _breedingChanceSpinner[0];
@@ -4972,37 +4999,32 @@ namespace PenguinMonitor
                 }
             }
         }
-        private void CheckForHighOffspringCount()
+        /// <summary>
+        /// Improbable counts in the box as it currently stands, or null if nothing looks odd.
+        /// Only meaningful once the box is finished — mid-edit the counts pass through values
+        /// (a bird added before the no-scan it replaces is removed, a "1" on the way to "12")
+        /// that are not worth interrupting for, so this is checked at lock time.
+        /// </summary>
+        private string? GetHighValueWarning()
         {
-            if(_highOffspringCountConfirmed)
-                return;
-
             int adults, eggs, chicks;
             int.TryParse(_adultsEditText?[0].Text ?? "0", out adults);
             int.TryParse(_eggsEditText?[0].Text ?? "0", out eggs);
             int.TryParse(_chicksEditText?[0].Text ?? "0", out chicks);
 
-            // Check if any values are 3 or greater - no state tracking, ask every time
             var highValues = new List<(string type, int count)>();
             if (adults > 2) highValues.Add(("adults", adults));
             if (eggs > 2) highValues.Add(("eggs", eggs));
             if (chicks > 2) highValues.Add(("chicks", chicks));
             if (chicks + eggs > 2 && eggs > 0 && chicks > 0) highValues.Add(("eggs & chicks", chicks + eggs));
 
-            if (highValues.Count > 0)
-            {
-                var message = "Are you sure you have found:\n\n";
-                foreach (var (type, count) in highValues)
-                    message += $"• {count} {type}\n";
-                message += "\nPlease check this is correct.";
-                ShowConfirmationDialog(
-                    "High Value Confirmation",
-                    message,
-                    ("OK", () =>{ _highOffspringCountConfirmed = true; }
-                ),
-                   null
-                );
-            }
+            if (highValues.Count == 0) return null;
+
+            var message = "Are you sure you have found:\n\n";
+            foreach (var (type, count) in highValues)
+                message += $"• {count} {type}\n";
+            message += "\nPlease check this is correct.";
+            return message;
         }
         private void SaveCurrentBoxData()
         {
@@ -6391,44 +6413,50 @@ namespace PenguinMonitor
                         RunOnUiThread(() =>
                         {
                             var verb = isRechip ? "rechipped" : "added";
-                            // Increment adult or chick count
-                            if (isChick)
-                            {
-                                BumpCount(_chicksEditText, 1);
-                                Toast.MakeText(this, $"#{pengNum} {verb} (+1 Chick)", ToastLength.Short)?.Show();
-                            }
-                            else
-                            {
-                                BumpCount(_adultsEditText, 1);
-                                Toast.MakeText(this, $"#{pengNum} {verb} (+1 Adult)", ToastLength.Short)?.Show();
-                            }
-                            SaveCurrentBoxData();
                             completed = true; // the tag may now stay in the box
                             dialog.Dismiss();
                             SetDialogActive(false);
-                            DrawPageLayouts();
 
-                            // Only after the server has confirmed the bird exists: offer to swap
-                            // a "No scan" placeholder in this box for the newly chipped adult
-                            // (net adult count unchanged — the no-scan already counted the bird).
+                            // A "No scan" in this box is an adult already counted but unidentified —
+                            // very often the bird just chipped. Decide swap-or-add BEFORE touching the
+                            // counts so the adult total only ever moves once, to its final value.
                             var replaceBox = _colonyState.GetTodayForBox(_currentBoxName);
-                            var noScanEntry = !isChick
-                                ? replaceBox?.ScannedIds.FirstOrDefault(s2 => s2.BirdId.StartsWith("NOSCAN_")) : null;
+                            var noScanEntry = isChick
+                                ? null : replaceBox?.ScannedIds.FirstOrDefault(s2 => s2.BirdId.StartsWith("NOSCAN_"));
+
+                            void AddAsNewBird()
+                            {
+                                if (isChick) BumpCount(_chicksEditText, 1);
+                                else BumpCount(_adultsEditText, 1);
+                                SaveCurrentBoxData();
+                                DrawPageLayouts();
+                                Toast.MakeText(this, $"#{pengNum} {verb} ({(isChick ? "+1 Chick" : "+1 Adult")})", ToastLength.Short)?.Show();
+                            }
+
                             if (noScanEntry != null)
                             {
                                 new AlertDialog.Builder(this)
                                     .SetTitle("Replace no-scan?")
-                                    .SetMessage($"#{pengNum} was {verb}. Replace the no-scan in box {_currentBoxName} with #{pengNum}?")
+                                    .SetMessage($"#{pengNum} was {verb}. Is this the no-scan adult already recorded in box {_currentBoxName}?\n\nReplace it — the adult count stays as it is.")
                                     .SetPositiveButton("Yes, replace", (s3, e3) =>
                                     {
+                                        // Swap, don't add: the no-scan already counted this bird as an adult.
+                                        // The counts don't move, so SaveCurrentBoxData would see nothing
+                                        // changed — persist the scan-list edit explicitly.
                                         replaceBox!.ScannedIds.Remove(noScanEntry);
-                                        BumpCount(_adultsEditText, -1);
-                                        SaveCurrentBoxData();
+                                        replaceBox.WhenDataCollectedUtc = DateTime.UtcNow;
+                                        _colonyState.SaveBoxObservation(_currentBoxName, replaceBox);
+                                        SaveToAppDataDir();
                                         DrawPageLayouts();
-                                        Toast.MakeText(this, $"No-scan in box {_currentBoxName} replaced by #{pengNum}", ToastLength.Short)?.Show();
+                                        Toast.MakeText(this, $"#{pengNum} {verb} — replaced the no-scan in box {_currentBoxName}", ToastLength.Short)?.Show();
                                     })
-                                    .SetNegativeButton("No", (s3, e3) => { })
+                                    .SetNegativeButton("No, another bird", (s3, e3) => AddAsNewBird())
+                                    .SetCancelable(false)   // one of the two must be applied — there is no sane default
                                     .Show();
+                            }
+                            else
+                            {
+                                AddAsNewBird();
                             }
                         });
                     }
