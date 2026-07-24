@@ -4,7 +4,7 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
-import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT } from './breedingConstants';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -677,14 +677,16 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   );
 }
 
-/** One breeding attempt in a season. A clutch starts when eggs/chicks appear after
- *  an empty check, and its window ends at ABN, egg removal / offspring absence
- *  (implies death), or fledge (laid + 87d) — whichever comes first. A later egg
- *  appearance after an empty check is a SECOND clutch with its own family. */
+/** One breeding attempt in a season. A clutch starts when eggs appear after an empty
+ *  check — or chicks do, after a monitoring gap long enough to have hidden the egg
+ *  phase — and its window ends at ABN, egg removal / offspring absence (implies death),
+ *  or fledge (laid + 87d), whichever comes first. A later egg appearance after an empty
+ *  check is a SECOND clutch with its own family. */
 interface Clutch {
   laid: number | null;      // estimated laid time; null when un-estimable
-  laidUncertainty: number | null; // ± days on the laid estimate (half the empty→found gap)
-  laidFailed: boolean;      // eggs already present at first check — data needs fixing
+  laidUncertainty: number | null; // ± days on the laid estimate (half the plausible-laying range)
+  laidFailed: boolean;      // nothing to measure back from (eggs at the first check ever, or
+                            // an abandoned discovery) — data needs fixing
   start: number;            // first obs with offspring present (egg appearance)
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
   startObsId: number | null;// that observation's id — the anchor a verification is keyed to
@@ -692,7 +694,7 @@ interface Clutch {
   windowStart: number;      // breeding window: egg appearance …
   windowEnd: number;        // … fledge (laid + 87d) or earlier failure
   guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
-  attendStart: number;      // courtship/nest-building start: 30d before the EARLIEST
+  attendStart: number;      // courtship/nest-building start: COURTSHIP_LEAD_DAYS before the EARLIEST
                             // plausible laid date. Attendance from here to guardEnd is
                             // parent evidence — the laid estimate is a midpoint, so
                             // measuring from it alone would cut off real courtship visits.
@@ -700,46 +702,143 @@ interface Clutch {
   maxChicks: number;
 }
 
-function segmentClutches(sObs: Observation[]): Clutch[] {
+/** A microchipped chick is in this observation — so the offspring here are close to
+ *  fledging, not newly hatched, and the attempt began much further back. */
+const hasChippedChick = (o: Observation) =>
+  o.scans.some(s => isChickAtObsDate(s.chip_date, s.chipped_as_adult, o.observation_time_utc));
+
+/** What one clutch's own observations say about when it was laid. Gathered during the
+ *  walk and turned into an estimate once the clutch has run its course — the hatch
+ *  evidence arrives long after the discovery does. */
+interface LaidEvidence {
+  emptyBefore: number | null;   // last check that found the box empty, before discovery
+  firstEggT: number | null;     // discovery, when it had eggs — laying dates straight off this
+  firstEggCount: number;
+  lastNoChickT: number | null;  // latest check that still had no chicks
+  firstChickT: number | null;   // earliest check with chicks
+  firstChickChipped: boolean;   // those chicks were already microchipped
+  abnAtStart: boolean;          // discovery already abandoned — nothing to date
+}
+
+/**
+ * Date laying from the two things that can be observed either side of it: the box filling
+ * with eggs, and the eggs becoming chicks. Each gives an interval laying must fall in; the
+ * estimate is that interval's midpoint and the ± is its half-width.
+ *
+ * Whichever interval is tighter wins, because which one is tighter is purely an accident of
+ * when the box happened to be visited. The hatch takes ties and near-ties (within a day):
+ * hatching is a sharper event than laying, which smears over the second egg.
+ */
+function estimateLaidFrom(ev: LaidEvidence): { laid: number | null; unc: number | null } {
+  if (ev.abnAtStart) return { laid: null, unc: null };
+  // Midpoint, rounded up to a whole day to match reports.php — but never past the top of the
+  // window: with the bounds this tight a window can be hours wide, and rounding up would
+  // otherwise put laying after the eggs were seen.
+  const halve = (lo: number, hi: number) =>
+    ({ laid: Math.min(hi, lo + Math.ceil((hi - lo) / 2 / DAY) * DAY), unc: Math.floor((hi - lo) / 2 / DAY) });
+
+  // What the box itself showed, which laying has to fit between: it was empty, so laying came
+  // after; it held eggs, so laying came before — less the second-egg lag, since it's the FIRST
+  // egg being dated.
+  const seenEmpty = ev.emptyBefore;
+  let seenEggs = ev.firstEggT !== null
+    ? ev.firstEggT - (ev.firstEggCount > 1 ? SECOND_EGG_LAG_DAYS : 0) * DAY : null;
+  // On a box checked every day or two that lag can put the bound before the check that found
+  // the box empty. The empty box was seen; the lag is inferred from a count — so the lag is
+  // what gives way, not the observation.
+  if (seenEggs !== null && seenEmpty !== null && seenEggs < seenEmpty) seenEggs = ev.firstEggT;
+  // What the chicks say, through their stage: hatching takes an incubation, a chick still in
+  // the nest hasn't fledged, and one already microchipped is older again. On a box watched
+  // closely around the hatch this is far the sharper signal — the hatch is a single event,
+  // where laying smears over two eggs.
+  const chickHi = ev.firstChickT !== null
+    ? ev.firstChickT - (ev.firstChickChipped ? BREEDING_OFFSETS.chip : BREEDING_OFFSETS.hatch) * DAY : null;
+  const chickLo = ev.firstChickT !== null
+    ? Math.max(ev.firstChickT - BREEDING_OFFSETS.fledge * DAY,
+        ...(ev.lastNoChickT !== null ? [ev.lastNoChickT - BREEDING_OFFSETS.hatch * DAY] : [])) : null;
+
+  // Every bound at once, not the better of two: each is a fact about the same unknown, so the
+  // answer is where they all agree. Whichever end was watched more closely is what tightens it.
+  const notNull = (xs: (number | null)[]) => xs.filter((x): x is number => x !== null);
+  const los = notNull([seenEmpty, chickLo]), his = notNull([seenEggs, chickHi]);
+  if (los.length && his.length) {
+    const lo = Math.max(...los), hi = Math.min(...his);
+    if (lo <= hi) return halve(lo, hi);
+  }
+  // No overlap: the chicks contradict the box's own contents — an empty box, or eggs still
+  // unhatched, too few days before a chick that needs a whole incubation. One of the two
+  // records is wrong, and the box's contents are what was directly seen, so fall back to
+  // those alone.
+  if (seenEmpty !== null && seenEggs !== null) return halve(seenEmpty, seenEggs);
+  return { laid: null, unc: null };
+}
+
+/**
+ * @param priorObsT when this box was last checked BEFORE these observations start (null =
+ *   never). Callers passing one season's observations must pass it: the gap that decides
+ *   whether chicks can start an attempt is the real monitoring gap, not one manufactured
+ *   by the season boundary.
+ */
+function segmentClutches(sObs: Observation[], priorObsT: number | null = null): Clutch[] {
   const clutches: Clutch[] = [];
+  const evidence: LaidEvidence[] = [];      // one per clutch, same index
   let current: Clutch | null = null;
+  let ev: LaidEvidence | null = null;       // the running clutch's laid evidence
   // After an ABN close the doomed eggs may linger in later checks — require an
   // empty check before a new clutch can start.
   let awaitingEmpty = false;
   let prevEmpty: number | null = null;
+  let prevObs: number | null = priorObsT;   // last check of ANY kind — the monitoring gap
   for (const o of sObs) {
     const t = parseDate(o.observation_time_utc).getTime();
     const off = (o.eggs || 0) + (o.chicks || 0);
     const abn = o.breeding_status === 'ABN';
+    // Chicks with no egg phase are usually stale/carry-forward data — but not if the box
+    // went unwatched long enough for the egg phase to have happened unseen. How long
+    // depends on what's in there: downy chicks put laying at least a hatch back, already
+    // chipped chicks put it most of a breeding cycle back.
+    const gapDays = prevObs === null ? Infinity : (t - prevObs) / DAY;
+    const chicksCanStart = gapDays >= (hasChippedChick(o) ? CHIPPED_CHICK_START_MIN_GAP_DAYS : CHICK_START_MIN_GAP_DAYS);
     if (current) {
       if (off === 0) {
-        current.end = t; current = null; prevEmpty = t; awaitingEmpty = false;
+        current.end = t; current = null; ev = null; prevEmpty = t; awaitingEmpty = false;
       } else {
         current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
         current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
-        if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+        // Hatch evidence: the last check with the eggs still unhatched, and the first with
+        // chicks. Only until chicks appear — a chick lost later says nothing about hatching.
+        if (ev && ev.firstChickT === null) {
+          if ((o.chicks || 0) > 0) { ev.firstChickT = t; ev.firstChickChipped = hasChippedChick(o); }
+          else ev.lastNoChickT = t;
+        }
+        if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
       }
     } else if (off === 0) {
       prevEmpty = t; awaitingEmpty = false;
-    } else if (!awaitingEmpty && ((o.eggs || 0) > 0 || clutches.length === 0)) {
-      // A breeding attempt begins at laying, so only eggs start a new clutch. Chicks
-      // appearing with no egg phase after a completed clutch is biologically impossible
-      // — it's stale/carry-forward data, not a real second brood — so it's ignored.
-      // Exception: the season's FIRST attempt may start on chicks (egg phase missed).
-      // Laid estimate (C# midpoint): halfway between last empty check and discovery,
-      // minus 2 days if 2+ eggs at discovery (second egg laid ~2 days after first)
-      let laid: number | null = null, laidUncertainty: number | null = null;
-      if (prevEmpty !== null && !abn) {
-        const found = (o.eggs || 0) > 1 ? t - SECOND_EGG_LAG_DAYS * DAY : t;
-        laid = prevEmpty + Math.ceil((found - prevEmpty) / 2 / DAY) * DAY;
-        laidUncertainty = Math.floor((found - prevEmpty) / 2 / DAY); // matches reports.php uncertaintyDays
-      }
-      current = { laid, laidUncertainty, laidFailed: laid === null, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
+    } else if (!awaitingEmpty && ((o.eggs || 0) > 0 || chicksCanStart)) {
+      const chicksAtStart = (o.chicks || 0) > 0;
+      ev = {
+        emptyBefore: prevEmpty,
+        firstEggT: (o.eggs || 0) > 0 ? t : null,
+        firstEggCount: o.eggs || 0,
+        // Discovered on chicks: the last we knew there were none is the empty check itself.
+        lastNoChickT: chicksAtStart ? prevEmpty : t,
+        firstChickT: chicksAtStart ? t : null,
+        firstChickChipped: chicksAtStart && hasChippedChick(o),
+        abnAtStart: abn,
+      };
+      evidence.push(ev);
+      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
-      if (abn) { current.end = t; current = null; awaitingEmpty = true; }
+      if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
     }
+    prevObs = t;
   }
+  clutches.forEach((c, i) => {
+    const { laid, unc } = estimateLaidFrom(evidence[i]);
+    c.laid = laid; c.laidUncertainty = unc; c.laidFailed = laid === null;
+  });
   for (const c of clutches) {
     const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
     c.windowStart = c.start;
@@ -1038,6 +1137,11 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     if (!seasonObsMap.has(label)) seasonObsMap.set(label, []);
     seasonObsMap.get(label)!.push(obs);
   }
+  // Every check of this box, ever, in order. Clutch segmentation runs one season at a
+  // time but needs the box's real monitoring gaps — the last check before a season
+  // started is a real check, and 1 April must not read as "unwatched since forever".
+  const allObsTimes = observations
+    .map(o => parseDate(o.observation_time_utc).getTime()).sort((a, b) => a - b);
   // Every bird-visit to this box — scans and chippings alike — grouped by season. A
   // bird's per-season count and lastSeen come from ITS OWN season's sightings, so a
   // bird chipped here in one season and scanned here in the next is two separate
@@ -1083,7 +1187,10 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     };
     const sObsChrono = (seasonObsMap.get(label) || []).slice()
       .sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
-    const clutches = segmentClutches(sObsChrono);
+    const firstT = sObsChrono.length ? parseDate(sObsChrono[0].observation_time_utc).getTime() : 0;
+    let priorObsT: number | null = null;
+    for (const t of allObsTimes) { if (t >= firstT) break; priorObsT = t; }
+    const clutches = segmentClutches(sObsChrono, priorObsT);
     // Pair detection runs on SIGHTINGS, not observations: a bird chipped at this nest
     // attended it even when no observation was recorded that day (e.g. an adult chipped
     // while guarding chicks). Same-day scan/chip pairs are already deduped to one visit.

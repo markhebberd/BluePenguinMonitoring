@@ -18,6 +18,7 @@
 import {
   BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS,
   MAX_OFFSPRING_SHOWN, COPRESENCE_WEIGHT,
+  CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS,
 } from '../breedingConstants';
 import { ALGORITHM_DOC } from '../algorithmFingerprint';
 
@@ -51,6 +52,24 @@ const CSS = `
 
 /** A day-offset from the laid estimate, written the way the rest of the app writes it. */
 const d = (n: number) => `${n} days`;
+
+// The worked example in section 6, taken from one box's real records and computed with the
+// same constants and the same arithmetic as the algorithm — so a changed offset moves the
+// example too, rather than leaving a plausible-looking sum that is quietly wrong.
+const DAY_MS = 86400000;
+const EG = { empty: '2023-07-03', egg: '2023-07-17', noChicks: '2023-08-22', chicks: '2023-08-29' };
+const egT = (s: string) => new Date(s + 'T00:00:00Z').getTime();
+const egDate = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+const egHalve = (lo: number, hi: number) => ({
+  laid: Math.min(hi, lo + Math.ceil((hi - lo) / 2 / DAY_MS) * DAY_MS),
+  unc: Math.floor((hi - lo) / 2 / DAY_MS),
+});
+const egBoxOnly = egHalve(egT(EG.empty), egT(EG.egg));
+const egChickLo = egT(EG.noChicks) - BREEDING_OFFSETS.hatch * DAY_MS;
+const egChickHi = egT(EG.chicks) - BREEDING_OFFSETS.hatch * DAY_MS;
+const egLo = Math.max(egT(EG.empty), egChickLo), egHi = Math.min(egT(EG.egg), egChickHi);
+const egBoth = egHalve(egLo, egHi);
+const egPlural = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
 
 export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { seasonStartMonth: number; seasonStartDay: number }) {
   const seasonStart = `${seasonStartDay} ${MONTHS[seasonStartMonth - 1]}`;
@@ -87,26 +106,23 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <li><b>Chipping records</b> — a bird given its chip at this box on a date.</li>
         <li><b>Penguin records</b> — confirmed sex where known, and the biometric observed-sex calls a monitor made when handling the bird.</li>
       </ul>
-      <p>It reads no other signal. If it wasn’t observed or scanned, the algorithm cannot know it.</p>
 
       <h3>3. Seasons</h3>
       <p>
         A season runs from {seasonStart} to the day before the next {seasonStart}, and is labelled by
         the year it starts in — “2026” means 2026/27. Everything below runs per box, per season,
-        independently. A bird chipped at a box one season and scanned there the next produces two
-        separate single-season records; it never carries a box’s whole history with it.
+        independently.
       </p>
 
       <h3>4. Sightings: what counts as “this bird was here”</h3>
       <p>
-        A <b>sighting</b> is one bird, at one box, on one day. Two things create one:
-        a scan inside an observation, and a chipping record at that box. Both are merged into a
-        single chronological list before anything else happens.
+        A <b>sighting</b> is one bird, at one box, on one day — a bird can only be counted once
+        per nest per day, however many times it was recorded there. Two things create one: a scan
+        inside an observation, and a chipping record at that box. Both are merged into a single
+        chronological list before anything else happens; where a bird was scanned <em>and</em>
+        chipped at the box on the same day, the scan wins, because it carries the box contents
+        with it.
       </p>
-      <ul>
-        <li>A bird scanned twice in one observation is <b>one</b> sighting.</li>
-        <li>A bird scanned <em>and</em> chipped at the box on the same day is <b>one</b> sighting — the scan wins, because it carries the box contents with it.</li>
-      </ul>
       <p>
         Counting chippings as sightings matters: an adult chipped while guarding chicks was
         plainly attending that nest, even if no observation was filed that day. Without this,
@@ -116,8 +132,17 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       <h3>5. Splitting a season into breeding attempts</h3>
       <p>The season’s observations are walked in date order:</p>
       <ul>
-        <li>Eggs appearing in a box that was last seen empty <b>starts</b> an attempt. That observation is the <em>discovery</em>.</li>
-        <li>Only <b>eggs</b> can start an attempt. Chicks appearing with no egg phase, after an attempt has already finished, is biologically impossible — it’s stale or carried-forward data, so it’s ignored. The one exception is a season’s <em>first</em> attempt, which may start on chicks when the egg phase was simply never observed.</li>
+        <li>Eggs or chicks appearing in a box that was last seen empty <b>starts</b> an attempt. That observation is the <em>discovery</em>.</li>
+        <li>
+          Eggs always start one. Chicks with <em>no</em> egg phase only start one if the box went
+          unchecked long enough for the eggs to have come and gone unseen:
+          {' '}<b>{CHICK_START_MIN_GAP_DAYS} days</b> for downy chicks, and
+          {' '}<b>{CHIPPED_CHICK_START_MIN_GAP_DAYS} days</b> where the chicks found are already
+          microchipped — a chipped chick is close to fledging, so the whole cycle would have had
+          to pass unseen. Chicks turning up in a box checked more recently than that can’t be
+          newly hatched; that’s stale or carried-forward data, and it’s ignored.
+        </li>
+        <li>The gap measured is the box’s real monitoring gap — the last check of any kind, including one in the previous season. A season boundary is not a gap.</li>
         <li>An attempt <b>ends</b> at the first check that finds the box empty (offspring removed or dead), or at an observation marked <code>ABN</code> (abandoned) — whichever comes first.</li>
         <li>After an <code>ABN</code>, doomed eggs often linger in later checks. A new attempt cannot start until an empty check has actually been seen, so those leftovers can’t masquerade as a second clutch.</li>
         <li>The highest egg count and highest chick count seen anywhere in the attempt are kept — they drive the offspring tally in step 10.</li>
@@ -125,25 +150,54 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
 
       <h3>6. Estimating when the eggs were laid</h3>
       <p>
-        The laid date is a <b>midpoint</b>: halfway between the last check that found the box
-        empty and the check that found eggs. If {SECOND_EGG_LAG_DAYS}+ eggs were already there at
-        discovery, {SECOND_EGG_LAG_DAYS} days come off first, because the second egg is laid about
-        {' '}{SECOND_EGG_LAG_DAYS} days after the first and it’s the <em>first</em> egg being dated.
-        The uncertainty quoted alongside it (<code>± n days</code>) is half the gap between those
-        two checks — so it is a direct measure of how often that box was visited.
+        Laying is never observed, so it’s bracketed and then halved. The laid date is the
+        <b> midpoint</b> of the range laying must fall in, and the <code>± n days</code> quoted
+        beside it is half that range — which makes it a direct measure of how often the box was
+        visited.
       </p>
+      <p>
+        Four things bound that range, and <em>all</em> of them apply — the range is where they
+        agree, not whichever one looks best. Two come from the box:
+      </p>
+      <ul>
+        <li><b>Laying came after</b> the last check that found the box empty.</li>
+        <li>
+          <b>Laying came before</b> the check that found eggs — less {SECOND_EGG_LAG_DAYS} days
+          when {SECOND_EGG_LAG_DAYS}+ were already there, since the second egg comes about
+          {' '}{SECOND_EGG_LAG_DAYS} days after the first and it’s the <em>first</em> being dated.
+        </li>
+      </ul>
+      <p>And two come from the chicks, which is usually what sharpens the answer:</p>
+      <ul>
+        <li>
+          <b>Laying was at least {BREEDING_OFFSETS.hatch} days before the first chick</b> — the time from
+          first egg to first chick — or at least {BREEDING_OFFSETS.chip} days if that first chick
+          was already microchipped, since the downy weeks were missed as well.
+        </li>
+        <li>
+          <b>And no more than {BREEDING_OFFSETS.hatch} days before the last check that still had no
+          chicks</b>, which is the bound that does the real work: it turns “somewhere in a
+          fortnight” into “within a day or two”. A chick still in the nest also hasn’t fledged, so
+          laying is never more than {BREEDING_OFFSETS.fledge} days back, however long the box went
+          unwatched.
+        </li>
+      </ul>
       <div className="eg">
-        <span className="eg-title">Example</span>
-        Box empty on 1 July. Next check, 15 July, finds 2 eggs. Discovery is pulled back
-        {' '}{SECOND_EGG_LAG_DAYS} days to 13 July; the midpoint of 1–13 July is 7 July.
-        Laid ≈ <b>7 July, ± 6 days</b>. Had the box been checked weekly, the same clutch would
-        read ± 3 days.
+        <span className="eg-title">Example — the hatch doing the work</span>
+        A box was empty on {egDate(egT(EG.empty))} and held an egg on {egDate(egT(EG.egg))}. On
+        the box alone that puts laying somewhere in a fortnight:
+        {' '}<b>{egDate(egBoxOnly.laid)} ± {egPlural(egBoxOnly.unc)}</b>. But the same box still had
+        no chicks on {egDate(egT(EG.noChicks))} and had them on {egDate(egT(EG.chicks))}. Stepped
+        back {BREEDING_OFFSETS.hatch} days, that puts laying between {egDate(egChickLo)} and
+        {' '}{egDate(egChickHi)} — so the only dates satisfying everything run
+        {' '}{egDate(egLo)}–{egDate(egHi)}. Laid <b>{egDate(egBoth.laid)}, ± {egPlural(egBoth.unc)}</b>,
+        out of exactly the same records.
       </div>
       <p>
-        There is <b>no</b> estimate when the season’s first observation already had eggs in it
-        (nothing to measure back to), or when the discovery itself is marked abandoned. Such an
-        attempt still appears, but with no predicted dates — that’s a real data gap, and it’s
-        worth fixing at the source.
+        Where the two disagree outright — an empty box fewer than {BREEDING_OFFSETS.hatch} days before a
+        chick that needs a whole incubation — one of the records is simply wrong. The box’s own
+        contents were seen directly, so the chick evidence is dropped rather than averaged in, and
+        the estimate falls back to the laying window alone.
       </p>
 
       <h3>7. The dates that follow from it</h3>
@@ -274,6 +328,7 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <li><b>Laid dates are only as good as the visit interval.</b> A three-week gap between checks produces a ±10-day estimate, and every predicted stage inherits that error.</li>
         <li><b>A visitor can take a slot.</b> Where the real parent was never scanned, a bird that merely passed through during the attendance window can win by default.</li>
         <li><b>Stale or carried-forward entries distort attempts.</b> Duplicate observations and impossible counts can create or hide an attempt; the Data validation tab exists to catch them.</li>
+        <li><b>Chicks in a well-monitored box with no eggs ever recorded show no attempt at all.</b> The gap test in step 5 reads them as carried-forward data. If a real brood was simply never recorded at the egg stage, the fix is at the source — the eggs belong in the record.</li>
         <li><b>It is an inference, not a record.</b> Where it’s wrong, the verification tick is the fix — human truth wins and is stored as such.</li>
       </ul>
 

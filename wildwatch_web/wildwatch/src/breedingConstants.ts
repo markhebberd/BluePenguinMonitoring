@@ -18,6 +18,11 @@ export const DAY = 86400000;
 /**
  * Days after the (estimated) first egg that each breeding stage falls due.
  * Mirrors the nestcheck "Next Breeding Dates" card.
+ *
+ * `hatch` runs in both directions: forward it predicts the hatch date, and backward it
+ * dates laying from an observed one — first egg to first chick, the sharper of the two
+ * signals whenever a box was watched more closely around hatching than around laying.
+ *
  *   hatch  — eggs hatch
  *   pg     — post-guard: parents stop attending the nest, both feed at sea
  *   chip   — start of the window in which chicks are big enough to microchip
@@ -27,6 +32,20 @@ export const BREEDING_OFFSETS = { hatch: 38, pg: 52, chip: 80, fledge: 87 };
 
 /** Little penguins lay the second egg about this many days after the first. */
 export const SECOND_EGG_LAG_DAYS = 2;
+
+
+/**
+ * How long a box must have gone unchecked before chicks found with no egg phase are
+ * believed to be a real breeding attempt rather than stale data. Shorter than that and
+ * the eggs would have been seen, so the chicks can't be new.
+ */
+export const CHICK_START_MIN_GAP_DAYS = 35;
+
+/**
+ * The same test when the chicks found are already microchipped. A chipped chick is close
+ * to fledging, so the whole attempt — laying, incubation, guard — must have passed unseen.
+ */
+export const CHIPPED_CHICK_START_MIN_GAP_DAYS = 75;
 
 /**
  * How long before laying a pair is already attending the nest (courtship and
