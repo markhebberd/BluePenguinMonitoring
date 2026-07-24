@@ -260,6 +260,44 @@ if ($action === 'save_verification' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// The day's note: one free-text line per colony per NZ date, saved from the day view.
+// Keyed by (colony_id, note_date) rather than an id, because that is how the caller knows it —
+// it is looking at a day, not at a row. Blank text deletes: "no note" has one representation.
+if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $dnRole = $observer['role'] ?? 'viewer';
+    if ($dnRole !== 'admin' && $dnRole !== 'editor') { http_response_code(403); echo json_encode(['error'=>'Editors only']); exit; }
+    $in = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($in)) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); exit; }
+    $date = (string)($in['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) { http_response_code(400); echo json_encode(['error'=>'date required (YYYY-MM-DD)']); exit; }
+    $colonyId = (int)($in['colony_id'] ?? $_GET['colony_id'] ?? 1);
+    requireColonyAccess($pdo, $observer, $colonyId, true);
+    // Collapse whitespace so a note pasted over two lines still fits the column and reads as one line.
+    $note = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($in['note'] ?? ''))), 0, 255);
+    $oid = $observer['observer_id'];
+
+    try {
+        $pdo->beginTransaction();
+        $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+        $ex->execute([$colonyId, $date]);
+        $existingId = $ex->fetchColumn();
+
+        if ($note === '') {
+            if ($existingId) wwAuditedDelete($pdo, 'day_notes', (int)$existingId, $oid, 'Cleared day note');
+        } elseif ($existingId) {
+            wwAuditedUpdate($pdo, 'day_notes', (int)$existingId, ['note'=>$note], $oid);
+        } else {
+            wwAuditedInsert($pdo, 'day_notes', ['colony_id'=>$colonyId, 'note_date'=>$date, 'note'=>$note], $oid);
+        }
+        $pdo->commit();
+        echo json_encode(['success'=>true, 'note'=>$note]);
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);
+    }
+    exit;
+}
+
 $table = $_GET['table'] ?? '';
 $id = $_GET['id'] ?? null;
 
@@ -267,9 +305,9 @@ $id = $_GET['id'] ?? null;
 // two can't drift apart — a table here that the gateway won't write is rejected at startup.
 $tables = array_intersect_key(WW_TABLE_KEYS, array_flip([
     'observations', 'penguins', 'penguin_scans', 'penguin_biometric_data', 'penguin_chips', 'observation_locations',
-    // Breeding verification is written via save_verification (below); generic access here is for
-    // history reads only.
-    'breeding_verifications',
+    // Breeding verification is written via save_verification, day notes via save_day_note (both
+    // above); generic access here is for history reads only.
+    'breeding_verifications', 'day_notes',
 ]));
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
@@ -354,6 +392,10 @@ function requireWriteColony($pdo, $observer, $table, $id, $input) {
             $locId = $col("SELECT location_id FROM observations WHERE observation_id = ?", $obsId);
             if ($locId) $colonyId = $col("SELECT colony_id FROM observation_locations WHERE location_id = ?", $locId);
         }
+    } elseif ($table === 'day_notes') {
+        // Carries its colony directly — no observation to resolve through.
+        $colonyId = $id ? $col("SELECT colony_id FROM day_notes WHERE day_note_id = ?", $id)
+                        : ($input['colony_id'] ?? null);
     } elseif ($table === 'breeding_verifications') {
         // Anchored to an observation; resolve its colony (used by the history read path).
         $obsId = $id ? $col("SELECT observation_id FROM breeding_verifications WHERE verification_id = ?", $id)

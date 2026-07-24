@@ -708,6 +708,76 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     return ['penguins' => $pengArr, 'sightings' => $sightArr];
 }
 
+// ============ Day notes ============
+
+/**
+ * An import's monitor filename reduced to the part a person actually wrote — the day note it
+ * should become — or '' if none of it was. Used by the JSON import (admin.php) and by the
+ * one-off backfill of the old observations.monitor_filename column.
+ *
+ * The shapes this handles, from the values that column accumulated:
+ *   sheet-import-2021-04-07              spreadsheet importer's own filename  -> ''
+ *   web-entry, bdot@snotch.com           web form's who-typed-it stamp        -> ''
+ *   PenguinMonitor 20 May 26 FM Marian   nestcheck export                     -> 'FM Marian'
+ *   PenguinMonitor 251019 150843         export named for a bare timestamp    -> ''
+ *   FM 13-2024-Jun 26.csv                old field-monitor sheet              -> 'FM 13'
+ *   Mark and Flo (no bdot)               typed into the app's Daily label     -> unchanged
+ *
+ * Abbreviations are left exactly as written: this expands no FM, GR or BC into a guess at what
+ * the person meant.
+ */
+function ww_cleanMonitorLabel(string $raw): string {
+    $s = trim($raw);
+    if ($s === '') return '';
+
+    // Machine provenance, not a note: neither says anything about the day itself.
+    if (preg_match('/^sheet-import\b/i', $s)) return '';
+    if (preg_match('/^web-entry\b/i', $s)) return '';
+
+    // The nestcheck export wrapper and the file extension carry no meaning.
+    $s = preg_replace('/^PenguinMonitor\s*/i', '', $s);
+    $s = preg_replace('/\.csv$/i', '', $s);
+
+    // A leading date is the day's own date, restated. Forms present in the data:
+    //   03.06.26 / 13.06.2026                 dotted
+    //   20 May 26 / 8 June 26 / 2 May 2026    spelled
+    //   250923 / 20250820 / 0902              compact — "260131FM" has no separator after it
+    $mon = '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?';
+    $leading = [
+        '/^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}\s*/',
+        '/^\d{1,2}\s+' . $mon . '\s+\d{2,4}\s*/i',
+        '/^(\d{8}|\d{6}|\d{4})(?!\d)\s*/',
+    ];
+    // Twice: "250922 015545 GR b" is a date followed by a time.
+    for ($pass = 0; $pass < 2; $pass++) {
+        foreach ($leading as $p) {
+            $next = preg_replace($p, '', $s, 1);
+            if ($next !== $s) { $s = $next; break; }
+        }
+    }
+
+    // The old FM sheets put the date at the end: "FM 13-2024-Jun 26", "FM 20 - 10 Sep 2024".
+    $s = preg_replace('/\s*-\s*\d{4}-' . $mon . '\s+\d{1,2}$/i', '', $s);
+    $s = preg_replace('/\s*-\s*\d{1,2}\s+' . $mon . '\s+\d{4}$/i', '', $s);
+
+    return trim(preg_replace('/\s+/', ' ', $s), " \t\n\r-–—,·");
+}
+
+/**
+ * Give a day the note $note if it has none. Never overwrites: a note already there was typed by
+ * a person (or corrected by one after an earlier import), and an import arriving later should
+ * not silently replace that. Returns true if a note was written. Caller owns the transaction.
+ */
+function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $observerId, $reason = null): bool {
+    $note = mb_substr(trim(preg_replace('/\s+/', ' ', $note)), 0, 255);
+    if ($note === '') return false;
+    $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+    $ex->execute([$colonyId, $noteDate]);
+    if ($ex->fetchColumn()) return false;
+    wwAuditedInsert($pdo, 'day_notes', ['colony_id' => $colonyId, 'note_date' => $noteDate, 'note' => $note], $observerId, $reason);
+    return true;
+}
+
 // The audited write primitives (wwAuditedInsert / Update / Delete / Upsert) live in db_write.php,
 // the one gateway between the clients and the data tables. Every endpoint gets them via config.php.
 require_once __DIR__ . '/db_write.php';

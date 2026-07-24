@@ -31,6 +31,7 @@ const WW_TABLE_KEYS = [
     'validation_dismissals' => 'id',
     'observers'             => 'observer_id',
     'breeding_verifications'                => 'verification_id',
+    'day_notes'             => 'day_note_id',
 ];
 
 /** Tables whose primary key is a natural string, not an auto-increment id. For these

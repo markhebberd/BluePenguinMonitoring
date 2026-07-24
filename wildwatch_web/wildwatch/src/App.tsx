@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { ColonyMap } from './components/ColonyMap';
@@ -31,7 +31,7 @@ interface Scan { scan_id?:number; peng_num?:string|null; pit_id:string; sex:stri
 
 interface Observation {
   observation_id?:number;
-  observation_time_utc:string; monitor_filename:string;
+  observation_time_utc:string;
   adults:number; eggs:number; chicks:number;
   breeding_status:string|null; gate_status:string|null; notes:string;
   no_scan?:number;
@@ -470,7 +470,60 @@ function useDateTooltip() {
 // in the enter-date workflow. Used, alongside a computed full monitor, to flag FM dates green.
 const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent) => void; hide: () => void; statsCache: Map<string, any>; registeredFmDates: Map<string, { season: number; number: number; partial: boolean }> }>({ show: () => {}, hide: () => {}, statsCache: new Map(), registeredFmDates: new Map() });
 
-function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boolean; date?: string }) {
+/**
+ * The day's note, editable in place — one free-text line saying what this day's monitor was
+ * ("Full monitor with Mark"). One per colony per date, so it is shown once at the top of the day
+ * rather than repeated on every box's row, which is what the old per-observation
+ * monitor_filename did. Clearing the text deletes the note.
+ */
+function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
+  const saved = getDayNote(date) || '';
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // A note arriving from a sync (or switching days) replaces the field, but never mid-edit —
+  // that would overwrite what the user is typing.
+  useEffect(() => { if (!editing) setText(saved); }, [saved, editing]);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+  const commit = async () => {
+    const next = text.trim();
+    setEditing(false);
+    if (!token || next === saved.trim()) { setText(saved); return; }
+    setSaving(true); setError(null);
+    try {
+      await saveDayNote(token, date, next);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save');
+      setText(saved);
+    }
+    setSaving(false);
+  };
+
+  if (!canEdit) return saved ? <span className="day-note">{saved}</span> : null;
+  if (!editing) return (
+    <span className={`day-note day-note-editable${saved ? '' : ' day-note-empty'}`}
+      title="What was this day's monitor?" onClick={() => setEditing(true)}>
+      {saving ? 'Saving…' : (saved || '+ note')}
+      {error && <span style={{color:'#F44336'}}> {error}</span>}
+    </span>
+  );
+  return (
+    <input ref={inputRef} className="day-note-input" value={text} maxLength={255}
+      placeholder="What was this day's monitor?"
+      onChange={e => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); setText(saved); setEditing(false); }
+      }} />
+  );
+}
+
+function DateStatsLine({ stats, showDate, date, hideLabel }: { stats: any; showDate?: boolean; date?: string; hideLabel?: boolean }) {
   const multiObs = stats.obs > stats.boxes;
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const reg = date ? registeredFmDates.get(date.length > 10 ? toNzDateStr(date) : date) : undefined;
@@ -493,7 +546,8 @@ function DateStatsLine({ stats, showDate, date }: { stats: any; showDate?: boole
     {stats.chicks > 0 && <span> {'\uD83D\uDC23'}{stats.chicks}</span>}
     {stats.penguins > 0 && <span> {stats.penguins} scanned</span>}
     {stats.chipped > 0 && <span> {stats.chipped} chipped</span>}
-    {stats.label && <span className="muted"> {stats.label}</span>}
+    {/* The day's note. Hidden where an editable copy sits beside this line (the day page header). */}
+    {!hideLabel && stats.label && <span className="muted"> {stats.label}</span>}
   </>);
 }
 
@@ -1529,7 +1583,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   return (
     <div ref={ref} className={`obs-card ${flashing ? 'highlighted' : ''}${highlight ? ' obs-pinned' : ''}`} style={deleting ? {opacity: 0.4, pointerEvents: 'none'} : undefined}>
       <div className="obs-top">
-        {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b> <span className="muted small">{obs.monitor_filename}</span></span>}
+        {/* The day's note isn't repeated per card — hovering the date shows it with the day's stats. */}
+        {!hideDate && <span><b><DateLink date={obs.observation_time_utc} onDayClick={onDayClick} /></b></span>}
         <span className="obs-top-right">
           {canEdit && editCount > 0 && obsId && <span className="edit-badge clickable" onClick={() => setShowHistory(!showHistory)}>{editCount === 1 ? 'edited' : `${editCount} edits`}</span>}
           {canEdit && obsId && !editing && <button className="edit-btn" onClick={startEdit}>Edit</button>}
@@ -3161,6 +3216,10 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [lastSavedObsId, setLastSavedObsId] = useState<number|null>(null);
+  // Observations entered from this page in this session. The season list below offers a delete
+  // only for these — it used to spot them by a "web-entry" monitor_filename, which no longer
+  // exists, and the point was always "undo what you just typed", not "delete any observation".
+  const [enteredObsIds, setEnteredObsIds] = useState<Set<number>>(new Set());
   // Set when a save was blocked by an existing observation on the same date — renders a link to it
   const [dupObs, setDupObs] = useState<{box:string; time:string}|null>(null);
   // Right-side full-height bird dock — opened by clicking a PenguinMini in the existing rows
@@ -3303,7 +3362,6 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
           breeding_status: breedingStatus || null,
           gate_status: (gateOverride ?? gateStatus) || null,
           notes,
-          monitor_filename: `web-entry, ${localStorage.getItem('ww_email') || 'unknown'}`
         })
       });
       const obsData = await obsRes.json();
@@ -3330,6 +3388,7 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
 
       setMessage(`Saved: Box ${box}, ${formatDate(parsedDate)}, ${scannedBirds.length} birds`);
       setLastSavedObsId(obsData.id);
+      setEnteredObsIds(prev => new Set(prev).add(obsData.id));
       // Reset form (keep the date so the next observation can reuse it)
       setAdults(0); setEggs(0); setChicks(0); setNoScan(0); setGateStatus(''); setBreedingStatus('');
       setNotes(''); setScannedBirds([]);
@@ -3592,7 +3651,7 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
               ))}
               {o.notes && <span className="muted" style={{fontStyle:'italic', fontSize:12}}>"{o.notes}"</span>}
               <span style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:6}}>
-                {o.monitor_filename?.startsWith('web-entry') && o.observation_id && (
+                {o.observation_id && enteredObsIds.has(o.observation_id) && (
                   <button className="remove-scan" onClick={async () => {
                     const reason = prompt(`Delete observation from ${formatDate(o.observation_time_utc)}?\n\nReason (optional):`);
                     if (reason === null) return;
@@ -3600,7 +3659,6 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
                     setAllBoxObs(prev => prev.filter(ob => ob.observation_id !== o.observation_id));
                   }}>&times;</button>
                 )}
-                <span className="muted" style={{fontSize:10}}>{o.monitor_filename}</span>
                 <a className="day-box-link" style={{whiteSpace:'nowrap'}} href={`/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(o.observation_time_utc)}`}>to observation →</a>
               </span>
             </div>
@@ -6069,7 +6127,8 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
       {(totalObs > 0 || totalChips > 0) && (
         <div className="day-section">
           <h3 className="day-header-row">
-            <span className="day-stats"><DateStatsLine stats={{ ...(getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, label:null, isFullMonitor:false, totalLocations:0 }), chipped: totalChips }} showDate date={date} /></span>
+            <span className="day-stats"><DateStatsLine stats={{ ...(getDateStats().get(date) || { boxes:0, obs:0, adults:0, eggs:0, chicks:0, penguins:0, label:null, isFullMonitor:false, totalLocations:0 }), chipped: totalChips }} showDate date={date} hideLabel /></span>
+            <DayNoteEditor date={date} token={token} canEdit={canEdit} />
             <button type="button" className={`day-changed-toggle${changedFields.size ? ' active' : ''}`} onClick={() => setChangedExpanded(v => !v)} title="Only show boxes whose observation differs from the previous one">
               Changed {changedExpanded ? '▴' : '▾'}
             </button>
@@ -7025,6 +7084,7 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
 }
 
 /** Audit-log plumbing columns — never interesting to a human reading the change list. */
+// monitor_filename is gone from observations, but audit rows written before it was dropped still carry it.
 const AUDIT_HIDDEN_FIELDS = ['location_id','observer_id','colony_id','monitor_filename','is_deleted','observation_id','scan_id','biometric_id'];
 /** On observation rows the box is already in the header, and the scan count is superseded by the minis. */
 const AUDIT_HIDDEN_OBS_FIELDS = [...AUDIT_HIDDEN_FIELDS, 'box', 'scans'];
@@ -8583,7 +8643,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         {datePreview?.loading && <p className="muted" style={{marginTop:8}}>Loading {formatDate(datePreview.date)}...</p>}
         {datePreview && !datePreview.loading && (
           <div className="obs-card" style={{marginTop:8}}>
-            <div style={{fontWeight:600, marginBottom:6}}>{formatDate(datePreview.date)}: {datePreview.totals.boxes} observations</div>
+            <div style={{fontWeight:600, marginBottom:6}}>
+              {formatDate(datePreview.date)}: {datePreview.totals.boxes} observations
+              {datePreview.day_note && <span className="muted" style={{fontWeight:400}}> · {datePreview.day_note}</span>}
+            </div>
             <div className="muted" style={{marginBottom:6}}>
               {'🐧'.repeat(datePreview.totals.adults)} {'🥚'.repeat(datePreview.totals.eggs)} {'🐣'.repeat(datePreview.totals.chicks)}
               {datePreview.totals.without_breeding > 0 && <span style={{color:'#F44336'}}> · ⚠️ {datePreview.totals.without_breeding} missing breeding status</span>}
@@ -8591,7 +8654,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             <div style={{maxHeight:200, overflowY:'auto', fontSize:12}}>
               {datePreview.observations.map((o: any) => (
                 <div key={o.observation_id} style={{padding:'2px 0', borderBottom:'1px solid #f0f0f0'}}>
-                  Box {o.box_name}: {'🐧'.repeat(o.adults)}{'🥚'.repeat(o.eggs)}{'🐣'.repeat(o.chicks)} {o.breeding_status || <span style={{color:'#F44336'}}>no status</span>} <span className="muted">{o.monitor_filename}</span>
+                  Box {o.box_name}: {'🐧'.repeat(o.adults)}{'🥚'.repeat(o.eggs)}{'🐣'.repeat(o.chicks)} {o.breeding_status || <span style={{color:'#F44336'}}>no status</span>}
                 </div>
               ))}
             </div>

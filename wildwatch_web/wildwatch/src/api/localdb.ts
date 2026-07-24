@@ -37,10 +37,10 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 // Old single-colony cache is replaced by per-colony DBs — remove it once to reclaim the space.
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
-const DB_VERSION = 3; // v3: single breeding_verifications store (dropped chicks/disagreements stores)
-const CACHE_VERSION = 16; // Bump to force all clients to full re-sync (v16: verification single-table)
+const DB_VERSION = 4; // v4: day_notes store
+const CACHE_VERSION = 17; // Bump to force all clients to full re-sync (v17: day notes replace monitor_filename)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics',
-  'verifications', 'meta'] as const;
+  'verifications', 'day_notes', 'meta'] as const;
 // Stores from earlier DB versions that no longer exist; dropped on upgrade.
 const OBSOLETE_STORES = ['verification_chicks', 'disagreements'];
 
@@ -94,6 +94,7 @@ interface MemCache {
   locations: any[];
   biometrics: any[];
   verifications: any[];
+  dayNotes: any[];
   // Pre-built indexes
   obsById: Map<number, any>;            // observation_id → observation
   obsByLocation: Map<number, any[]>;   // location_id → observations
@@ -108,6 +109,7 @@ interface MemCache {
   // Precomputed date stats
   // Breeding verification (human ground truth): one row per verified clutch, chicks inline (JSON)
   verByObs: Map<number, any>;          // anchor observation_id → verification
+  noteByDate: Map<string, string>;     // NZ date string → the day's note
   dateStats: Map<string, any>;         // NZ date string → stats
   observationDates: string[];          // sorted NZ dates with data
   obsByNzDate: Map<string, any[]>;     // NZ date string → observations
@@ -138,11 +140,9 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   // Chippings on this date — only birds chipped at a location in the current colony.
   // Chips are global in the cache; location_id ties each to its colony (locById is colony-scoped).
   const chippedCount = c.chips.filter((ch: any) => ch.chip_date === nzDate && c.locById.has(ch.location_id)).length;
-  // Most common monitor filename
-  const nameCounts: Record<string, number> = {};
-  for (const o of obs) { if (o.monitor_filename) nameCounts[o.monitor_filename] = (nameCounts[o.monitor_filename] || 0) + 1; }
-  const topName = Object.entries(nameCounts).sort((a, b) => b[1] - a[1])[0];
-  const label = topName && topName[1] > obs.length * 0.5 ? topName[0] : null;
+  // The day's note — what a person said this day's monitor was. One per colony per date, so
+  // there is nothing to vote on the way the old per-observation monitor_filename needed.
+  const label = c.noteByDate.get(nzDate) || null;
   // Full monitor: a box not observed today is excused if its most recent breeding_status (before today) is DCM
   // Convert NZ date to UTC cutoff: end of NZ day = nzDate T12:00:00 UTC (fixed +12, matching utcToNzDate)
   const utcCutoff = nzDate + ' 12:00:00';
@@ -186,10 +186,11 @@ function buildDateStats(c: MemCache): void {
   c.observationDates = [...c.obsByNzDate.keys()].sort();
 }
 
-function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[]; verifications?: any[] }, fmExcludedRaw?: string | null): MemCache {
+function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]; chips: any[]; locations: any[]; biometrics: any[]; verifications?: any[]; dayNotes?: any[] }, fmExcludedRaw?: string | null): MemCache {
   const cache: MemCache = {
     ...data,
     verifications: data.verifications || [],
+    dayNotes: data.dayNotes || [],
     fmExcludedRaw,
     fmExcluded: parseFmExcluded(fmExcludedRaw),
     obsById: new Map(),
@@ -203,11 +204,14 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     scansByPit: new Map(),
     bioByPeng: new Map(),
     verByObs: new Map(),
+    noteByDate: new Map(),
     dateStats: new Map(),
     observationDates: [],
     obsByNzDate: new Map(),
   };
   for (const v of cache.verifications) cache.verByObs.set(v.observation_id, v);
+  // note_date arrives as a DATE string; slice guards against a driver handing back a datetime.
+  for (const n of cache.dayNotes) cache.noteByDate.set(String(n.note_date).slice(0, 10), n.note);
   for (const l of data.locations) { cache.locByName.set(l.location_name, l); cache.locById.set(l.location_id, l); }
   for (const p of data.penguins) cache.pengByNum.set(p.peng_num, p);
   for (const c of data.chips) {
@@ -275,6 +279,7 @@ function openDB(): Promise<IDBDatabase> {
             : store === 'locations' ? 'location_id'
             : store === 'biometrics' ? 'biometric_id'
             : store === 'verifications' ? 'verification_id'
+            : store === 'day_notes' ? 'day_note_id'
             : 'key';
           db.createObjectStore(store, { keyPath });
         }
@@ -358,16 +363,16 @@ function applyEditCounts(observations: any[], editCounts: Record<string, number>
 async function loadMemFromIDB(): Promise<void> {
   const db = await openDB();
   console.time('loadMemFromIDB:getAll');
-  const [observations, scans, penguins, chips, locations, biometrics, verifications] = await Promise.all([
+  const [observations, scans, penguins, chips, locations, biometrics, verifications, dayNotes] = await Promise.all([
     getAll(db, 'observations'), getAll(db, 'scans'), getAll(db, 'penguins'),
     getAll(db, 'chips'), getAll(db, 'locations'), getAll(db, 'biometrics'),
-    getAll(db, 'verifications'),
+    getAll(db, 'verifications'), getAll(db, 'day_notes'),
   ]);
   console.timeEnd('loadMemFromIDB:getAll');
   console.log(`loadMemFromIDB: ${observations.length} obs, ${scans.length} scans, ${penguins.length} penguins, ${locations.length} locations`);
   const fmExcluded = await getMeta(db, 'fm_excluded_boxes');
   console.time('loadMemFromIDB:buildIndexes');
-  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics, verifications }, fmExcluded);
+  mem = buildIndexes({ observations, scans, penguins, chips, locations, biometrics, verifications, dayNotes }, fmExcluded);
   console.timeEnd('loadMemFromIDB:buildIndexes');
   notifySubscribers();
 }
@@ -408,6 +413,7 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       putAll(db, 'locations', data.locations),
       putAll(db, 'biometrics', data.biometrics),
       putAll(db, 'verifications', data.verifications || []),
+      putAll(db, 'day_notes', data.day_notes || []),
     ]);
     console.timeEnd('idb-write');
     await setMeta(db, 'snapshot_time', data.snapshot_time);
@@ -416,7 +422,7 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
     mem = buildIndexes({
       observations, scans: data.scans, penguins: data.penguins,
       chips: data.chips, locations: data.locations, biometrics: data.biometrics,
-      verifications: data.verifications,
+      verifications: data.verifications, dayNotes: data.day_notes,
     }, data.fm_excluded_boxes);
     console.timeEnd('buildIndexes');
     notifySubscribers();
@@ -430,9 +436,9 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       for (const id of deletedScanIds) store.delete(id);
       await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
     }
-    // Verifications ride every snapshot in full, so replace the store wholesale — this is how a
-    // deleted verification leaves the cache.
-    await clearStores(db, ['verifications']);
+    // Verifications and day notes ride every snapshot in full, so replace those stores
+    // wholesale — this is how a deleted verification or a cleared note leaves the cache.
+    await clearStores(db, ['verifications', 'day_notes']);
     await Promise.all([
       putAll(db, 'observations', observations),
       putAll(db, 'scans', activeScans),
@@ -441,6 +447,7 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
       putAll(db, 'locations', data.locations),
       putAll(db, 'biometrics', data.biometrics),
       putAll(db, 'verifications', data.verifications || []),
+      putAll(db, 'day_notes', data.day_notes || []),
     ]);
     // Also update edit counts for observations already in IDB
     if (data.edit_counts && Object.keys(data.edit_counts).length > 0 && mem) {
@@ -543,7 +550,11 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     // cache on the pre-edit verification forever.
     const verSig = (rows: any[]) => (rows || []).map((r: any) => `${r.verification_id}:${r.updated_at}`).sort().join(',');
     const verChanged = verSig(data.verifications) !== verSig(mem?.verifications || []);
-    const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0 || verChanged;
+    // Day notes ride in full for the same reason, and need the same comparison: editing a note
+    // moves no observation row, so "rows arrived" can't tell an edit from an unchanged resend.
+    const noteSig = (rows: any[]) => (rows || []).map((r: any) => `${r.day_note_id}:${r.updated_at}`).sort().join(',');
+    const notesChanged = noteSig(data.day_notes) !== noteSig(mem?.dayNotes || []);
+    const hasChanges = data.observations?.length > 0 || data.scans?.length > 0 || data.penguins?.length > 0 || data.chips?.length > 0 || data.locations?.length > 0 || data.biometrics?.length > 0 || verChanged || notesChanged;
     if (hasChanges) {
       onProgress?.('Syncing changes...');
       await storeSnapshot(data, false);
@@ -1471,7 +1482,7 @@ export function computeFutureObservations(): any[] {
     const obs_date = utcToNzDate(o.observation_time_utc);
     if (obs_date > today) {
       const box_name = c.locById.get(o.location_id)?.location_name || '';
-      rows.push({ obs_date, box_name, monitor: o.monitor_filename || '', _href: obsHref(box_name, o.observation_time_utc) });
+      rows.push({ obs_date, box_name, monitor: c.noteByDate.get(obs_date) || '', _href: obsHref(box_name, o.observation_time_utc) });
     }
   }
   return rows.sort(byDateDesc);
@@ -1550,7 +1561,9 @@ export function computeDuplicateObservations(): any[] {
   for (const [key, obs] of map) {
     if (obs.length < 2) continue;
     const [box_name, obs_date] = key.split('|');
-    const monitors = [...new Set(obs.map((o: any) => o.monitor_filename).filter(Boolean))].join(', ');
+    // The two rows came from the same day, so they share a note — it names the day rather than
+    // telling the duplicates apart, which the per-observation monitor_filename used to do.
+    const monitors = c.noteByDate.get(obs_date) || '';
     const first = obs.reduce((a: any, b: any) => a.observation_time_utc < b.observation_time_utc ? a : b);
     rows.push({ obs_date, box_name, cnt: obs.length, monitors, _href: obsHref(box_name, first.observation_time_utc) });
   }
@@ -1840,7 +1853,7 @@ export function queryChipOnlyBoxes(days = 30): string[] {
 
 /** Get observations for a NZ date (same logic as day.php) */
 export function queryDay(date: string): any {
-  if (!mem) return { date, observations: [], chippings: [] };
+  if (!mem) return { date, day_note: null, observations: [], chippings: [] };
   const c = mem;
 
   // NZ date D covers UTC range: (D-1)T12:00:00 to DT12:00:00 — fixed +12 (NZST), matching
@@ -1882,7 +1895,33 @@ export function queryDay(date: string): any {
     })
     .sort((a: any, b: any) => (parseInt(a.chip_box) || 999) - (parseInt(b.chip_box) || 999));
 
-  return { date, observations, chippings };
+  return { date, day_note: c.noteByDate.get(date) || null, observations, chippings };
+}
+
+/** The note filed against an NZ date for the active colony, or null. Reads straight from the
+ *  cache so it also answers for a day with no observations (a note written ahead of the visit). */
+export function getDayNote(date: string): string | null {
+  return mem?.noteByDate.get(date) || null;
+}
+
+/** Save (or clear, with '') the day's note, then fold it into the cache so the day view and the
+ *  calendar update without waiting for the next snapshot. */
+export async function saveDayNote(token: string, date: string, note: string): Promise<void> {
+  const resp = await fetch(`/api/crud.php?action=save_day_note&${colonyQS()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ date, note, colony_id: getColonyId() }),
+  });
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.error || 'Failed to save note');
+  if (mem) {
+    const saved = (data.note ?? '') as string;
+    if (saved) mem.noteByDate.set(date, saved); else mem.noteByDate.delete(date);
+    const stats = mem.dateStats.get(date);
+    if (stats) stats.label = saved || null;
+    notifySubscribers();
+  }
+  triggerSync();
 }
 
 // ============ Lifecycle ============

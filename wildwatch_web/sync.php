@@ -50,6 +50,20 @@ function authenticate($pdo) {
 /**
  * GET: Download latest observation per box with scans.
  */
+/** The colony's day notes as note_date => note, for stamping onto each observation below. */
+function dayNoteMap($pdo, $colonyId): array {
+    $s = $pdo->prepare("SELECT note_date, note FROM day_notes WHERE colony_id = ?");
+    $s->execute([$colonyId]);
+    $map = [];
+    foreach ($s->fetchAll() as $r) $map[$r['note_date']] = $r['note'];
+    return $map;
+}
+
+/** NZ calendar date of a UTC observation time — the key day notes are filed under. */
+function nzDateOf(string $utc): string {
+    return (new DateTime($utc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('Y-m-d');
+}
+
 function handleDownload($pdo, $colonyId, $observer) {
     // Latest observation per box, plus second-most-recent for boxes where latest is today
     $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
@@ -57,7 +71,7 @@ function handleDownload($pdo, $colonyId, $observer) {
     // First: get latest per box
     $stmt = $pdo->prepare("
         SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
-            o.observation_time_utc, o.monitor_filename, o.observer_id,
+            o.observation_time_utc, o.observer_id,
             ob.observer_name,
             o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
         FROM observations o
@@ -86,7 +100,7 @@ function handleDownload($pdo, $colonyId, $observer) {
         $ph = implode(',', array_fill(0, count($todayBoxLocationIds), '?'));
         $prevStmt = $pdo->prepare("
             SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
-                o.observation_time_utc, o.monitor_filename, o.observer_id,
+                o.observation_time_utc, o.observer_id,
                 ob.observer_name,
                 o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
             FROM observations o
@@ -130,17 +144,23 @@ function handleDownload($pdo, $colonyId, $observer) {
         }
     }
 
-    // Build response: latest per box + previous for today's boxes
+    // Build response: latest per box + previous for today's boxes.
+    // Each observation carries its day's note. `monitor_filename` is the same value under the
+    // name the installed app still deserialises — the per-observation column is gone; drop the
+    // alias once nestcheck ships a release that reads `day_note`.
+    $dayNotes = dayNoteMap($pdo, $colonyId);
     $boxes = [];
     $previous = [];
     $latestIds = [];
     foreach ($latestObs as $obs) {
         $boxName = $obs['box_name'];
+        $note = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
         $boxes[$boxName] = [
             'observation_id' => (int)$obs['observation_id'],
             'location_id' => (int)$obs['location_id'],
             'observation_time_utc' => $obs['observation_time_utc'],
-            'monitor_filename' => $obs['monitor_filename'],
+            'day_note' => $note,
+            'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
             'eggs' => (int)$obs['eggs'],
@@ -154,11 +174,13 @@ function handleDownload($pdo, $colonyId, $observer) {
     }
     foreach ($previousObs as $obs) {
         $boxName = $obs['box_name'];
+        $note = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
         $previous[$boxName] = [
             'observation_id' => (int)$obs['observation_id'],
             'location_id' => (int)$obs['location_id'],
             'observation_time_utc' => $obs['observation_time_utc'],
-            'monitor_filename' => $obs['monitor_filename'],
+            'day_note' => $note,
+            'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
             'eggs' => (int)$obs['eggs'],
@@ -217,6 +239,7 @@ function handleUpload($pdo, $colonyId, $observer) {
     $created = [];
     $conflicts = [];
     $errors = [];
+    $labelDates = [];   // NZ dates this payload wrote to — the days $dailyLabel describes
 
     $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
 
@@ -227,7 +250,8 @@ function handleUpload($pdo, $colonyId, $observer) {
         $chipLookup[strtoupper(substr($c['pit_id'], -8))] = $c['pit_id'];
     }
 
-    // Batch-fetch scans for conflict display
+    // Batch-fetch scans and day notes for conflict display
+    $conflictDayNotes = dayNoteMap($pdo, $colonyId);
     $viewPrefix = getColonyPrefix($pdo, $colonyId);
     $fetchScansForObs = function($obsId) use ($pdo, $chipLookup, $viewPrefix) {
         $s = $pdo->prepare("SELECT ps.pit_id, ps.scan_time_utc, pc.peng_num, p.sex, p.chick_size_code
@@ -262,7 +286,7 @@ function handleUpload($pdo, $colonyId, $observer) {
             // Check if this box already has today's observation on the server
             if (!$forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.no_scan,
-                    o.breeding_status, o.gate_status, o.notes, o.monitor_filename, ob.observer_name
+                    o.breeding_status, o.gate_status, o.notes, ob.observer_name
                     FROM observations o LEFT JOIN observers ob ON o.observer_id = ob.observer_id
                     WHERE o.location_id = ? AND o.is_deleted = FALSE
                     AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?
@@ -291,7 +315,8 @@ function handleUpload($pdo, $colonyId, $observer) {
                                 'breeding_status' => $existing['breeding_status'],
                                 'gate_status' => $existing['gate_status'],
                                 'notes' => $existing['notes'],
-                                'monitor_filename' => $existing['monitor_filename'],
+                                'day_note' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])] ?? null,
+                                'monitor_filename' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])] ?? null,
                                 'scans' => $fetchScansForObs($existing['observation_id']),
                             ],
                             'incoming' => $obs,
@@ -311,8 +336,10 @@ function handleUpload($pdo, $colonyId, $observer) {
                 'location_id' => $locationId, 'observer_id' => $observerId, 'observation_time_utc' => $obsTime,
                 'adults' => (int)($obs['adults'] ?? 0), 'eggs' => (int)($obs['eggs'] ?? 0), 'chicks' => (int)($obs['chicks'] ?? 0),
                 'breeding_status' => $obs['breeding_status'] ?? null, 'gate_status' => $obs['gate_status'] ?? null,
-                'notes' => $obs['notes'] ?? '', 'monitor_filename' => $dailyLabel ?: null, 'no_scan' => $noScanCount,
+                'notes' => $obs['notes'] ?? '', 'no_scan' => $noScanCount,
             ];
+            // The day the phone's label describes — collected here, written once after the loop.
+            $labelDates[nzDateOf($obsTime)] = true;
 
             // Create, or force-replace in place. wwAuditedUpdate logs only the fields that actually
             // differ, so a re-sync reads as "what changed" rather than a re-print of the row.
@@ -385,6 +412,13 @@ function handleUpload($pdo, $colonyId, $observer) {
 
             $created[] = ['box_name' => $boxName, 'observation_id' => (int)$observationId, 'scans' => $scanTotal,
                           'scans_added' => $scansCreated, 'scans_removed' => $scansRemoved];
+        }
+
+        // The phone's "Daily label" is the day's note. It fills a day that has none rather than
+        // overwriting: by the time a second sync arrives the note may have been corrected in the
+        // web day view, and a re-sync of the same label should not undo that edit.
+        foreach (array_keys($labelDates) as $noteDate) {
+            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync');
         }
 
         $pdo->commit();

@@ -59,6 +59,15 @@ function getVerificationData($pdo, $colonyId, $viewPrefix) {
     return ['verifications' => $verRows];
 }
 
+/** The colony's day notes — one free-text line per NZ date. A few hundred rows at most, so
+ *  they ride every snapshot (full and incremental) in FULL: the client replaces its store
+ *  wholesale, which is how a cleared note leaves the cache. */
+function getDayNotes($pdo, $colonyId) {
+    $dn = $pdo->prepare("SELECT " . SNAP_COLS_DAYNOTE . " FROM day_notes d WHERE d.colony_id = ? ORDER BY d.note_date");
+    $dn->execute([$colonyId]);
+    return ['day_notes' => $dn->fetchAll()];
+}
+
 function getTotalCounts($pdo, $colonyId) {
     $c = function($sql, $params = []) use ($pdo) {
         $s = $pdo->prepare($sql); $s->execute($params); return (int)$s->fetchColumn();
@@ -77,7 +86,7 @@ if ($since) {
     // Incremental sync: only rows updated since the given timestamp
     $ts = date('Y-m-d H:i:s', strtotime($since));
 
-    $obs = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted, o.updated_at
+    $obs = $pdo->prepare("SELECT " . SNAP_COLS_OBS . ", o.updated_at
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
         WHERE ol.colony_id = ? AND o.updated_at >= ?");
     $obs->execute([$colonyId, $ts]);
@@ -124,7 +133,8 @@ if ($since) {
         COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
         COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
         COALESCE((SELECT MAX(created_at) FROM penguin_chips), '2000-01-01'),
-        COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01')
+        COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM day_notes), '2000-01-01')
     ) as wm");
     $snapshotTime = $wmStmt->fetch()['wm'];
 
@@ -145,7 +155,7 @@ if ($since) {
         'edit_counts' => $editCounts,
         'fm_excluded_boxes' => $fmExcludedBoxes,
         '_counts' => getTotalCounts($pdo, $colonyId),
-    ], getVerificationData($pdo, $colonyId, $viewPrefix)));
+    ], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId)));
     exit;
 }
 
@@ -207,7 +217,7 @@ $json = json_encode(array_merge([
     'edit_counts' => $editCounts,
     'fm_excluded_boxes' => $fmExcludedBoxes,
     '_counts' => getTotalCounts($pdo, $colonyId),
-], getVerificationData($pdo, $colonyId, $viewPrefix)));
+], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId)));
 
 // Manual gzip with known Content-Length for accurate client progress
 $gz = gzencode($json, 6);

@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS observations (
     breeding_status VARCHAR(50),
     gate_status VARCHAR(50),
     notes TEXT,
-    monitor_filename VARCHAR(255),
     is_deleted BOOLEAN DEFAULT FALSE,
     deletion_reason TEXT,
     deleted_at TIMESTAMP NULL,
@@ -86,6 +85,23 @@ CREATE TABLE IF NOT EXISTS observations (
     INDEX idx_loc_time (location_id, observation_time_utc),
     INDEX idx_observer (observer_id),
     INDEX idx_deleted (is_deleted)
+);
+
+-- One free-text note per colony per monitoring day — what the day's work was, in a person's
+-- words ("Full monitor with Mark"). note_date is an NZ calendar date and is deliberately not
+-- an FK: a note can outlive, or precede, the observations it describes.
+-- Authorship and edit history live in audit_log (see migrations/2026-07-24c-day-notes.sql).
+CREATE TABLE IF NOT EXISTS day_notes (
+    day_note_id INT AUTO_INCREMENT PRIMARY KEY,
+    colony_id   INT NOT NULL,
+    note_date   DATE NOT NULL,
+    note        VARCHAR(255) NOT NULL,    -- never blank; delete the row instead
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_colony_date (colony_id, note_date),
+    KEY idx_note_date (note_date),
+    CONSTRAINT chk_dn_note CHECK (CHAR_LENGTH(TRIM(note)) > 0),
+    CONSTRAINT fk_dn_colony FOREIGN KEY (colony_id) REFERENCES colonies (colony_id)
 );
 
 CREATE TABLE IF NOT EXISTS penguins (

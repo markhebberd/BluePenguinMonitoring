@@ -510,7 +510,7 @@ if ($action === 'preview_date' || $action === 'delete_date') {
     $utcEnd = date('Y-m-d 12:00:00', strtotime($date));
 
     $stmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
-        o.breeding_status, o.notes, o.monitor_filename, ol.location_name AS box_name,
+        o.breeding_status, o.notes, ol.location_name AS box_name,
         (SELECT COUNT(*) FROM penguin_scans ps WHERE ps.observation_id = o.observation_id AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)) as scan_count
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
         WHERE o.observation_time_utc >= ? AND o.observation_time_utc < ? AND o.is_deleted = FALSE
@@ -530,7 +530,12 @@ if ($action === 'preview_date' || $action === 'delete_date') {
     }
 
     if ($action === 'preview_date') {
-        echo json_encode(['date' => $date, 'totals' => $totals, 'observations' => $observations]);
+        // The day's note, so the preview says what the day was before you delete it.
+        $noteStmt = $pdo->prepare("SELECT note FROM day_notes WHERE colony_id = ? AND note_date = ?");
+        $noteStmt->execute([$colonyId, $date]);
+        $dayNote = $noteStmt->fetchColumn();
+        echo json_encode(['date' => $date, 'day_note' => $dayNote === false ? null : $dayNote,
+            'totals' => $totals, 'observations' => $observations]);
         exit;
     }
 
@@ -1736,7 +1741,7 @@ function ww_parseImportJson($pdo, $jsonText, $colonyId, $observerId, $filename) 
                 'location_id' => $locId, 'adults' => $adults, 'eggs' => $eggs, 'chicks' => $chicks,
                 'breeding_status' => $breeding, 'gate_status' => $gate, 'notes' => $notes,
                 'scans' => $scans, 'unmatched' => $rowUnmatched, 'box_tags' => $boxTags,
-                'status' => $status, 'error' => $error, 'monitor_filename' => $mfile,
+                'status' => $status, 'error' => $error,
             ];
         }
     }
@@ -1802,7 +1807,7 @@ if ($action === 'import_csv_commit') {
             $obsId = wwAuditedInsert($pdo, 'observations', [
                 'location_id' => $row['location_id'], 'observer_id' => $observerId, 'observation_time_utc' => $row['obs_time'],
                 'adults' => $row['adults'], 'eggs' => $row['eggs'], 'chicks' => $row['chicks'], 'no_scan' => $row['no_scan'],
-                'breeding_status' => $row['breeding_status'], 'notes' => $row['notes'], 'monitor_filename' => $A['filename'],
+                'breeding_status' => $row['breeding_status'], 'notes' => $row['notes'],
             ], $observerId);
             $imported++;
             foreach ($row['scans'] as $sc) {
@@ -1850,9 +1855,18 @@ if ($action === 'import_json_commit') {
     $A = ww_parseImportJson($pdo, $json, $colonyId, $observerId, $filename);
     if (!$A['ok']) { http_response_code(400); echo json_encode(['error' => $A['error']]); exit; }
 
-    $imported = 0; $scans = 0; $skippedDup = 0; $skippedErr = 0;
+    $imported = 0; $scans = 0; $skippedDup = 0; $skippedErr = 0; $dayNotes = 0;
     try {
         $pdo->beginTransaction();
+        // A nestcheck export's monitor filename is the closest thing the file has to a note on
+        // the day ("PenguinMonitor 20 May 26 FM Marian"). Cleaned of its wrapper and date, it
+        // names the day it imported into — but only where that day has no note yet.
+        $noteFor = [];
+        foreach ($A['rows'] as $row) {
+            if ($row['status'] !== 'ok' || !$row['date']) continue;
+            $clean = ww_cleanMonitorLabel((string)($row['monitor'] ?? ''));
+            if ($clean !== '' && !isset($noteFor[$row['date']])) $noteFor[$row['date']] = $clean;
+        }
         foreach ($A['rows'] as $row) {
             if ($row['status'] === 'error') { $skippedErr++; continue; }
             if ($row['status'] === 'duplicate') { $skippedDup++; continue; }
@@ -1860,13 +1874,15 @@ if ($action === 'import_json_commit') {
                 'location_id' => $row['location_id'], 'observer_id' => $observerId, 'observation_time_utc' => $row['obs_time'],
                 'adults' => $row['adults'], 'eggs' => $row['eggs'], 'chicks' => $row['chicks'],
                 'breeding_status' => $row['breeding_status'], 'gate_status' => $row['gate_status'], 'notes' => $row['notes'],
-                'monitor_filename' => $row['monitor_filename'],
             ], $observerId);
             $imported++;
             foreach ($row['scans'] as $sc) {
                 wwAuditedInsert($pdo, 'penguin_scans', ['observation_id' => $obsId, 'pit_id' => $sc['pit_id'], 'scan_time_utc' => $row['obs_time']], $observerId);
                 $scans++;
             }
+        }
+        foreach ($noteFor as $noteDate => $note) {
+            if (wwFillDayNote($pdo, $colonyId, $noteDate, $note, $observerId, 'json_import')) $dayNotes++;
         }
         $pdo->commit();
     } catch (Exception $e) {
@@ -1879,7 +1895,7 @@ if ($action === 'import_json_commit') {
     echo json_encode([
         'success' => true, 'filename' => $A['filename'], 'colony_id' => $colonyId, 'colony_name' => $A['colony_name'],
         'imported' => $imported, 'scans' => $scans, 'skipped_duplicates' => $skippedDup, 'skipped_errors' => $skippedErr,
-        'unmatched_chips' => $A['unmatched_chips'],
+        'day_notes' => $dayNotes, 'unmatched_chips' => $A['unmatched_chips'],
     ]);
     exit;
 }

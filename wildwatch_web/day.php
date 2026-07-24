@@ -62,8 +62,14 @@ $stmt->execute([$date]);
 $chippings = $stmt->fetchAll();
 stripPengPrefix($chippings, $viewPrefix);
 
+// The day's note — one free-text line for this colony on this date, or null.
+$noteStmt = $pdo->prepare("SELECT note FROM day_notes WHERE colony_id = ? AND note_date = ?");
+$noteStmt->execute([$colonyId, $date]);
+$dayNote = $noteStmt->fetchColumn();
+
 echo json_encode([
     'date' => $date,
+    'day_note' => $dayNote === false ? null : $dayNote,
     'observations' => $observations,
     'chippings' => $chippings,
 ]);

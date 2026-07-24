@@ -30,10 +30,9 @@ if ($summary) {
 }
 
 function handleSummary($pdo, $colonyId) {
-    // Get all observations with location info, grouped by monitor filename and date
+    // All observations with location info, grouped by NZ monitoring day
     $sql = "SELECT
-                o.observation_time_utc,
-                o.monitor_filename,
+                DATE(o.observation_time_utc + INTERVAL 12 HOUR) AS nz_date,
                 ol.location_name,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes
@@ -46,19 +45,22 @@ function handleSummary($pdo, $colonyId) {
     $stmt->execute([$colonyId]);
     $rows = $stmt->fetchAll();
 
-    // Group by monitor session (filename + date)
+    $noteStmt = $pdo->prepare("SELECT note_date, note FROM day_notes WHERE colony_id = ?");
+    $noteStmt->execute([$colonyId]);
+    $notes = array_column($noteStmt->fetchAll(), 'note', 'note_date');
+
+    // One entry per monitoring day, carrying that day's note
     $monitors = [];
     foreach ($rows as $row) {
-        $date = substr($row['observation_time_utc'], 0, 10);
-        $key = $row['monitor_filename'] . '|' . $date;
-        if (!isset($monitors[$key])) {
-            $monitors[$key] = [
+        $date = $row['nz_date'];
+        if (!isset($monitors[$date])) {
+            $monitors[$date] = [
                 'date' => $date,
-                'filename' => $row['monitor_filename'],
+                'note' => $notes[$date] ?? null,
                 'boxes' => []
             ];
         }
-        $monitors[$key]['boxes'][$row['location_name']] = [
+        $monitors[$date]['boxes'][$row['location_name']] = [
             'adults' => (int)$row['adults'],
             'eggs' => (int)$row['eggs'],
             'chicks' => (int)$row['chicks'],
@@ -76,7 +78,7 @@ function handleSummary($pdo, $colonyId) {
 
 function handleLocationDetail($pdo, $colonyId, $locationName) {
     $sql = "SELECT
-                o.observation_id, o.observation_time_utc, o.monitor_filename,
+                o.observation_id, o.observation_time_utc,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes,
                 ob.observer_name
@@ -128,7 +130,6 @@ function handleColonyOverview($pdo, $colonyId) {
                 o.observation_time_utc,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes,
-                o.monitor_filename,
                 (SELECT COUNT(*) FROM observations o2 WHERE o2.location_id = ol.location_id AND o2.is_deleted = FALSE) as total_observations
             FROM observation_locations ol
             LEFT JOIN observations o ON o.observation_id = (

@@ -12,7 +12,7 @@
  * ', o.updated_at' to the observations list; nothing else differs.
  */
 
-const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted';
+const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted';
 const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted';
 const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, death_date, vid_for_scanner, chick_size_code, notes';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, solo';
@@ -22,4 +22,8 @@ const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date
 // Human-verified breeding truth (single table). Reviewer names come from the observer joins
 // (oa/oc) so the client shows "accepted by <name>" without an observers table. chicks is a JSON
 // array of peng_nums (prefix-stripped per element in getVerificationData). Alias v = breeding_verifications.
+// The day's note — one row per colony per NZ date. Alias d = day_notes. updated_at rides along
+// so the client can tell an edited note from an unchanged one on an incremental snapshot.
+const SNAP_COLS_DAYNOTE = 'd.day_note_id, d.note_date, d.note, d.updated_at';
+
 const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.male_peng_num, v.female_peng_num, v.adults_reviewed_by, oa.observer_name AS adults_reviewed_by_name, v.adults_reviewed_at, v.adults_note, v.chicks_verdict, v.chicks, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_reviewed_by, oc.observer_name AS chicks_reviewed_by_name, v.chicks_reviewed_at, v.chicks_note, v.created_at, v.updated_at';

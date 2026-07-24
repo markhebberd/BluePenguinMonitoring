@@ -12,7 +12,6 @@ interface Scan {
 interface Observation {
   observation_id: number;
   observation_time_utc: string;
-  monitor_filename: string;
   adults: number;
   eggs: number;
   chicks: number;
@@ -87,7 +86,6 @@ export function BoxDetail({ boxName, onClose }: BoxDetailProps) {
           <div key={obs.observation_id} className="observation-card">
             <div className="obs-header">
               <span className="obs-date">{formatDate(obs.observation_time_utc)}</span>
-              <span className="obs-filename">{obs.monitor_filename}</span>
             </div>
 
             <div className="obs-data-row">

@@ -17,26 +17,31 @@ switch ($view) {
 }
 
 function handleTimeline($pdo, $colonyId) {
-    $sql = "SELECT o.observation_time_utc, o.monitor_filename, ol.location_name AS box_name,
+    // One entry per NZ day, carrying that day's note. Days used to be split by
+    // monitor_filename and then re-merged largest-wins; the note is per-day, so there is
+    // nothing left to split on.
+    $sql = "SELECT DATE(o.observation_time_utc + INTERVAL 12 HOUR) AS nz_date, ol.location_name AS box_name,
                 o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes
             FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
             WHERE ol.colony_id = ? AND o.is_deleted = FALSE ORDER BY o.observation_time_utc ASC";
     $stmt = $pdo->prepare($sql); $stmt->execute([$colonyId]); $rows = $stmt->fetchAll();
-    $monitors = [];
-    foreach ($rows as $row) {
-        $date = substr($row['observation_time_utc'], 0, 10);
-        $key = $row['monitor_filename'] . '|' . $date;
-        if (!isset($monitors[$key])) $monitors[$key] = ['date' => $date, 'filename' => $row['monitor_filename'], 'boxes' => []];
-        $monitors[$key]['boxes'][$row['box_name']] = ['a'=>(int)$row['adults'],'e'=>(int)$row['eggs'],'c'=>(int)$row['chicks'],'s'=>$row['breeding_status'],'g'=>$row['gate_status'],'n'=>$row['notes']];
-    }
+
+    $noteStmt = $pdo->prepare("SELECT note_date, note FROM day_notes WHERE colony_id = ?");
+    $noteStmt->execute([$colonyId]);
+    $notes = array_column($noteStmt->fetchAll(), 'note', 'note_date');
+
     $byDate = [];
-    foreach (array_values($monitors) as $m) { $d=$m['date']; if (!isset($byDate[$d])||count($m['boxes'])>count($byDate[$d]['boxes'])) $byDate[$d]=$m; }
+    foreach ($rows as $row) {
+        $date = $row['nz_date'];
+        if (!isset($byDate[$date])) $byDate[$date] = ['date' => $date, 'note' => $notes[$date] ?? null, 'boxes' => []];
+        $byDate[$date]['boxes'][$row['box_name']] = ['a'=>(int)$row['adults'],'e'=>(int)$row['eggs'],'c'=>(int)$row['chicks'],'s'=>$row['breeding_status'],'g'=>$row['gate_status'],'n'=>$row['notes']];
+    }
     echo json_encode(array_values($byDate));
 }
 
 function handleBox($pdo, $colonyId, $boxName) {
     if (empty($boxName)) { echo json_encode(['error'=>'name required']); return; }
-    $sql = "SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
+    $sql = "SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
             FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = FALSE ORDER BY o.observation_time_utc DESC";
     $stmt = $pdo->prepare($sql); $stmt->execute([$colonyId, $boxName]); $observations = $stmt->fetchAll();
@@ -120,7 +125,7 @@ function handleBox($pdo, $colonyId, $boxName) {
     // Optionally include deleted observations
     $deleted = [];
     if ($deletedCount > 0 && isset($_GET['include_deleted'])) {
-        $delObs = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.monitor_filename, o.adults, o.eggs, o.chicks, o.breeding_status, o.notes, o.deleted_at, ob.observer_name as deleted_by_name,
+        $delObs = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.notes, o.deleted_at, ob.observer_name as deleted_by_name,
             (SELECT a.change_reason FROM audit_log a WHERE a.table_name = 'observations' AND a.record_id = o.observation_id AND a.action = 'DELETE' ORDER BY a.change_timestamp DESC LIMIT 1) as delete_reason
             FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id LEFT JOIN observers ob ON o.deleted_by = ob.observer_id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = TRUE ORDER BY o.observation_time_utc DESC");
