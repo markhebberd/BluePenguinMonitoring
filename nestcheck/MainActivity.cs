@@ -3899,7 +3899,13 @@ namespace PenguinMonitor
                 var nsPadH = (int)(8 * textSize / 10);
                 var nsPadV = (int)(3 * textSize / 10);
                 nsb.SetPadding(nsPadH, nsPadV, nsPadH, nsPadV);
-                nsb.Background = _uiFactory.CreateRoundedBackground(SCAN_CHIPPED_TODAY_BG, 4);
+                // Thin black outline to match the scan mini-views (like wildwatch)
+                var nsBg = new Android.Graphics.Drawables.GradientDrawable();
+                nsBg.SetShape(Android.Graphics.Drawables.ShapeType.Rectangle);
+                nsBg.SetColor(SCAN_CHIPPED_TODAY_BG);
+                nsBg.SetCornerRadius(4 * (Resources?.DisplayMetrics?.Density ?? 2f));
+                nsBg.SetStroke(System.Math.Max(1, (int)(Resources?.DisplayMetrics?.Density ?? 2f)), Color.Black);
+                nsb.Background = nsBg;
                 nsb.SetTextColor(Color.Black);
                 nsb.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
                 return nsb;
@@ -3954,7 +3960,11 @@ namespace PenguinMonitor
             public override void Draw(Canvas canvas)
             {
                 var b = Bounds;
-                var rect = new RectF(b.Left, b.Top, b.Right, b.Bottom);
+                // Inset by half the stroke so the outline sits fully inside the bounds, not clipped.
+                float stroke = System.Math.Max(1f, _radius / 4f); // ~1dp
+                float inset = stroke / 2f;
+                var rect = new RectF(b.Left + inset, b.Top + inset, b.Right - inset, b.Bottom - inset);
+                _paint.SetStyle(Paint.Style.Fill);
                 _paint.Color = _baseColor;
                 canvas.DrawRoundRect(rect, _radius, _radius, _paint);
                 if (_chick && b.Width() > 0)
@@ -3967,6 +3977,11 @@ namespace PenguinMonitor
                     canvas.DrawRect(b.Left + b.Width() * 0.85f, b.Top, b.Right, b.Bottom, _paint);
                     canvas.Restore();
                 }
+                // Thin black outline, like wildwatch
+                _paint.SetStyle(Paint.Style.Stroke);
+                _paint.StrokeWidth = stroke;
+                _paint.Color = Color.Black;
+                canvas.DrawRoundRect(rect, _radius, _radius, _paint);
             }
 
             public override void SetAlpha(int alpha) { }
