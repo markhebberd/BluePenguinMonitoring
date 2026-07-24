@@ -506,14 +506,14 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
   if (!canEdit) return saved ? <span className="day-note">{saved}</span> : null;
   if (!editing) return (
     <span className={`day-note day-note-editable${saved ? '' : ' day-note-empty'}`}
-      title="What was this day's monitor?" onClick={() => setEditing(true)}>
+      title="Monitor notes" onClick={() => setEditing(true)}>
       {saving ? 'Saving…' : (saved || '+ note')}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
     </span>
   );
   return (
     <input ref={inputRef} className="day-note-input" value={text} maxLength={255}
-      placeholder="What was this day's monitor?"
+      placeholder="Monitor notes"
       onChange={e => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={e => {
