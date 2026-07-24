@@ -7413,7 +7413,7 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
  *  Built from the local cache. */
 function DcmBoxesChart() {
   const v = useDbVersion();
-  const [gran, setGran] = useState<'season' | 'month'>('season');
+  const [gran, setGran] = useState<'season' | 'month'>('month');
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const seasonYearOfNz = (nz: string): number => { const [y, m, d] = nz.split('-').map(Number); return getSeasonStart(new Date(y, m - 1, d)).getFullYear(); };
 
