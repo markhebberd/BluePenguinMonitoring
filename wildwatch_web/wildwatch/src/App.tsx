@@ -503,9 +503,9 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
     setSaving(false);
   };
 
-  if (!canEdit) return saved ? <span className="day-note">{saved}</span> : null;
+  if (!canEdit) return saved ? <span className="day-hdr-note">{saved}</span> : null;
   if (!editing) return (
-    <span className={`day-note day-note-editable${saved ? '' : ' day-note-empty'}`}
+    <span className={`day-hdr-note day-note-editable${saved ? '' : ' day-note-empty'}`}
       title="Monitor notes" onClick={() => setEditing(true)}>
       {saving ? 'Saving…' : (saved || '+ note')}
       {error && <span style={{color:'#F44336'}}> {error}</span>}

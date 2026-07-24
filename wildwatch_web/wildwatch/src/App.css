@@ -431,8 +431,9 @@ h3.collapsible:hover { color:#1a5276; }
 .day-stats { flex:0 1 auto; min-width:0; }
 @media (min-width:900px) { .day-stats .date-stats-date { margin-right:16px; } }
 /* The day's note, edited in place at the end of the day's stats sentence — inline, so it
-   continues that line rather than claiming a row of its own. */
-.day-note { font-size:13px; font-weight:normal; color:#455a64; font-style:italic; white-space:nowrap; }
+   continues that line rather than claiming a row of its own. Its own class, not .day-note:
+   that one is an observation's notes inside a day row, which must wrap. */
+.day-hdr-note { font-size:13px; font-weight:normal; color:#455a64; font-style:italic; white-space:nowrap; }
 .day-note-editable { cursor:text; border-bottom:1px dashed transparent; }
 .day-note-editable:hover { border-bottom-color:#b0bec5; }
 .day-note-empty { color:#90a4ae; font-style:normal; font-size:12px; }
