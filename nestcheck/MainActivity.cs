@@ -3866,6 +3866,15 @@ namespace PenguinMonitor
             return (label, sex, isChick, pd);
         }
 
+        // Mark prefers the chick-size letter (L/B/S) tucked into the badge's yellow strip at the
+        // end, rather than "LC"/"BC"/"SC" mid-label — see CreateScanBadge. Matches the logged-in
+        // observer's first name.
+        private bool CurrentObserverIsMark()
+        {
+            var first = (_appSettings?.ObserverName ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+            return first.Equals("Mark", StringComparison.OrdinalIgnoreCase);
+        }
+
         // Colony acronym for display (PT, NI). Falls back to the colony name's initials
         // until a colonies sync delivers colony_prefix.
         private string CurrentColonyAcronym()
@@ -3896,6 +3905,15 @@ namespace PenguinMonitor
                 return nsb;
             }
             var (label, sex, isChick, pd) = LookupPenguinLabel(birdId);
+
+            // For Mark: drop the chick-size code's trailing C and move it to the end, so the L/B/S
+            // lands in the yellow chick strip (which chipped-as-chick badges already draw).
+            if (labelOverride == null && CurrentObserverIsMark() && pd != null && !string.IsNullOrEmpty(pd.ChickSizeCode))
+            {
+                var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
+                var sizeLetter = pd.ChickSizeCode.TrimEnd('C', 'c');
+                label = string.Join(" ", new[] { num, pd.ScannedId, sizeLetter }.Where(s => !string.IsNullOrEmpty(s)));
+            }
 
             var badge = new TextView(this) { Text = labelOverride ?? label, TextSize = textSize };
             var padH = (int)(8 * textSize / 10);
