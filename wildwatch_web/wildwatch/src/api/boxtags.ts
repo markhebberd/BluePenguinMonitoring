@@ -89,7 +89,9 @@ export async function saveVerification(token: string, body: Record<string, any>)
     body: JSON.stringify(body),
   });
   const result = await r.json();
-  triggerSync();
+  // Awaited (unlike the other writers): the verify modal stays open after a verdict and re-reads
+  // the cache, so the sync must land before it re-renders or it shows the pre-save state.
+  if (!result?.error) await triggerSync();
   return result;
 }
 

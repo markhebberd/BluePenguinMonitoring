@@ -1289,10 +1289,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                   onOpen={(e) => setOpenVerify({ key: vKey, pos: { x: Math.min(e.clientX + 8, window.innerWidth - 340), y: e.clientY + 8 } })} />
               )}
               {openVerify?.key === vKey && (
+                // A verdict refreshes in place — the modal stays open so both halves can be
+                // reviewed in one sitting; only clicking away (backdrop/✕) closes it.
                 <BreedingVerifyModal pos={openVerify.pos} fam={fam} state={vState} box={boxName || ''}
                   token={token} canEdit={canEdit} onBirdClick={onBirdClick}
                   onClose={() => setOpenVerify(null)}
-                  onChanged={() => { setOpenVerify(null); onDataChange?.(); }} />
+                  onChanged={() => onDataChange?.()} />
               )}
               {clutches.length > 1 && (
                 <div className={`clutch-label${clutch.startObsTime ? ' clickable' : ''}`}
