@@ -167,21 +167,24 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
           {' '}{SECOND_EGG_LAG_DAYS} days after the first and it’s the <em>first</em> being dated.
         </li>
       </ul>
-      <p>And two come from the chicks, which is usually what sharpens the answer:</p>
+      <p>And two come from the hatch, which is usually what sharpens the answer:</p>
       <ul>
+        <li><b>Laying was at least {BREEDING_OFFSETS.hatch} days before the first check with chicks</b> — the time from first egg to first chick.</li>
         <li>
-          <b>Laying was at least {BREEDING_OFFSETS.hatch} days before the first chick</b> — the time from
-          first egg to first chick — or at least {BREEDING_OFFSETS.chip} days if that first chick
-          was already microchipped, since the downy weeks were missed as well.
-        </li>
-        <li>
-          <b>And no more than {BREEDING_OFFSETS.hatch} days before the last check that still had no
-          chicks</b>, which is the bound that does the real work: it turns “somewhere in a
-          fortnight” into “within a day or two”. A chick still in the nest also hasn’t fledged, so
-          laying is never more than {BREEDING_OFFSETS.fledge} days back, however long the box went
-          unwatched.
+          <b>And no more than {BREEDING_OFFSETS.hatch} days before the last check that still had
+          no chicks</b>, which is the bound that does the real work: it turns “somewhere in a
+          fortnight” into “within a day or two”.
         </li>
       </ul>
+      <p>
+        Those are the <em>only</em> two the chicks contribute, and both need an actual hatch to
+        have been observed — no chicks on one visit, chicks on the next. What a chick’s own stage
+        implies is deliberately kept out: that an already-microchipped chick must be near
+        fledging, or that a chick still in the nest can’t have fledged, are inferences about the
+        bird’s age rather than dated events. They’re sound enough to rule a breeding window
+        <em> out</em> — the chipped-chick one does exactly that back in step 5 — but not to date
+        one, and an estimate is only as honest as its weakest input.
+      </p>
       <div className="eg">
         <span className="eg-title">Example — the hatch doing the work</span>
         A box was empty on {egDate(egT(EG.empty))} and held an egg on {egDate(egT(EG.egg))}. On

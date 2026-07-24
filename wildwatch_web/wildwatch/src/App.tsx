@@ -716,18 +716,17 @@ interface LaidEvidence {
   firstEggCount: number;
   lastNoChickT: number | null;  // latest check that still had no chicks
   firstChickT: number | null;   // earliest check with chicks
-  firstChickChipped: boolean;   // those chicks were already microchipped
   abnAtStart: boolean;          // discovery already abandoned — nothing to date
 }
 
 /**
- * Date laying from the two things that can be observed either side of it: the box filling
- * with eggs, and the eggs becoming chicks. Each gives an interval laying must fall in; the
- * estimate is that interval's midpoint and the ± is its half-width.
+ * Date laying from the events that can actually be observed either side of it: the box filling
+ * with eggs, and the eggs becoming chicks. Each bounds laying; the estimate is the midpoint of
+ * where all the bounds agree, and the ± is that overlap's half-width.
  *
- * Whichever interval is tighter wins, because which one is tighter is purely an accident of
- * when the box happened to be visited. The hatch takes ties and near-ties (within a day):
- * hatching is a sharper event than laying, which smears over the second egg.
+ * Every bound is applied at once rather than the best one being picked — which end of the
+ * attempt was watched most closely is an accident of visiting, and whichever it was, it
+ * tightens the same answer.
  */
 function estimateLaidFrom(ev: LaidEvidence): { laid: number | null; unc: number | null } {
   if (ev.abnAtStart) return { laid: null, unc: null };
@@ -747,15 +746,18 @@ function estimateLaidFrom(ev: LaidEvidence): { laid: number | null; unc: number 
   // the box empty. The empty box was seen; the lag is inferred from a count — so the lag is
   // what gives way, not the observation.
   if (seenEggs !== null && seenEmpty !== null && seenEggs < seenEmpty) seenEggs = ev.firstEggT;
-  // What the chicks say, through their stage: hatching takes an incubation, a chick still in
-  // the nest hasn't fledged, and one already microchipped is older again. On a box watched
-  // closely around the hatch this is far the sharper signal — the hatch is a single event,
-  // where laying smears over two eggs.
-  const chickHi = ev.firstChickT !== null
-    ? ev.firstChickT - (ev.firstChickChipped ? BREEDING_OFFSETS.chip : BREEDING_OFFSETS.hatch) * DAY : null;
-  const chickLo = ev.firstChickT !== null
-    ? Math.max(ev.firstChickT - BREEDING_OFFSETS.fledge * DAY,
-        ...(ev.lastNoChickT !== null ? [ev.lastNoChickT - BREEDING_OFFSETS.hatch * DAY] : [])) : null;
+  // What the hatch says. The box had no chicks, then it had them, so hatching fell between
+  // those two checks and laying an incubation before each — on a box watched closely around
+  // hatching this is far the sharper signal, since the hatch is a single event where laying
+  // smears over two eggs.
+  //
+  // ONLY the hatch, though. What a chick's own stage implies — that a chipped one is near
+  // fledging, that one still in the nest hasn't fledged — is an inference about the bird's
+  // age, not a dated event. Those are good enough to rule a breeding window out (they gate
+  // whether chicks may start an attempt at all) but not to date one, so they stay out of here.
+  const hatchedBetween = ev.firstChickT !== null && ev.lastNoChickT !== null;
+  const chickHi = hatchedBetween ? ev.firstChickT! - BREEDING_OFFSETS.hatch * DAY : null;
+  const chickLo = hatchedBetween ? ev.lastNoChickT! - BREEDING_OFFSETS.hatch * DAY : null;
 
   // Every bound at once, not the better of two: each is a fact about the same unknown, so the
   // answer is where they all agree. Whichever end was watched more closely is what tightens it.
@@ -808,7 +810,7 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
         // Hatch evidence: the last check with the eggs still unhatched, and the first with
         // chicks. Only until chicks appear — a chick lost later says nothing about hatching.
         if (ev && ev.firstChickT === null) {
-          if ((o.chicks || 0) > 0) { ev.firstChickT = t; ev.firstChickChipped = hasChippedChick(o); }
+          if ((o.chicks || 0) > 0) ev.firstChickT = t;
           else ev.lastNoChickT = t;
         }
         if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
@@ -824,7 +826,6 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
         // Discovered on chicks: the last we knew there were none is the empty check itself.
         lastNoChickT: chicksAtStart ? prevEmpty : t,
         firstChickT: chicksAtStart ? t : null,
-        firstChickChipped: chicksAtStart && hasChippedChick(o),
         abnAtStart: abn,
       };
       evidence.push(ev);
