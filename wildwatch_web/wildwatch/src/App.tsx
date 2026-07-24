@@ -691,7 +691,6 @@ interface Clutch {
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
   startObsId: number | null;// that observation's id — the anchor a verification is keyed to
   end: number | null;       // obs that ended the attempt; null = still running
-  lastOffspringT: number;   // last check that actually found offspring in the box
   windowStart: number;      // breeding window: laying (estimated), or discovery when un-estimable …
   windowEnd: number;        // … the check that ended it; predicted fledge while still running
   guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
@@ -808,7 +807,6 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
       } else {
         current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
         current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
-        current.lastOffspringT = t;
         // Hatch evidence: the last check with the eggs still unhatched, and the first with
         // chicks. Only until chicks appear — a chick lost later says nothing about hatching.
         if (ev && ev.firstChickT === null) {
@@ -831,7 +829,7 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
         abnAtStart: abn,
       };
       evidence.push(ev);
-      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null, lastOffspringT: t,
+      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
       if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
@@ -844,18 +842,14 @@ function segmentClutches(sObs: Observation[], priorObsT: number | null = null): 
   });
   for (const c of clutches) {
     const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
-    // The attempt runs from laying to the check that ended it — offspring gone, or ABN — rather
-    // than from the discovery, which only records when someone happened to look.
-    //
-    // The end needs one guard, though. A box is often last seen holding chicks and then not
-    // checked again for weeks; ending the window at that eventual empty check would credit the
-    // attempt with months nobody observed (92 days, in the worst case here). So the end never
-    // runs past the later of the predicted fledge and the last check that actually found
-    // offspring: extend a window while the box demonstrably still held chicks, never through a
-    // blind gap. An ABN ends it outright, since that check found the offspring itself.
+    // The attempt runs from laying to the check that ended it — offspring gone, or ABN. Not
+    // from the discovery, which is only when someone happened to look, and not to a predicted
+    // fledge, which would cut a window short while the box plainly still held chicks. A window
+    // still running has no observed end, so there the predicted fledge stands in: it's what
+    // eventually stops an unrevisited box reading as "current".
     c.windowStart = anchor;
     c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
-    c.windowEnd = Math.min(c.end ?? Infinity, Math.max(c.lastOffspringT, anchor + BREEDING_OFFSETS.fledge * DAY));
+    c.windowEnd = c.end ?? (anchor + BREEDING_OFFSETS.fledge * DAY);
     c.attendStart = (c.laid !== null ? c.laid - (c.laidUncertainty || 0) * DAY : c.windowStart) - COURTSHIP_LEAD_DAYS * DAY;
   }
   return clutches;
