@@ -260,16 +260,18 @@ header h1:hover { opacity:.8; }
 .sex-icon { font-weight:700; margin-right:2px; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
-/* Chipped-as-chick yellow: halfway between the UNL (#FFF9C4) and CON (#FFD54F) status swatches.
+/* Chipped-as-chick tail: the chick body colour itself (#FFF9C4), so an adult that was chipped
+   as a chick carries the same yellow the app uses for chicks — toned down, as a hint of origin.
+   On a chick the tail matches the body and simply disappears: a chick needs no "was a chick" cue.
    Its left edge (--chick-stop) is set inline to the middle of the gap before the size code. */
-.scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
-.scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
-.scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
-.scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
-.scan.unproven { background: linear-gradient(to right, #E0E0E0 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+.scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 var(--chick-stop,85%), #FFF9C4 var(--chick-stop,85%)); }
+.scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 var(--chick-stop,85%), #FFF9C4 var(--chick-stop,85%)); }
+.scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF var(--chick-stop,85%), #FFF9C4 var(--chick-stop,85%)); }
+.scan.chick.chipped-chick { background:#FFF9C4; }
+.scan.unproven { background: linear-gradient(to right, #E0E0E0 var(--chick-stop,85%), #FFF9C4 var(--chick-stop,85%)); }
 .scan.chipped-here { background:#C8E6C9; }
-/* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
-.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+/* Chipped-here AND chipped-as-chick: green with the chick-yellow "tail" (overrides solid green) */
+.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 var(--chick-stop,85%), #FFF9C4 var(--chick-stop,85%)); }
 .scan.no-scan { background:#E0E0E0; color:#000; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
 .add-noscan-btn { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .add-noscan-btn:hover { background:#d5d5d5; }
