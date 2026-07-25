@@ -269,8 +269,8 @@ header h1:hover { opacity:.8; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
 .scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FFF9C4 85%); }
 /* Chick size code (LC/BC/SC + sex) as a trailing yellow tab hugging the code, at the mini's
-   right edge — the chipped-as-chick strip, now carrying the code. UNL pale yellow. */
-.scan .chick-tag { background:#FFF9C4; color:#333; margin:-1px -4px -1px 4px; padding:1px 4px; border-left:0.1em solid #333; border-radius:0 2px 2px 0; }
+   right edge — the chipped-as-chick strip, now carrying the code. UNL pale yellow, no divider. */
+.scan .chick-tag { background:#FFF9C4; color:#333; margin:-1px -4px -1px 4px; padding:1px 4px; border-radius:0 2px 2px 0; }
 .scan.no-scan { background:#E0E0E0; color:#000; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
 .add-noscan-btn { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .add-noscan-btn:hover { background:#d5d5d5; }

@@ -657,10 +657,10 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     const base = sizeLabel.endsWith('U') ? sizeLabel.slice(0, -1) : sizeLabel;
     mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
-  // Chick size code (LC/BC/SC, plus any sex info) rides at the END in a yellow tab, nestcheck-
-  // style — it replaces the decorative chipped-chick tail wherever a code exists. A still-chick
-  // pill is already all-yellow, so it keeps the code inline.
-  const showSizeTag = !!sizeLabel && wasChippedAsChick && !stillChick;
+  // Chick size code (LC/BC/SC, plus any sex info) always rides at the END in a yellow tab,
+  // nestcheck-style — one behaviour in every place a mini renders. A size code only exists for a
+  // bird chipped as a chick, so the tab is the chipped-as-chick marker, carrying the code.
+  const showSizeTag = !!sizeLabel;
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   // Hovering a mini tied to a data entry shows that entry's NZ-local time. Use the first
   // timestamped source available — an explicit observationDate, or a timestamp carried on the
