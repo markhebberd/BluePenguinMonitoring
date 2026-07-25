@@ -249,23 +249,25 @@ header h1:hover { opacity:.8; }
 @keyframes status-pop { from { opacity:0; } to { opacity:1; } }
 .obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
 .scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
-.scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; color:#333; text-decoration:none; }
+/* One border for every mini — the thin black. Chicks inherit it too (no colour override). */
+.scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
 .scan.f { background:#FFE4E1; }
 .scan.m { background:#E6F3FF; }
-.scan.chick { background:#FFF9C4; border-color:#FDD835; }
+.scan.chick { background:#FFF9C4; }
 .scan.chick.offspring-fledged { cursor:default; font-style:italic; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
 .sex-icon { font-weight:700; margin-right:2px; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
-.scan { border: 0.1em solid #333; }
-.scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 85%, #FDD835 85%); }
-.scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 85%, #FDD835 85%); }
-.scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF 85%, #FDD835 85%); }
-.scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 85%, #FDD835 85%); }
-.scan.unproven { background: linear-gradient(to right, #E0E0E0 85%, #FDD835 85%); }
+/* Chipped-as-chick yellow: halfway between the UNL (#FFF9C4) and CON (#FFD54F) status swatches.
+   Its left edge (--chick-stop) is set inline to the middle of the gap before the size code. */
+.scan.chipped-chick { background: linear-gradient(to right, #f0f0f0 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+.scan.f.chipped-chick { background: linear-gradient(to right, #FFE4E1 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+.scan.m.chipped-chick { background: linear-gradient(to right, #E6F3FF var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+.scan.chick.chipped-chick { background: linear-gradient(to right, #FFF9C4 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
+.scan.unproven { background: linear-gradient(to right, #E0E0E0 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
 .scan.chipped-here { background:#C8E6C9; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
-.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FDD835 85%); }
+.scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 var(--chick-stop,85%), #FFE78A var(--chick-stop,85%)); }
 .scan.no-scan { background:#E0E0E0; color:#000; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
 .add-noscan-btn { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .add-noscan-btn:hover { background:#d5d5d5; }

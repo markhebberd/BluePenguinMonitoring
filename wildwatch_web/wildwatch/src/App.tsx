@@ -640,7 +640,10 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   const chippedHereCls = scan.chip_date && obsNzDate && scan.chip_date.substring(0, 10) === obsNzDate ? 'chipped-here' : '';
   // Combined chick size code: LC + M → LCM, LC + no sex but returned → LCU, LC alone → LC
   const sc = scan.chick_size_code || '';
-  const sizeLabel = sc ? (sex ? sc + sex.charAt(0) : (scan.hasReturned ? sc + 'U' : sc)) : '';
+  // The size code carries a sex letter only when it's a GUESS (the U-tokens built below); a
+  // CONFIRMED sex is already the pill colour, so "LCM" collapses to "LC" — but a guessed
+  // "BC-2UM" keeps its tokens.
+  const sizeLabel = sc ? (!sex && scan.hasReturned ? sc + 'U' : sc) : '';
   // Unsexed bird: surface biometric sex guesses (U = unconfirmed). A single guess merges
   // onto the size label with no count/space, sharing one U — "LCU"+M → "LCUM", "LC"+M → "LCUM".
   // Repeated guesses or guesses for both sexes use numbered tokens, most-guessed first,
@@ -667,7 +670,12 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime}
+      /* Yellow chipped-as-chick strip begins halfway across the gap between the pit_id and the
+         size code — a monospace char is 1ch, so it's (code length + half a space) from the
+         right, past the 4px right padding. Falls back to a fixed 85% when there's no code. */
+      style={mid ? ({ '--chick-stop': `calc(100% - 4px - ${mid.length + 0.5}ch)` } as React.CSSProperties) : undefined}
+      onClick={navigateDirectly ? undefined : e => navClick(e, () => {
       onClick();
       // Re-clicking the bird already open in the panel won't remount it — toggle the highlight.
       if (scan.peng_num && scan.peng_num === openPanelPengNum) toggleSelectedPengMinis();
