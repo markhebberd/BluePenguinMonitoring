@@ -166,6 +166,25 @@ namespace PenguinMonitor.UI.Factories
             spinner.Adapter = adapter;
             return spinner;
         }
+
+        // Empty dropdown spinner for callers that manage their own (possibly changing) adapters —
+        // same fixes as CreateSpinner: native drag-to-open inside a ScrollView, popup below the
+        // field, Material Light styling. Pair with CreateSpinnerAdapter for the solid-highlight rows.
+        public Spinner CreateDropdownSpinner()
+        {
+            var spinner = new DropdownSpinner(SpinnerThemed, SpinnerMode.Dropdown);
+            spinner.SetPopupBackgroundDrawable(CreateRoundedBackground(CARD_COLOR, 8));
+            return spinner;
+        }
+
+        // Adapter with the app's roomy, solid-highlight dropdown rows (no fading Material ripple).
+        public ArrayAdapter<string> CreateSpinnerAdapter(System.Collections.Generic.IList<string> items)
+        {
+            var adapter = new CustomSpinnerAdapter(SpinnerThemed, Android.Resource.Layout.SimpleSpinnerItem,
+                System.Linq.Enumerable.ToArray(items));
+            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+            return adapter;
+        }
         // A dropdown Spinner that keeps its native drag-to-open (press → drag onto an item →
         // release to select) working inside a ScrollView. On touch-down it tells the ScrollView
         // not to intercept, so the press-drag isn't stolen as a scroll, and drops the popup below

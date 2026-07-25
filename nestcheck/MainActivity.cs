@@ -2880,20 +2880,16 @@ namespace PenguinMonitor
             var regionColonyLayout = new LinearLayout(this);
             regionColonyLayout.SetPadding(8, 8, 8, 8);
 
-            // Material Light context so the anchored popup renders modern, not Gingerbread (see CreateSpinner).
-            var spinnerCtx = new ContextThemeWrapper(this, Android.Resource.Style.ThemeMaterialLight);
-
-            var regionSpinner = new Spinner(spinnerCtx, SpinnerMode.Dropdown);
+            // Same fixed dropdowns as everywhere else (drag-to-open, popup below, solid highlight).
+            var regionSpinner = _uiFactory.CreateDropdownSpinner();
             regionSpinner.SetPadding(8, 4, 8, 4);
             regionSpinner.Prompt = "Region";
-            regionSpinner.SetPopupBackgroundDrawable(_uiFactory.CreateRoundedBackground(UIFactory.CARD_COLOR, 8));
             regionSpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(regionSpinner);
 
-            var colonySpinner = new Spinner(spinnerCtx, SpinnerMode.Dropdown);
+            var colonySpinner = _uiFactory.CreateDropdownSpinner();
             colonySpinner.SetPadding(8, 4, 8, 4);
             colonySpinner.Prompt = "Colony";
-            colonySpinner.SetPopupBackgroundDrawable(_uiFactory.CreateRoundedBackground(UIFactory.CARD_COLOR, 8));
             colonySpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(colonySpinner);
 
@@ -2902,8 +2898,7 @@ namespace PenguinMonitor
             if (!string.IsNullOrEmpty(_appSettings.SelectedColonyName))
             {
                 var savedColony = new[] { _appSettings.SelectedColonyName };
-                colonySpinner.Adapter = new ArrayAdapter<string>(spinnerCtx, Android.Resource.Layout.SimpleSpinnerItem, savedColony);
-                ((ArrayAdapter<string>)colonySpinner.Adapter).SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+                colonySpinner.Adapter = _uiFactory.CreateSpinnerAdapter(savedColony);
             }
 
             // Fetch colonies from server and populate dropdowns
@@ -2928,9 +2923,7 @@ namespace PenguinMonitor
 
                         // Build region list
                         var regions = allColonies.Select(c => c["region_name"]?.ToString() ?? "").Distinct().ToList();
-                        var regionAdapter = new ArrayAdapter<string>(spinnerCtx, Android.Resource.Layout.SimpleSpinnerItem, regions);
-                        regionAdapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-                        regionSpinner.Adapter = regionAdapter;
+                        regionSpinner.Adapter = _uiFactory.CreateSpinnerAdapter(regions);
 
                         // When region changes, update colony spinner
                         regionSpinner.ItemSelected += (s, e) =>
@@ -2938,9 +2931,7 @@ namespace PenguinMonitor
                             var selectedRegion = regions[e.Position];
                             var coloniesInRegion = allColonies.Where(c => c["region_name"]?.ToString() == selectedRegion).ToList();
                             var colonyNames = coloniesInRegion.Select(c => c["colony_name"]?.ToString() ?? "").ToList();
-                            var colonyAdapter = new ArrayAdapter<string>(spinnerCtx, Android.Resource.Layout.SimpleSpinnerItem, colonyNames);
-                            colonyAdapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-                            colonySpinner.Adapter = colonyAdapter;
+                            colonySpinner.Adapter = _uiFactory.CreateSpinnerAdapter(colonyNames);
 
                             // Pre-select current colony if in this region
                             var currentIdx = colonyNames.IndexOf(_appSettings.SelectedColonyName);
