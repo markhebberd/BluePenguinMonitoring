@@ -252,7 +252,13 @@ header h1:hover { opacity:.8; }
 /* One border for every mini — the thin black. Chicks inherit it too (no colour override).
    --scan-pad-r mirrors the right padding so the chipped-chick strip lands right; a larger mini
    (the panel header) overrides both together. */
-.scan { font-size:9px; line-height:1.4; padding:1px 2px; --scan-pad-r:2px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
+/* EVERY size on a mini is font-relative (em / ch), so a bigger mini is nothing but a larger
+   font-size — the panel header is exactly this rule at font-size:20px, same padding, gaps,
+   border and corner proportions. Fixed px here (as border-radius and padding once were) makes
+   a big mini render differently from a small one. 0.22em ≈ the 2px the small mini uses; 0.15em
+   corners = the header's original 3px. --scan-pad-r must stay equal to the horizontal padding
+   so the chipped-chick tail lands in the trailing gap. */
+.scan { font-size:9px; line-height:1.4; padding:0.11em 0.22em; --scan-pad-r:0.22em; border-radius:0.15em; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
 /* Gap between a mini's text units (num · chip · size code). Narrower than a monospace space
    (1ch) so the pill reads squarer, and tunable in one place. --scan-pad-r above is kept in step
    with the halved horizontal padding so the chipped-chick tail still lands in the trailing gap. */
@@ -261,7 +267,7 @@ header h1:hover { opacity:.8; }
 .scan.m { background:#E6F3FF; }
 .scan.chick { background:#FFF9C4; }
 .scan.chick.offspring-fledged { cursor:default; font-style:italic; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
-.sex-icon { font-weight:700; margin-right:2px; }
+.sex-icon { font-weight:700; margin-right:0.2em; }
 .scan.f .sex-icon { color:#C62828; }
 .scan.m .sex-icon { color:#1565C0; }
 /* Chipped-as-chick tail: the chick body colour itself (#FFF9C4), so an adult that was chipped
@@ -297,8 +303,9 @@ h3.collapsible { cursor:pointer; user-select:none; }
 h3.collapsible:hover { color:#1a5276; }
 .bird-title-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; gap:8px; }
 .bird-title-peng { white-space:nowrap; flex-shrink:0; display:flex; align-items:center; gap:4px; }
-.bird-title-peng .scan { font-size:20px; padding:6px 12px; --scan-pad-r:12px; cursor:default; }
-.bird-title-peng .scan .sex-icon { font-size:20px; }
+/* The panel header mini is just a big mini: only the font-size differs; padding, gaps, corners,
+   border and the sex-icon size are all em/ch on .scan and scale from this one value. */
+.bird-title-peng .scan { font-size:20px; cursor:default; }
 .bird-title-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; min-width:60px; text-align:center; }
 .header-nav { display:flex; gap:6px; align-items:center; }
 .admin-panel { max-width:800px; margin:0 auto; padding:16px 20px; }
