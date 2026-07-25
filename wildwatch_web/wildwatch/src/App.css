@@ -254,11 +254,12 @@ header h1:hover { opacity:.8; }
    (the panel header) overrides both together. */
 /* EVERY size on a mini is font-relative (em / ch), so a bigger mini is nothing but a larger
    font-size — the panel header is exactly this rule at font-size:20px, same padding, gaps,
-   border and corner proportions. Fixed px here (as border-radius and padding once were) makes
-   a big mini render differently from a small one. 0.22em ≈ the 2px the small mini uses; 0.15em
-   corners = the header's original 3px. --scan-pad-r must stay equal to the horizontal padding
-   so the chipped-chick tail lands in the trailing gap. */
-.scan { font-size:9px; line-height:1.4; padding:0.11em 0.22em; --scan-pad-r:0.22em; border-radius:0.15em; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
+   border and corners. Fixed px here (as border-radius and padding once were) makes a big mini
+   render differently from a small one. 0.22em ≈ the 2px the small mini uses; --scan-pad-r must
+   stay equal to the horizontal padding so the chipped-chick tail lands in the trailing gap.
+   border-radius:0 — square corners, matching the header, at every size (a fixed px radius blew
+   up rounded when a small mini was magnified). */
+.scan { font-size:9px; line-height:1.4; padding:0.11em 0.22em; --scan-pad-r:0.22em; border-radius:0; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
 /* Gap between a mini's text units (num · chip · size code). Narrower than a monospace space
    (1ch) so the pill reads squarer, and tunable in one place. --scan-pad-r above is kept in step
    with the halved horizontal padding so the chipped-chick tail still lands in the trailing gap. */
