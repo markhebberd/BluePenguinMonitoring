@@ -9,7 +9,13 @@ namespace PenguinMonitor.UI.Factories
     public class UIFactory
     {
         private readonly Context _context;
-        
+        // Material Light context for spinner popups, created ONCE and reused. Wrapping each spinner
+        // in its own fresh ContextThemeWrapper made every rebuilt dropdown resolve the full Material
+        // theme on first open (~1s lag); a shared context resolves it once for the whole app.
+        private Android.Views.ContextThemeWrapper? _spinnerThemedContext;
+        private Android.Views.ContextThemeWrapper SpinnerThemed =>
+            _spinnerThemedContext ??= new Android.Views.ContextThemeWrapper(_context, Android.Resource.Style.ThemeMaterialLight);
+
         // Color constants
         public static readonly Color PRIMARY_BLUE = Color.ParseColor("#2196F3");   // selectBox bo
         public static readonly Color SUCCESS_GREEN = Color.ParseColor("#4CAF50");   // green
@@ -143,7 +149,7 @@ namespace PenguinMonitor.UI.Factories
             // The app runs on the ancient Theme.NoTitleBar, whose Spinner popup renders in a dated
             // Gingerbread style. Render this spinner (and its anchored popup) through Material Light
             // so the dropdown looks modern; the closed field keeps our own rounded background below.
-            var themed = new Android.Views.ContextThemeWrapper(_context, Android.Resource.Style.ThemeMaterialLight);
+            var themed = SpinnerThemed;
             var spinner = new Spinner(themed, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
