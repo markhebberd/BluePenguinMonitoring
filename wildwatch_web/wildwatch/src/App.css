@@ -851,8 +851,8 @@ select.ef-input.ef-placeholder { color:#888; }
 .history-field s { color:#999; }
 .edit-badge { font-size:11px; color:#999; cursor:pointer; margin-top:2px; display:inline-block; }
 .edit-badge:hover { color:#666; text-decoration:underline; }
-.edit-btn { background:none; border:1px solid #ddd; color:#999; font-size:11px; padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:auto; }
-.edit-btn:hover { color:#333; border-color:#999; }
+.edit-btn { background:none; border:1px solid #ccc; color:#222; font-size:11px; padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:auto; }
+.edit-btn:hover { color:#000; border-color:#888; }
 .obs-edit { padding:4px 0; }
 .obs-edit-row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
 .obs-edit-row label { font-size:13px; min-width:20px; }

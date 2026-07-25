@@ -1,0 +1,24 @@
+# Cloudflare Tunnel for the NAS mirror. Runs SEPARATELY from the wildwatch container (its own
+# tiny project) so exposure can be started/stopped/deleted without touching the mirror.
+#
+# Outbound-only: cloudflared dials OUT to Cloudflare's edge and holds the connection open. No
+# inbound port is opened on the NAS or router. The public hostnames and -- critically -- the
+# Cloudflare Access policies that gate them are configured in the Cloudflare Zero Trust
+# dashboard, NOT here; this file only supplies the tunnel token and network reach.
+#
+# host networking lets cloudflared reach the mirror on 127.0.0.1:8080 and (if you expose SSH)
+# the NAS's own sshd on 127.0.0.1:22.
+#
+# Start once you have a token:
+#   printf 'CF_TUNNEL_TOKEN=<token from the Cloudflare tunnel>\n' | sudo tee .env  (chmod 600)
+#   sudo docker compose -p cloudflared up -d
+# Stop/remove exposure entirely:
+#   sudo docker compose -p cloudflared down
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    network_mode: host
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
