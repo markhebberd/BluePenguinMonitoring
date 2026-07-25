@@ -150,7 +150,7 @@ namespace PenguinMonitor.UI.Factories
             // Gingerbread style. Render this spinner (and its anchored popup) through Material Light
             // so the dropdown looks modern; the closed field keeps our own rounded background below.
             var themed = SpinnerThemed;
-            var spinner = new Spinner(themed, SpinnerMode.Dropdown);
+            var spinner = new DropdownSpinner(themed, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
             // Style the popup itself: a white rounded card instead of the theme's bare (often
@@ -164,25 +164,28 @@ namespace PenguinMonitor.UI.Factories
             var adapter = new CustomSpinnerAdapter(themed, Android.Resource.Layout.SimpleSpinnerItem, options);
             adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
             spinner.Adapter = adapter;
-
-            // The whole screen lives in a ScrollView, which otherwise steals a press-and-move as a
-            // scroll before the Spinner's tap-to-open (click on release) fires — so holding or
-            // swiping on a dropdown scrolled the page instead of opening it. Open on finger-DOWN and
-            // consume the gesture so the ScrollView can't intercept it. The popup handles selection.
-            spinner.Touch += (sender, e) =>
-            {
-                if (e.Event?.Action == Android.Views.MotionEventActions.Down)
-                {
-                    spinner.Parent?.RequestDisallowInterceptTouchEvent(true);
-                    // Drop the popup BELOW the field (offset by the field's height) so it doesn't
-                    // cover the current value; ListPopupWindow flips it above when there's no room.
-                    spinner.DropDownVerticalOffset = spinner.Height;
-                    spinner.PerformClick();
-                }
-                e.Handled = true;
-            };
             return spinner;
         }
+        // A dropdown Spinner that keeps its native drag-to-open (press → drag onto an item →
+        // release to select) working inside a ScrollView. On touch-down it tells the ScrollView
+        // not to intercept, so the press-drag isn't stolen as a scroll, and drops the popup below
+        // the field. It does NOT set an OnTouchListener — that would replace the Spinner's own
+        // ForwardingListener and break the drag-to-select.
+        private class DropdownSpinner : Spinner
+        {
+            public DropdownSpinner(Context context, SpinnerMode mode) : base(context, mode) { }
+            protected DropdownSpinner(System.IntPtr javaReference, Android.Runtime.JniHandleOwnership transfer) : base(javaReference, transfer) { }
+            public override bool DispatchTouchEvent(Android.Views.MotionEvent e)
+            {
+                if (e != null && e.Action == Android.Views.MotionEventActions.Down)
+                {
+                    Parent?.RequestDisallowInterceptTouchEvent(true);
+                    DropDownVerticalOffset = Height; // open below the field, not over the value
+                }
+                return base.DispatchTouchEvent(e);
+            }
+        }
+
         private class CustomSpinnerAdapter : ArrayAdapter<string>
         {
             private readonly string[] _values;
