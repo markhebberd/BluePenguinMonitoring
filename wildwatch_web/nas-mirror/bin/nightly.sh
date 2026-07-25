@@ -28,7 +28,14 @@ LOG="$WW_ROOT/logs/nightly.log"
 # shellcheck disable=SC1090
 [ -f "$SHARED/nas.env" ] && . "$SHARED/nas.env"
 
-mkdir -p "$BACKUPS" "$STATUS" "$SHARED" "$WW_ROOT/kits" "$(dirname "$LOG")"
+mkdir -p "$BACKUPS" "$STATUS" "$SHARED" "$WW_ROOT/kits" "$WW_ROOT/tmp" "$(dirname "$LOG")"
+
+# Serialise runs: a manual "Back up now" (trigger-watcher) and the 06:30 cron must never
+# overlap -- both drop/recreate the ww_a/ww_b slots. Skip this run if another holds the lock.
+exec 9>"$WW_ROOT/tmp/nightly.lock" || true
+if command -v flock >/dev/null 2>&1; then
+  flock -n 9 || { echo "another nightly run is in progress -- skipping"; exit 0; }
+fi
 
 DATE=$(date +%Y-%m-%d)
 STAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')

@@ -8,6 +8,11 @@
 
 require_once __DIR__ . '/secrets.php';   // defines DB_HOST, DB_NAME, DB_USER, DB_PASS, API_KEY
 
+// This server is a read-only backup MIRROR only if its secrets.php declares it. Production
+// never defines IS_MIRROR, so it defaults to false. Used to expose the backup-status admin
+// view (status.php + the "Backup" admin tab) only on the mirror.
+if (!defined('IS_MIRROR')) define('IS_MIRROR', false);
+
 // CORS settings (adjust for production)
 define('ALLOWED_ORIGIN', '*');  // In production, set to your specific domain
 

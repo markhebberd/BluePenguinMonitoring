@@ -311,7 +311,7 @@ $tables = array_intersect_key(WW_TABLE_KEYS, array_flip([
 ]));
 
 if ($action === 'history') { handleHistory($pdo, $table, $id); exit; }
-if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'role'=>$observer['role'] ?? 'viewer']); exit; }
+if ($action === 'me') { echo json_encode(['name'=>$observer['observer_name'], 'role'=>$observer['role'] ?? 'viewer', 'is_mirror'=>(defined('IS_MIRROR') && IS_MIRROR)]); exit; }
 
 // Season field-monitoring dates — write (POST) requires auth
 if ($action === 'season_fm_dates') {

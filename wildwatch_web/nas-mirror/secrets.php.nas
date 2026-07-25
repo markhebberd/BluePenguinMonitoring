@@ -23,3 +23,7 @@ define('DB_RO_PASS', 'CHANGE_ME_MATCH_DB_RO_PASS');
 // Local-only API key. NOT the production key — nothing on the LAN needs that one,
 // and the nightly download reads the production key from shared/nas.env instead.
 define('API_KEY', 'CHANGE_ME_LOCAL_ONLY_KEY');
+
+// Marks this server as the read-only backup mirror. Production's secrets.php never defines
+// this (config.php defaults it to false), so the backup-status admin view appears only here.
+define('IS_MIRROR', true);

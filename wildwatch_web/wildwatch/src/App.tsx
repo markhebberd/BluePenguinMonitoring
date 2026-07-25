@@ -6795,6 +6795,8 @@ function App() {
           setUserRole(d.role);
           localStorage.setItem('ww_role', d.role);
         }
+        // Only the backup mirror reports is_mirror; drives the admin "Mirror" tab.
+        localStorage.setItem('ww_is_mirror', d.is_mirror ? '1' : '0');
       })
       .catch(() => {});
   }, [authToken]);
@@ -7848,8 +7850,11 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
-  const ADMIN_TABS = ['io', 'validation', 'algorithm', 'users', 'database', 'system'] as const;
+  const ADMIN_TABS = ['io', 'validation', 'algorithm', 'users', 'database', 'system', 'mirror'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
+  // "Mirror" tab is only meaningful on the backup mirror (set by the /me response). Its
+  // status view + action buttons all 404 on production.
+  const isMirror = localStorage.getItem('ww_is_mirror') === '1';
   const [adminTab, setAdminTab] = useState<AdminTab>(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
     return (ADMIN_TABS as readonly string[]).includes(t || '') ? (t as AdminTab) : 'io';
@@ -7874,6 +7879,34 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (dbVersion > 0) hashScrollDone.current = hash;
   }, [adminTab, dbVersion]);
+
+  // ---- Mirror tab: backup-status view + on-demand actions (mirror server only) ----
+  const [mirrorHtml, setMirrorHtml] = useState<string>('');
+  const [mirrorMsg, setMirrorMsg] = useState<string>('');
+  const [mirrorBusy, setMirrorBusy] = useState<'' | 'backup' | 'release'>('');
+  const loadMirrorStatus = () => {
+    const t = localStorage.getItem('ww_token') || '';
+    fetch('/api/status.php', { headers: { 'Authorization': `Bearer ${t}` } })
+      .then(r => r.ok ? r.text() : Promise.reject(r.status))
+      .then(setMirrorHtml)
+      .catch(() => setMirrorHtml('<p style="font-family:system-ui;padding:2rem;color:#900">Could not load backup status.</p>'));
+  };
+  useEffect(() => { if (adminTab === 'mirror') loadMirrorStatus(); }, [adminTab]);
+  const triggerMirror = async (action: 'backup' | 'release') => {
+    const t = localStorage.getItem('ww_token') || '';
+    setMirrorBusy(action);
+    setMirrorMsg(action === 'backup'
+      ? 'Backup + restore queued — this takes a few minutes. Refresh the status below to watch progress.'
+      : 'Refreshing app code from production...');
+    try {
+      const r = await fetch(`/api/status.php?action=${action}`, { method: 'POST', headers: { 'Authorization': `Bearer ${t}` } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMirrorMsg(d.error || `Failed (HTTP ${r.status})`);
+      else setMirrorMsg(d.message || 'Queued.');
+    } catch { setMirrorMsg('Failed to reach the server.'); }
+    setMirrorBusy('');
+    setTimeout(loadMirrorStatus, action === 'release' ? 12000 : 20000);
+  };
 
   // In-app arrival from a header pin. selectTab writes ?tab=validation; the scroll waits a
   // tick because the target section is inside a display:none tab until this render commits,
@@ -8264,7 +8297,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['algorithm', 'Algorithm'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System']]) as const).map(([id, label]) => (
+        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['algorithm', 'Algorithm'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -8986,6 +9019,23 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
           <DiskHistoryChart token={token} />
         </Suspense>
+      </div>
+
+      <div style={{ display: adminTab === 'mirror' ? undefined : 'none' }}>
+        <h3>Backup mirror</h3>
+        <p className="muted">This server is the offline, restore-tested copy of Wildwatch. It pulls production&rsquo;s backup and code automatically each night; the buttons run those on demand.</p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+          <button className="edit-btn" disabled={!!mirrorBusy} onClick={() => triggerMirror('release')}>
+            {mirrorBusy === 'release' ? 'Updating…' : 'Update live code to mirror'}
+          </button>
+          <button className="edit-btn" disabled={!!mirrorBusy} onClick={() => triggerMirror('backup')}>
+            {mirrorBusy === 'backup' ? 'Backing up…' : 'Back up live to mirror now'}
+          </button>
+          <button className="edit-btn" onClick={loadMirrorStatus}>Refresh status</button>
+        </div>
+        {mirrorMsg && <p className="muted" style={{ color: '#1a6b8f' }}>{mirrorMsg}</p>}
+        <iframe title="Backup status" srcDoc={mirrorHtml}
+          style={{ width: '100%', height: '78vh', border: '1px solid #ddd', borderRadius: 8, marginTop: 8, background: '#0f1720' }} />
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>

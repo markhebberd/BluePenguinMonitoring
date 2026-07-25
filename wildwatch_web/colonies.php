@@ -15,15 +15,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $pdo = getDbConnection();
 
-// Try auth — if authenticated, return colonies they have permission for
-// If not authenticated, return all colonies (public read)
-$observer = null;
-$header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-    $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
-    $stmt->execute([$m[1]]);
-    $observer = $stmt->fetch();
-}
+// Login required — the colony list is not public. The SPA fetches this only after login
+// (loadColony), so requiring auth costs nothing and stops anonymous callers enumerating
+// colony names/regions.
+$observer = requireAuth($pdo);
 
 if ($observer && ($observer['role'] ?? '') !== 'admin') {
     // Non-admin: only colonies this user has explicit permission for
@@ -38,8 +33,7 @@ if ($observer && ($observer['role'] ?? '') !== 'admin') {
 
     // No permissions = no colonies
 } else {
-    // Admins get every colony (consistent with requireColonyAccess in config.php);
-    // unauthenticated callers get the public read of all colonies.
+    // Admins get every colony (consistent with requireColonyAccess in config.php).
     $stmt = $pdo->query("SELECT c.colony_id, c.region_id, c.colony_name, c.colony_prefix, c.location_sets_string, r.region_name
         FROM colonies c JOIN regions r ON c.region_id = r.region_id
         ORDER BY r.region_name, c.colony_name");

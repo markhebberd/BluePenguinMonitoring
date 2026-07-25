@@ -35,6 +35,10 @@ services:
       # Nightly status page, served at /status (Apache Alias — it cannot be mounted inside
       # the read-only html mount).
       - @@WW_ROOT@@/status:/var/www/status:ro
+      # Triggers dir — the ONLY writable mount. The web app drops flag files here (backup /
+      # release requested from the Mirror admin tab); a root host-watcher acts on them and
+      # runs fixed scripts. The web app never runs host commands.
+      - @@WW_ROOT@@/triggers:/var/www/triggers
       # The database. Bind-mounted rather than a named volume so everything the mirror
       # owns sits under one deletable folder.
       - @@WW_ROOT@@/db:/var/lib/mysql
