@@ -3967,7 +3967,8 @@ namespace PenguinMonitor
             // Notes (if any)
             if (!string.IsNullOrEmpty(obs.Notes))
             {
-                var notesText = new TextView(this) { Text = obs.Notes, TextSize = 11 };
+                // Same size as the breeding-prediction line (13), but not bold.
+                var notesText = new TextView(this) { Text = obs.Notes, TextSize = 13 };
                 notesText.SetTextColor(Color.Black);
                 notesText.SetPadding(0, 4, 0, 0);
                 layout.AddView(notesText);
