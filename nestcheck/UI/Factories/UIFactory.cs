@@ -14,7 +14,7 @@ namespace PenguinMonitor.UI.Factories
         // theme on first open (~1s lag); a shared context resolves it once for the whole app.
         private Android.Views.ContextThemeWrapper? _spinnerThemedContext;
         private Android.Views.ContextThemeWrapper SpinnerThemed =>
-            _spinnerThemedContext ??= new Android.Views.ContextThemeWrapper(_context, Android.Resource.Style.ThemeMaterialLight);
+            _spinnerThemedContext ??= new Android.Views.ContextThemeWrapper(_context, Resource.Style.SpinnerMaterialLight);
 
         // Color constants
         public static readonly Color PRIMARY_BLUE = Color.ParseColor("#2196F3");   // selectBox bo

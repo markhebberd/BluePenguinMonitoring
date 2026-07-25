@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solid, non-animating drag/press highlight for the spinner dropdown list, so the highlight
+     under the finger stays for the whole press-drag instead of fading like the Material ripple. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true" android:drawable="@color/spinner_drag_highlight" />
+    <item android:state_selected="true" android:drawable="@color/spinner_drag_highlight" />
+    <item android:state_focused="true" android:drawable="@color/spinner_drag_highlight" />
+    <item android:drawable="@android:color/transparent" />
+</selector>

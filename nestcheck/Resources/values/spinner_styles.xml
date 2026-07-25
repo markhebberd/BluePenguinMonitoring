@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="spinner_drag_highlight">#E0E0E0</color>
+    <!-- Material Light, but the dropdown list uses a solid (non-ripple) selector so the
+         press-drag highlight doesn't fade after ~500ms. -->
+    <style name="SpinnerMaterialLight" parent="@android:style/Theme.Material.Light">
+        <item name="android:dropDownListViewStyle">@style/SpinnerDropDownList</item>
+    </style>
+    <style name="SpinnerDropDownList" parent="@android:style/Widget.Material.Light.ListView.DropDown">
+        <item name="android:listSelector">@drawable/spinner_drag_selector</item>
+    </style>
+</resources>
