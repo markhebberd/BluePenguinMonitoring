@@ -145,7 +145,10 @@ namespace PenguinMonitor.UI.Factories
             var spinner = new Spinner(_context, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
-            
+            // Style the popup itself: a white rounded card instead of the theme's bare (often
+            // black/transparent) list that reads as "super ugly".
+            spinner.SetPopupBackgroundDrawable(CreateRoundedBackground(CARD_COLOR, 8));
+
             // Set the spinner to have the same layout weight as the input fields
             var spinnerParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             spinnerParams.SetMargins(4, 0, 4, 0);
@@ -157,11 +160,15 @@ namespace PenguinMonitor.UI.Factories
         }
         private class CustomSpinnerAdapter : ArrayAdapter<string>
         {
-            private readonly string[] _values;            
+            private readonly string[] _values;
+            private readonly int _padH, _padV;
             public CustomSpinnerAdapter(Context context, int resource, string[] values)
                 : base(context, resource, values)
             {
                 _values = values;
+                float d = context.Resources?.DisplayMetrics?.Density ?? 2f;
+                _padH = (int)(16 * d);
+                _padV = (int)(12 * d);
             }
             public override View GetView(int position, View convertView, ViewGroup parent)
             {
@@ -174,7 +181,11 @@ namespace PenguinMonitor.UI.Factories
                 var view = base.GetDropDownView(position, convertView, parent);
                 if (view is TextView tv)
                 {
-                    tv.Gravity = GravityFlags.Center;
+                    // Roomy, readable rows — the default drop-down item is cramped and low-contrast.
+                    tv.Gravity = GravityFlags.CenterVertical;
+                    tv.SetPadding(_padH, _padV, _padH, _padV);
+                    tv.SetTextColor(TEXT_PRIMARY);
+                    tv.TextSize = 16;
                     if (position == 0 && _values[0] == "")
                         tv.Text = "Gate-open or no-data";
                 }

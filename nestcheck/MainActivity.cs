@@ -2883,12 +2883,14 @@ namespace PenguinMonitor
             var regionSpinner = new Spinner(this, SpinnerMode.Dropdown);
             regionSpinner.SetPadding(8, 4, 8, 4);
             regionSpinner.Prompt = "Region";
+            regionSpinner.SetPopupBackgroundDrawable(_uiFactory.CreateRoundedBackground(UIFactory.CARD_COLOR, 8));
             regionSpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(regionSpinner);
 
             var colonySpinner = new Spinner(this, SpinnerMode.Dropdown);
             colonySpinner.SetPadding(8, 4, 8, 4);
             colonySpinner.Prompt = "Colony";
+            colonySpinner.SetPopupBackgroundDrawable(_uiFactory.CreateRoundedBackground(UIFactory.CARD_COLOR, 8));
             colonySpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(colonySpinner);
 
