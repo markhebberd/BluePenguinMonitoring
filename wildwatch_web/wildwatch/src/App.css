@@ -250,9 +250,9 @@ header h1:hover { opacity:.8; }
 .obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
 .scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
 /* One border for every mini — the thin black. Chicks inherit it too (no colour override).
-   background-origin:content-box so the chipped-chick gradient's 100% is the end of the text
-   (not the padding edge) — that's what lets --chick-stop align to the size code at any padding. */
-.scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; background-origin:content-box; }
+   --scan-pad-r mirrors the right padding so the chipped-chick strip lands right; a larger mini
+   (the panel header) overrides both together. */
+.scan { font-size:9px; line-height:1.4; padding:1px 4px; --scan-pad-r:4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:0.1em solid #333; color:#333; text-decoration:none; }
 .scan.f { background:#FFE4E1; }
 .scan.m { background:#E6F3FF; }
 .scan.chick { background:#FFF9C4; }
@@ -291,7 +291,7 @@ h3.collapsible { cursor:pointer; user-select:none; }
 h3.collapsible:hover { color:#1a5276; }
 .bird-title-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; gap:8px; }
 .bird-title-peng { white-space:nowrap; flex-shrink:0; display:flex; align-items:center; gap:4px; }
-.bird-title-peng .scan { font-size:20px; padding:6px 12px; cursor:default; }
+.bird-title-peng .scan { font-size:20px; padding:6px 12px; --scan-pad-r:12px; cursor:default; }
 .bird-title-peng .scan .sex-icon { font-size:20px; }
 .bird-title-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; min-width:60px; text-align:center; }
 .header-nav { display:flex; gap:6px; align-items:center; }

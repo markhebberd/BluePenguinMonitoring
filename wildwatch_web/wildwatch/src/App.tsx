@@ -672,10 +672,10 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
   return (
     <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime}
       /* Yellow chipped-as-chick strip begins halfway across the gap between the pit_id and the
-         size code. The gradient is measured over the CONTENT box (see CSS), so 100% is the end
-         of the text and this is (code length + half a space) in from it — a monospace char is
-         1ch, so it holds at any font size or padding. Falls back to a fixed 85% with no code. */
-      style={mid ? ({ '--chick-stop': `calc(100% - ${mid.length + 0.5}ch)` } as React.CSSProperties) : undefined}
+         size code: in from the right by the right padding (--scan-pad-r, which each mini size
+         sets to match its own) plus the code and half a space — a monospace char is 1ch. Falls
+         back to a fixed 85% when there's no code. */
+      style={mid ? ({ '--chick-stop': `calc(100% - var(--scan-pad-r, 4px) - ${mid.length + 0.5}ch)` } as React.CSSProperties) : undefined}
       onClick={navigateDirectly ? undefined : e => navClick(e, () => {
       onClick();
       // Re-clicking the bird already open in the panel won't remount it — toggle the highlight.
