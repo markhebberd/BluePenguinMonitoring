@@ -164,6 +164,23 @@ namespace PenguinMonitor.UI.Factories
             var adapter = new CustomSpinnerAdapter(themed, Android.Resource.Layout.SimpleSpinnerItem, options);
             adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
             spinner.Adapter = adapter;
+
+            // The whole screen lives in a ScrollView, which otherwise steals a press-and-move as a
+            // scroll before the Spinner's tap-to-open (click on release) fires — so holding or
+            // swiping on a dropdown scrolled the page instead of opening it. Open on finger-DOWN and
+            // consume the gesture so the ScrollView can't intercept it. The popup handles selection.
+            spinner.Touch += (sender, e) =>
+            {
+                if (e.Event?.Action == Android.Views.MotionEventActions.Down)
+                {
+                    spinner.Parent?.RequestDisallowInterceptTouchEvent(true);
+                    // Drop the popup BELOW the field (offset by the field's height) so it doesn't
+                    // cover the current value; ListPopupWindow flips it above when there's no room.
+                    spinner.DropDownVerticalOffset = spinner.Height;
+                    spinner.PerformClick();
+                }
+                e.Handled = true;
+            };
             return spinner;
         }
         private class CustomSpinnerAdapter : ArrayAdapter<string>
