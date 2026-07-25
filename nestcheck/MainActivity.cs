@@ -3914,23 +3914,45 @@ namespace PenguinMonitor
 
             // For Mark: drop the chick-size code's trailing C and move it to the end, so the L/B/S
             // lands in the yellow chick strip (which chipped-as-chick badges already draw).
+            bool sizeLetterAtEnd = false;
             if (labelOverride == null && CurrentObserverIsMark() && pd != null && !string.IsNullOrEmpty(pd.ChickSizeCode))
             {
                 var num = !string.IsNullOrEmpty(pd.PengNum) ? $"#{pd.PengNum}" : "";
                 var sizeLetter = pd.ChickSizeCode.TrimEnd('C', 'c');
                 label = string.Join(" ", new[] { num, pd.ScannedId, sizeLetter }.Where(s => !string.IsNullOrEmpty(s)));
+                sizeLetterAtEnd = true;
             }
 
-            var badge = new TextView(this) { Text = labelOverride ?? label, TextSize = textSize };
+            var labelText = labelOverride ?? label;
+            var badge = new TextView(this) { TextSize = textSize };
+            // Monospace renders a space a full cell wide; scale each inter-token space to 0.5× so
+            // the badge sits tighter without touching the glyphs themselves.
+            if (labelText.IndexOf(' ') >= 0)
+            {
+                var spannable = new Android.Text.SpannableString(labelText);
+                for (int i = 0; i < labelText.Length; i++)
+                    if (labelText[i] == ' ')
+                        spannable.SetSpan(new Android.Text.Style.ScaleXSpan(0.5f), i, i + 1, Android.Text.SpanTypes.ExclusiveExclusive);
+                badge.TextFormatted = spannable;
+            }
+            else badge.Text = labelText;
             var padH = (int)(8 * textSize / 10);
             var padV = (int)(3 * textSize / 10);
-            // Chipped-as-chick (includes returnees) gets a yellow strip on the right 15%, like wildwatch.
             bool chippedAsChick = pd != null && pd.ChipAs != "Adult";
-            badge.SetPadding(padH, padV, chippedAsChick ? padH * 3 : padH, padV);
+            // Size letter at the end sits in its own yellow tab hugging the letter (padH each side),
+            // so right padding matches the left. Otherwise reserve the decorative right-15% strip.
+            float stripWidthPx = 0f;
+            if (sizeLetterAtEnd)
+            {
+                float letterW = badge.Paint.MeasureText(labelText.Substring(labelText.Length - 1));
+                stripWidthPx = letterW + 2 * padH;
+            }
+            int padRight = (chippedAsChick && !sizeLetterAtEnd) ? padH * 3 : padH;
+            badge.SetPadding(padH, padV, padRight, padV);
 
             Color bg = sex == "M" ? SCAN_MALE_BG : sex == "F" ? SCAN_FEMALE_BG : SCAN_UNKNOWN_BG;
             float radiusPx = 4 * (Resources?.DisplayMetrics?.Density ?? 2f);
-            badge.Background = new BadgeBackground(bg, chippedAsChick, SCAN_CHICK_BG, radiusPx);
+            badge.Background = new BadgeBackground(bg, chippedAsChick, SCAN_CHICK_BG, radiusPx, stripWidthPx);
             badge.SetTextColor(sex == "M" ? SCAN_MALE_TEXT : sex == "F" ? SCAN_FEMALE_TEXT : Color.DarkGray);
             badge.SetTypeface(Android.Graphics.Typeface.Monospace, Android.Graphics.TypefaceStyle.Normal);
 
@@ -3950,11 +3972,12 @@ namespace PenguinMonitor
             private readonly Color _stripColor;
             private readonly bool _chick;
             private readonly float _radius;
+            private readonly float _stripWidthPx; // 0 => fall back to the right 15%
             private readonly Paint _paint = new Paint(PaintFlags.AntiAlias);
 
-            public BadgeBackground(Color baseColor, bool chick, Color stripColor, float radius)
+            public BadgeBackground(Color baseColor, bool chick, Color stripColor, float radius, float stripWidthPx = 0f)
             {
-                _baseColor = baseColor; _chick = chick; _stripColor = stripColor; _radius = radius;
+                _baseColor = baseColor; _chick = chick; _stripColor = stripColor; _radius = radius; _stripWidthPx = stripWidthPx;
             }
 
             public override void Draw(Canvas canvas)
@@ -3974,7 +3997,8 @@ namespace PenguinMonitor
                     clip.AddRoundRect(rect, _radius, _radius, Android.Graphics.Path.Direction.Cw);
                     canvas.ClipPath(clip);
                     _paint.Color = _stripColor;
-                    canvas.DrawRect(b.Left + b.Width() * 0.85f, b.Top, b.Right, b.Bottom, _paint);
+                    float stripLeft = _stripWidthPx > 0f ? (b.Right - _stripWidthPx) : (b.Left + b.Width() * 0.85f);
+                    canvas.DrawRect(stripLeft, b.Top, b.Right, b.Bottom, _paint);
                     canvas.Restore();
                 }
                 // Thin black outline, like wildwatch
