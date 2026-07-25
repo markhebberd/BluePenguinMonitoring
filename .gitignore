@@ -407,6 +407,11 @@ my-release-key.keystore
 secrets.props
 nestcheck/secrets.props
 wildwatch_web/secrets.php
+# Claude Code's machine-local settings. Never commit: its permissions allowlist stores whole
+# command lines verbatim, so any secret ever passed as an argument gets recorded in it. It had
+# accumulated three (two since rotated) before being untracked. Shared settings go in
+# .claude/settings.json instead, which is safe to commit.
+.claude/settings.local.json
 # Play Store upload credential (account-wide service account) — never commit
 play-service-account.json
 nestcheck/play-service-account.json
