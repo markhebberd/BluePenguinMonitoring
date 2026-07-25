@@ -2637,7 +2637,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   <span className="muted">{pt.sightings.length} shared sighting{pt.sightings.length !== 1 ? 's' : ''} with</span>
                   {pt.is_no_scan
                     ? <span className="scan no-scan">No scan</span>
-                    : <PenguinMini scan={{peng_num: pt.peng_num, pit_id: pt.pit_id, sex: pt.sex, chipped_as_adult: pt.chipped_as_adult, chip_date: pt.chip_date}} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />}
+                    : <PenguinMini scan={pt} onClick={() => onBirdClick(pt.peng_num)} observationDate={pt.sightings[0]?.date} />}
                 </div>
                 {partnerOpen && seasonList.map(([label, seasonSightings]) => {
                   const windowGroups = new Map<string, { win: any; rows: any[] }>();
