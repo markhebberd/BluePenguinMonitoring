@@ -140,9 +140,11 @@ namespace PenguinMonitor.UI.Factories
         }
         public Spinner CreateSpinner(string[] options)
         {
-            // Always an anchored popup under the field — the theme's default is a full-screen
-            // dialog selector, which looks disconnected from the picker.
-            var spinner = new Spinner(_context, SpinnerMode.Dropdown);
+            // The app runs on the ancient Theme.NoTitleBar, whose Spinner popup renders in a dated
+            // Gingerbread style. Render this spinner (and its anchored popup) through Material Light
+            // so the dropdown looks modern; the closed field keeps our own rounded background below.
+            var themed = new Android.Views.ContextThemeWrapper(_context, Android.Resource.Style.ThemeMaterialLight);
+            var spinner = new Spinner(themed, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
             // Style the popup itself: a white rounded card instead of the theme's bare (often
@@ -153,7 +155,7 @@ namespace PenguinMonitor.UI.Factories
             var spinnerParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             spinnerParams.SetMargins(4, 0, 4, 0);
             spinner.LayoutParameters = spinnerParams;
-            var adapter = new CustomSpinnerAdapter(_context, Android.Resource.Layout.SimpleSpinnerItem, options);
+            var adapter = new CustomSpinnerAdapter(themed, Android.Resource.Layout.SimpleSpinnerItem, options);
             adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
             spinner.Adapter = adapter;
             return spinner;
