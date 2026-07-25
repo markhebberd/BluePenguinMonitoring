@@ -1,59 +1,90 @@
 # Wildwatch NAS mirror
 
-A complete third copy of Wildwatch on a Synology NAS, at a second physical site, that rebuilds
-itself every night and serves the result on the LAN. It does three jobs:
+A complete third copy of Wildwatch on a Synology NAS (a DS423+), at a second physical site,
+that rebuilds itself every night, serves the result on the LAN, and emails if it ever stops.
+It does three jobs:
 
 1. **Backup destination** — pulls `https://wildwatch.co.nz/api/backup.php` nightly and keeps
    every dump forever under `backups/YYYY/MM/YYYY-MM-DD.sql.gz`. Nothing is ever pruned.
-2. **Proof the backup restores** — wipes a database, restores that dump into it *from empty*,
-   verifies it, and only then points the site at it. If you can browse the colony at
-   `http://<nas-ip>:8080`, the backup is provably good — not "the file was 680 KB and exited 0".
+2. **Proof the backup restores** — drops a database, restores that dump into it *from empty*,
+   verifies it (tables, row counts, freshness, a real login round-trip), and only then points
+   the site at it. If you can log into the colony at `http://192.168.1.253:8080`, the backup is
+   provably good — not "the file was ~950 KB and exited 0".
 3. **A location you can rebuild production from** — alongside the data it mirrors the source
    repo and pulls a nightly kit of everything else the VPS needs (secrets, nginx and mail
    config, DKIM keys, cron, package list, live DNS). See [REBUILD.md](REBUILD.md).
 
-A backup you have never restored is a hypothesis. This turns it into a nightly test.
+A backup you have never restored is a hypothesis. This turns it into a nightly test — and
+tells you (by email) the mornings it can't.
 
 **Trust posture:** this NAS holds the production credentials and the unredacted database —
 same keys as live, deliberately, because a copy you have to reconstruct secrets for is not a
 location you can rebuild from. Treat the NAS as production infrastructure: it is now one of
-the two machines where a compromise means a full compromise.
+the machines where a compromise means a full compromise.
 
-## Verified before writing this
+## Architecture at a glance
 
-Run locally against the real `2026-06-30` production dump:
+- **One container** (`wildwatch`), built from [Dockerfile](Dockerfile): Debian 13 + PHP 8.4 +
+  MariaDB 11.8 — the *same* versions as the production VPS, so a dump that restores here
+  restores there. Apache + mod_php stands in for the VPS's nginx + php-fpm.
+- **Everything under one folder**, `/volume1/docker/wildwatch` (inside the existing `docker`
+  shared folder). Removal is: delete the Container Manager project, delete the folder. No named
+  volumes, no extra packages, no DSM config touched.
+- **Plain HTTP, LAN-only.** Published on `0.0.0.0:8080` (all interfaces, so it survived the
+  static-IP switch and any future one). The NAS has no WAN interface and no port is forwarded,
+  so "all interfaces" is still the house LAN. Login uses the real Wildwatch password over HTTP
+  on the LAN — an accepted trade-off (see below).
+- **Pull-only.** The NAS reaches out to production; production never reaches in. Three nightly
+  flows, all outbound: HTTPS for the dump, git for the source, SSH (forced-command) for the kit
+  + release + check-in.
+
+## Verified against real production data
 
 | Check | Result |
 |---|---|
-| Dump restores into an **empty** MariaDB 11.8 (same version as prod) | 14 tables, **38,722** observations, 1,005 penguins, 14,161 scans — in **<1 s** |
-| MariaDB-only syntax in the dump (`CHECK (json_valid(...))`, latin1/utf8mb4_general collations) | restores clean |
-| SPA served from `dist/` | `GET /` → 200 |
-| Client-side route (no server-side route table) | `GET /day/2026-06-30` → 200 |
+| Fixed dump restores into an **empty** MariaDB 11.8.6 (identical to prod) | **18 tables, 44,551 observations, 1,042 penguins, 16,828 scans** |
+| Generated column (`penguins.is_dead`) | excluded by the fixed `backup.php` (see below), recomputed on insert |
+| SPA + client-side route over HTTP | `GET /` 200, `GET /day/...` 200 |
 | API unauthenticated | `GET /api/snapshot.php` → **401** (up, demanding a login) |
-| API with a key | `GET /api/colonies.php` → 200 |
-| `secrets.php` symlink into the mounted `shared/` dir | resolves inside the container |
-| Anonymous `git clone --mirror` of the GitHub repo (it is **public** — no credential needed) | 26 MB, `06464a6` @ 2026-07-24 |
-| Same clone via a throwaway container, for a NAS with no git package | works (`alpine/git`, `safe.directory='*'`) |
-| `rebuild-kit.sh` with every source path absent (wrong host / not root) | **exits 1**, emits nothing — it refuses to ship a technically-valid, practically-empty kit |
+| **Full login round-trip** | log in → token → token accepted on the next request → snapshot 200 |
+| App release pulled from the VPS | `app/` tracks production's deployed release, stamped with its git rev |
+| Alert email path | test mail relayed `250 OK` to the inbox; fail + no-checkin alerts fire |
+
+## Three production fixes this shook out
+
+These were found *because* the mirror actually restores and logs in every night — things a
+"backup exited 0" never catches:
+
+- **`backup.php` dumped generated columns.** `penguins.is_dead` is `STORED GENERATED`; naming
+  it in an `INSERT` makes MariaDB abort the restore at error 1906 — so **every prior backup was
+  unrestorable** (it would silently drop all penguins). Fixed to select columns from
+  `information_schema`, excluding generated ones. Committed + deployed to production.
+- **App DB user needed `CREATE`.** `crud.php` lazily runs `CREATE TABLE IF NOT EXISTS sessions`
+  on login; the mirror's `ww` user only had DML, so login 500'd. Now granted `ALL` on the
+  `ww_%` pattern (matching production), which survives the nightly slot rebuilds.
+- **Apache dropped the `Authorization` header.** nginx forwards it; Apache doesn't, so a minted
+  token was rejected on the very next request. Fixed with `SetEnvIf Authorization ...` in
+  [apache-site.conf](apache-site.conf).
 
 ## Layout on the NAS
 
 ```
-/volume1/wildwatch/
-├── nas-mirror/          <- this directory (docker-compose.yml, Dockerfile, .env)
-├── app/                 <- SPA dist at the root, PHP API in app/api/  (rsynced from the Mac)
+/volume1/docker/wildwatch/
+├── nas-mirror/          <- this directory (Dockerfile, compose-template.yml, docker-compose.yml, .env, bin/)
+├── app/                 <- SPA at the root, PHP API in app/api/  (pulled nightly from the VPS release)
 ├── shared/
-│   ├── secrets.php      <- local DB credentials; app/api/secrets.php is a symlink to this
+│   ├── secrets.php      <- local DB creds; app/api/secrets.php symlinks to it; group-readable by www-data (33)
 │   ├── active_db        <- "ww_a" or "ww_b" — which restore slot is live
-│   ├── nas.env          <- WW_API_KEY (production key), chmod 600 root
-│   └── id_nas           <- SSH key for fetching the rebuild kit from the VPS
-├── backups/YYYY/MM/     <- database dumps. Never pruned.           ~680 KB/night
-├── kits/YYYY/MM/        <- server config + secrets from the VPS.   small, also kept forever
-├── repo.git             <- bare mirror of the GitHub repo          26 MB, updated nightly
+│   ├── nas.env          <- WW_API_KEY (production read key), root 600
+│   └── id_nas           <- SSH key for kit/release/check-in from the VPS, root 600
+├── db/                  <- MariaDB data (bind mount; both slots live here)
+├── backups/YYYY/MM/     <- database dumps. Never pruned.               ~950 KB/night
+├── kits/YYYY/MM/        <- server config + secrets from the VPS.       small, also kept forever
+├── repo.git             <- bare mirror of the GitHub repo             ~26 MB, updated nightly
 ├── mac-kit/             <- hand-copied irreplaceables (see REBUILD.md)
 ├── status/index.html    <- nightly report, served at /status/
 ├── logs/nightly.log
-└── bin/{nightly.sh,rebuild-kit.sh}
+└── bin/                 <- nightly.sh + copies of the VPS-side scripts
 ```
 
 Two database slots (`ww_a`, `ww_b`) alternate. Each night the **inactive** one is dropped,
@@ -62,151 +93,143 @@ night therefore leaves yesterday's good copy serving, and never blanks the site.
 
 ## Requirements
 
-- A Synology that can run **Container Manager** (DSM 7.2+, x86_64 or arm64 — most Plus/Value
-  models; not the older ARMv7 boxes). Non-Docker fallback below.
-- ~1 GB of disk. The archive grows at **~680 KB/night ≈ 250 MB/year** for dumps plus a small
-  config kit, so "forever" is genuinely fine; the repo mirror is a flat 26 MB.
+- A Synology running **Container Manager** (DSM 7.2+, x86_64 or arm64). This deployment: DS423+,
+  DSM 7.3.2, 2 GB RAM. MariaDB is tuned small in the Dockerfile (64 MB buffer pool, etc.) to fit.
+- ~1 GB of disk. Dumps grow ~950 KB/night (~350 MB/year); the repo mirror is a flat ~26 MB.
+  Space is not the constraint — RAM is.
 - Outbound HTTPS **and SSH** from the NAS. **No port forward, no reverse-proxy entry, no
   QuickConnect rule** — nothing inbound, ever.
 
 ## Setup
 
-**1. Build the SPA on the Mac** (I don't run builds — this is yours to run):
+The app code and DB schema now come from production automatically (nightly release pull + dump),
+so there is **no dev-machine dependency** in steady state. First-time setup:
+
+**1. Build the mirror image on the NAS** (the Dockerfile changes ~never — only on a PHP/MariaDB
+major bump). Container Manager's Project wizard can't build from a Dockerfile, so build via CLI:
 
 ```bash
-cd ~/src/penguins/wildwatch_web/wildwatch && npx vite build
+cd /volume1/docker/wildwatch/nas-mirror
+sudo docker build -t wildwatch-mirror:latest .
 ```
 
-**2. Copy the app tree to the NAS** (SSH enabled in DSM → Terminal & SNMP):
+**2. Run the bootstrap** (idempotent — safe to re-run), which writes `.env`/`secrets.php`/
+`nas.env`, generates the SSH key, renders an image-only `docker-compose.yml`, and starts it:
 
 ```bash
-NAS=admin@192.168.1.109
-ssh $NAS 'mkdir -p /volume1/wildwatch/{app/api,shared,backups,status,logs,bin,tmp}'
-cd ~/src/penguins/wildwatch_web
-rsync -av --exclude .htaccess wildwatch/dist/ $NAS:/volume1/wildwatch/app/
-rsync -av --exclude secrets.php --exclude 'secrets.php.sample' \
-      --include '*.php' --include 'migrations/***' --exclude '*' \
-      ./ $NAS:/volume1/wildwatch/app/api/
-rsync -av nas-mirror/ $NAS:/volume1/wildwatch/nas-mirror/
-scp nas-mirror/bin/nightly.sh $NAS:/volume1/wildwatch/bin/
+WW_API_KEY='<production read key>' \
+  sudo WW_ROOT=/volume1/docker/wildwatch bash nas-mirror/bin/bootstrap-nas.sh
 ```
 
-> **Do not copy `wildwatch_web/.htaccess`.** It force-redirects HTTP→HTTPS, which would break
-> a plain-HTTP LAN site instantly. The rsync above excludes it; `apache-site.conf` sets
+Pass `START=0` to prepare everything but create the container yourself in **Container Manager →
+Project → Create** (image-only compose validates there; a clean `wildwatch` name that DSM
+tracks properly).
+
+> **Never copy `wildwatch_web/.htaccess` into `app/`.** It force-redirects HTTP→HTTPS, which
+> breaks a plain-HTTP LAN site instantly. The release pull strips it; `apache-site.conf` sets
 > `AllowOverride None` as a second line of defence.
 
-**3. On the NAS**, as root (SSH, `sudo -i`):
+**3. Pin the NAS key on the VPS** to the forced-command dispatcher (so the key can only ask for
+`kit`/`release`/`checkin`, never a shell):
 
 ```bash
-cd /volume1/wildwatch
-cp nas-mirror/env.sample nas-mirror/.env          # set BIND_ADDR, HTTP_PORT, both passwords
-cp nas-mirror/secrets.php.nas shared/secrets.php  # DB_PASS must match DB_APP_PASS
-ln -sfn /var/www/shared/secrets.php app/api/secrets.php   # dangling on the host, valid in the container
-printf 'WW_API_KEY=<production API key>\n' > shared/nas.env
-chmod 600 shared/nas.env nas-mirror/.env; chmod 640 shared/secrets.php
-chmod +x bin/nightly.sh
-docker compose -f nas-mirror/docker-compose.yml --env-file nas-mirror/.env up -d --build
+# on the VPS, install the helper scripts from this repo's bin/:
+sudo install -m 755 -o root -g root {rebuild-kit,release-tar,nas-fetch,nas-checkin,nas-alert,nas-watchdog}.sh /usr/local/bin/
+# append to /home/mark/.ssh/authorized_keys, one line (key from shared/id_nas.pub):
+command="/usr/local/bin/nas-fetch.sh",restrict ssh-ed25519 AAAA... nas-rebuild-kit
+# watchdog cron:
+echo '0 21 * * * root /usr/local/bin/nas-watchdog.sh' | sudo tee /etc/cron.d/nas-watchdog
 ```
 
-**4. Let the NAS fetch the rebuild kit from the VPS.** On the **NAS**, as root:
+**4. First run + schedule.** Run `sudo /volume1/docker/wildwatch/bin/nightly.sh` once and watch
+it go green. Then schedule it — see **Scheduling** below.
 
-```bash
-ssh-keygen -t ed25519 -N '' -C nas-rebuild-kit -f /volume1/wildwatch/shared/id_nas
-cat /volume1/wildwatch/shared/id_nas.pub
+## Scheduling
+
+The nightly runs from **cron at 06:30 NZ** (Pacific/Auckland — same zone as the NAS, so it
+tracks DST). It's a hand-added line in `/etc/crontab`, TAB-delimited as DSM's `synocrond`
+requires, and **verified to actually fire** (a one-minute test cron ran):
+
+```
+30	6	*	*	*	root	/volume1/docker/wildwatch/bin/nightly.sh
 ```
 
-On the **VPS**, install the kit script and pin the key to it — same forced-command pattern the
-CI deploy key already uses, so a stolen NAS key can only ever produce a kit:
+06:30 is 30 min after the existing devian backup (an independent second copy) — the mirror
+pulls its own fresh dump from production and does not depend on devian.
 
-```bash
-sudo install -m 700 -o root -g root rebuild-kit.sh /usr/local/bin/rebuild-kit.sh   # from repo bin/
-# append to /home/mark/.ssh/authorized_keys, one line:
-command="sudo /usr/local/bin/rebuild-kit.sh",restrict ssh-ed25519 AAAA... nas-rebuild-kit
-```
+> DSM's Task Scheduler GUI was **not** used, because its "email on failure" is a false comfort
+> here: DSM email is unconfigured, and even configured it can't email you when the NAS is *off*.
+> Alerting is handled by the dead-man's-switch below instead.
 
-It needs `sudo` to read `secrets.php`, `/etc/postfix/sasl_passwd` and the DKIM keys; `mark` has
-passwordless sudo. Test it from the NAS before scheduling anything:
+## Alerting (self-hosted dead-man's-switch)
 
-```bash
-ssh -i /volume1/wildwatch/shared/id_nas mark@wildwatch.co.nz > /tmp/kit.tar.gz
-tar -tzf /tmp/kit.tar.gz | head        # should list kit/files/var/www/wildwatch/shared/secrets.php
-```
+Uses the existing `@wildwatch.co.nz` mail server, and **every path was tested** (real mail
+relayed `250 OK`). At the end of every run, `nightly.sh` checks in with the VPS over the same
+SSH channel: `checkin ok` on success, `checkin fail` otherwise.
 
-To include the Maildirs as well, make the forced command
-`command="sudo /usr/local/bin/rebuild-kit.sh --with-mail"` and set `KIT_KEEP=7` in the task's
-environment — mailboxes are far larger than config, and keeping those forever will hurt.
+- **`checkin fail`** → the VPS emails you immediately ([nas-checkin.sh](bin/nas-checkin.sh)).
+- **No check-in for ~20h** → the VPS watchdog ([nas-watchdog.sh](bin/nas-watchdog.sh), cron
+  21:00 UTC) emails you. This is the important one: it catches the NAS being off, the cron
+  breaking, or the network dying — none of which a NAS-side alert could ever report.
 
-**5. First run:** `/volume1/wildwatch/bin/nightly.sh` — takes a few seconds, prints each step.
-
-**6. DSM → Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script**
-- User: **root**, daily at **03:30** (production's own backup cron runs 03:15 UTC — pick a time
-  after wildwatch.co.nz has finished its own night's work)
-- Command: `/volume1/wildwatch/bin/nightly.sh`
-- Tick **"Send run details by email"** and **"only when the script terminates abnormally"** —
-  that's the failure alarm, and it costs nothing.
+> **Alerts are ASCII-only, enforced.** The SMTP2GO relay doesn't offer SMTPUTF8, so a single
+> non-ASCII character (an em-dash, a smart quote) bounces the whole message — a silent-failure
+> trap for an alert. [nas-alert.sh](bin/nas-alert.sh) strips anything non-ASCII.
 
 ## What the nightly run does
 
 ```
-download dump ─> archive forever ─> mirror git repo ─> fetch rebuild kit
+download dump ─> archive forever ─> mirror git repo ─> fetch kit ─> pull app release
                                                           │
         drop+recreate the INACTIVE slot ──> restore into it from empty
                                                           │
-              verify (tables, row counts vs last night, freshness)
+   verify (tables, row counts vs last night, freshness) ──> flip the live slot
                                                           │
-                     flip the live slot ──> smoke test ──> status page
+        smoke test (site 200 / API 401) ──> login round-trip ──> status page
+                                                          │
+                              check in with the VPS (ok | fail)
 ```
 
 Archiving happens before the restore, so a night where the restore fails still captures the
-dump, the code and the kit. The live slot only flips after the checks pass, so a bad night keeps
-serving yesterday's good copy instead of blanking the site.
+dump, the code and the kit. The live slot only flips after the checks pass. A failed app-release
+pull is a **warning**, not a failure — the mirror keeps serving the code it already has; the
+restore is what the badge certifies.
 
-## What she sees
+## What Britta sees
 
-- `http://192.168.1.109:8080/status/` — last night's report: downloaded, archived, repo mirrored,
-  kit fetched, restored into an empty database, row counts (with last night's for comparison),
-  latest observation date, and a green **RESTORE VERIFIED** / red **RESTORE FAILED** badge.
-- `http://192.168.1.109:8080/` — Wildwatch itself, her normal login (the observer accounts and
-  password hashes come out of the restored backup, so logging in is *itself* part of the proof).
+- `http://192.168.1.253:8080/status/` — a plain-language report: a big count of tested backups,
+  a **calendar** of every verified night (green = a restore-tested backup that day; dim = the NAS
+  was off), last night's step-by-step detail, and a green **RESTORE VERIFIED** / red **RESTORE
+  FAILED** badge.
+- `http://192.168.1.253:8080/` — Wildwatch itself, her normal login. The observer accounts and
+  password hashes come out of the restored backup, so logging in is *itself* part of the proof.
 
-Anything she edits there vanishes at 03:30 when the slot is rebuilt. The status page says so.
+Anything she edits there vanishes at 06:30 when the slot is rebuilt. The status page says so.
+
+## App code stays in sync automatically
+
+The nightly dump carries production's *schema*, and the nightly **release pull** copies
+production's *deployed* SPA + PHP over the SSH channel — so both track production with no
+dev-machine in the loop. The only deliberate manual step left is a MariaDB/PHP *major* version
+bump (edit the Dockerfile, rebuild the image, recreate the container) — and the nightly restore
+is its own canary for that: it goes red if the versions ever become incompatible.
 
 ## Consequences of it holding the real keys
 
-This is the intended design — a third location that needs a secret you don't have there isn't a
-third location — but it is worth being explicit about what follows, because these are now facts
-about the system rather than open questions:
+- **The NAS is production infrastructure.** It holds the production API key, DB passwords, the
+  SMTP2GO relay credential and the DKIM signing keys, plus every colony's data and every
+  observer's email + password hash. Whoever reaches that box can act as wildwatch.co.nz. Worth
+  saying to Britta once, in those words.
+- **The SSH key is scoped even though the payload isn't.** The forced command lets the NAS ask
+  only for `kit`/`release`/`checkin`, never a shell — so a stolen NAS key adds no new way *into*
+  the VPS beyond the secrets the kit already contains.
+- **Rotation now means three places:** VPS, Mac, NAS (`shared/nas.env`, `shared/secrets.php`).
+- **DSM's own protections matter here** — disable the admin account, 2FA on anything that can log
+  in, keep Container Manager updated. This box is now worth attacking.
 
-- **Her NAS is production infrastructure.** It holds the production API key, the DB passwords,
-  the SMTP2GO relay credential and the DKIM signing keys, plus every colony's data and every
-  observer's email and password hash. Whoever can reach that box can act as wildwatch.co.nz,
-  including sending mail that passes DKIM. Worth saying to her in those words, once.
-- **Keep the secrets out of DSM's own logs.** `shared/nas.env`, `shared/id_nas` and the kit
-  archives are root-owned `chmod 600`/`400`. Never put a key in the Task Scheduler command line —
-  DSM stores and mails that in plain text.
-- **The SSH key is scoped even though the payload isn't.** The forced command means the NAS can
-  only ask for a kit, never get a shell — so a stolen NAS key doesn't add a way *in* to the VPS
-  beyond the secrets the kit already contains.
-- **Rotation now means three places**, not two: VPS, Mac, NAS. `shared/nas.env` and
-  `shared/secrets.php` are the NAS copies to update.
-- **DSM's own protections still matter here** — disable the admin account, 2FA on any account
-  that can log in, and keep Container Manager updated. This box is now worth attacking.
+## Removing it
 
-## Keeping it in sync with production
-
-The nightly dump carries production's *schema*, so the database always matches prod. The only
-thing that can drift is the NAS's copy of the app code, and the status page shows its date.
-
-Old code + new schema is harmless (it ignores columns it doesn't know about). The one bad
-combination is **new code + old schema** — I hit exactly that while testing: today's
-`colonies.php` against the June 30 dump gives `Unknown column 'c.colony_prefix'`, because that
-column landed in a later migration. So: after a deploy that includes a migration, rsync the app
-tree *and then* re-run `nightly.sh`, rather than rsyncing and waiting.
-
-## Fallback if the NAS can't run Docker
-
-Older/value models without Container Manager can do this with DSM packages instead — **Web
-Station** (Apache + PHP 8.x profile with `pdo_mysql` enabled), **MariaDB 10/11**, and the same
-`nightly.sh` with the `docker exec` lines replaced by `/usr/local/mariadb11/bin/mysql`. Same
-design, more DSM GUI fiddling, and Web Station's virtual host does the SPA fallback rewrite.
-Tell me the model and I'll write that variant.
+`bin/uninstall-nas.sh` on the NAS stops + removes the container and image and revokes the deploy
+access (keeps data unless `--purge-data`). Then, on the VPS: `sudo rm /usr/local/bin/nas-*.sh
+/usr/local/bin/{rebuild-kit,release-tar}.sh /etc/cron.d/nas-watchdog` and drop the
+`nas-rebuild-kit` line from `~/.ssh/authorized_keys`.
