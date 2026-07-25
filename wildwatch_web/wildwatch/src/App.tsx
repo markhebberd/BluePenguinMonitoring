@@ -657,16 +657,6 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     const base = sizeLabel.endsWith('U') ? sizeLabel.slice(0, -1) : sizeLabel;
     mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
-  // Chick size code (LC/BC/SC, plus any sex info) always rides at the END in a yellow tab that
-  // fills the right of the pill to its edge, nestcheck-style — one behaviour everywhere a mini
-  // renders. A size code exists only for a bird chipped as a chick, so the tab IS the
-  // chipped-as-chick marker; the body then drops the chick fill and shows sex (or neutral), so
-  // the pill reads two-tone instead of yellow-on-yellow.
-  const showSizeTag = !!sizeLabel;
-  const sexCls = sex === 'F' ? 'f' : sex === 'M' ? 'm' : '';
-  const bodyClasses = showSizeTag
-    ? `has-tag ${sexCls} ${chippedHereCls}`
-    : `${cls} ${chipCls} ${grayCls} ${chippedHereCls}`;
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   // Hovering a mini tied to a data entry shows that entry's NZ-local time. Use the first
   // timestamped source available — an explicit observationDate, or a timestamp carried on the
@@ -677,12 +667,12 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
-    <a className={`scan clickable ${bodyClasses}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
+    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
       onClick();
       // Re-clicking the bird already open in the panel won't remount it — toggle the highlight.
       if (scan.peng_num && scan.peng_num === openPanelPengNum) toggleSelectedPengMinis();
     })}>
-      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid && !showSizeTag ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}{showSizeTag && <span className="chick-tag">{mid}</span>}
+      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{(num || icon) && chip ? ' ' : ''}{chip}{mid ? ` ${mid}` : ''}
     </a>
   );
 }
