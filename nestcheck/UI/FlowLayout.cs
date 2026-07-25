@@ -20,25 +20,23 @@ namespace PenguinMonitor.UI
 
         public FlowLayout(Context context) : base(context) { }
 
-        // Total width of all children plus the spacing between them, measured against maxWidth.
-        private int TotalRowWidth(int maxWidth, bool measure)
+        // Total width of all (already-measured) children plus the spacing between them.
+        private int TotalRowWidth()
         {
             int total = 0;
             for (int i = 0; i < ChildCount; i++)
-            {
-                var child = GetChildAt(i)!;
-                if (measure)
-                    child.Measure(MeasureSpec.MakeMeasureSpec(maxWidth, MeasureSpecMode.AtMost),
-                        MeasureSpec.MakeMeasureSpec(0, MeasureSpecMode.Unspecified));
-                total += child.MeasuredWidth + (i > 0 ? HorizontalSpacing : 0);
-            }
+                total += GetChildAt(i)!.MeasuredWidth + (i > 0 ? HorizontalSpacing : 0);
             return total;
         }
 
         protected override void OnMeasure(int widthMeasureSpec, int heightMeasureSpec)
         {
             int maxWidth = MeasureSpec.GetSize(widthMeasureSpec);
-            bool breakAfterFirst = BreakAfterFirstWhenWrapping && ChildCount > 1 && TotalRowWidth(maxWidth, measure: true) > maxWidth;
+            // Always measure every child first — the layout loop below reads MeasuredWidth/Height.
+            for (int i = 0; i < ChildCount; i++)
+                GetChildAt(i)!.Measure(MeasureSpec.MakeMeasureSpec(maxWidth, MeasureSpecMode.AtMost),
+                    MeasureSpec.MakeMeasureSpec(0, MeasureSpecMode.Unspecified));
+            bool breakAfterFirst = BreakAfterFirstWhenWrapping && ChildCount > 1 && TotalRowWidth() > maxWidth;
             int x = 0, y = 0, rowHeight = 0;
 
             for (int i = 0; i < ChildCount; i++)
@@ -63,7 +61,7 @@ namespace PenguinMonitor.UI
         protected override void OnLayout(bool changed, int l, int t, int r, int b)
         {
             int maxWidth = r - l;
-            bool breakAfterFirst = BreakAfterFirstWhenWrapping && ChildCount > 1 && TotalRowWidth(maxWidth, measure: false) > maxWidth;
+            bool breakAfterFirst = BreakAfterFirstWhenWrapping && ChildCount > 1 && TotalRowWidth() > maxWidth;
             int x = 0, y = 0, rowHeight = 0;
 
             for (int i = 0; i < ChildCount; i++)
