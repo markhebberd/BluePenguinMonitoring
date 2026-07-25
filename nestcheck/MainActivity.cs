@@ -134,7 +134,6 @@ namespace PenguinMonitor
         private LinearLayout? _stickyNoteBar;
         private CheckBox _setTimeActiveSessionCheckBox;
         private TextView _boxSavedTimeTextView;
-        private Spinner _boxSetSelector;
         // Trails the filter sentence with the count of boxes currently shown, e.g. "(74)".
         private TextView? _boxCountLabel;
 
@@ -3253,18 +3252,6 @@ namespace PenguinMonitor
             actionRow.AddView(_syncButton);
             actionRow.AddView(authButton);
             _settingsCard.AddView(actionRow);
-        }
-
-        private void UpdateBoxSetsSelector()
-        {
-            //Update box sets selector spinner
-            List<string> boxSets = (_appSettings.AllBoxSetsString ?? "").Split(new string[] { "},{", "{", "}" }, StringSplitOptions.RemoveEmptyEntries).ToList();
-            boxSets.Add("All");
-            ArrayAdapter<string> adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, boxSets);
-            adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
-            _boxSetSelector.Adapter = adapter;
-            if (_appSettings.BoxSetString != null && boxSets.Contains(_appSettings.BoxSetString))
-                _boxSetSelector.SetSelection(boxSets.IndexOf(_appSettings.BoxSetString));
         }
 
         private void OnScrollViewTouch(object? sender, View.TouchEventArgs e)
