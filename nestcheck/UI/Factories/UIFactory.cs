@@ -199,7 +199,19 @@ namespace PenguinMonitor.UI.Factories
                 if (e != null && e.Action == Android.Views.MotionEventActions.Down)
                 {
                     Parent?.RequestDisallowInterceptTouchEvent(true);
-                    DropDownVerticalOffset = Height; // open below the field, not over the value
+                    // Position the popup clear of the field in whichever direction it opens. When it
+                    // fits below, drop it below the field (offset by the field height) so it doesn't
+                    // cover the current value. When it can't fit below and flips ABOVE, lift it by a
+                    // small gap so the lowest item sits just above the field rather than over it.
+                    var dm = Resources?.DisplayMetrics;
+                    float density = dm?.Density ?? 2f;
+                    var loc = new int[2];
+                    GetLocationOnScreen(loc);
+                    int anchorTop = loc[1];
+                    int spaceBelow = (dm?.HeightPixels ?? 0) - (anchorTop + Height);
+                    int estPopup = (Adapter?.Count ?? 0) * (int)(48 * density); // ≈ row height per item
+                    bool flipUp = estPopup > spaceBelow && anchorTop > spaceBelow;
+                    DropDownVerticalOffset = flipUp ? -(int)(8 * density) : Height;
                 }
                 return base.DispatchTouchEvent(e);
             }
