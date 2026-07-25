@@ -12,13 +12,13 @@ $__active = @file_get_contents('/var/www/shared/active_db');
 $__active = trim((string)$__active);
 if ($__active !== 'ww_a' && $__active !== 'ww_b') $__active = 'ww_a';
 
-define('DB_HOST', 'db');            // docker-compose service name
+define('DB_HOST', '127.0.0.1');     // MariaDB runs in this same container
 define('DB_NAME', $__active);
 define('DB_USER', 'ww');
 define('DB_PASS', 'CHANGE_ME_MATCH_DB_APP_PASS');
 
 define('DB_RO_USER', 'ww_ro');
-define('DB_RO_PASS', 'readonly-local-only');
+define('DB_RO_PASS', 'CHANGE_ME_MATCH_DB_RO_PASS');
 
 // Local-only API key. NOT the production key — nothing on the LAN needs that one,
 // and the nightly download reads the production key from shared/nas.env instead.

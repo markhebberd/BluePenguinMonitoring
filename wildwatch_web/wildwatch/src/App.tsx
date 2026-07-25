@@ -657,6 +657,10 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     const base = sizeLabel.endsWith('U') ? sizeLabel.slice(0, -1) : sizeLabel;
     mid = [base, guessSexes.map(g => `${g.c}U${g.s}`).join('-')].filter(Boolean).join('-');
   }
+  // Chick size code (LC/BC/SC, plus any sex info) rides at the END in a yellow tab, nestcheck-
+  // style — it replaces the decorative chipped-chick tail wherever a code exists. A still-chick
+  // pill is already all-yellow, so it keeps the code inline.
+  const showSizeTag = !!sizeLabel && wasChippedAsChick && !stillChick;
   const href = scan.peng_num ? `/bird/${scan.peng_num}` : undefined;
   // Hovering a mini tied to a data entry shows that entry's NZ-local time. Use the first
   // timestamped source available — an explicit observationDate, or a timestamp carried on the
@@ -667,12 +671,12 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
     ? parseDate(timeSrc).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     : undefined;
   return (
-    <a className={`scan clickable ${cls} ${chipCls} ${grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
+    <a className={`scan clickable ${cls} ${showSizeTag ? '' : chipCls} ${showSizeTag ? '' : grayCls} ${chippedHereCls}`} data-peng={scan.peng_num || chip || undefined} href={href} title={title || nzTime} onClick={navigateDirectly ? undefined : e => navClick(e, () => {
       onClick();
       // Re-clicking the bird already open in the panel won't remount it — toggle the highlight.
       if (scan.peng_num && scan.peng_num === openPanelPengNum) toggleSelectedPengMinis();
     })}>
-      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}
+      {num}{num && icon ? ' ' : ''}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{mid && !showSizeTag ? ` ${mid} ` : (num || icon) && chip ? ' ' : ''}{chip}{showSizeTag && <span className="chick-tag">{mid}</span>}
     </a>
   );
 }

@@ -1,51 +1,46 @@
-# Wildwatch NAS mirror — LAN-only, HTTP, restored nightly from the previous night's backup.
-# Run from /volume1/wildwatch/nas-mirror on the Synology (Container Manager / docker compose).
+# Template. bootstrap-nas.sh renders this to docker-compose.yml with literal values —
+# DSM's Container Manager validates Projects with its own parser, stricter than docker
+# compose's, and rejects variable interpolation (it cannot read the root-only .env to
+# resolve it) and v2-era keys like mem_limit. So: plain literals, no variables.
+#
+# One container: MariaDB + Apache/PHP together, one bind-mounted folder.
+# To remove: Container Manager -> Project -> wildwatch -> Delete, then delete
+# @@WW_ROOT@@. No named volumes, no extra networks, no DSM config touched.
 #
 # Deliberately NOT exposed to the internet: no reverse proxy entry, no QuickConnect rule,
-# no port forward. The only network traffic that leaves the house is the nightly outbound
-# HTTPS pull from wildwatch.co.nz.
+# no port forward. The only traffic leaving the house is the nightly outbound pull.
 
 services:
-  db:
-    image: mariadb:11.8          # matches production (MariaDB 11.8.x)
-    container_name: wildwatch-db
+  wildwatch:
+    # Image is built once via CLI (docker build -t wildwatch-mirror:latest .) because
+    # DSM's Project wizard cannot build from a Dockerfile — it tries to download the image
+    # and rejects the file. An image-only compose validates in the GUI. Rebuild the image
+    # by hand only when the Dockerfile changes (a PHP/MariaDB major bump — rare).
+    image: wildwatch-mirror:latest
+    container_name: wildwatch
     restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?set DB_ROOT_PASS in .env}
-      MARIADB_USER: ww
-      MARIADB_PASSWORD: ${DB_APP_PASS:?set DB_APP_PASS in .env}
-      MARIADB_DATABASE: ww_a     # created empty; the nightly restore fills ww_a / ww_b
-    volumes:
-      - dbdata:/var/lib/mysql
-      - ./initdb:/docker-entrypoint-initdb.d:ro
-    # No ports: — the DB is reachable only from the web container and `docker exec`.
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 20s
-      timeout: 5s
-      retries: 10
-
-  web:
-    build: .
-    container_name: wildwatch-web
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
+    # Supplies WW_DB_PASS / WW_DB_RO_PASS to the entrypoint on first run.
+    env_file:
+      - .env
     ports:
-      - "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-8080}:80"
+      - "@@HTTP_PORT@@:80"
     volumes:
-      # SPA build + PHP API, rsynced from the dev machine. Read-only to the container.
+      # SPA build + PHP API, pulled nightly from production's deployed release. Read-only.
       # app/api/secrets.php is a symlink to /var/www/shared/secrets.php (dangling on the
-      # host, resolved inside the container) — same trick the VPS deploy uses, so the
-      # real credentials never sit in the rsynced tree.
-      - ${WW_ROOT:-/volume1/wildwatch}/app:/var/www/html:ro
-      # Credentials + which slot (ww_a / ww_b) is live. secrets.php re-reads active_db
-      # on every request, so the nightly flip needs no restart.
-      - ${WW_ROOT:-/volume1/wildwatch}/shared:/var/www/shared:ro
-      # Nightly status page, served at /status (Apache Alias — it cannot be mounted
-      # inside the read-only html mount).
-      - ${WW_ROOT:-/volume1/wildwatch}/status:/var/www/status:ro
-
-volumes:
-  dbdata:
+      # host, resolved inside the container), so credentials stay out of the app tree.
+      - @@WW_ROOT@@/app:/var/www/html:ro
+      # Credentials + which slot (ww_a / ww_b) is live. secrets.php re-reads active_db on
+      # every request, so the nightly flip needs no restart.
+      - @@WW_ROOT@@/shared:/var/www/shared:ro
+      # Nightly status page, served at /status (Apache Alias — it cannot be mounted inside
+      # the read-only html mount).
+      - @@WW_ROOT@@/status:/var/www/status:ro
+      # The database. Bind-mounted rather than a named volume so everything the mirror
+      # owns sits under one deletable folder.
+      - @@WW_ROOT@@/db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/ && mariadb -uroot -e 'SELECT 1' >/dev/null"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
