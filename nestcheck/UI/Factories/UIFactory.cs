@@ -214,6 +214,11 @@ namespace PenguinMonitor.UI.Factories
                     tv.SetPadding(_padH, _padV, _padH, _padV);
                     tv.SetTextColor(TEXT_PRIMARY);
                     tv.TextSize = 16;
+                    // Replace the item's Material ripple background (which fades in slowly and out
+                    // quickly, so you can't tell which row your finger is on) with a solid state
+                    // highlight — instant on/off, and it stays lit while the row is under the finger.
+                    tv.SetBackgroundResource(Resource.Drawable.spinner_drag_selector);
+                    tv.SetPadding(_padH, _padV, _padH, _padV);
                     if (position == 0 && _values[0] == "")
                         tv.Text = "Gate-open or no-data";
                 }
