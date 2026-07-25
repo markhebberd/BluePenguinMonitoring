@@ -134,15 +134,15 @@ namespace PenguinMonitor.UI.Factories
 
             return editText;
         }
-        public Spinner CreateSpinner(List<string> options, bool dropdown = false)
+        public Spinner CreateSpinner(List<string> options)
         {
-            return CreateSpinner(options.ToArray(), dropdown);
+            return CreateSpinner(options.ToArray());
         }
-        public Spinner CreateSpinner(string[] options, bool dropdown = false)
+        public Spinner CreateSpinner(string[] options)
         {
-            // dropdown: anchored popup under the field; default is the theme's mode
-            // (a full-screen dialog selector on our theme).
-            var spinner = dropdown ? new Spinner(_context, SpinnerMode.Dropdown) : new Spinner(_context);
+            // Always an anchored popup under the field — the theme's default is a full-screen
+            // dialog selector, which looks disconnected from the picker.
+            var spinner = new Spinner(_context, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
             

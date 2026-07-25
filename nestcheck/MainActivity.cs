@@ -2880,13 +2880,13 @@ namespace PenguinMonitor
             var regionColonyLayout = new LinearLayout(this);
             regionColonyLayout.SetPadding(8, 8, 8, 8);
 
-            var regionSpinner = new Spinner(this);
+            var regionSpinner = new Spinner(this, SpinnerMode.Dropdown);
             regionSpinner.SetPadding(8, 4, 8, 4);
             regionSpinner.Prompt = "Region";
             regionSpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             regionColonyLayout.AddView(regionSpinner);
 
-            var colonySpinner = new Spinner(this);
+            var colonySpinner = new Spinner(this, SpinnerMode.Dropdown);
             colonySpinner.SetPadding(8, 4, 8, 4);
             colonySpinner.Prompt = "Colony";
             colonySpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
@@ -5632,7 +5632,7 @@ namespace PenguinMonitor
 
             // Sex
             card.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList(), dropdown: true);
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
             var savedSex = existing?.ObservedSex ?? "";
             var sexIdx = Array.FindIndex(ObservedSexOptions, o => o.code == savedSex);
             if (sexIdx >= 0) sexSpinner.SetSelection(sexIdx);
@@ -5860,7 +5860,7 @@ namespace PenguinMonitor
 
             var sexLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             sexLayout.AddView(createLabel("Sex"));
-            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList(), dropdown: true);
+            var sexSpinner = _uiFactory.CreateSpinner(ObservedSexOptions.Select(o => o.label).ToList());
             sexSpinner.LayoutParameters = spinnerParams;
             sexLayout.AddView(sexSpinner);
             sexCol.AddView(sexLayout);
@@ -5868,7 +5868,7 @@ namespace PenguinMonitor
             var chickSizeLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chickSizeLayout.Visibility = ViewStates.Gone;
             chickSizeLayout.AddView(createLabel("Chick size"));
-            var chickSizeSpinner = _uiFactory.CreateSpinner(new List<string> { "Unknown", "Single Chick (SC)", "Big Chick (BC)", "Little Chick (LC)" }, dropdown: true);
+            var chickSizeSpinner = _uiFactory.CreateSpinner(new List<string> { "Unknown", "Single Chick (SC)", "Big Chick (BC)", "Little Chick (LC)" });
             chickSizeSpinner.LayoutParameters = spinnerParams;
             chickSizeLayout.AddView(chickSizeSpinner);
             sexCol.AddView(chickSizeLayout);
