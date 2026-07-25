@@ -1669,10 +1669,11 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
     if (scrollTo && ref.current) {
       ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setFlashing(true);
-      const timer = setTimeout(() => setFlashing(false), 1500);
-      return () => clearTimeout(timer);
+    } else if (!highlight) {
+      // Keep the highlight until the user navigates elsewhere — no auto-fade timer.
+      setFlashing(false);
     }
-  }, [highlight]);
+  }, [highlight, scrollTo]);
   const obsId = obs.observation_id;
   const localObs = obs;
   const dayNote = getDayNote(toNzDateStr(obs.observation_time_utc));
