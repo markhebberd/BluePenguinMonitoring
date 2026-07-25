@@ -9035,7 +9035,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         </div>
         {mirrorMsg && <p className="muted" style={{ color: '#1a6b8f' }}>{mirrorMsg}</p>}
         <iframe title="Backup status" srcDoc={mirrorHtml}
-          style={{ width: '100%', height: '78vh', border: '1px solid #ddd', borderRadius: 8, marginTop: 8, background: '#0f1720' }} />
+          style={{ width: '100%', height: '78vh', border: '1px solid #ddd', borderRadius: 8, marginTop: 8, background: '#fff' }} />
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>

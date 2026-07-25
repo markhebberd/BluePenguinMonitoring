@@ -113,35 +113,35 @@ write_status() {
   {
     printf '<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
     printf '<title>Wildwatch backup status</title><style>'
-    printf 'body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:2rem;background:#0f1720;color:#e6edf3}'
-    printf '.card{max-width:46rem;margin:auto}h1{font-size:1.25rem;margin:0 0 .25rem}h2{font-size:1rem;margin:1.75rem 0 .25rem}'
+    printf 'body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.25rem;background:#fff;color:#2a2a2a}'
+    printf '.card{max-width:46rem;margin:auto}h1{font-size:1.2rem;margin:0 0 .25rem;color:#1a3a4a}h2{font-size:1rem;margin:1.5rem 0 .25rem;color:#1a3a4a}'
     printf '.badge{display:inline-block;padding:.35rem .8rem;border-radius:999px;font-weight:600;letter-spacing:.02em}'
-    printf '.ok{background:#0f5132;color:#d1e7dd}.bad{background:#5c1a1a;color:#f8d7da}'
-    printf '.summary{margin:1.25rem 0;padding:1.1rem 1.25rem;background:#132030;border:1px solid #263241;border-radius:12px}'
-    printf '.summary .big{font-size:2.4rem;font-weight:700;line-height:1;color:#3fb950}'
+    printf '.ok{background:#e6f4ea;color:#1e7e34}.bad{background:#fdecea;color:#c0392b}'
+    printf '.summary{margin:1.25rem 0;padding:1.1rem 1.25rem;background:#f5f8fa;border:1px solid #e2e8ee;border-radius:12px}'
+    printf '.summary .big{font-size:2.4rem;font-weight:700;line-height:1;color:#1a6b8f}'
     printf '.cal{margin:.75rem 0 .25rem}.mrow{display:flex;align-items:center;gap:.6rem;margin:2px 0}'
-    printf '.ml{width:4.5rem;color:#9fb0c0;font-size:.8rem;text-align:right;flex:none}'
-    printf '.days{display:flex;flex-wrap:wrap;gap:2px;flex:1}.mc{width:1.6rem;color:#9fb0c0;font-size:.8rem;text-align:right}'
-    printf '.days i{width:12px;height:12px;border-radius:2px;background:#21262d}'
-    printf '.days i.on{background:#3fb950}.days i.off{background:#21262d}'
+    printf '.ml{width:4.5rem;color:#666;font-size:.8rem;text-align:right;flex:none}'
+    printf '.days{display:flex;flex-wrap:wrap;gap:2px;flex:1}.mc{width:1.6rem;color:#666;font-size:.8rem;text-align:right}'
+    printf '.days i{width:12px;height:12px;border-radius:2px;background:#e2e8ee}'
+    printf '.days i.on{background:#2e9e4f}.days i.off{background:#e2e8ee}'
     printf 'table{border-collapse:collapse;width:100%%;margin-top:.5rem}'
-    printf 'td{padding:.45rem .6rem;border-top:1px solid #263241;vertical-align:top}'
-    printf 'td.s{width:1.6rem}.m{color:#9fb0c0;font-size:.9rem}a{color:#7cc4ff}.leg{font-size:.8rem;color:#9fb0c0;margin-top:.4rem}'
+    printf 'td{padding:.45rem .6rem;border-top:1px solid #e5e9ee;vertical-align:top}'
+    printf 'td.s{width:1.6rem}.m{color:#666;font-size:.9rem}a{color:#1a6b8f}.leg{font-size:.8rem;color:#666;margin-top:.4rem}'
     printf '.leg i{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px}</style>'
     printf '<div class=card><h1>Wildwatch backup mirror</h1>'
     printf '<p><span class="badge %s">%s</span></p><p class=m>%s Checked %s.</p>' "$cls" "$badge" "$sub" "$STAMP"
 
     render_calendar
-    printf '<p class=leg><i style="background:#3fb950"></i> a day with a restore-tested backup &nbsp; '
-    printf '<i style="background:#21262d"></i> no backup that day (NAS was off)</p>'
+    printf '<p class=leg><i style="background:#2e9e4f"></i> a day with a restore-tested backup &nbsp; '
+    printf '<i style="background:#e2e8ee"></i> no backup that day (NAS was off)</p>'
 
     printf '<h2>Last night&rsquo;s check</h2><table>'
     printf '%s' "$STEPS" | while IFS='	' read -r st label detail; do
       [ -z "$label" ] && continue
       case "$st" in
-        ok)   icon='<span style="color:#3fb950">&#10003;</span>' ;;
-        warn) icon='<span style="color:#d29922">&#9888;</span>'  ;;
-        *)    icon='<span style="color:#f85149">&#10007;</span>' ;;
+        ok)   icon='<span style="color:#1e7e34">&#10003;</span>' ;;
+        warn) icon='<span style="color:#b8860b">&#9888;</span>'  ;;
+        *)    icon='<span style="color:#c0392b">&#10007;</span>' ;;
       esac
       printf '<tr><td class=s>%s</td><td>%s</td><td class=m>%s</td></tr>' "$icon" "$label" "$detail"
     done
