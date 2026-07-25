@@ -249,7 +249,7 @@ header h1:hover { opacity:.8; }
 @keyframes status-pop { from { opacity:0; } to { opacity:1; } }
 .obs-notes { font-size:11px; color:#555; margin-top:3px; font-style:italic; }
 .scans { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
-.scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; color:#333; text-decoration:none; }
+.scan { font-size:9px; line-height:1.4; padding:1px 4px; border-radius:3px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; color:#333; text-decoration:none; white-space:nowrap; }
 .scan.f { background:#FFE4E1; }
 .scan.m { background:#E6F3FF; }
 .scan.chick { background:#FFF9C4; border-color:#FDD835; }
@@ -268,9 +268,12 @@ header h1:hover { opacity:.8; }
 .scan.chipped-here { background:#C8E6C9; }
 /* Chipped-here AND chipped-as-chick: green with the yellow "tail" (overrides solid green) */
 .scan.chipped-chick.chipped-here { background: linear-gradient(to right, #C8E6C9 85%, #FFF9C4 85%); }
-/* Chick size code (LC/BC/SC + sex) as a trailing yellow tab hugging the code, at the mini's
-   right edge — the chipped-as-chick strip, now carrying the code. UNL pale yellow, no divider. */
-.scan .chick-tag { background:#FFF9C4; color:#333; margin:-1px -4px -1px 4px; padding:1px 4px; border-radius:0 2px 2px 0; }
+/* Chick size code (LC/BC/SC + sex) fills the right of the mini as a solid yellow block, flush
+   to the pill's rounded edge — the chipped-as-chick strip, now carrying the code. UNL pale
+   yellow, no divider. The pill turns into a flex row only when tagged, so untagged minis are
+   untouched; overflow:hidden clips the block's square corners to the pill's radius. */
+.scan.has-tag { display:inline-flex; align-items:center; overflow:hidden; }
+.scan.has-tag .chick-tag { align-self:stretch; display:inline-flex; align-items:center; background:#FFF9C4; color:#333; margin:-1px -4px -1px 4px; padding:0 4px; }
 .scan.no-scan { background:#E0E0E0; color:#000; display:inline-flex; align-items:center; justify-content:center; min-width:84px; text-align:center; }
 .add-noscan-btn { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:3px 8px; font-size:11px; cursor:pointer; white-space:nowrap; }
 .add-noscan-btn:hover { background:#d5d5d5; }
