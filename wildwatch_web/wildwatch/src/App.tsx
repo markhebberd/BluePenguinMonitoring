@@ -5653,9 +5653,12 @@ function SurvivalPredictionReport() {
 /** Pair bond duration: how many consecutive seasons the same two adults share a box. */
 function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   const v = useDbVersion();
-  const rows = useMemo(() => {
-    // For each box+season, find the detected breeding pair. Then track consecutive seasons
-    // the same pair appears together at ANY box.
+  // Count non-consecutive breeding years too: rank and threshold on total seasons together
+  // rather than only the longest unbroken run.
+  const [nonConsec, setNonConsec] = useState(false);
+  const allRows = useMemo(() => {
+    // For each box+season, find the detected breeding pair. Then track the seasons the same
+    // pair appears together at ANY box.
     const pairSeasons = new Map<string, { a: any; b: any; seasons: Set<string>; boxes: Set<string> }>();
     for (const loc of queryAllLocations()) {
       const bd = queryBoxDetailSync(loc.location_name);
@@ -5673,30 +5676,43 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
         }
       }
     }
-    // Compute max consecutive run of seasons
-    return Array.from(pairSeasons.values())
-      .map(e => {
-        const sorted = Array.from(e.seasons).map(Number).sort((a, b) => a - b);
-        let maxRun = 1, run = 1;
-        for (let i = 1; i < sorted.length; i++) {
-          if (sorted[i] === sorted[i - 1] + 1) { run++; if (run > maxRun) maxRun = run; }
-          else run = 1;
-        }
-        return { a: e.a, b: e.b, totalSeasons: sorted.length, consecutive: maxRun, boxes: Array.from(e.boxes).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) };
-      })
-      .filter(r => r.totalSeasons >= 2)
-      .sort((a, b) => b.consecutive - a.consecutive || b.totalSeasons - a.totalSeasons)
-      .slice(0, 25);
+    // Longest consecutive run, and the full season list (for the non-consecutive reading).
+    return Array.from(pairSeasons.values()).map(e => {
+      const sorted = Array.from(e.seasons).map(Number).sort((a, b) => a - b);
+      let maxRun = 1, run = 1;
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] === sorted[i - 1] + 1) { run++; if (run > maxRun) maxRun = run; }
+        else run = 1;
+      }
+      return { a: e.a, b: e.b, totalSeasons: sorted.length, consecutive: maxRun,
+        years: sorted.map(y => seasonRange(String(y))).join(', '),
+        boxes: Array.from(e.boxes).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) };
+    });
   }, [v]);
+  // Duration is the metric being ranked/filtered: consecutive run, or total seasons when
+  // non-consecutive years are counted. Keep only bonds lasting more than two seasons.
+  const rows = useMemo(() => {
+    const dur = (r: typeof allRows[number]) => nonConsec ? r.totalSeasons : r.consecutive;
+    return allRows.filter(r => dur(r) > 2)
+      .sort((a, b) => dur(b) - dur(a) || b.totalSeasons - a.totalSeasons || b.consecutive - a.consecutive);
+  }, [allRows, nonConsec]);
   const [shown, showAllBtn] = useTopRows(rows);
 
   return (
     <div className="report-card">
       <h3>Pair bond duration</h3>
-      <p className="muted">Breeding pairs detected together in multiple seasons, ranked by longest consecutive run (min 2 seasons, top 25)</p>
+      <div className="group-method-row">
+        <button className={!nonConsec ? 'active' : ''} onClick={() => setNonConsec(false)}>Consecutive years</button>
+        <button className={nonConsec ? 'active' : ''} onClick={() => setNonConsec(true)}>Incl. non-consecutive</button>
+      </div>
+      <p className="muted">
+        Breeding pairs detected together for more than two seasons, ranked by {nonConsec
+          ? 'total seasons bred together (gaps allowed)'
+          : 'longest unbroken run of seasons'}.
+      </p>
       {rows.length === 0 ? <p className="muted">No data available</p> : (
         <table className="guess-rank-table mini-list-table">
-          <thead><tr><th>Pair</th><th>Consecutive</th><th>Total seasons</th><th>Boxes</th></tr></thead>
+          <thead><tr><th>Pair</th><th>Consecutive</th><th>Total seasons</th><th>Seasons</th><th>Boxes</th></tr></thead>
           <tbody>
             {shown.map((r, i) => (
               <tr key={i}>
@@ -5707,8 +5723,9 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
                     ))}
                   </div>
                 </td>
-                <td><strong>{r.consecutive}</strong></td>
-                <td>{r.totalSeasons}</td>
+                <td>{nonConsec ? r.consecutive : <strong>{r.consecutive}</strong>}</td>
+                <td>{nonConsec ? <strong>{r.totalSeasons}</strong> : r.totalSeasons}</td>
+                <td className="muted">{r.years}</td>
                 <td>{r.boxes.join(', ')}</td>
               </tr>
             ))}
