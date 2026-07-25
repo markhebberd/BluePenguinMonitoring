@@ -4016,7 +4016,7 @@ namespace PenguinMonitor
         private static readonly Color SCAN_MALE_BG = Color.ParseColor("#E6F3FF");
         private static readonly Color SCAN_FEMALE_BG = Color.ParseColor("#FFE4E1");
         private static readonly Color SCAN_UNKNOWN_BG = Color.ParseColor("#F0F0F0");
-        private static readonly Color SCAN_CHICK_BG = Color.ParseColor("#FFF9C4");
+        private static readonly Color SCAN_CHICK_BG = Color.ParseColor("#FFEB3B");
         private static readonly Color SCAN_CHIPPED_TODAY_BG = Color.ParseColor("#C8E6C9");
         private static readonly Color BOX_MISMATCH_BG = Color.ParseColor("#FFCDD2");
         private static readonly Color SCAN_MALE_TEXT = Color.ParseColor("#1565C0");
