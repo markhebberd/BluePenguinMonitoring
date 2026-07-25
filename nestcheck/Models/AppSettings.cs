@@ -707,20 +707,6 @@ namespace PenguinMonitor.Models
             }
         }
 
-        private bool showDailyLabelWarning = true;
-        public bool ShowDailyLabelWarning
-        {
-            get => showDailyLabelWarning;
-            set
-            {
-                if (showDailyLabelWarning != value)
-                {
-                    showDailyLabelWarning = value;
-                    OnAnyPropertyChanged();
-                }
-            }
-        }
-
         // Transient property - not saved to JSON
         [JsonIgnore]
         public bool ShowDifferencesWithPreviousMonitor { get; set; } = false;

@@ -186,7 +186,6 @@ namespace PenguinMonitor
         }
         private Button? _deleteBoxTagButton;
 
-        private TextView? _standaloneDailyLabelWarning;
         private TextView? _noColonyBanner;   // blocks data entry while no box sets string is loaded
         private TextView? _webviewButton;   // opens the wildwatch box panel for the current nest
         private LinearLayout? _prevObsSummaryLayout;
@@ -1816,19 +1815,6 @@ namespace PenguinMonitor
             headerStatusSettingsCard.AddView(_settingsCard);
             CreateBoxSetsDictionary();
 
-            // Daily label warning (below buttons, visible even when settings collapsed)
-            _standaloneDailyLabelWarning = new TextView(this)
-            {
-                Text = "⚠ Daily label is not set — open Settings to set it",
-                TextSize = 13,
-            };
-            _standaloneDailyLabelWarning.SetTextColor(UIFactory.DANGER_RED);
-            _standaloneDailyLabelWarning.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            _standaloneDailyLabelWarning.SetPadding(16, 8, 16, 8);
-            _standaloneDailyLabelWarning.Gravity = GravityFlags.Center;
-            _standaloneDailyLabelWarning.Visibility = ViewStates.Gone;
-            headerStatusSettingsCard.AddView(_standaloneDailyLabelWarning);
-
             parentLinearLayout.AddView(headerStatusSettingsCard);
 
            // Data card
@@ -2843,91 +2829,38 @@ namespace PenguinMonitor
             setLabelButton.Click += (s, e) =>
             {
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
-                var oldLabel = _colonyState.DailyLabel ?? "";
+                var nzToday = NzToday;
 
                 // Hide keyboard
                 var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
                 imm?.HideSoftInputFromWindow(dailyLabelInput.WindowToken, 0);
 
-                // Find today's observations by this user with a different or empty label
-                var nzToday = NzToday;
-                var myObserverName = _appSettings?.ObserverName ?? "";
-                var mismatchedObs = _colonyState.TodayBoxes.Values
-                    .Where(o => o.ObserverName == myObserverName
-                        && ToNzTime(o.WhenDataCollectedUtc).Date == nzToday
-                        && (o.MonitorFilename ?? "") != newLabel)
-                    .ToList();
-                var mismatchedPending = _colonyState.PendingObservations
-                    .Where(o => o.ObserverName == myObserverName
-                        && ToNzTime(o.WhenDataCollectedUtc).Date == nzToday
-                        && (o.MonitorFilename ?? "") != newLabel)
-                    .ToList();
-                var totalMismatched = mismatchedObs.Count + mismatchedPending.Count;
+                // The daily label is the colony's day note (one per colony per day) — no longer a
+                // per-observation filename. Set it locally (it also rides along as daily_label on the
+                // next observation upload), then upsert it straight to the server day note so a change
+                // takes effect even when today's observations are already synced.
+                _colonyState.DailyLabel = newLabel;
+                _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
+                DataStorageService.SaveColonyState(this, _colonyState);
 
-                Action applyLabel = () =>
+                if (_appSettings.IsAuthenticated)
                 {
-                    _colonyState.DailyLabel = newLabel;
-                    _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
-                    DataStorageService.SaveColonyState(this, _colonyState);
-                    UpdateDailyLabelWarnings();
-                };
-
-                if (totalMismatched > 0 && !string.IsNullOrEmpty(newLabel))
-                {
-                    new AlertDialog.Builder(this)
-                        .SetTitle("Update existing observations?")
-                        .SetMessage($"{totalMismatched} of your observations today have a different label.\n\nUpdate them all to \"{newLabel}\"?")
-                        .SetPositiveButton("Update all", (s2, e2) =>
-                        {
-                            foreach (var obs in mismatchedObs)
-                            {
-                                // Server-side observations aren't in the upload queue — copy them into
-                                // PendingObservations so the label change actually uploads.
-                                var obsNzDate = ToNzTime(obs.WhenDataCollectedUtc).Date;
-                                var existingPending = _colonyState.PendingObservations.FirstOrDefault(p =>
-                                    p.BoxName == obs.BoxName && ToNzTime(p.WhenDataCollectedUtc).Date == obsNzDate);
-                                if (existingPending != null) continue; // handled via mismatchedPending
-                                obs.MonitorFilename = newLabel;
-                                obs.IsPendingUpload = true;
-                                obs.PendingUploadSinceUtc ??= DateTime.UtcNow;
-                                if (obs.ObservationId.HasValue)
-                                    obs.ConfirmedAgainstObsId = obs.ObservationId.Value; // replace on server, don't duplicate
-                                _colonyState.SaveBoxObservation(obs.BoxName, obs);
-                            }
-                            foreach (var obs in mismatchedPending) { obs.MonitorFilename = newLabel; obs.IsPendingUpload = true; obs.PendingUploadSinceUtc ??= DateTime.UtcNow; }
-                            applyLabel();
-                            DrawPageLayouts();
-                            TryBackgroundUpload();
-                        })
-                        .SetNegativeButton("Just set label", (s2, e2) => applyLabel())
-                        .Show();
+                    var colonyId = CurrentColonyIdOrDefault();
+                    var dateStr = nzToday.ToString("yyyy-MM-dd");
+                    var token = _appSettings.AuthToken;
+                    _ = Task.Run(async () =>
+                    {
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token);
+                        new Handler(Looper.MainLooper).Post(() =>
+                            Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
+                    });
                 }
                 else
                 {
-                    applyLabel();
+                    Toast.MakeText(this, "Daily label set", ToastLength.Short)?.Show();
                 }
             };
             dailyLabelLayout.AddView(setLabelButton);
-
-            // Warning icon to the LEFT of the checkbox
-            var dailyLabelWarningIcon = new TextView(this) { Text = "⚠", TextSize = 16 };
-            dailyLabelWarningIcon.SetTextColor(UIFactory.DANGER_RED);
-            dailyLabelWarningIcon.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            var warnIconParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            warnIconParams.Gravity = GravityFlags.CenterVertical;
-            warnIconParams.SetMargins(8, 0, 2, 0);
-            dailyLabelWarningIcon.LayoutParameters = warnIconParams;
-            dailyLabelLayout.AddView(dailyLabelWarningIcon);
-
-            var dailyLabelWarningCheckBox = new CheckBox(this) { Checked = _appSettings.ShowDailyLabelWarning };
-            dailyLabelWarningCheckBox.SetPadding(0, 0, 0, 0);
-            dailyLabelWarningCheckBox.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            dailyLabelWarningCheckBox.CheckedChange += (s, e) =>
-            {
-                _appSettings.ShowDailyLabelWarning = dailyLabelWarningCheckBox.Checked;
-                UpdateDailyLabelWarnings();
-            };
-            dailyLabelLayout.AddView(dailyLabelWarningCheckBox);
 
             // Edit Box Tags mode toggle button
             Button editBoxTagsButton = _uiFactory.CreateStyledButton(
@@ -3480,7 +3413,6 @@ namespace PenguinMonitor
                         }
                         if (_settingsCard != null) _settingsCard.Visibility = ViewStates.Gone;
                         if (_breedingDatesCard != null) _breedingDatesCard.Visibility = ViewStates.Gone;
-                        if (_standaloneDailyLabelWarning != null) _standaloneDailyLabelWarning.Visibility = ViewStates.Gone;
                         if (_prevObsHeaderText != null) _prevObsHeaderText.Visibility = ViewStates.Gone;
                         if (_prevObsSummaryLayout != null) _prevObsSummaryLayout.Visibility = ViewStates.Gone;
                         if (_stickyNoteBar != null) _stickyNoteBar.Visibility = ViewStates.Gone;
@@ -3517,9 +3449,6 @@ namespace PenguinMonitor
                     {
                         selectedPage = UIFactory.selectedPage.BoxDataSingle;
                     }
-
-                    // Warnings below action buttons (always visible regardless of settings collapse)
-                    UpdateDailyLabelWarnings();
 
                     // Tag mode content: today's data card + instruction text
                     if (_tagModeContentLayout != null)
@@ -6811,13 +6740,6 @@ namespace PenguinMonitor
             DataStorageService.SaveColonyState(this, _colonyState);
             UpdateSyncButtonLabel();
 
-        }
-
-        private void UpdateDailyLabelWarnings()
-        {
-            bool show = _appSettings.ShowDailyLabelWarning && string.IsNullOrWhiteSpace(_colonyState.DailyLabel) && !_appSettings.EditBoxTagsMode && !_isHistoricalView;
-            if (_standaloneDailyLabelWarning != null)
-                _standaloneDailyLabelWarning.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
         }
 
         private void UpdateSyncButtonLabel()

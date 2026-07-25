@@ -1184,6 +1184,28 @@ namespace PenguinMonitor.Services
             return new Dictionary<string, BoxNoteData>();
         }
 
+        // Push the day's note (the phone's "Daily label") straight to the day_notes table for a
+        // colony + NZ date. Unlike the daily_label carried on an observation upload — which only
+        // fills a day that has no note yet — this upserts, so re-setting the label actually changes
+        // it. Needs editor/admin role server-side; a viewer gets 403 and we just keep it local.
+        internal async Task<bool> SaveDayNoteAsync(int colonyId, string nzDate, string note, string token)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_API_URL}?action=save_day_note&colony_id={colonyId}");
+                request.Headers.Add("Authorization", $"Bearer {token}");
+                var body = JsonConvert.SerializeObject(new { colony_id = colonyId, date = nzDate, note });
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                var response = await _httpClient.SendAsync(request);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save day note: {ex.Message}");
+                return false;
+            }
+        }
+
         internal async Task<bool> UpdateBoxNotesAsync(int locationId, string notes, string token)
         {
             try
