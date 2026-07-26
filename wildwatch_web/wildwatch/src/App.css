@@ -572,6 +572,10 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 /* Shared sightings split by season, with breeding-window groups in a black box */
 .partner-season { margin-bottom:4px; }
 .partner-season-label { font-size:10px; font-weight:600; color:#1a5276; margin:4px 0 2px; }
+/* Sighting history split by season */
+.sight-season { margin-bottom:6px; }
+.sight-season-label { font-size:11px; font-weight:700; color:#1a5276; margin:8px 0 3px; padding-bottom:2px; border-bottom:1px solid #dde3e8; }
+.sight-season-label .muted { font-weight:500; font-size:10px; }
 .partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
 .partner-window-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .partner-window-offspring { display:inline-flex; gap:3px; align-items:center; flex-wrap:wrap; }

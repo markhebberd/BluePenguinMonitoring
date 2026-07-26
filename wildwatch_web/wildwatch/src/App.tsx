@@ -2451,7 +2451,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {editing && <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} /></td></tr>}
             {editing && <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>}
             {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
-            <tr><td className="muted">VID</td><td>{!editing ? (p.vid_for_scanner || <span className="muted">-</span>) : <EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} />}</td></tr>
+            {editing && <tr><td className="muted">VID</td><td><EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} /></td></tr>}
             {chips.map((c: any, i: number) => {
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();
@@ -2707,33 +2707,48 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       {/* Sighting history */}
       {sightings.length > 0 && <div className="bird-section">
         <h3 className="collapsible" onClick={() => toggleSection('sightings')}>{expandedSections.sightings ? '▾' : '▸'} Sighting history ({sightings.length})</h3>
-        {expandedSections.sightings && sightings.map((s: any, i: number) => s.source === 'chip' ? (
-          <ChipCard key={i} date={s.date} box={s.box} onBoxClick={onBoxClick} onDayClick={onDayClick} onBirdClick={onBirdClick}
-            chipBy={s.chip_by}
-            scan={{ peng_num: p.peng_num, pit_id: s.pit_id || activeChip?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, chip_by: s.chip_by, is_rechip: s.is_rechip }} />
-        ) : (
-          <div key={i} className="obs-card">
-            <div className="obs-top">
-              <b><DateLink date={s.date} onDayClick={() => onSightingClick(s.box, s.date)} /></b>
-              <a className="bird-chip clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>Box {s.box}</a>
-            </div>
-            <div className="obs-nums">
-              {s.adults === 0 && s.eggs === 0 && s.chicks === 0 && <span className="muted">Empty</span>}
-              {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
-              {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
-              {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
-              {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
-              {((s.seen_with || []).length > 0 || (s.no_scan || 0) > 0) && <span className="muted">with</span>}
-              {(s.seen_with || []).map((sw: any) => (
-                <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
+        {expandedSections.sightings && (() => {
+          // Sightings arrive newest-first; grouping preserves that order within and across
+          // seasons, so each season header introduces the block of visits below it.
+          const bySeason = new Map<string, any[]>();
+          for (const s of sightings) {
+            const label = getSeasonLabel(parseDate(s.date));
+            if (!bySeason.has(label)) bySeason.set(label, []);
+            bySeason.get(label)!.push(s);
+          }
+          return Array.from(bySeason.entries()).sort((a, b) => b[0].localeCompare(a[0])).map(([label, rows]) => (
+            <div key={label} className="sight-season">
+              <div className="sight-season-label">{seasonRange(label)} <span className="muted">{rows.length} sighting{rows.length !== 1 ? 's' : ''}</span></div>
+              {rows.map((s: any, i: number) => s.source === 'chip' ? (
+                <ChipCard key={i} date={s.date} box={s.box} onBoxClick={onBoxClick} onDayClick={onDayClick} onBirdClick={onBirdClick}
+                  chipBy={s.chip_by}
+                  scan={{ peng_num: p.peng_num, pit_id: s.pit_id || activeChip?.pit_id, sex: p.sex, chip_date: s.date, chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code, chip_by: s.chip_by, is_rechip: s.is_rechip }} />
+              ) : (
+                <div key={i} className="obs-card">
+                  <div className="obs-top">
+                    <b><DateLink date={s.date} onDayClick={() => onSightingClick(s.box, s.date)} /></b>
+                    <a className="bird-chip clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>Box {s.box}</a>
+                  </div>
+                  <div className="obs-nums">
+                    {s.adults === 0 && s.eggs === 0 && s.chicks === 0 && <span className="muted">Empty</span>}
+                    {s.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(s.adults, 6))}</span>}
+                    {s.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(s.eggs, 6))}</span>}
+                    {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
+                    {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
+                    {((s.seen_with || []).length > 0 || (s.no_scan || 0) > 0) && <span className="muted">with</span>}
+                    {(s.seen_with || []).map((sw: any) => (
+                      <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
+                    ))}
+                    {Array.from({ length: s.no_scan || 0 }).map((_, k) => (
+                      <span key={`ns${k}`} className="scan no-scan">No scan</span>
+                    ))}
+                  </div>
+                  {s.notes && <div className="obs-notes">{s.notes}</div>}
+                </div>
               ))}
-              {Array.from({ length: s.no_scan || 0 }).map((_, k) => (
-                <span key={`ns${k}`} className="scan no-scan">No scan</span>
-              ))}
             </div>
-            {s.notes && <div className="obs-notes">{s.notes}</div>}
-          </div>
-        ))}
+          ));
+        })()}
       </div>}
     </div>
   );
