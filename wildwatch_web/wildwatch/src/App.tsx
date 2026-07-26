@@ -2432,6 +2432,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   };
   // Weight and flipper as measured on the chipping day: the biometric row dated the same NZ
   // day as the chip. Editing writes through to that row — these are not fields of the chip.
+  // Residency: chipping to the bird's most recent sighting — how long it has been on the
+  // books here. Blank (and the row hidden) until it has been seen since being chipped.
+  const residency = activeChip?.chip_date && sightings.length > 0
+    ? durationBetween(parseDate(activeChip.chip_date), parseDate(sightings[0].date)) : '';
   const chipDay = (c: any) => (c.chip_date ? String(c.chip_date).slice(0, 10) : null);
   const chipBio = (c: any) => {
     const day = chipDay(c);
@@ -2487,6 +2491,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     ? <><DateLink date={activeChip.chip_date} onDayClick={onDayClick} /> <span className="muted">{agoSince(activeChip.chip_date)}</span></>
                     : <span className="muted">-</span>}
                 </td></tr>
+                {residency && <tr><td className="muted">Residency</td><td>{residency}</td></tr>}
                 {activeChip?.chip_box && <tr><td className="muted">Chip box</td><td>
                   <a className="clickable" href={`/box/${activeChip.chip_box}`} onClick={e => navClick(e, () => onBoxClick(activeChip.chip_box))}>Box {activeChip.chip_box}</a>
                   {activeChip.chip_by && <span className="chip-by"><span className="muted">by:</span> {activeChip.chip_by}</span>}
@@ -2507,6 +2512,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                       <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={editing} />
                       {!editing && c.chip_date && <span className="muted"> {agoSince(c.chip_date)}</span>}
                     </td></tr>
+                    {/* Whole-bird figure, so it hangs off the original chip only, not each rechip. */}
+                    {i === 0 && !!residency && <tr><td className="muted">Residency</td><td>{residency}</td></tr>}
                     <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td><EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={editing} /></td></tr>
                     <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={editing} /></td></tr>
                     {(() => { const bio = chipBio(c); return (<>
@@ -10913,24 +10920,26 @@ function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
 function fmtDateTime(d:string) { return formatDate(d); }
-/** How long ago a date was, as "3 years, 4 months" — rounded to the nearest whole month,
- *  and dropping whichever of years/months is zero. Under a month it counts in days, so a
- *  bird chipped last week doesn't read as "0 months". */
-function durationSince(d: string): string {
-  const then = parseDate(d), now = new Date();
-  if (isNaN(then.getTime()) || then >= now) return '';
-  let months = (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth());
-  if (now.getDate() < then.getDate()) months--;  // this month's anniversary hasn't come round yet
+/** The span between two dates, as "3 years, 4 months" — rounded to the nearest whole month,
+ *  dropping whichever of years/months is zero. Under a month it counts in days, so a bird
+ *  chipped last week doesn't read as "0 months". Empty string if the range is inverted or
+ *  either end is unparseable, so callers can hide the row rather than print nothing useful. */
+function durationBetween(from: Date, to: Date): string {
+  if (isNaN(from.getTime()) || isNaN(to.getTime()) || from >= to) return '';
+  let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+  if (to.getDate() < from.getDate()) months--;  // this month's anniversary hasn't come round yet
   // Round up once past the midpoint of the current part-month.
-  const anniv = new Date(then); anniv.setMonth(anniv.getMonth() + months);
-  if ((now.getTime() - anniv.getTime()) / DAY >= 15) months++;
+  const anniv = new Date(from); anniv.setMonth(anniv.getMonth() + months);
+  if ((to.getTime() - anniv.getTime()) / DAY >= 15) months++;
   if (months < 1) {
-    const days = Math.max(1, Math.round((now.getTime() - then.getTime()) / DAY));
+    const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / DAY));
     return `${days} day${days !== 1 ? 's' : ''}`;
   }
   const y = Math.floor(months / 12), m = months % 12;
   return [y && `${y} year${y !== 1 ? 's' : ''}`, m && `${m} month${m !== 1 ? 's' : ''}`].filter(Boolean).join(', ');
 }
+/** How long ago a date was. */
+function durationSince(d: string): string { return durationBetween(parseDate(d), new Date()); }
 /** durationSince as an elapsed-time phrase — "3 years, 4 months ago". Empty for a missing
  *  or future date, so the bare word "ago" can never render on its own. */
 function agoSince(d: string): string { const s = durationSince(d); return s ? `${s} ago` : ''; }
