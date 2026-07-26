@@ -1035,6 +1035,7 @@ export function computeChickSizeMismatch(): any[] {
       bc_peng: n.bc.peng_num, lc_peng: n.lc.peng_num,
       bc_weight: n.bc.chip_weight ?? null, lc_weight: n.lc.chip_weight ?? null,
       bc_flipper: n.bc.chip_flipper ?? null, lc_flipper: n.lc.chip_flipper ?? null,
+      _href: dayBoxHref(chip_date, box_name),
     });
   }
   return out;

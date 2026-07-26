@@ -7991,7 +7991,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     return iChickSize
       .filter((r: any) => r[lo] != null && r[hi] != null && Number(r[hi]) > Number(r[lo]))
       .map((r: any) => ({ box_name: r.box_name, chip_date: r.chip_date, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
-        bc_val: Number(r[lo]), lc_val: Number(r[hi]), diff: Number(r[hi]) - Number(r[lo]), unit }))
+        bc_val: Number(r[lo]), lc_val: Number(r[hi]), diff: Number(r[hi]) - Number(r[lo]), unit, _href: r._href }))
       .sort((a: any, b: any) => b.diff - a.diff);
   }, [iChickSize, chickMetric]);
 
@@ -9022,7 +9022,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           empty="None — every little chick is smaller than its big chick"
           columns={[
             { key: 'box_name', label: 'Box', render: boxCell },
-            { key: 'chip_date', label: 'Chipped' },
+            { key: 'chip_date', label: 'Chipped', render: dayCell },
             { key: 'bc_peng', label: 'BC', render: pengCell },
             { key: 'bc_val', label: `BC (${chickMetric === 'weight' ? 'g' : 'mm'})` },
             { key: 'lc_peng', label: 'LC', render: pengCell },
