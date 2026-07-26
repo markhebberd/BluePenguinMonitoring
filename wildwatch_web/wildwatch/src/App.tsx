@@ -7993,7 +7993,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         const bcF = num(r.bc_flipper), lcF = num(r.lc_flipper);
         const wInv = bcW != null && lcW != null && lcW > bcW;
         const fInv = bcF != null && lcF != null && lcF > bcF;
-        return { box_name: r.box_name, chip_date: r.chip_date, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
+        return { box_name: r.box_name, chip_date: r.chip_date, chipper: r.chipper, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
           bc_w: bcW, lc_w: lcW, bc_f: bcF, lc_f: lcF, wInv, fInv,
           wDiff: wInv ? lcW! - bcW! : 0, fDiff: fInv ? lcF! - bcF! : 0, _href: r._href };
       })
@@ -9024,6 +9024,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           columns={[
             { key: 'box_name', label: 'Box', render: boxCell },
             { key: 'chip_date', label: 'Chipped', render: dayCell },
+            { key: 'chipper', label: 'Chipper', render: (v: any) => v || '—' },
             { key: 'bc_peng', label: 'BC', render: pengCell },
             { key: 'lc_peng', label: 'LC', render: pengCell },
             { key: 'bc_w', label: 'BC wt (g)', render: (v: any) => v ?? '—' },
