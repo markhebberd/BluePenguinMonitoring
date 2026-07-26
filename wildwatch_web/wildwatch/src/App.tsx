@@ -2281,7 +2281,7 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
     const flags = FLAGS.filter(([k]) => b[k]).map(([, label]) => label);
     const ed = editing && !removed;
     return (<Fragment key={`${removed ? 'del' : 'bio'}${b.biometric_id ?? i}`}>
-      <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 4, fontSize: 11 }}>
+      <tr className="bio-record-head"><td className="muted" colSpan={2} style={{ fontWeight: 600, fontSize: 11 }}>
         {ed ? <EditableField value={b.observation_date} type="date" onSave={saveField(b.biometric_id, 'observation_date')} canEdit={true} /> : (b.observation_date || '')}
         {removed && <span className="bird-badge" style={{ background: '#FFCDD2', marginLeft: 6 }}>removed</span>}
         {removed && canEdit && <button className="edit-btn" style={{ marginLeft: 8 }} onClick={() => restore(b)}>Restore</button>}
@@ -2406,6 +2406,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const [showHistory, setShowHistory] = useState<{table:string;id:number}|null>(null);
   const [hasHistory, setHasHistory] = useState(false);
   const [editing, setEditing] = useState(false);
+  // The ▸ arrow opens the full record read-only; Edit shows the same rows, live.
+  const [showDetails, setShowDetails] = useState(false);
+  const fullView = editing || showDetails;
   const [copiedPit, setCopiedPit] = useState(false);
   const copyPit = (v: string) => { navigator.clipboard?.writeText(v); setCopiedPit(true); setTimeout(() => setCopiedPit(false), 1500); };
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
@@ -2427,6 +2430,23 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     if (reason === null) return;
     return updateRecord(token || '', 'penguin_chips', pitId, {[field]: val}, reason || undefined);
   };
+  // Weight and flipper as measured on the chipping day: the biometric row dated the same NZ
+  // day as the chip. Editing writes through to that row — these are not fields of the chip.
+  const chipDay = (c: any) => (c.chip_date ? String(c.chip_date).slice(0, 10) : null);
+  const chipBio = (c: any) => {
+    const day = chipDay(c);
+    return day ? biometrics.find((b: any) => String(b.observation_date || '').slice(0, 10) === day) || null : null;
+  };
+  const saveChipBio = (c: any, field: string) => async (val: any) => {
+    if (!token) return;
+    const num = val === '' || val === null || val === undefined ? null : parseFloat(val);
+    const bio = chipBio(c);
+    if (bio) return updateRecord(token, 'penguin_biometric_data', bio.biometric_id, { [field]: num });
+    // No biometric on the chipping day yet — the first measurement entered creates one.
+    const day = chipDay(c);
+    if (!day || num === null) return;
+    return createRecord(token, 'penguin_biometric_data', { peng_num: p.peng_num, observation_date: day, [field]: num });
+  };
 
 
   return (
@@ -2447,56 +2467,77 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
 
       {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
 
-      {/* Last seen */}
-      {sightings.length > 0 && (() => {
-        const last = sightings[0];
-        return <div className="bird-last-seen">Last seen <DateLink date={last.date} onDayClick={onDayClick} /> at <a className="clickable" href={`/box/${last.box}`} onClick={e => navClick(e, () => onBoxClick(last.box))}>{last.box}</a></div>;
-      })()}
-
-      {/* All penguin data */}
+      {/* All penguin data. Collapsed it is three or four lines — last seen, the active
+          chip's date and box, and notes if there are any. The ▸ on the right opens the
+          full field set in exactly the edit view's layout, read-only (EditableField
+          renders as plain text when canEdit is false); Edit makes that same view live. */}
       <div className="bird-section">
-        <table className="bird-table">
-          <tbody>
-            {/* Summary view is trimmed — sex / chipped-as-chick / chick-size / pit id all
-                already read off the mini above. Everything shows again under Edit. */}
-            {editing && <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} /></td></tr>}
-            {editing && <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>}
-            {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
-            {chips.map((c: any, i: number) => {
-              const re = 'Re'.repeat(i);
-              const prefix = i === 0 ? '' : re.toLowerCase();
-              // Collapsed: one consolidated line per chip — "date in: box by: chipper",
-              // plus weight/flipper from the biometric recorded on that chip date.
-              // The initial chip is "Chip Info"; each rechip gets its own "Rechip Info" line.
-              if (!editing) {
-                const chipDay = c.chip_date ? String(c.chip_date).slice(0, 10) : null;
-                const bio = chipDay ? biometrics.find((b: any) => String(b.observation_date || '').slice(0, 10) === chipDay && (b.weight || b.flipper_length)) : null;
-                return (
-                  <tr key={`chip${i}`}><td className="muted">{i === 0 ? 'Chip Info' : `${re}chip Info`}</td><td>
-                    {c.chip_date ? <DateLink date={c.chip_date} onDayClick={onDayClick} /> : <span className="muted">-</span>}
-                    {c.chip_box && <> <span className="muted">in:</span> <a className="clickable" href={`/box/${c.chip_box}`} onClick={e => navClick(e, () => onBoxClick(c.chip_box))}>{c.chip_box}</a></>}
-                    {c.chip_by && <> <span className="muted">by:</span> {c.chip_by}</>}
-                    {bio?.weight && <> <span className="muted">weight:</span> {parseFloat(bio.weight).toFixed(0)}g</>}
-                    {bio?.flipper_length && <> <span className="muted">flipper:</span> {parseFloat(bio.flipper_length).toFixed(0)}mm</>}
-                  </td></tr>
-                );
-              }
-              return (<Fragment key={`chip${i}`}>
-              <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
-              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td><EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={true} /></td></tr>
-              <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td><EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={true} /></td></tr>
-              <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} /></td></tr>
-            </Fragment>);
-            })}
-            {(editing || !!p.death_date) && <tr><td className="muted">Date of death</td><td>{!editing
-              ? (p.death_date ? p.death_date.slice(0, 10) : <span className="muted">-</span>)
-              // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
-              : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
-                  onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="date of death" canEdit={true} />}</td></tr>}
-            {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td>{!editing ? p.notes : <EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={true} />}</td></tr>}
-            <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
-          </tbody>
-        </table>
+        <div className="bird-table-wrap">
+          <table className="bird-table">
+            <tbody>
+              {sightings.length > 0 && <tr><td className="muted">Last seen</td><td>
+                <DateLink date={sightings[0].date} onDayClick={onDayClick} />
+                <span className="muted"> at </span>
+                <a className="clickable" href={`/box/${sightings[0].box}`} onClick={e => navClick(e, () => onBoxClick(sightings[0].box))}>Box {sightings[0].box}</a>
+              </td></tr>}
+
+              {!fullView && <>
+                <tr><td className="muted">Chip date</td><td>
+                  {activeChip?.chip_date
+                    ? <><DateLink date={activeChip.chip_date} onDayClick={onDayClick} /> <span className="muted">{durationSince(activeChip.chip_date)}</span></>
+                    : <span className="muted">-</span>}
+                </td></tr>
+                {activeChip?.chip_box && <tr><td className="muted">Chip box</td><td>
+                  <a className="clickable" href={`/box/${activeChip.chip_box}`} onClick={e => navClick(e, () => onBoxClick(activeChip.chip_box))}>Box {activeChip.chip_box}</a>
+                  {activeChip.chip_by && <span className="chip-by"><span className="muted">by:</span> {activeChip.chip_by}</span>}
+                </td></tr>}
+                {!!p.notes && <tr><td className="muted">Notes</td><td>{p.notes}</td></tr>}
+              </>}
+
+              {fullView && <>
+                <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={editing} /></td></tr>
+                <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>
+                <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={editing} /></td></tr>
+                {chips.map((c: any, i: number) => {
+                  const re = 'Re'.repeat(i);
+                  const prefix = i === 0 ? '' : re.toLowerCase();
+                  return (<Fragment key={`chip${i}`}>
+                    <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
+                    <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>
+                      <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={editing} />
+                      {!editing && c.chip_date && <span className="muted"> {durationSince(c.chip_date)}</span>}
+                    </td></tr>
+                    <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td><EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={editing} /></td></tr>
+                    <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={editing} /></td></tr>
+                    {(() => { const bio = chipBio(c); return (<>
+                      <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Weight</td><td><span className="chip-measure">
+                        <EditableField value={bio?.weight ? parseFloat(bio.weight).toFixed(0) : ''} type="number" min={0}
+                          onSave={saveChipBio(c, 'weight')} placeholder="-" canEdit={editing} />
+                        {bio?.weight && <span className="muted">g</span>}
+                      </span></td></tr>
+                      <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Flipper</td><td><span className="chip-measure">
+                        <EditableField value={bio?.flipper_length ? parseFloat(bio.flipper_length).toFixed(0) : ''} type="number" min={0}
+                          onSave={saveChipBio(c, 'flipper_length')} placeholder="-" canEdit={editing} />
+                        {bio?.flipper_length && <span className="muted">mm</span>}
+                      </span></td></tr>
+                    </>); })()}
+                  </Fragment>);
+                })}
+                {(editing || !!p.death_date) && <tr><td className="muted">Date of death</td><td>{!editing
+                  ? (p.death_date ? p.death_date.slice(0, 10) : <span className="muted">-</span>)
+                  // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
+                  : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
+                      onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="date of death" canEdit={true} />}</td></tr>}
+                {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td><EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={editing} /></td></tr>}
+                <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
+              </>}
+            </tbody>
+          </table>
+          {/* Hidden while editing — Edit already shows every field, and Cancel/Done is the way out. */}
+          {!editing && <button className="detail-toggle" onClick={() => setShowDetails(v => !v)}
+            title={showDetails ? 'Hide full record' : 'Show full record'}
+            aria-label={showDetails ? 'Hide full record' : 'Show full record'}>{showDetails ? '▾' : '▸'}</button>}
+        </div>
       </div>
 
       {/* Sightings loading indicator */}
@@ -10872,6 +10913,24 @@ function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }
 function fmtDateTime(d:string) { return formatDate(d); }
+/** How long ago a date was, as "3 years, 4 months" — rounded to the nearest whole month,
+ *  and dropping whichever of years/months is zero. Under a month it counts in days, so a
+ *  bird chipped last week doesn't read as "0 months". */
+function durationSince(d: string): string {
+  const then = parseDate(d), now = new Date();
+  if (isNaN(then.getTime()) || then >= now) return '';
+  let months = (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth());
+  if (now.getDate() < then.getDate()) months--;  // this month's anniversary hasn't come round yet
+  // Round up once past the midpoint of the current part-month.
+  const anniv = new Date(then); anniv.setMonth(anniv.getMonth() + months);
+  if ((now.getTime() - anniv.getTime()) / DAY >= 15) months++;
+  if (months < 1) {
+    const days = Math.max(1, Math.round((now.getTime() - then.getTime()) / DAY));
+    return `${days} day${days !== 1 ? 's' : ''}`;
+  }
+  const y = Math.floor(months / 12), m = months % 12;
+  return [y && `${y} year${y !== 1 ? 's' : ''}`, m && `${m} month${m !== 1 ? 's' : ''}`].filter(Boolean).join(', ');
+}
 /** Returns YYYY-MM-DD in NZ time for a datetime string.
  *  Fixed +12 (NZST), matching the bucketing in localdb so dates can't roll over. */
 function toNzDateStr(d: string): string {

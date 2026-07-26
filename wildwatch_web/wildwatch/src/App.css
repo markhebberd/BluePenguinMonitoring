@@ -300,7 +300,6 @@ header h1:hover { opacity:.8; }
 /* Bird page */
 .bird-page { max-width:800px; margin:0 auto; padding:16px 20px; }
 .bird-detail {}
-.bird-last-seen { font-size:0.95em; color:#555; margin-bottom:12px; padding:6px 10px; background:#e8f5e9; border-radius:6px; }
 h3.collapsible { cursor:pointer; user-select:none; }
 h3.collapsible:hover { color:#1a5276; }
 .bird-title-row { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; gap:8px; }
@@ -476,6 +475,18 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-table { width:100%; font-size:13px; border-collapse:collapse; }
 .bird-table td { padding:4px 8px 4px 0; vertical-align:top; }
 .bird-table td:first-child { white-space:nowrap; width:70px; color:#999; }
+/* The ▸ that opens the full record sits against the table's right edge, top-aligned so it
+   stays put whether three rows are showing or thirty. */
+.bird-table-wrap { position:relative; padding-right:18px; }
+.detail-toggle { position:absolute; top:0; right:0; border:none; background:none; cursor:pointer;
+  color:#888; font-size:13px; line-height:1; padding:4px; }
+.detail-toggle:hover { color:#1a5276; }
+/* Chip box row: "Box 3        by: LJ" */
+.chip-by { margin-left:24px; }
+.chip-measure { display:inline-flex; align-items:baseline; gap:3px; }
+/* Each expanded biometric needs air from the one above it — most of all in edit mode, where
+   every record is a stack of inputs and they otherwise run together as one wall. */
+.bird-table tr.bio-record-head td { padding-top:14px; border-top:1px solid #eee; }
 .bird-notes { font-style:italic; color:#666; font-size:13px; margin-top:4px; }
 .copy-pit-btn { font-size:10px; padding:1px 8px; border:1px solid #90caf9; background:#e3f2fd; color:#1a5276; border-radius:4px; cursor:pointer; }
 .copy-pit-btn:hover { background:#bbdefb; }
