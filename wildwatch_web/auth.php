@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    $stmt = $pdo->prepare("SELECT * FROM observers WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE email = ?");
     $stmt->execute([$email]);
     $rows = $stmt->fetchAll();
 

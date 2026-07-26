@@ -29,7 +29,7 @@ const WW_TABLE_KEYS = [
     'colonies'              => 'colony_id',
     'colony_permissions'    => 'permission_id',
     'validation_dismissals' => 'id',
-    'observers'             => 'observer_id',
+    'users'                 => 'id',
     'breeding_verifications'                => 'verification_id',
     'day_notes'             => 'day_note_id',
 ];

@@ -38,7 +38,7 @@ function authenticate($pdo) {
 
     // Try Bearer token (session auth)
     if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt = $pdo->prepare("SELECT o.*, o.id AS observer_id, o.f_name AS observer_name FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
         if ($result) return $result;
@@ -73,11 +73,11 @@ function handleDownload($pdo, $colonyId, $observer) {
     $stmt = $pdo->prepare("
         SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
             o.observation_time_utc, o.observer_id,
-            ob.observer_name,
+            ob.f_name AS observer_name,
             o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+        LEFT JOIN users ob ON o.observer_id = ob.id
         WHERE ol.colony_id = ? AND o.is_deleted = FALSE
         AND o.observation_id = (
             SELECT o2.observation_id FROM observations o2
@@ -102,11 +102,11 @@ function handleDownload($pdo, $colonyId, $observer) {
         $prevStmt = $pdo->prepare("
             SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
                 o.observation_time_utc, o.observer_id,
-                ob.observer_name,
+                ob.f_name AS observer_name,
                 o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
             FROM observations o
             JOIN observation_locations ol ON o.location_id = ol.location_id
-            LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+            LEFT JOIN users ob ON o.observer_id = ob.id
             WHERE ol.colony_id = ? AND o.is_deleted = FALSE
             AND o.location_id IN ($ph)
             AND o.observation_id = (
@@ -292,8 +292,8 @@ function handleUpload($pdo, $colonyId, $observer) {
             // Check if this box already has today's observation on the server
             if (!$forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.no_scan,
-                    o.breeding_status, o.gate_status, o.notes, ob.observer_name
-                    FROM observations o LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+                    o.breeding_status, o.gate_status, o.notes, ob.f_name AS observer_name
+                    FROM observations o LEFT JOIN users ob ON o.observer_id = ob.id
                     WHERE o.location_id = ? AND o.is_deleted = FALSE
                     AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?
                     ORDER BY o.observation_time_utc DESC LIMIT 1");

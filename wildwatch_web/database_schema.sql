@@ -1,9 +1,13 @@
 -- PenguinMonitor Database Schema Migration
 -- Based on Proposed_DB_Schema.md
 
-CREATE TABLE IF NOT EXISTS observers (
-    observer_id INT AUTO_INCREMENT PRIMARY KEY,
-    observer_name VARCHAR(100) NOT NULL UNIQUE,
+-- People with a login. Every other table's observer_id / deleted_by / reviewed_by column is
+-- an FK to users.id — those column names were left alone when the table was renamed, so the
+-- API keeps publishing observer_id / observer_name and installed nestcheck builds keep working.
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    f_name VARCHAR(100) NOT NULL UNIQUE,
+    surname VARCHAR(100),
     email VARCHAR(255),
     passphrase_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -36,7 +40,7 @@ CREATE TABLE IF NOT EXISTS colony_permissions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY (colony_id, observer_id),
     FOREIGN KEY (colony_id) REFERENCES colonies(colony_id),
-    FOREIGN KEY (observer_id) REFERENCES observers(observer_id),
+    FOREIGN KEY (observer_id) REFERENCES users(id),
     INDEX idx_observer (observer_id)
 );
 
@@ -79,8 +83,8 @@ CREATE TABLE IF NOT EXISTS observations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (location_id) REFERENCES observation_locations(location_id),
-    FOREIGN KEY (observer_id) REFERENCES observers(observer_id),
-    FOREIGN KEY (deleted_by) REFERENCES observers(observer_id),
+    FOREIGN KEY (observer_id) REFERENCES users(id),
+    FOREIGN KEY (deleted_by) REFERENCES users(id),
     INDEX idx_obs_time (observation_time_utc),
     INDEX idx_loc_time (location_id, observation_time_utc),
     INDEX idx_observer (observer_id),
@@ -153,7 +157,7 @@ CREATE TABLE IF NOT EXISTS penguin_scans (
     FOREIGN KEY (observation_id) REFERENCES observations(observation_id),
     FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
     FOREIGN KEY (chip_id) REFERENCES penguin_chips(chip_id),
-    FOREIGN KEY (deleted_by) REFERENCES observers(observer_id),
+    FOREIGN KEY (deleted_by) REFERENCES users(id),
     INDEX idx_observation (observation_id),
     INDEX idx_penguin (penguin_id),
     INDEX idx_deleted (is_deleted)
@@ -178,7 +182,7 @@ CREATE TABLE IF NOT EXISTS penguin_biometric_data (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (penguin_id) REFERENCES penguins(penguin_id),
     FOREIGN KEY (observation_id) REFERENCES observations(observation_id),
-    FOREIGN KEY (deleted_by) REFERENCES observers(observer_id),
+    FOREIGN KEY (deleted_by) REFERENCES users(id),
     INDEX idx_penguin_date (penguin_id, observation_date)
 );
 
@@ -190,14 +194,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
     observer_id INT NOT NULL,
     changed_fields JSON,
     change_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (observer_id) REFERENCES observers(observer_id),
+    FOREIGN KEY (observer_id) REFERENCES users(id),
     INDEX idx_record (table_name, record_id),
     INDEX idx_observer (observer_id),
     INDEX idx_timestamp (change_timestamp)
 );
 
 -- Seed data: Nelson region and Tarakohe colony
-INSERT IGNORE INTO observers (observer_id, observer_name, email, passphrase_hash)
+INSERT IGNORE INTO users (id, f_name, email, passphrase_hash)
 VALUES (1, 'legacy_import', 'mark@wildwatch.co.nz', '$2y$10$placeholder');
 
 INSERT IGNORE INTO regions (region_id, region_name)

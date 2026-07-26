@@ -26,9 +26,9 @@ if ($method === 'GET') {
     requireColonyAccess($pdo, $observer, $colonyId);
     $stmt = $pdo->prepare("
         SELECT d.error_type, d.error_key, d.content_hash, d.reason,
-               d.dismissed_by, d.dismissed_at, ob.observer_name AS dismissed_by_name
+               d.dismissed_by, d.dismissed_at, ob.f_name AS dismissed_by_name
         FROM validation_dismissals d
-        LEFT JOIN observers ob ON d.dismissed_by = ob.observer_id
+        LEFT JOIN users ob ON d.dismissed_by = ob.id
         WHERE d.colony_id = ?");
     $stmt->execute([$colonyId]);
     echo json_encode(['dismissals' => $stmt->fetchAll()]);

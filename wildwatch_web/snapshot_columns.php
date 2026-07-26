@@ -29,7 +29,7 @@ const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date
 // so the client can tell an edited note from an unchanged one on an incremental snapshot.
 const SNAP_COLS_DAYNOTE = 'd.day_note_id, d.note_date, d.note, d.observer, d.recorder, d.updated_at';
 
-const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.male_peng_num, v.female_peng_num, v.adults_reviewed_by, oa.observer_name AS adults_reviewed_by_name, v.adults_reviewed_at, v.adults_note, v.chicks_verdict, v.chicks, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_reviewed_by, oc.observer_name AS chicks_reviewed_by_name, v.chicks_reviewed_at, v.chicks_note, v.created_at, v.updated_at';
+const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.male_peng_num, v.female_peng_num, v.adults_reviewed_by, oa.f_name AS adults_reviewed_by_name, v.adults_reviewed_at, v.adults_note, v.chicks_verdict, v.chicks, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_reviewed_by, oc.f_name AS chicks_reviewed_by_name, v.chicks_reviewed_at, v.chicks_note, v.created_at, v.updated_at';
 
 /** Every observer, id → name, so the client can name whoever recorded an observation from
  *  observations.observer_id alone — the id is on the row, the name is looked up once rather
@@ -38,5 +38,5 @@ const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.
  *  its store wholesale: that is how a rename or a removed account reaches the cache.
  *  Name only — no email, no hash. */
 function getObservers($pdo) {
-    return ['observers' => $pdo->query("SELECT observer_id, observer_name FROM observers ORDER BY observer_id")->fetchAll()];
+    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name FROM users ORDER BY id")->fetchAll()];
 }

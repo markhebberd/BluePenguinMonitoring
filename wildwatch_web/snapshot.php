@@ -44,8 +44,8 @@ function getVerificationData($pdo, $colonyId, $viewPrefix) {
     $ver = $pdo->prepare("SELECT " . SNAP_COLS_VER . " FROM breeding_verifications v
         JOIN observations o ON o.observation_id = v.observation_id
         JOIN observation_locations ol ON ol.location_id = o.location_id
-        LEFT JOIN observers oa ON oa.observer_id = v.adults_reviewed_by
-        LEFT JOIN observers oc ON oc.observer_id = v.chicks_reviewed_by
+        LEFT JOIN users oa ON oa.id = v.adults_reviewed_by
+        LEFT JOIN users oc ON oc.id = v.chicks_reviewed_by
         WHERE ol.colony_id = ?");
     $ver->execute([$colonyId]);
     $verRows = $ver->fetchAll();

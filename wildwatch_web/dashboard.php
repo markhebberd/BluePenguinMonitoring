@@ -125,9 +125,9 @@ function handleBox($pdo, $colonyId, $boxName) {
     // Optionally include deleted observations
     $deleted = [];
     if ($deletedCount > 0 && isset($_GET['include_deleted'])) {
-        $delObs = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.notes, o.deleted_at, ob.observer_name as deleted_by_name,
+        $delObs = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.notes, o.deleted_at, ob.f_name as deleted_by_name,
             (SELECT a.change_reason FROM audit_log a WHERE a.table_name = 'observations' AND a.record_id = o.observation_id AND a.action = 'DELETE' ORDER BY a.change_timestamp DESC LIMIT 1) as delete_reason
-            FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id LEFT JOIN observers ob ON o.deleted_by = ob.observer_id
+            FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id LEFT JOIN users ob ON o.deleted_by = ob.id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = TRUE ORDER BY o.observation_time_utc DESC");
         $delObs->execute([$colonyId, $boxName]);
         $deleted = $delObs->fetchAll();

@@ -163,7 +163,7 @@ function requireReadAuth($pdo = null) {
     // Bearer token — full access
     $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt = $pdo->prepare("SELECT o.*, o.id AS observer_id, o.f_name AS observer_name FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
         if ($result) { touchSession($pdo, $m[1]); return $result; }
@@ -178,7 +178,7 @@ function requireReadAuth($pdo = null) {
             // Check global API key
             if ($apiKey === API_KEY) return true;
             // Check per-observer api_key (legacy app uses this for boxtags)
-            $stmt = $pdo->prepare("SELECT * FROM observers WHERE api_key = ?");
+            $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE api_key = ?");
             $stmt->execute([$apiKey]);
             $result = $stmt->fetch();
             if ($result) return $result;
@@ -196,7 +196,7 @@ function requireAuth($pdo = null) {
     if (!$pdo) $pdo = getDbConnection();
     $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt = $pdo->prepare("SELECT o.*, o.id AS observer_id, o.f_name AS observer_name FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
         if ($result) { touchSession($pdo, $m[1]); return $result; }

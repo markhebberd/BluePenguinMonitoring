@@ -30,7 +30,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS sessions (
     observer_id INT NOT NULL,
     expires_at DATETIME NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (observer_id) REFERENCES observers(observer_id)
+    FOREIGN KEY (observer_id) REFERENCES users(id)
 )");
 
 $action = $_GET['action'] ?? '';
@@ -432,7 +432,7 @@ function handleLogin($pdo) {
     $email = $input['email'] ?? '';
     $password = $input['password'] ?? '';
 
-    $stmt = $pdo->prepare("SELECT * FROM observers WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE email = ?");
     $stmt->execute([$email]);
     $rows = $stmt->fetchAll();
 
@@ -472,8 +472,8 @@ function handleRegister($pdo) {
     try {
         // Self-signup was the one account creation that left no audit trail.
         $pdo->beginTransaction();
-        $newId = wwAuditedInsertSelf($pdo, 'observers',
-            ['observer_name' => $name, 'email' => $email, 'passphrase_hash' => $hash, 'role' => 'editor'],
+        $newId = wwAuditedInsertSelf($pdo, 'users',
+            ['f_name' => $name, 'email' => $email, 'passphrase_hash' => $hash, 'role' => 'editor'],
             'Self-signup');
         $pdo->commit();
         echo json_encode(['success'=>true, 'observer_id'=>$newId]);
@@ -489,7 +489,7 @@ function handleRequestPasswordReset($pdo) {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $email = trim($input['email'] ?? '');
     if ($email !== '') {
-        $stmt = $pdo->prepare("SELECT * FROM observers WHERE email = ?");
+        $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE email = ?");
         $stmt->execute([$email]);
         foreach ($stmt->fetchAll() as $observer) {
             // Replace any outstanding reset links (invites keep their longer validity)
@@ -503,8 +503,8 @@ function handleRequestPasswordReset($pdo) {
 /** Look up a live (unused, unexpired) set-password token. */
 function findResetToken($pdo, $token) {
     if ($token === '') return null;
-    $stmt = $pdo->prepare("SELECT pr.*, o.observer_name, o.email FROM password_resets pr
-        JOIN observers o ON o.observer_id = pr.observer_id
+    $stmt = $pdo->prepare("SELECT pr.*, o.f_name AS observer_name, o.email FROM password_resets pr
+        JOIN users o ON o.id = pr.observer_id
         WHERE pr.token_hash = ? AND pr.used_at IS NULL AND pr.expires_at > NOW()");
     $stmt->execute([hash('sha256', $token)]);
     return $stmt->fetch() ?: null;
@@ -529,12 +529,12 @@ function handleResetPassword($pdo) {
 
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
     // The observer is their own actor: they authenticated with the emailed token, not a session.
-    wwAuditedUpdate($pdo, 'observers', $row['observer_id'], ['passphrase_hash' => $hash],
+    wwAuditedUpdate($pdo, 'users', $row['observer_id'], ['passphrase_hash' => $hash],
         $row['observer_id'], 'Password set via ' . $row['purpose'] . ' link');
     wwPasswordResetConsume($pdo, $row['token_hash']);
     wwSessionsDeleteForObserver($pdo, $row['observer_id']);
 
-    $stmt = $pdo->prepare("SELECT * FROM observers WHERE observer_id = ?");
+    $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE id = ?");
     $stmt->execute([$row['observer_id']]);
     $observer = $stmt->fetch();
     $token = wwSessionCreate($pdo, $observer['observer_id']);
@@ -553,7 +553,7 @@ function authenticate($pdo) {
 
     // Try Bearer token (session auth)
     if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
-        $stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+        $stmt = $pdo->prepare("SELECT o.*, o.id AS observer_id, o.f_name AS observer_name FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
         $stmt->execute([$m[1]]);
         $result = $stmt->fetch();
         if ($result) return $result;
@@ -756,13 +756,13 @@ function handleHistory($pdo, $table, $id) {
 
         if (!empty($scanIds)) {
             $placeholders = implode(',', array_fill(0, count($scanIds), '?'));
-            $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id
+            $stmt = $pdo->prepare("SELECT a.*, o.f_name AS observer_name FROM audit_log a JOIN users o ON a.observer_id = o.id
                 WHERE (a.table_name = ? AND a.record_id = ?)
                    OR (a.table_name = 'penguin_scans' AND a.record_id IN ($placeholders))
                 ORDER BY a.change_timestamp DESC LIMIT 100");
             $stmt->execute(array_merge([$table, $id], $scanIds));
         } else {
-            $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
+            $stmt = $pdo->prepare("SELECT a.*, o.f_name AS observer_name FROM audit_log a JOIN users o ON a.observer_id = o.id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
             $stmt->execute([$table, $id]);
         }
 
@@ -782,7 +782,7 @@ function handleHistory($pdo, $table, $id) {
         }
         echo json_encode($results);
     } else {
-        $stmt = $pdo->prepare("SELECT a.*, o.observer_name FROM audit_log a JOIN observers o ON a.observer_id = o.observer_id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
+        $stmt = $pdo->prepare("SELECT a.*, o.f_name AS observer_name FROM audit_log a JOIN users o ON a.observer_id = o.id WHERE a.table_name = ? AND a.record_id = ? ORDER BY a.change_timestamp DESC LIMIT 50");
         $stmt->execute([$table, $id]);
         echo json_encode($stmt->fetchAll());
     }
@@ -804,7 +804,7 @@ function handleChangePassword($pdo, $observer) {
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
     $pdo->beginTransaction();
     try {
-        wwAuditedUpdate($pdo, 'observers', $observer['observer_id'], ['passphrase_hash' => $hash],
+        wwAuditedUpdate($pdo, 'users', $observer['observer_id'], ['passphrase_hash' => $hash],
             $observer['observer_id'], 'Password changed by user');
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); return; }

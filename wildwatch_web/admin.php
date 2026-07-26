@@ -21,7 +21,7 @@ if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
     if (!empty($_GET['token'])) { $m = [null, $_GET['token']]; }
     else { http_response_code(401); echo json_encode(['error'=>'Auth required']); exit; }
 }
-$stmt = $pdo->prepare("SELECT o.* FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+$stmt = $pdo->prepare("SELECT o.*, o.id AS observer_id, o.f_name AS observer_name FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
 $stmt->execute([$m[1]]);
 $observer = $stmt->fetch();
 if (!$observer) { http_response_code(401); echo json_encode(['error'=>'Invalid token']); exit; }
@@ -138,10 +138,10 @@ if ($action === 'duplicate_observations') {
             DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) as obs_date,
             COUNT(*) as cnt,
             GROUP_CONCAT(o.observation_id ORDER BY o.observation_time_utc DESC) as obs_ids,
-            GROUP_CONCAT(COALESCE(ob.observer_name,'?') ORDER BY o.observation_time_utc DESC) as observers
+            GROUP_CONCAT(COALESCE(ob.f_name,'?') ORDER BY o.observation_time_utc DESC) as observers
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+        LEFT JOIN users ob ON o.observer_id = ob.id
         WHERE o.is_deleted = FALSE
         GROUP BY ol.location_name, DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00'))
         HAVING cnt > 1
@@ -222,10 +222,10 @@ if ($action === 'improbable_counts') {
 if ($action === 'future_observations') {
     echo json_encode($pdo->query("
         SELECT ol.location_name AS box_name, " . WW_NZ . " AS obs_date,
-            COALESCE(ob.observer_name, '?') AS observer
+            COALESCE(ob.f_name, '?') AS observer
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+        LEFT JOIN users ob ON o.observer_id = ob.id
         WHERE o.is_deleted = FALSE
           AND " . WW_NZ . " > DATE(CONVERT_TZ(NOW(), '+00:00', '+12:00'))
         ORDER BY obs_date DESC
@@ -312,14 +312,14 @@ if ($action === 'cleanup_duplicate_observations') {
 if ($action === 'recent_changes') {
     $days = min(30, max(1, (int)($_GET['days'] ?? 7)));
     $stmt = $pdo->prepare("SELECT a.*,
-        o.observer_name,
+        o.f_name AS observer_name,
         DATE(CONVERT_TZ(a.change_timestamp, '+00:00', '+12:00')) as nz_date,
         DATE_FORMAT(CONVERT_TZ(a.change_timestamp, '+00:00', '+12:00'), '%H:%i') as nz_time,
         CASE WHEN a.table_name = 'observations' THEN
             (SELECT ol.location_name FROM observations obs JOIN observation_locations ol ON obs.location_id = ol.location_id WHERE obs.observation_id = a.record_id LIMIT 1)
         END as box_name
         FROM audit_log a
-        LEFT JOIN observers o ON a.observer_id = o.observer_id
+        LEFT JOIN users o ON a.observer_id = o.id
         WHERE a.change_timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)
           AND a.action <> 'SELECT' AND a.table_name <> '__sql_console'
         ORDER BY a.change_timestamp DESC");
@@ -367,7 +367,7 @@ if ($action === 'recent_changes') {
 }
 
 if ($action === 'users') {
-    $stmt = $pdo->query("SELECT observer_id, observer_name, email, role, created_at FROM observers ORDER BY observer_id");
+    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, email, role, created_at FROM users ORDER BY id");
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -375,15 +375,16 @@ if ($action === 'users') {
 if ($action === 'update_user') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input || !$input['observer_id']) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
+    // The API still speaks observer_name; the column behind it is users.f_name.
     $fields = [];
-    foreach (['role', 'observer_name', 'email'] as $field) {
-        if (isset($input[$field])) $fields[$field] = $input[$field];
+    foreach (['role' => 'role', 'observer_name' => 'f_name', 'surname' => 'surname', 'email' => 'email'] as $in => $col) {
+        if (isset($input[$in])) $fields[$col] = $input[$in];
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
 
     $pdo->beginTransaction();
     try {
-        wwAuditedUpdate($pdo, 'observers', $input['observer_id'], $fields, $observer['observer_id']);
+        wwAuditedUpdate($pdo, 'users', $input['observer_id'], $fields, $observer['observer_id']);
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true]);
@@ -393,6 +394,7 @@ if ($action === 'update_user') {
 if ($action === 'create_user') {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $name = trim($input['observer_name'] ?? '');
+    $surname = trim($input['surname'] ?? '');
     $email = trim($input['email'] ?? '');
     $role = $input['role'] ?? 'viewer';
     $password = (string)($input['password'] ?? '');
@@ -403,19 +405,20 @@ if ($action === 'create_user') {
     if ($name === '' || ($password === '' && !$invite)) { http_response_code(400); echo json_encode(['error'=>'Name and either a password or an email (to send an invite) are required']); exit; }
     if (!$invite && strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
     if (!in_array($role, ['viewer', 'editor', 'admin'], true)) { http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit; }
-    $dup = $pdo->prepare("SELECT observer_id FROM observers WHERE observer_name = ?");
+    $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ?");
     $dup->execute([$name]);
     if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>"A user named \"$name\" already exists"]); exit; }
     $hash = password_hash($invite ? bin2hex(random_bytes(32)) : $password, PASSWORD_BCRYPT);
     $pdo->beginTransaction();
     try {
-        $id = (int)wwAuditedInsert($pdo, 'observers',
-            ['observer_name' => $name, 'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
+        $id = (int)wwAuditedInsert($pdo, 'users',
+            ['f_name' => $name, 'surname' => $surname !== '' ? $surname : null,
+             'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
             $observer['observer_id'], $invite ? 'Created with email invite' : 'Created with password');
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
-    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
     exit;
 }
 
@@ -464,7 +467,7 @@ if ($action === 'backups') {
 if ($action === 'send_reset') {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $id = (int)($input['observer_id'] ?? 0);
-    $chk = $pdo->prepare("SELECT observer_id, observer_name, email FROM observers WHERE observer_id = ?");
+    $chk = $pdo->prepare("SELECT id AS observer_id, f_name AS observer_name, email FROM users WHERE id = ?");
     $chk->execute([$id]);
     $row = $chk->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
@@ -482,7 +485,7 @@ if ($action === 'reset_password') {
     $password = (string)($input['password'] ?? '');
     if (!$id) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
     if (strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
-    $chk = $pdo->prepare("SELECT observer_name FROM observers WHERE observer_id = ?");
+    $chk = $pdo->prepare("SELECT f_name AS observer_name FROM users WHERE id = ?");
     $chk->execute([$id]);
     $row = $chk->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
@@ -490,7 +493,7 @@ if ($action === 'reset_password') {
     $hash = password_hash($password, PASSWORD_BCRYPT);
     $pdo->beginTransaction();
     try {
-        wwAuditedUpdate($pdo, 'observers', $id, ['passphrase_hash' => $hash], $observer['observer_id'], 'Password reset by admin');
+        wwAuditedUpdate($pdo, 'users', $id, ['passphrase_hash' => $hash], $observer['observer_id'], 'Password reset by admin');
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true, 'observer_name'=>$row['observer_name']]);
@@ -996,11 +999,11 @@ if ($action === 'create_colony_boxes') {
 
 if ($action === 'colony_permissions') {
     $stmt = $pdo->query("SELECT cp.permission_id, cp.colony_id, cp.observer_id, cp.role,
-            c.colony_name, o.observer_name
+            c.colony_name, o.f_name AS observer_name
         FROM colony_permissions cp
         JOIN colonies c ON cp.colony_id = c.colony_id
-        JOIN observers o ON cp.observer_id = o.observer_id
-        ORDER BY c.colony_name, o.observer_name");
+        JOIN users o ON cp.observer_id = o.id
+        ORDER BY c.colony_name, o.f_name");
     echo json_encode($stmt->fetchAll());
     exit;
 }

@@ -19,10 +19,10 @@ $utcStart = date('Y-m-d 12:00:00', strtotime($date) - 86400);
 $utcEnd = date('Y-m-d 12:00:00', strtotime($date));
 $stmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks,
     o.breeding_status, o.gate_status, o.notes, o.observer_id,
-    ol.location_name AS box_name, ob.observer_name
+    ol.location_name AS box_name, ob.f_name AS observer_name
     FROM observations o
     JOIN observation_locations ol ON o.location_id = ol.location_id
-    LEFT JOIN observers ob ON o.observer_id = ob.observer_id
+    LEFT JOIN users ob ON o.observer_id = ob.id
     WHERE o.observation_time_utc >= ? AND o.observation_time_utc < ?
     AND o.is_deleted = FALSE
     ORDER BY ol.location_name + 0, o.observation_time_utc");

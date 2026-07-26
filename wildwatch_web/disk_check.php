@@ -80,7 +80,7 @@ function getDiskFree() { $f = @disk_free_space(__DIR__); return $f !== false ? r
 $pdo = getDbConnection();
 $token = $_GET['token'] ?? '';
 if (!$token) { send(['type' => 'error', 'msg' => 'Auth required']); exit; }
-$stmt = $pdo->prepare("SELECT o.role FROM sessions s JOIN observers o ON s.observer_id = o.observer_id WHERE s.token = ? AND s.expires_at > NOW()");
+$stmt = $pdo->prepare("SELECT o.role FROM sessions s JOIN users o ON s.observer_id = o.id WHERE s.token = ? AND s.expires_at > NOW()");
 $stmt->execute([$token]);
 $user = $stmt->fetch();
 if (!$user || $user['role'] !== 'admin') { send(['type' => 'error', 'msg' => 'Admin required']); exit; }

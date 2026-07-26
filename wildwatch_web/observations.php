@@ -81,10 +81,10 @@ function handleLocationDetail($pdo, $colonyId, $locationName) {
                 o.observation_id, o.observation_time_utc,
                 o.adults, o.eggs, o.chicks,
                 o.breeding_status, o.gate_status, o.notes,
-                ob.observer_name
+                ob.f_name AS observer_name
             FROM observations o
             JOIN observation_locations ol ON o.location_id = ol.location_id
-            JOIN observers ob ON o.observer_id = ob.observer_id
+            JOIN users ob ON o.observer_id = ob.id
             WHERE ol.colony_id = ? AND ol.location_name = ? AND o.is_deleted = FALSE
             ORDER BY o.observation_time_utc DESC";
 
