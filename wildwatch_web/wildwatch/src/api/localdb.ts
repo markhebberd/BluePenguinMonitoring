@@ -111,6 +111,7 @@ interface MemCache {
   // Breeding verification (human ground truth): one row per verified clutch, chicks inline (JSON)
   verByObs: Map<number, any>;          // anchor observation_id → verification
   noteByDate: Map<string, string>;     // NZ date string → the day's note
+  dayPeopleByDate: Map<string, { observer: string | null; recorder: string | null }>; // who was out that day
   observerById: Map<number, string>;   // observer_id → observer_name
   dateStats: Map<string, any>;         // NZ date string → stats
   observationDates: string[];          // sorted NZ dates with data
@@ -215,6 +216,7 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     bioByPeng: new Map(),
     verByObs: new Map(),
     noteByDate: new Map(),
+    dayPeopleByDate: new Map(),
     observerById: new Map(),
     dateStats: new Map(),
     observationDates: [],
@@ -222,7 +224,12 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
   };
   for (const v of cache.verifications) cache.verByObs.set(v.observation_id, v);
   // note_date arrives as a DATE string; slice guards against a driver handing back a datetime.
-  for (const n of cache.dayNotes) cache.noteByDate.set(String(n.note_date).slice(0, 10), n.note);
+  // A row can now exist for its people alone, so the note may be null while observer/recorder aren't.
+  for (const n of cache.dayNotes) {
+    const d = String(n.note_date).slice(0, 10);
+    if (n.note) cache.noteByDate.set(d, n.note);
+    if (n.observer || n.recorder) cache.dayPeopleByDate.set(d, { observer: n.observer || null, recorder: n.recorder || null });
+  }
   for (const ob of cache.observers) cache.observerById.set(Number(ob.observer_id), ob.observer_name);
   for (const l of data.locations) { cache.locByName.set(l.location_name, l); cache.locById.set(l.location_id, l); }
   for (const p of data.penguins) cache.pengByNum.set(p.peng_num, p);
@@ -1965,19 +1972,33 @@ export function getDayNote(date: string): string | null {
   return mem?.noteByDate.get(date) || null;
 }
 
-/** Save (or clear, with '') the day's note, then fold it into the cache so the day view and the
- *  calendar update without waiting for the next snapshot. */
-export async function saveDayNote(token: string, date: string, note: string): Promise<void> {
+/** Who was observing and who was recording on an NZ date, for the active colony. */
+export function getDayPeople(date: string): { observer: string | null; recorder: string | null } {
+  return mem?.dayPeopleByDate.get(date) || { observer: null, recorder: null };
+}
+
+/** Save the day's note and/or who was out, then fold the result into the cache so the day view
+ *  and calendar update without waiting for the next snapshot. Only the fields passed are
+ *  touched; '' clears one, and clearing all three deletes the day's row server-side. */
+export async function saveDayNote(token: string, date: string,
+                                  fields: { note?: string; observer?: string; recorder?: string }): Promise<void> {
   const resp = await fetch(`/api/crud.php?action=save_day_note&${colonyQS()}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ date, note, colony_id: getColonyId() }),
+    // note is always sent: the endpoint treats a missing note as blank, so omitting it on a
+    // people-only edit would wipe the note.
+    body: JSON.stringify({ date, colony_id: getColonyId(), note: fields.note ?? (getDayNote(date) || ''),
+      ...(fields.observer !== undefined ? { observer: fields.observer } : {}),
+      ...(fields.recorder !== undefined ? { recorder: fields.recorder } : {}) }),
   });
   const data = await resp.json();
   if (!resp.ok || data.error) throw new Error(data.error || 'Failed to save note');
   if (mem) {
     const saved = (data.note ?? '') as string;
     if (saved) mem.noteByDate.set(date, saved); else mem.noteByDate.delete(date);
+    const obs = (data.observer ?? '') as string, rec = (data.recorder ?? '') as string;
+    if (obs || rec) mem.dayPeopleByDate.set(date, { observer: obs || null, recorder: rec || null });
+    else mem.dayPeopleByDate.delete(date);
     const stats = mem.dateStats.get(date);
     if (stats) stats.label = saved || null;
     notifySubscribers();

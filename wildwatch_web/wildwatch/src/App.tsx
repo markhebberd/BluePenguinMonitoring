@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -479,15 +479,17 @@ const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent)
  * rather than repeated on every box's row, which is what the old per-observation
  * monitor_filename did. Clearing the text deletes the note.
  */
-function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
-  const saved = getDayNote(date) || '';
+function DayField({ date, token, canEdit, field, saved, placeholder, addLabel, maxLength, prefix }: {
+  date: string; token?: string; canEdit?: boolean; field: 'note' | 'observer' | 'recorder';
+  saved: string; placeholder: string; addLabel: string; maxLength: number; prefix?: string;
+}) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(saved);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // A note arriving from a sync (or switching days) replaces the field, but never mid-edit —
+  // A value arriving from a sync (or switching days) replaces the field, but never mid-edit —
   // that would overwrite what the user is typing.
   useEffect(() => { if (!editing) setText(saved); }, [saved, editing]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
@@ -498,7 +500,7 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
     if (!token || next === saved.trim()) { setText(saved); return; }
     setSaving(true); setError(null);
     try {
-      await saveDayNote(token, date, next);
+      await saveDayNote(token, date, { [field]: next });
     } catch (e: any) {
       setError(e.message || 'Failed to save');
       setText(saved);
@@ -506,17 +508,18 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
     setSaving(false);
   };
 
-  if (!canEdit) return saved ? <span className="day-hdr-note">{saved}</span> : null;
+  const label = prefix && saved ? <span className="day-hdr-people-label">{prefix}</span> : null;
+  if (!canEdit) return saved ? <span className="day-hdr-note">{label}{saved}</span> : null;
   if (!editing) return (
     <span className={`day-hdr-note day-note-editable${saved ? '' : ' day-note-empty'}`}
-      title="Monitor notes" onClick={() => setEditing(true)}>
-      {saving ? 'Saving…' : (saved || '+ note')}
+      title={placeholder} onClick={() => setEditing(true)}>
+      {saving ? 'Saving…' : (saved ? <>{label}{saved}</> : addLabel)}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
     </span>
   );
   return (
-    <input ref={inputRef} className="day-note-input" value={text} maxLength={255}
-      placeholder="Monitor notes"
+    <input ref={inputRef} className="day-note-input" value={text} maxLength={maxLength}
+      placeholder={placeholder}
       onChange={e => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={e => {
@@ -524,6 +527,24 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
         if (e.key === 'Escape') { e.preventDefault(); setText(saved); setEditing(false); }
       }} />
   );
+}
+
+/** The day's record beside the stats line: what happened, and who was out. An editor sees all
+ *  three with "+ observer" prompts for the empty ones; everyone else sees only what's filled in. */
+function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
+  const { observer, recorder } = getDayPeople(date);
+  const fields: { field: 'note'|'observer'|'recorder'; saved: string; placeholder: string; addLabel: string; maxLength: number; prefix?: string }[] = [
+    { field: 'note',     saved: getDayNote(date) || '', placeholder: 'Monitor notes',    addLabel: '+ note',     maxLength: 255 },
+    { field: 'observer', saved: observer || '',         placeholder: 'Who was observing', addLabel: '+ observer', maxLength: 100, prefix: 'observer' },
+    { field: 'recorder', saved: recorder || '',         placeholder: 'Who was recording', addLabel: '+ recorder', maxLength: 100, prefix: 'recorder' },
+  ];
+  const shown = fields.filter(f => canEdit || f.saved);
+  return (<>{shown.map((f, i) => (
+    <Fragment key={f.field}>
+      {i > 0 && <span className="day-hdr-sep"> · </span>}
+      <DayField date={date} token={token} canEdit={canEdit} {...f} />
+    </Fragment>
+  ))}</>);
 }
 
 function DateStatsLine({ stats, showDate, date, hideLabel }: { stats: any; showDate?: boolean; date?: string; hideLabel?: boolean }) {

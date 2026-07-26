@@ -50,12 +50,13 @@ function authenticate($pdo) {
 /**
  * GET: Download latest observation per box with scans.
  */
-/** The colony's day notes as note_date => note, for stamping onto each observation below. */
+/** The colony's day notes as note_date => [note, observer, recorder], for stamping onto each
+ *  observation below. Note stays a plain string in the payload; the people ride beside it. */
 function dayNoteMap($pdo, $colonyId): array {
-    $s = $pdo->prepare("SELECT note_date, note FROM day_notes WHERE colony_id = ?");
+    $s = $pdo->prepare("SELECT note_date, note, observer, recorder FROM day_notes WHERE colony_id = ?");
     $s->execute([$colonyId]);
     $map = [];
-    foreach ($s->fetchAll() as $r) $map[$r['note_date']] = $r['note'];
+    foreach ($s->fetchAll() as $r) $map[$r['note_date']] = ['note' => $r['note'], 'observer' => $r['observer'], 'recorder' => $r['recorder']];
     return $map;
 }
 
@@ -154,12 +155,15 @@ function handleDownload($pdo, $colonyId, $observer) {
     $latestIds = [];
     foreach ($latestObs as $obs) {
         $boxName = $obs['box_name'];
-        $note = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
+        $day = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
+        $note = $day['note'] ?? null;
         $boxes[$boxName] = [
             'observation_id' => (int)$obs['observation_id'],
             'location_id' => (int)$obs['location_id'],
             'observation_time_utc' => $obs['observation_time_utc'],
             'day_note' => $note,
+            'day_observer' => $day['observer'] ?? null,
+            'day_recorder' => $day['recorder'] ?? null,
             'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
@@ -235,6 +239,8 @@ function handleUpload($pdo, $colonyId, $observer) {
 
     $forceReplace = ($_GET['action'] === 'confirm');
     $dailyLabel = $input['daily_label'] ?? '';
+    $dailyObserver = (string)($input['daily_observer'] ?? '');
+    $dailyRecorder = (string)($input['daily_recorder'] ?? '');
     $observerId = (int)$observer['observer_id'];
     $created = [];
     $conflicts = [];
@@ -315,8 +321,8 @@ function handleUpload($pdo, $colonyId, $observer) {
                                 'breeding_status' => $existing['breeding_status'],
                                 'gate_status' => $existing['gate_status'],
                                 'notes' => $existing['notes'],
-                                'day_note' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])] ?? null,
-                                'monitor_filename' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])] ?? null,
+                                'day_note' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])]['note'] ?? null,
+                                'monitor_filename' => $conflictDayNotes[nzDateOf($existing['observation_time_utc'])]['note'] ?? null,
                                 'scans' => $fetchScansForObs($existing['observation_id']),
                             ],
                             'incoming' => $obs,
@@ -414,11 +420,12 @@ function handleUpload($pdo, $colonyId, $observer) {
                           'scans_added' => $scansCreated, 'scans_removed' => $scansRemoved];
         }
 
-        // The phone's "Daily label" is the day's note. It fills a day that has none rather than
-        // overwriting: by the time a second sync arrives the note may have been corrected in the
-        // web day view, and a re-sync of the same label should not undo that edit.
+        // The phone's "Daily label" is the day's note, and who was observing/recording rides with
+        // it. It fills a day that has none rather than overwriting: by the time a second sync
+        // arrives the note may have been corrected in the web day view, and a re-sync of the same
+        // label should not undo that edit.
         foreach (array_keys($labelDates) as $noteDate) {
-            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync');
+            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync', $dailyObserver, $dailyRecorder);
         }
 
         $pdo->commit();

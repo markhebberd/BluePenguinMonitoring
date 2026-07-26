@@ -9,6 +9,10 @@ namespace PenguinMonitor.Models
         public DateTime LastSyncedUtc { get; set; }
         public string DailyLabel { get; set; } = "";
         public string DailyLabelDate { get; set; } = "";
+        /// <summary>Who was looking in the boxes today, and who was working the phone. Both ride
+        /// with the daily label to the colony's day_notes row. Cleared with it at rollover.</summary>
+        public string DailyObserver { get; set; } = "";
+        public string DailyRecorder { get; set; } = "";
 
         /// <summary>
         /// Pending observations not yet uploaded to server.
@@ -71,11 +75,13 @@ namespace PenguinMonitor.Models
                 TodayBoxes.Remove(key);
             }
 
-            // Clear daily label if it was set on a previous day
+            // Clear daily label (and who was out) if it was set on a previous day
             if (!string.IsNullOrEmpty(DailyLabelDate) && DailyLabelDate != nzTodayStr)
             {
                 DailyLabel = "";
                 DailyLabelDate = "";
+                DailyObserver = "";
+                DailyRecorder = "";
             }
 
             // Drop downloaded biometrics from a previous day; keep unsynced edits so they aren't lost

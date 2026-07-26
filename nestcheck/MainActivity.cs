@@ -2819,6 +2819,34 @@ namespace PenguinMonitor
             dailyLabelInput.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             dailyLabelLayout.AddView(dailyLabelInput);
 
+            // Who was out today. Saved with the daily label by the same Set button — one row per
+            // colony per day holds all three, so it makes no sense to commit them separately.
+            var dayPeopleLayout = new LinearLayout(this);
+            dayPeopleLayout.SetPadding(8, 0, 8, 8);
+            EditText MakePersonInput(string hint, string initial)
+            {
+                var input = new EditText(this)
+                {
+                    InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapWords,
+                    Hint = hint,
+                    Text = initial ?? "",
+                    TextSize = 14,
+                };
+                input.SetTextColor(UIFactory.TEXT_PRIMARY);
+                input.SetHintTextColor(UIFactory.TEXT_SECONDARY);
+                input.SetPadding(12, 8, 12, 8);
+                input.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                input.Focusable = true;
+                input.FocusableInTouchMode = true;
+                input.Clickable = true;
+                input.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+                return input;
+            }
+            var observerInput = MakePersonInput("Observer", _colonyState.DailyObserver);
+            var recorderInput = MakePersonInput("Recorder", _colonyState.DailyRecorder);
+            dayPeopleLayout.AddView(observerInput);
+            dayPeopleLayout.AddView(recorderInput);
+
             var setLabelButton = new Button(this) { Text = "Set", TextSize = 12 };
             setLabelButton.SetTextColor(Color.White);
             setLabelButton.SetPadding(16, 8, 16, 8);
@@ -2828,6 +2856,8 @@ namespace PenguinMonitor
             setLabelButton.Click += (s, e) =>
             {
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
+                var newObserver = observerInput.Text?.Trim() ?? "";
+                var newRecorder = recorderInput.Text?.Trim() ?? "";
                 var nzToday = NzToday;
 
                 // Hide keyboard
@@ -2835,10 +2865,13 @@ namespace PenguinMonitor
                 imm?.HideSoftInputFromWindow(dailyLabelInput.WindowToken, 0);
 
                 // The daily label is the colony's day note (one per colony per day) — no longer a
-                // per-observation filename. Set it locally (it also rides along as daily_label on the
-                // next observation upload), then upsert it straight to the server day note so a change
-                // takes effect even when today's observations are already synced.
+                // per-observation filename — and observer/recorder are fields of that same row.
+                // Set them locally (they also ride along on the next observation upload), then
+                // upsert straight to the server so a change takes effect even when today's
+                // observations are already synced.
                 _colonyState.DailyLabel = newLabel;
+                _colonyState.DailyObserver = newObserver;
+                _colonyState.DailyRecorder = newRecorder;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
                 DataStorageService.SaveColonyState(this, _colonyState);
 
@@ -2849,7 +2882,7 @@ namespace PenguinMonitor
                     var token = _appSettings.AuthToken;
                     _ = Task.Run(async () =>
                     {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token);
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserver, newRecorder);
                         new Handler(Looper.MainLooper).Post(() =>
                             Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
                     });
@@ -3067,6 +3100,7 @@ namespace PenguinMonitor
             _settingsCard.AddView(regionColonyLayout);
             // 2. Daily label
             _settingsCard.AddView(dailyLabelLayout);
+            _settingsCard.AddView(dayPeopleLayout);
             // 3. Bluetooth enable + Scan BT are added together as a row below
 
             // Scanner device picker
@@ -6733,11 +6767,13 @@ namespace PenguinMonitor
 
                 // Load colony state (or migrate from legacy)
                 _colonyState = DataStorageService.LoadColonyState(this);
-                // Clear daily label if it was set on a previous day
+                // Clear daily label (and who was out) if it was set on a previous day
                 if (!string.IsNullOrEmpty(_colonyState.DailyLabelDate) && _colonyState.DailyLabelDate != NzToday.ToString("yyyy-MM-dd"))
                 {
                     _colonyState.DailyLabel = "";
                     _colonyState.DailyLabelDate = "";
+                    _colonyState.DailyObserver = "";
+                    _colonyState.DailyRecorder = "";
                     DataStorageService.SaveColonyState(this, _colonyState);
                 }
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)

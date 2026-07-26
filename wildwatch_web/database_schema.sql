@@ -95,12 +95,19 @@ CREATE TABLE IF NOT EXISTS day_notes (
     day_note_id INT AUTO_INCREMENT PRIMARY KEY,
     colony_id   INT NOT NULL,
     note_date   DATE NOT NULL,
-    note        VARCHAR(255) NOT NULL,    -- never blank; delete the row instead
+    note        VARCHAR(255) NULL,        -- what happened that day
+    observer    VARCHAR(100) NULL,        -- who was looking in the boxes (free text, as typed in the field)
+    recorder    VARCHAR(100) NULL,        -- who was working the phone
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_colony_date (colony_id, note_date),
     KEY idx_note_date (note_date),
-    CONSTRAINT chk_dn_note CHECK (CHAR_LENGTH(TRIM(note)) > 0),
+    -- An all-blank row is deleted instead (crud.php save_day_note), so "nothing recorded for
+    -- this day" has exactly one representation.
+    CONSTRAINT chk_dn_any CHECK (
+          CHAR_LENGTH(TRIM(COALESCE(note, ''))) > 0
+       OR CHAR_LENGTH(TRIM(COALESCE(observer, ''))) > 0
+       OR CHAR_LENGTH(TRIM(COALESCE(recorder, ''))) > 0),
     CONSTRAINT fk_dn_colony FOREIGN KEY (colony_id) REFERENCES colonies (colony_id)
 );
 

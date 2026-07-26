@@ -273,24 +273,43 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $colonyId = (int)($in['colony_id'] ?? $_GET['colony_id'] ?? 1);
     requireColonyAccess($pdo, $observer, $colonyId, true);
     // Collapse whitespace so a note pasted over two lines still fits the column and reads as one line.
-    $note = mb_substr(trim(preg_replace('/\s+/', ' ', (string)($in['note'] ?? ''))), 0, 255);
+    $clean = fn($v, $max) => mb_substr(trim(preg_replace('/\s+/', ' ', (string)$v)), 0, $max);
+    $note = $clean($in['note'] ?? '', 255);
+    // observer/recorder are only touched when the caller sends them, so a client that knows
+    // nothing about the people fields (an older nestcheck posting just a note) can't blank them.
+    $sentObserver = array_key_exists('observer', $in);
+    $sentRecorder = array_key_exists('recorder', $in);
+    $observerName = $sentObserver ? $clean($in['observer'], 100) : null;
+    $recorderName = $sentRecorder ? $clean($in['recorder'], 100) : null;
     $oid = $observer['observer_id'];
 
     try {
         $pdo->beginTransaction();
-        $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+        $ex = $pdo->prepare("SELECT day_note_id, note, observer, recorder FROM day_notes WHERE colony_id = ? AND note_date = ?");
         $ex->execute([$colonyId, $date]);
-        $existingId = $ex->fetchColumn();
+        $row = $ex->fetch(PDO::FETCH_ASSOC);
+        $existingId = $row['day_note_id'] ?? null;
 
-        if ($note === '') {
+        // What the row will hold once this write lands — whichever fields weren't sent keep
+        // their stored value. All three blank means the day has nothing left to say: delete.
+        $finalNote     = $note;
+        $finalObserver = $sentObserver ? $observerName : ($row['observer'] ?? '');
+        $finalRecorder = $sentRecorder ? $recorderName : ($row['recorder'] ?? '');
+        $allBlank = $finalNote === '' && (string)$finalObserver === '' && (string)$finalRecorder === '';
+
+        $fields = ['note' => $finalNote === '' ? null : $finalNote];
+        if ($sentObserver) $fields['observer'] = $observerName === '' ? null : $observerName;
+        if ($sentRecorder) $fields['recorder'] = $recorderName === '' ? null : $recorderName;
+
+        if ($allBlank) {
             if ($existingId) wwAuditedDelete($pdo, 'day_notes', (int)$existingId, $oid, 'Cleared day note');
         } elseif ($existingId) {
-            wwAuditedUpdate($pdo, 'day_notes', (int)$existingId, ['note'=>$note], $oid);
+            wwAuditedUpdate($pdo, 'day_notes', (int)$existingId, $fields, $oid);
         } else {
-            wwAuditedInsert($pdo, 'day_notes', ['colony_id'=>$colonyId, 'note_date'=>$date, 'note'=>$note], $oid);
+            wwAuditedInsert($pdo, 'day_notes', ['colony_id'=>$colonyId, 'note_date'=>$date] + $fields, $oid);
         }
         $pdo->commit();
-        echo json_encode(['success'=>true, 'note'=>$note]);
+        echo json_encode(['success'=>true, 'note'=>$finalNote, 'observer'=>$finalObserver, 'recorder'=>$finalRecorder]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);

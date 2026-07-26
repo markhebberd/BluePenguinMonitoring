@@ -781,13 +781,22 @@ function ww_cleanMonitorLabel(string $raw): string {
  * a person (or corrected by one after an earlier import), and an import arriving later should
  * not silently replace that. Returns true if a note was written. Caller owns the transaction.
  */
-function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $observerId, $reason = null): bool {
-    $note = mb_substr(trim(preg_replace('/\s+/', ' ', $note)), 0, 255);
-    if ($note === '') return false;
+function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $observerId, $reason = null,
+                       string $dayObserver = '', string $dayRecorder = ''): bool {
+    $clean = fn($v, $max) => mb_substr(trim(preg_replace('/\s+/', ' ', $v)), 0, $max);
+    $note = $clean($note, 255);
+    $dayObserver = $clean($dayObserver, 100);
+    $dayRecorder = $clean($dayRecorder, 100);
+    if ($note === '' && $dayObserver === '' && $dayRecorder === '') return false;
     $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
     $ex->execute([$colonyId, $noteDate]);
     if ($ex->fetchColumn()) return false;
-    wwAuditedInsert($pdo, 'day_notes', ['colony_id' => $colonyId, 'note_date' => $noteDate, 'note' => $note], $observerId, $reason);
+    wwAuditedInsert($pdo, 'day_notes', [
+        'colony_id' => $colonyId, 'note_date' => $noteDate,
+        'note'     => $note === '' ? null : $note,
+        'observer' => $dayObserver === '' ? null : $dayObserver,
+        'recorder' => $dayRecorder === '' ? null : $dayRecorder,
+    ], $observerId, $reason);
     return true;
 }
 
