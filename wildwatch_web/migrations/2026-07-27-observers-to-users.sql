@@ -41,6 +41,20 @@ ALTER TABLE users
   ADD COLUMN surname VARCHAR(100) NULL AFTER f_name,
   RENAME INDEX observer_name TO f_name;
 
+-- falcon_id: this person's identifier in Falcon. Free text rather than INT — an external
+-- system's id is whatever that system says it is, and nothing here parses it. Not unique
+-- and not indexed until there's a query that needs it to be.
+ALTER TABLE users ADD COLUMN falcon_id VARCHAR(64) NULL AFTER surname;
+
+-- active: whether this is a current account. Existing rows default to active — nobody is
+-- deactivated by this migration. An account is deactivated rather than deleted because it
+-- owns observations, audit_log entries and verifications that must keep their author.
+--
+-- NOTE: nothing enforces this yet. Setting active = 0 marks the account in the admin screen
+-- but does NOT block login — auth.php / crud.php still authenticate on email + password
+-- alone. Adding `AND active = 1` to those lookups is a separate, deliberate change.
+ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE AFTER falcon_id;
+
 -- Step 2: a view under the old name, so the code still running (and any request in flight)
 -- keeps working until the new release is live. Single-table, plain column aliases, so it is
 -- updatable and insertable — the old INSERT/UPDATE paths work through it too.

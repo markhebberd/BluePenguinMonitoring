@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     f_name VARCHAR(100) NOT NULL UNIQUE,
     surname VARCHAR(100),
+    falcon_id VARCHAR(64),          -- identifier for this person in Falcon; free-form, not validated here
+    active BOOLEAN NOT NULL DEFAULT TRUE,  -- deactivated accounts are kept, not deleted (they own observations)
     email VARCHAR(255),
     passphrase_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

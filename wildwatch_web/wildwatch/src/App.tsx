@@ -8371,7 +8371,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   };
 
   const [colonies, setColonies] = useState<any[]>([]);
-  const emptyNewUser = { observer_name: '', surname: '', email: '', role: 'viewer', password: '' };
+  const emptyNewUser = { observer_name: '', surname: '', falcon_id: '', email: '', role: 'viewer', password: '' };
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [newUserColonies, setNewUserColonies] = useState<Record<string, string>>({}); // colony_id -> 'view' | 'edit'
   const [addUserErr, setAddUserErr] = useState('');
@@ -8386,7 +8386,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     try {
       const r = await fetch('/api/admin.php?action=create_user', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ observer_name: newUser.observer_name, surname: newUser.surname, email: newUser.email, role: newUser.role, password: newUser.password }),
+        body: JSON.stringify({ observer_name: newUser.observer_name, surname: newUser.surname, falcon_id: newUser.falcon_id, email: newUser.email, role: newUser.role, password: newUser.password }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
@@ -8935,12 +8935,13 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <h3>Users</h3>
         {loading ? <p className="muted">Loading...</p> : (
           <table className="bird-table" style={{width:'100%'}}>
-            <thead><tr><th>Name</th><th>Surname</th><th>Email</th><th>Role</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Surname</th><th>Falcon ID</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.observer_id}>
                   <td>{u.observer_name}</td>
                   <td><EditableField value={u.surname} onSave={(v: any) => updateUser(u.observer_id, 'surname', v)} placeholder="-" canEdit={true} /></td>
+                  <td><EditableField value={u.falcon_id} onSave={(v: any) => updateUser(u.observer_id, 'falcon_id', v)} placeholder="-" canEdit={true} /></td>
                   <td>{u.email}</td>
                   <td>
                     <select value={u.role || 'viewer'} onChange={e => updateUser(u.observer_id, 'role', e.target.value)}>
@@ -8949,6 +8950,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
                       <option value="admin">Admin</option>
                     </select>
                   </td>
+                  <td><input type="checkbox" checked={u.active == 1} onChange={e => updateUser(u.observer_id, 'active', e.target.checked ? '1' : '0')} title="Inactive accounts are kept for their history" /></td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="edit-btn" onClick={() => { setResetFor(u); setResetPw(genPassword()); setResetMsg(''); }}>Reset password</button>
                     {u.email && <button className="edit-btn" style={{ marginLeft: 6 }} disabled={sendingResetFor === u.observer_id}
@@ -8976,6 +8978,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <input type="text" placeholder="Name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="text" placeholder="Surname (optional)" value={newUser.surname} onChange={e => setNewUser({ ...newUser, surname: e.target.value })} style={{ padding: '5px 8px' }} />
+          <input type="text" placeholder="Falcon ID (optional)" value={newUser.falcon_id} onChange={e => setNewUser({ ...newUser, falcon_id: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="email" placeholder="Email (optional)" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} style={{ padding: '5px 8px' }} />
           <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} style={{ padding: '5px 8px' }}>
             <option value="viewer">Viewer</option>

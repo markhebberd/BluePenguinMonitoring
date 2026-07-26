@@ -367,7 +367,7 @@ if ($action === 'recent_changes') {
 }
 
 if ($action === 'users') {
-    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, email, role, created_at FROM users ORDER BY id");
+    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, active, email, role, created_at FROM users ORDER BY id");
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -377,8 +377,8 @@ if ($action === 'update_user') {
     if (!$input || !$input['observer_id']) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
     // The API still speaks observer_name; the column behind it is users.f_name.
     $fields = [];
-    foreach (['role' => 'role', 'observer_name' => 'f_name', 'surname' => 'surname', 'email' => 'email'] as $in => $col) {
-        if (isset($input[$in])) $fields[$col] = $input[$in];
+    foreach (['role' => 'role', 'observer_name' => 'f_name', 'surname' => 'surname', 'falcon_id' => 'falcon_id', 'active' => 'active', 'email' => 'email'] as $in => $col) {
+        if (isset($input[$in])) $fields[$col] = $col === 'active' ? (int)(bool)$input[$in] : $input[$in];
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
 
@@ -395,6 +395,7 @@ if ($action === 'create_user') {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $name = trim($input['observer_name'] ?? '');
     $surname = trim($input['surname'] ?? '');
+    $falconId = trim($input['falcon_id'] ?? '');
     $email = trim($input['email'] ?? '');
     $role = $input['role'] ?? 'viewer';
     $password = (string)($input['password'] ?? '');
@@ -412,13 +413,13 @@ if ($action === 'create_user') {
     $pdo->beginTransaction();
     try {
         $id = (int)wwAuditedInsert($pdo, 'users',
-            ['f_name' => $name, 'surname' => $surname !== '' ? $surname : null,
+            ['f_name' => $name, 'surname' => $surname !== '' ? $surname : null, 'falcon_id' => $falconId !== '' ? $falconId : null,
              'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
             $observer['observer_id'], $invite ? 'Created with email invite' : 'Created with password');
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
-    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'falcon_id'=>$falconId, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
     exit;
 }
 
