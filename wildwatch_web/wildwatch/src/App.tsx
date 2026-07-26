@@ -1258,6 +1258,14 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
   // flipped back to newest-first at the end, which is the order every screen displays.
   const seasons = Array.from(seasonBirds.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   const bredBefore = new Set<string>();
+  // A chick is this box's offspring only if it was CHIPPED here — a chick chipped in one box
+  // but scanned in another the same season is a visitor there, not that box's chick, and must
+  // not be pulled into a second family. Chip-box provenance is read straight from the penguin
+  // records (their is_chipped_here), which survives the same-day scan/chip sighting dedup that
+  // can otherwise leave a scanned-and-chipped chick without chip provenance on its sighting.
+  const chippedHereKeys = new Set((allPenguinsInBox || [])
+    .filter((p: any) => p.is_chipped_here && p.pit_id)
+    .map((p: any) => String(p.pit_id).slice(-8)));
   const result: BoxSeasonData[] = [];
   for (const [label, birdMap] of seasons) {
     const seasonYear = parseInt(label);
@@ -1291,7 +1299,7 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     const chickFamily = new Map<string, number>();
     for (const b of birdMap.values()) {
       const k = b.pit_id.slice(-8);
-      if (!chippedThisSeason(b) || parentKeys.has(k)) continue;
+      if (!chippedThisSeason(b) || !chippedHereKeys.has(k) || parentKeys.has(k)) continue;
       const ct = new Date(b.chip_date!).getTime();
       let fi = clutches.findIndex((c, i) => pairs[i] && ct >= c.windowStart && ct <= c.windowEnd);
       if (fi < 0 && familyIdxs.length > 0) fi = familyIdxs[familyIdxs.length - 1];

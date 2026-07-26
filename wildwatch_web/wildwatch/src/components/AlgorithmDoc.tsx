@@ -321,9 +321,11 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
 
       <h3>10. Matching chicks to an attempt</h3>
       <p>
-        A bird counts as this season’s chick if it was chipped <em>as a chick</em> (not as an adult)
-        and its chip date falls inside this season. A returning adult that happens to have been
-        chick-chipped years ago is a visitor, not a chick.
+        A bird counts as this season’s chick if it was chipped <em>as a chick</em> (not as an adult),
+        its chip date falls inside this season, and it was chipped <em>at this box</em>. A returning
+        adult that happens to have been chick-chipped years ago is a visitor, not a chick; so is a
+        chick chipped in another nest that was merely scanned here — it belongs to a single family,
+        the one in its own chip box, and is never pulled into a second nest’s clutch.
       </p>
       <p>
         Each such chick is assigned to the attempt whose breeding window contains its chip date.
