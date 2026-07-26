@@ -6402,10 +6402,23 @@ namespace PenguinMonitor
                             var noScanEntry = isChick
                                 ? null : replaceBox?.ScannedIds.FirstOrDefault(s2 => s2.BirdId.StartsWith("NOSCAN_"));
 
+                            // The held-scans flush pre-counts each flushed bird as an adult before the
+                            // new-bird form opens; scanCleanup.decrementAdult marks that this bird is
+                            // ALREADY in the adult count. Completion must not add it a second time (and,
+                            // if it turns out to be a chick, must move it out of Adults into Chicks).
+                            bool preCountedAsAdult = scanCleanup?.decrementAdult == true;
+
                             void AddAsNewBird()
                             {
-                                if (isChick) BumpCount(_chicksEditText, 1);
-                                else BumpCount(_adultsEditText, 1);
+                                if (isChick)
+                                {
+                                    BumpCount(_chicksEditText, 1);
+                                    if (preCountedAsAdult) BumpCount(_adultsEditText, -1);
+                                }
+                                else if (!preCountedAsAdult)
+                                {
+                                    BumpCount(_adultsEditText, 1);
+                                }
                                 SaveCurrentBoxData();
                                 DrawPageLayouts();
                                 Toast.MakeText(this, $"#{pengNum} {verb} ({(isChick ? "+1 Chick" : "+1 Adult")})", ToastLength.Short)?.Show();
@@ -6419,9 +6432,17 @@ namespace PenguinMonitor
                                     .SetPositiveButton("Yes, replace", (s3, e3) =>
                                     {
                                         // Swap, don't add: the no-scan already counted this bird as an adult.
-                                        // The counts don't move, so SaveCurrentBoxData would see nothing
-                                        // changed — persist the scan-list edit explicitly.
                                         replaceBox!.ScannedIds.Remove(noScanEntry);
+                                        // If the held-scans flush ALSO counted this bird as an adult, the
+                                        // no-scan and the flushed scan are one physical bird counted twice —
+                                        // drop the duplicate so the adult total lands on its true value.
+                                        if (preCountedAsAdult)
+                                        {
+                                            replaceBox.Adults = Math.Max(0, replaceBox.Adults - 1);
+                                            if (_adultsEditText?[0] != null) _adultsEditText[0].Text = replaceBox.Adults.ToString();
+                                        }
+                                        // The counts otherwise don't move, so SaveCurrentBoxData would see
+                                        // nothing changed — persist the scan-list edit explicitly.
                                         replaceBox.WhenDataCollectedUtc = DateTime.UtcNow;
                                         _colonyState.SaveBoxObservation(_currentBoxName, replaceBox);
                                         SaveToAppDataDir();
