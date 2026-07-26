@@ -2949,49 +2949,69 @@ namespace PenguinMonitor
                             var newId = Convert.ToInt32(selected["colony_id"]);
                             if (newId == _appSettings.SelectedColonyId) return;
 
-                            // Block switching while there are unsynced changes — they belong to the
-                            // current colony and must not be uploaded to a different one.
-                            int unsynced = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
-                            if (unsynced > 0)
+                            void ApplySwitch()
                             {
-                                Toast.MakeText(this, $"Sync before switching colony — {unsynced} unsynced change{(unsynced == 1 ? "" : "s")}", ToastLength.Long)?.Show();
-                                // Revert the spinner to the current colony
+                                _appSettings.SelectedColonyId = newId;
+                                _appSettings.SelectedColonyName = selected["colony_name"]?.ToString() ?? "";
+                                _appSettings.SelectedColonyPrefix = selected.TryGetValue("colony_prefix", out var cpfx) ? cpfx?.ToString() ?? "" : "";
+                                _appSettings.AllBoxSetsString = selected["location_sets_string"]?.ToString() ?? "";
+                                _appSettings.BoxSetString = "All";
+                                DataStorageService.saveApplicationSettings(_appSettings);
+
+                                // Reset the single-colony cached state so the new colony's sync repopulates cleanly
+                                _colonyState.TodayBoxes.Clear();
+                                _colonyState.PreviousBoxes.Clear();
+                                _colonyState.TodayBiometrics.Clear();
+                                _colonyState.PendingObservations.Clear();
+                                _colonyState.LastSyncedUtc = DateTime.MinValue;
+                                DataStorageService.SaveColonyState(this, _colonyState);
+
+                                CreateBoxSetsDictionary();
+                                if (_boxNamesAndIndexes.Count > 0)
+                                {
+                                    var first = _boxNamesAndIndexes.First().Key;
+                                    _currentBoxName = first;
+                                    _currentBoxIndex = _boxNamesAndIndexes[first];
+                                    _isBoxLocked = true;
+                                }
+                                DrawPageLayouts();
+                                StartSync();               // download the new colony's data
+                                WarmEmbedWebView();         // re-point the warm embed at the new colony
+                            }
+
+                            void RevertColonySpinner()
+                            {
                                 _suppressColonySwitch = true;
                                 var curIdx = coloniesInRegion.FindIndex(c => Convert.ToInt32(c["colony_id"]) == _appSettings.SelectedColonyId);
                                 if (curIdx >= 0) colonySpinner.SetSelection(curIdx, false);
                                 _suppressColonySwitch = false;
+                            }
+
+                            // Unsynced changes belong to the current colony and must not upload to another,
+                            // so normally you must sync first. But a change that CAN'T upload (e.g. one that
+                            // silently keeps failing) would otherwise trap you here forever — so also offer
+                            // to discard it and switch.
+                            int unsynced = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
+                            if (unsynced > 0)
+                            {
+                                new AlertDialog.Builder(this)
+                                    .SetTitle("Unsynced changes")
+                                    .SetMessage($"{unsynced} change{(unsynced == 1 ? "" : "s")} for {_appSettings.SelectedColonyName} haven't uploaded yet. Sync first, or discard {(unsynced == 1 ? "it" : "them")} to switch to {selected["colony_name"]}.")
+                                    .SetCancelable(false)
+                                    .SetPositiveButton("Sync now", (s2, e2) => { RevertColonySpinner(); StartSync(); })
+                                    .SetNeutralButton("Discard & switch", (s2, e2) =>
+                                    {
+                                        _colonyState.PendingObservations.RemoveAll(p => p.IsPendingUpload);
+                                        foreach (var b in _colonyState.TodayBiometrics.Values) b.IsPendingUpload = false;
+                                        DataStorageService.SaveColonyState(this, _colonyState);
+                                        ApplySwitch();
+                                    })
+                                    .SetNegativeButton("Cancel", (s2, e2) => RevertColonySpinner())
+                                    .Show();
                                 return;
                             }
 
-                            _appSettings.SelectedColonyId = newId;
-                            _appSettings.SelectedColonyName = selected["colony_name"]?.ToString() ?? "";
-                            _appSettings.SelectedColonyPrefix = selected.TryGetValue("colony_prefix", out var cpfx) ? cpfx?.ToString() ?? "" : "";
-                            _appSettings.AllBoxSetsString = selected["location_sets_string"]?.ToString() ?? "";
-                            _appSettings.BoxSetString = "All";
-                            DataStorageService.saveApplicationSettings(_appSettings);
-
-                            // Reset the single-colony cached state so the new colony's sync repopulates cleanly
-                            _colonyState.TodayBoxes.Clear();
-                            _colonyState.PreviousBoxes.Clear();
-                            _colonyState.TodayBiometrics.Clear();
-                            _colonyState.LastSyncedUtc = DateTime.MinValue;
-                            DataStorageService.SaveColonyState(this, _colonyState);
-
-                            CreateBoxSetsDictionary();
-                            if (_boxNamesAndIndexes.Count > 0)
-                            {
-                                var first = _boxNamesAndIndexes.First().Key;
-                                _currentBoxName = first;
-                                _currentBoxIndex = _boxNamesAndIndexes[first];
-                                _isBoxLocked = true;
-                            }
-                            DrawPageLayouts();
-
-                            // Download the new colony's data
-                            StartSync();
-
-                            // Re-point the warm embed WebView at the new colony (background re-sync)
-                            WarmEmbedWebView();
+                            ApplySwitch();
                         };
 
                         // Pre-select current region
