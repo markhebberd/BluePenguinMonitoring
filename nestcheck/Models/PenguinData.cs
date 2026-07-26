@@ -15,7 +15,6 @@ namespace PenguinMonitor.Models
         public LifeStage LastKnownLifeStage { get; set; }
         public DateTime ChipDate { get; set; }
         public string Sex { get; set; } = "";
-        public string VidForScanner { get; set; } = "";
         public string ChipAs { get; set; } = "";
         public string ChickSizeCode { get; set; } = "";
     }

@@ -99,7 +99,7 @@ if ($since) {
         WHERE ol.colony_id = ? AND (o.updated_at >= ? OR ps.deleted_at >= ?)");
     $scans->execute([$colonyId, $ts, $ts]);
 
-    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, is_dead, death_date, vid_for_scanner, chick_size_code, notes FROM penguins WHERE updated_at >= ?");
+    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, notes FROM penguins WHERE updated_at >= ?");
     $penguins->execute([$ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin

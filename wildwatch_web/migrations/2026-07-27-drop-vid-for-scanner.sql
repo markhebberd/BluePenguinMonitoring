@@ -1,0 +1,31 @@
+-- Drop penguins.vid_for_scanner.
+--
+-- RUN ONLY AFTER the code that stops SELECTing the column is deployed (snapshot.php,
+-- snapshot_columns.php, penguins.php, observations.php). Dropping it first makes those
+-- endpoints 500 until the deploy lands.
+--
+-- What is lost: a hand-curated scanner label on 1004 of 1043 penguins — box + chick-size/sex
+-- shorthand such as "31-BC22", "98-93-M", "77-61-81-20-79-F". This is the point of no return
+-- for the column; take the backup below first.
+--
+-- Also lost: nestcheck's third-chance bird lookup. LookupPenguinLabel matched a scanned ID
+-- against the full PIT, then the last 8 digits, then vid_for_scanner. That third fallback is
+-- gone, so a scanner reporting a VID rather than a PIT now shows the raw id, not "#PT383".
+--
+-- What is not lost: audit_log holds the value for any penguin whose VID was ever written or
+-- edited through the gateway (not the original bulk import):
+--   SELECT record_id, JSON_UNQUOTE(JSON_EXTRACT(changed_fields, '$.vid_for_scanner'))
+--     FROM audit_log WHERE table_name = 'penguins'
+--       AND JSON_EXTRACT(changed_fields, '$.vid_for_scanner') IS NOT NULL;
+--
+-- Full backup of every value, taken before the ALTER (keep the .sql off the VPS):
+--   mysqldump --no-create-info --complete-insert wildwatch_nestcheck penguins \
+--     --where="vid_for_scanner IS NOT NULL" > vid_for_scanner-backup-2026-07-27.sql
+-- Or as a two-column CSV:
+--   SELECT peng_num, vid_for_scanner FROM penguins WHERE vid_for_scanner IS NOT NULL;
+
+ALTER TABLE penguins DROP COLUMN vid_for_scanner;
+
+-- Verify (expect zero rows):
+-- SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'penguins' AND COLUMN_NAME = 'vid_for_scanner';

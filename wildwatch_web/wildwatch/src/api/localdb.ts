@@ -959,7 +959,7 @@ export function queryAllPenguins(): any[] {
     const active = chips.find((c: any) => c.is_active == 1) || chips[0];
     result.push({
       peng_num: p.peng_num, sex: p.sex, life_stage: p.life_stage,
-      chipped_as_adult: p.chipped_as_adult, vid_for_scanner: p.vid_for_scanner,
+      chipped_as_adult: p.chipped_as_adult,
       chick_size_code: p.chick_size_code, hasReturned: p.hasReturned || false,
       pit_id: active?.pit_id || null, chip_date: active?.chip_date || null,
       chip_box: active?.chip_box || null,

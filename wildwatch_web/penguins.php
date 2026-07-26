@@ -106,7 +106,7 @@ if ($chipId) {
 // Return all penguins with summary stats
 // JOIN through penguin_chips to get pit_id and chip_date
 $sql = "SELECT
-            p.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.vid_for_scanner, p.chick_size_code,
+            p.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code,
             pc_active.pit_id, pc_active.chip_date,
             COUNT(DISTINCT ps.observation_id) as total_scans,
             COUNT(DISTINCT ol.location_name) as boxes_seen,

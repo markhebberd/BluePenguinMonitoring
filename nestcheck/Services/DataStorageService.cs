@@ -491,7 +491,7 @@ namespace PenguinMonitor.Services
                         remotePenguinData[cleanId.ToUpper()] = new PenguinData
                         {
                             FullPitId = record.pit_id ?? "", ScannedId = eightDigitId, PengNum = record.peng_num ?? "",
-                            LastKnownLifeStage = lifeStage, Sex = record.sex ?? "", VidForScanner = record.vid_for_scanner ?? "",
+                            LastKnownLifeStage = lifeStage, Sex = record.sex ?? "",
                             ChipDate = chipDate,
                             ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? ""
                         };

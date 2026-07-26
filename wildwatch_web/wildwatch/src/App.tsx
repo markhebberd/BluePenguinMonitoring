@@ -2451,7 +2451,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {editing && <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={true} /></td></tr>}
             {editing && <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>}
             {editing && <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={true} /></td></tr>}
-            {editing && <tr><td className="muted">VID</td><td><EditableField value={p.vid_for_scanner} onSave={savePenguin('vid_for_scanner')} placeholder="-" canEdit={true} /></td></tr>}
             {chips.map((c: any, i: number) => {
               const re = 'Re'.repeat(i);
               const prefix = i === 0 ? '' : re.toLowerCase();

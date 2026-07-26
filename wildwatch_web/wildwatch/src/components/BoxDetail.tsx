@@ -6,7 +6,6 @@ interface Scan {
   tag_number: string;
   sex: string | null;
   life_stage: string | null;
-  vid_for_scanner: string | null;
 }
 
 interface Observation {
@@ -117,7 +116,7 @@ export function BoxDetail({ boxName, onClose }: BoxDetailProps) {
                     key={i}
                     className="scan-badge"
                     style={{ backgroundColor: getSexColor(scan.sex) }}
-                    title={`${scan.tag_number} | ${scan.sex || '?'} | ${scan.life_stage || '?'}${scan.vid_for_scanner ? ' | VID:' + scan.vid_for_scanner : ''}`}
+                    title={`${scan.tag_number} | ${scan.sex || '?'} | ${scan.life_stage || '?'}`}
                   >
                     {scan.tag_number.slice(-8)}
                     {scan.sex ? ` ${scan.sex}` : ''}

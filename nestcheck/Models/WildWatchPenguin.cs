@@ -7,7 +7,6 @@ namespace PenguinMonitor.Models
         public string sex { get; set; }
         public int? is_dead { get; set; }
         public string chip_date { get; set; }
-        public string vid_for_scanner { get; set; }
         public int? chipped_as_adult { get; set; }
         public string chick_size_code { get; set; }
     }

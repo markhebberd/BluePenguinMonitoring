@@ -3781,8 +3781,7 @@ namespace PenguinMonitor
             if (_remotePenguinData != null)
             {
                 if (!_remotePenguinData.TryGetValue(cleanId, out pd))
-                    if (!_remotePenguinData.TryGetValue(shortId, out pd))
-                        pd = _remotePenguinData.Values.FirstOrDefault(p => p.VidForScanner == birdId);
+                    _remotePenguinData.TryGetValue(shortId, out pd);
             }
 
             if (pd != null)
