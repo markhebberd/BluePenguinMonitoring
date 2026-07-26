@@ -782,20 +782,25 @@ function ww_cleanMonitorLabel(string $raw): string {
  * not silently replace that. Returns true if a note was written. Caller owns the transaction.
  */
 function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $observerId, $reason = null,
-                       string $dayObserver = '', string $dayRecorder = ''): bool {
-    $clean = fn($v, $max) => mb_substr(trim(preg_replace('/\s+/', ' ', $v)), 0, $max);
-    $note = $clean($note, 255);
-    $dayObserver = $clean($dayObserver, 100);
-    $dayRecorder = $clean($dayRecorder, 100);
-    if ($note === '' && $dayObserver === '' && $dayRecorder === '') return false;
+                       ?int $dayObserverId = null, ?int $dayRecorderId = null): bool {
+    $note = mb_substr(trim(preg_replace('/\s+/', ' ', $note)), 0, 255);
+    if ($note === '' && $dayObserverId === null && $dayRecorderId === null) return false;
     $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
     $ex->execute([$colonyId, $noteDate]);
     if ($ex->fetchColumn()) return false;
+    // A phone sending an id for a user that has since been deleted must not abort the whole
+    // upload — the observations matter more than the attribution, so drop an unknown id.
+    $known = function ($id) use ($pdo) {
+        if ($id === null) return null;
+        $c = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+        $c->execute([$id]);
+        return $c->fetchColumn() ? $id : null;
+    };
     wwAuditedInsert($pdo, 'day_notes', [
         'colony_id' => $colonyId, 'note_date' => $noteDate,
-        'note'     => $note === '' ? null : $note,
-        'observer' => $dayObserver === '' ? null : $dayObserver,
-        'recorder' => $dayRecorder === '' ? null : $dayRecorder,
+        'note'        => $note === '' ? null : $note,
+        'observer_id' => $known($dayObserverId),
+        'recorder_id' => $known($dayRecorderId),
     ], $observerId, $reason);
     return true;
 }

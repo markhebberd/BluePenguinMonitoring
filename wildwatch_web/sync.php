@@ -53,10 +53,24 @@ function authenticate($pdo) {
 /** The colony's day notes as note_date => [note, observer, recorder], for stamping onto each
  *  observation below. Note stays a plain string in the payload; the people ride beside it. */
 function dayNoteMap($pdo, $colonyId): array {
-    $s = $pdo->prepare("SELECT note_date, note, observer, recorder FROM day_notes WHERE colony_id = ?");
+    // The people are FKs to users; resolve them to display names here so the phone can show
+    // "who was out" without carrying a copy of the user table.
+    $s = $pdo->prepare("SELECT d.note_date, d.note, d.observer_id, d.recorder_id,
+            TRIM(CONCAT(uo.f_name, ' ', uo.surname)) AS observer_name,
+            TRIM(CONCAT(ur.f_name, ' ', ur.surname)) AS recorder_name
+        FROM day_notes d
+        LEFT JOIN users uo ON uo.id = d.observer_id
+        LEFT JOIN users ur ON ur.id = d.recorder_id
+        WHERE d.colony_id = ?");
     $s->execute([$colonyId]);
     $map = [];
-    foreach ($s->fetchAll() as $r) $map[$r['note_date']] = ['note' => $r['note'], 'observer' => $r['observer'], 'recorder' => $r['recorder']];
+    foreach ($s->fetchAll() as $r) $map[$r['note_date']] = [
+        'note' => $r['note'],
+        'observer_id' => $r['observer_id'] !== null ? (int)$r['observer_id'] : null,
+        'recorder_id' => $r['recorder_id'] !== null ? (int)$r['recorder_id'] : null,
+        'observer' => $r['observer_name'] ?: null,
+        'recorder' => $r['recorder_name'] ?: null,
+    ];
     return $map;
 }
 
@@ -164,6 +178,8 @@ function handleDownload($pdo, $colonyId, $observer) {
             'day_note' => $note,
             'day_observer' => $day['observer'] ?? null,
             'day_recorder' => $day['recorder'] ?? null,
+            'day_observer_id' => $day['observer_id'] ?? null,
+            'day_recorder_id' => $day['recorder_id'] ?? null,
             'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
@@ -201,12 +217,18 @@ function handleDownload($pdo, $colonyId, $observer) {
     $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes, watched FROM observation_locations WHERE colony_id = ?");
     $locStmt->execute([$colonyId]);
 
+    // Everyone who can be named as the day's observer or recorder. Active only — the phone is
+    // picking who is out today, and a deactivated person is by definition not. Names are
+    // pre-joined so the app never has to compose them.
+    $userStmt = $pdo->query("SELECT id, TRIM(CONCAT(f_name, ' ', surname)) AS name FROM users WHERE active = 1 ORDER BY f_name, surname");
+
     echo json_encode([
         'snapshot_time' => date('c'),
         'observer' => ['observer_id' => (int)$observer['observer_id'], 'name' => $observer['observer_name']],
         'boxes' => (object)$boxes,
         'previous' => (object)$previous,
         'locations' => $locStmt->fetchAll(),
+        'users' => $userStmt->fetchAll(),
     ]);
 }
 
@@ -239,8 +261,8 @@ function handleUpload($pdo, $colonyId, $observer) {
 
     $forceReplace = ($_GET['action'] === 'confirm');
     $dailyLabel = $input['daily_label'] ?? '';
-    $dailyObserver = (string)($input['daily_observer'] ?? '');
-    $dailyRecorder = (string)($input['daily_recorder'] ?? '');
+    $dailyObserverId = (int)($input['daily_observer_id'] ?? 0) ?: null;
+    $dailyRecorderId = (int)($input['daily_recorder_id'] ?? 0) ?: null;
     $observerId = (int)$observer['observer_id'];
     $created = [];
     $conflicts = [];
@@ -425,7 +447,7 @@ function handleUpload($pdo, $colonyId, $observer) {
         // arrives the note may have been corrected in the web day view, and a re-sync of the same
         // label should not undo that edit.
         foreach (array_keys($labelDates) as $noteDate) {
-            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync', $dailyObserver, $dailyRecorder);
+            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync', $dailyObserverId, $dailyRecorderId);
         }
 
         $pdo->commit();

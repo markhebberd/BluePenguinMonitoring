@@ -9,10 +9,11 @@ namespace PenguinMonitor.Models
         public DateTime LastSyncedUtc { get; set; }
         public string DailyLabel { get; set; } = "";
         public string DailyLabelDate { get; set; } = "";
-        /// <summary>Who was looking in the boxes today, and who was working the phone. Both ride
-        /// with the daily label to the colony's day_notes row. Cleared with it at rollover.</summary>
-        public string DailyObserver { get; set; } = "";
-        public string DailyRecorder { get; set; } = "";
+        /// <summary>Who was looking in the boxes today, and who was working the phone — users.id
+        /// from the server's people list, 0 for "not recorded". Both ride with the daily label to
+        /// the colony's day_notes row. Cleared with it at rollover.</summary>
+        public int DailyObserverId { get; set; }
+        public int DailyRecorderId { get; set; }
 
         /// <summary>
         /// Pending observations not yet uploaded to server.
@@ -80,8 +81,8 @@ namespace PenguinMonitor.Models
             {
                 DailyLabel = "";
                 DailyLabelDate = "";
-                DailyObserver = "";
-                DailyRecorder = "";
+                DailyObserverId = 0;
+                DailyRecorderId = 0;
             }
 
             // Drop downloaded biometrics from a previous day; keep unsynced edits so they aren't lost

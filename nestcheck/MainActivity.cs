@@ -2819,33 +2819,38 @@ namespace PenguinMonitor
             dailyLabelInput.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             dailyLabelLayout.AddView(dailyLabelInput);
 
-            // Who was out today. Saved with the daily label by the same Set button — one row per
-            // colony per day holds all three, so it makes no sense to commit them separately.
+            // Who was out today. Both are people from the user table, not free text, so the day's
+            // record links to the same person the web admin screen manages. Saved with the daily
+            // label by the same Set button — one row per colony per day holds all three.
             var dayPeopleLayout = new LinearLayout(this);
             dayPeopleLayout.SetPadding(8, 0, 8, 8);
-            EditText MakePersonInput(string hint, string initial)
+            var dayUsers = DataStorageService.LoadUsers(this);
+            // Index 0 is "not recorded", so a spinner position maps to dayUsers[pos - 1].
+            Spinner MakePersonSpinner(string emptyLabel, int selectedId)
             {
-                var input = new EditText(this)
-                {
-                    InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapWords,
-                    Hint = hint,
-                    Text = initial ?? "",
-                    TextSize = 14,
-                };
-                input.SetTextColor(UIFactory.TEXT_PRIMARY);
-                input.SetHintTextColor(UIFactory.TEXT_SECONDARY);
-                input.SetPadding(12, 8, 12, 8);
-                input.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
-                input.Focusable = true;
-                input.FocusableInTouchMode = true;
-                input.Clickable = true;
-                input.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
-                return input;
+                var labels = new List<string> { emptyLabel };
+                labels.AddRange(dayUsers.Select(u => u.name ?? ""));
+                var spinner = _uiFactory.CreateDropdownSpinner();
+                spinner.SetPadding(8, 4, 8, 4);
+                spinner.Adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
+                var idx = dayUsers.FindIndex(u => u.id == selectedId);
+                spinner.SetSelection(idx >= 0 ? idx + 1 : 0);
+                spinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+                return spinner;
             }
-            var observerInput = MakePersonInput("Observer", _colonyState.DailyObserver);
-            var recorderInput = MakePersonInput("Recorder", _colonyState.DailyRecorder);
-            dayPeopleLayout.AddView(observerInput);
-            dayPeopleLayout.AddView(recorderInput);
+            var observerSpinner = MakePersonSpinner("— observer —", _colonyState.DailyObserverId);
+            var recorderSpinner = MakePersonSpinner("— recorder —", _colonyState.DailyRecorderId);
+            // Selected spinner position -> users.id, 0 for "not recorded".
+            int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
+                ? dayUsers[s.SelectedItemPosition - 1].id : 0;
+            dayPeopleLayout.AddView(observerSpinner);
+            dayPeopleLayout.AddView(recorderSpinner);
+            if (dayUsers.Count == 0)
+            {
+                var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
+                noUsers.SetTextColor(UIFactory.TEXT_SECONDARY);
+                dayPeopleLayout.AddView(noUsers);
+            }
 
             var setLabelButton = new Button(this) { Text = "Set", TextSize = 12 };
             setLabelButton.SetTextColor(Color.White);
@@ -2856,8 +2861,8 @@ namespace PenguinMonitor
             setLabelButton.Click += (s, e) =>
             {
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
-                var newObserver = observerInput.Text?.Trim() ?? "";
-                var newRecorder = recorderInput.Text?.Trim() ?? "";
+                var newObserverId = SelectedUserId(observerSpinner);
+                var newRecorderId = SelectedUserId(recorderSpinner);
                 var nzToday = NzToday;
 
                 // Hide keyboard
@@ -2870,8 +2875,8 @@ namespace PenguinMonitor
                 // upsert straight to the server so a change takes effect even when today's
                 // observations are already synced.
                 _colonyState.DailyLabel = newLabel;
-                _colonyState.DailyObserver = newObserver;
-                _colonyState.DailyRecorder = newRecorder;
+                _colonyState.DailyObserverId = newObserverId;
+                _colonyState.DailyRecorderId = newRecorderId;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
                 DataStorageService.SaveColonyState(this, _colonyState);
 
@@ -2882,7 +2887,7 @@ namespace PenguinMonitor
                     var token = _appSettings.AuthToken;
                     _ = Task.Run(async () =>
                     {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserver, newRecorder);
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId);
                         new Handler(Looper.MainLooper).Post(() =>
                             Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
                     });
@@ -6772,8 +6777,8 @@ namespace PenguinMonitor
                 {
                     _colonyState.DailyLabel = "";
                     _colonyState.DailyLabelDate = "";
-                    _colonyState.DailyObserver = "";
-                    _colonyState.DailyRecorder = "";
+                    _colonyState.DailyObserverId = 0;
+                    _colonyState.DailyRecorderId = 0;
                     DataStorageService.SaveColonyState(this, _colonyState);
                 }
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)

@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, saveDayNote, getObserverName } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -479,9 +479,9 @@ const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent)
  * rather than repeated on every box's row, which is what the old per-observation
  * monitor_filename did. Clearing the text deletes the note.
  */
-function DayField({ date, token, canEdit, field, saved, placeholder, addLabel, maxLength, prefix }: {
-  date: string; token?: string; canEdit?: boolean; field: 'note' | 'observer' | 'recorder';
-  saved: string; placeholder: string; addLabel: string; maxLength: number; prefix?: string;
+function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLength }: {
+  date: string; token?: string; canEdit?: boolean;
+  saved: string; placeholder: string; addLabel: string; maxLength: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(saved);
@@ -500,7 +500,7 @@ function DayField({ date, token, canEdit, field, saved, placeholder, addLabel, m
     if (!token || next === saved.trim()) { setText(saved); return; }
     setSaving(true); setError(null);
     try {
-      await saveDayNote(token, date, { [field]: next });
+      await saveDayNote(token, date, { note: next });
     } catch (e: any) {
       setError(e.message || 'Failed to save');
       setText(saved);
@@ -508,12 +508,11 @@ function DayField({ date, token, canEdit, field, saved, placeholder, addLabel, m
     setSaving(false);
   };
 
-  const label = prefix && saved ? <span className="day-hdr-people-label">{prefix}</span> : null;
-  if (!canEdit) return saved ? <span className="day-hdr-note">{label}{saved}</span> : null;
+  if (!canEdit) return saved ? <span className="day-hdr-note">{saved}</span> : null;
   if (!editing) return (
     <span className={`day-hdr-note day-note-editable${saved ? '' : ' day-note-empty'}`}
       title={placeholder} onClick={() => setEditing(true)}>
-      {saving ? 'Saving…' : (saved ? <>{label}{saved}</> : addLabel)}
+      {saving ? 'Saving…' : (saved || addLabel)}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
     </span>
   );
@@ -529,21 +528,59 @@ function DayField({ date, token, canEdit, field, saved, placeholder, addLabel, m
   );
 }
 
-/** The day's record beside the stats line: what happened, and who was out. An editor sees all
- *  three with "+ observer" prompts for the empty ones; everyone else sees only what's filled in. */
+/** Observer or recorder for the day: a person from the user table, not free text. Only active
+ *  people are offered, but whoever is already set stays listed even if since deactivated —
+ *  otherwise the picker would silently misrepresent an old day as having nobody. */
+function DayPersonField({ date, token, canEdit, field, userId, label }: {
+  date: string; token?: string; canEdit?: boolean;
+  field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const users = getUsers();
+  const name = getUserName(userId);
+
+  const commit = async (v: string) => {
+    const next = v === '' ? null : Number(v);
+    if (!token || next === userId) return;
+    setSaving(true); setError(null);
+    try {
+      await saveDayNote(token, date, { [field]: next });
+    } catch (e: any) { setError(e.message || 'Failed to save'); }
+    setSaving(false);
+  };
+
+  if (!canEdit) return name ? <span className="day-hdr-note"><span className="day-hdr-people-label">{label}</span>{name}</span> : null;
+  const options = users.filter(u => u.active || u.id === userId);
+  return (
+    <span className="day-hdr-note">
+      <span className="day-hdr-people-label">{label}</span>
+      <select className="day-person-select" value={userId ?? ''} disabled={saving}
+        title={`Who was ${label === 'observer' ? 'observing' : 'recording'}`}
+        onChange={e => commit(e.target.value)}>
+        <option value="">{saving ? 'Saving…' : '—'}</option>
+        {options.map(u => <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ' (inactive)'}</option>)}
+      </select>
+      {error && <span style={{color:'#F44336'}}> {error}</span>}
+    </span>
+  );
+}
+
+/** The day's record beside the stats line: what happened, and who was out. The two people are
+ *  users, picked from the user table; the note is free text. */
 function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
-  const { observer, recorder } = getDayPeople(date);
-  const fields: { field: 'note'|'observer'|'recorder'; saved: string; placeholder: string; addLabel: string; maxLength: number; prefix?: string }[] = [
-    { field: 'note',     saved: getDayNote(date) || '', placeholder: 'Monitor notes',    addLabel: '+ note',     maxLength: 255 },
-    { field: 'observer', saved: observer || '',         placeholder: 'Who was observing', addLabel: '+ observer', maxLength: 100, prefix: 'observer' },
-    { field: 'recorder', saved: recorder || '',         placeholder: 'Who was recording', addLabel: '+ recorder', maxLength: 100, prefix: 'recorder' },
-  ];
-  const shown = fields.filter(f => canEdit || f.saved);
-  return (<>{shown.map((f, i) => (
-    <Fragment key={f.field}>
-      {i > 0 && <span className="day-hdr-sep"> · </span>}
-      <DayField date={date} token={token} canEdit={canEdit} {...f} />
-    </Fragment>
+  const { observer_id, recorder_id } = getDayPeople(date);
+  const note = getDayNote(date) || '';
+  const parts: React.ReactNode[] = [];
+  if (canEdit || note) parts.push(
+    <DayField key="note" date={date} token={token} canEdit={canEdit} saved={note}
+      placeholder="Monitor notes" addLabel="+ note" maxLength={255} />);
+  if (canEdit || observer_id) parts.push(
+    <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id" userId={observer_id} label="observer" />);
+  if (canEdit || recorder_id) parts.push(
+    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id" userId={recorder_id} label="recorder" />);
+  return (<>{parts.map((el, i) => (
+    <Fragment key={i}>{i > 0 && <span className="day-hdr-sep"> · </span>}{el}</Fragment>
   ))}</>);
 }
 

@@ -459,6 +459,9 @@ h3.collapsible:hover { color:#1a5276; }
 /* "observer Britta · recorder Mark H" beside the day's note */
 .day-hdr-people-label { color:#90a4ae; font-style:normal; font-size:11px; margin-right:4px; }
 .day-hdr-sep { color:#b0bec5; font-style:normal; }
+.day-person-select { font-size:12px; font-family:inherit; color:#455a64; border:1px solid transparent;
+  background:transparent; border-radius:4px; padding:0 2px; max-width:170px; }
+.day-person-select:hover { border-color:#b0bec5; background:#fff; }
 .day-note-input { font-size:13px; font-weight:normal; font-family:inherit; color:#455a64; padding:1px 6px;
   border:1px solid #90caf9; border-radius:4px; width:15em; max-width:100%; vertical-align:baseline; }
 .day-cf-toggles { display:flex; gap:12px; }

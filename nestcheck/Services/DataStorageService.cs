@@ -47,6 +47,8 @@ namespace PenguinMonitor.Services
             }
         }
         internal const string WILDWATCH_BASE_URL = "https://wildwatch.co.nz/penguin-api";
+        private const string USERS_FILENAME = "wildwatch_users.json";
+
         internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/api/penguins.php";
         internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
         internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/api/sync.php";
@@ -327,8 +329,8 @@ namespace PenguinMonitor.Services
                 {
                     var uploadBody = JsonConvert.SerializeObject(new {
                         daily_label = colonyState.DailyLabel,
-                        daily_observer = colonyState.DailyObserver,
-                        daily_recorder = colonyState.DailyRecorder,
+                        daily_observer_id = colonyState.DailyObserverId,
+                        daily_recorder_id = colonyState.DailyRecorderId,
                         observations = pendingBoxes,
                     });
                     var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
@@ -460,6 +462,11 @@ namespace PenguinMonitor.Services
                         }
                         File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
                     }
+                    // Who can be named as today's observer/recorder. Cached so the pickers still
+                    // work in the field with no signal — a colony's people rarely change mid-round.
+                    if (serverState?.users != null)
+                        File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
+                            JsonConvert.SerializeObject(serverState.users, Formatting.Indented));
                     onLineProgress?.Invoke(0, $"{result.BoxCount} boxes ✓");
                     return result.BoxCount;
                 }, "Boxes", s => onLineProgress?.Invoke(0, s), isCancelled);
@@ -637,7 +644,7 @@ namespace PenguinMonitor.Services
             if (uploads.Count == 0) return 0;
 
             var body = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
-                daily_observer = colonyState.DailyObserver, daily_recorder = colonyState.DailyRecorder, observations = uploads });
+                daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId, observations = uploads });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=confirm");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -704,7 +711,7 @@ namespace PenguinMonitor.Services
             }
 
             var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
-                daily_observer = colonyState.DailyObserver, daily_recorder = colonyState.DailyRecorder, observations = pendingBoxes });
+                daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId, observations = pendingBoxes });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
@@ -866,6 +873,7 @@ namespace PenguinMonitor.Services
             public Dictionary<string, SyncBox>? boxes { get; set; }
             public Dictionary<string, SyncBox>? previous { get; set; }
             public List<SyncLocation>? locations { get; set; }
+            public List<SyncUser>? users { get; set; }
         }
         private class SyncBox
         {
@@ -889,6 +897,12 @@ namespace PenguinMonitor.Services
             public string? scan_time_utc { get; set; }
             public string? peng_num { get; set; }
             public string? sex { get; set; }
+        }
+        /// <summary>A person who can be named as the day's observer or recorder. Active users only.</summary>
+        public class SyncUser
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
         }
         private class SyncLocation
         {
@@ -1188,18 +1202,33 @@ namespace PenguinMonitor.Services
             return new Dictionary<string, BoxNoteData>();
         }
 
+        /// <summary>Cached list of people who can be the day's observer or recorder. Empty until
+        /// the first sync; the pickers then fall back to "not recorded".</summary>
+        internal static List<SyncUser> LoadUsers(Context context)
+        {
+            try
+            {
+                var path = Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME);
+                if (!File.Exists(path)) return new List<SyncUser>();
+                return JsonConvert.DeserializeObject<List<SyncUser>>(File.ReadAllText(path)) ?? new List<SyncUser>();
+            }
+            catch { return new List<SyncUser>(); }
+        }
+
         // Push the day's note (the phone's "Daily label") straight to the day_notes table for a
         // colony + NZ date. Unlike the daily_label carried on an observation upload — which only
         // fills a day that has no note yet — this upserts, so re-setting the label actually changes
         // it. Needs editor/admin role server-side; a viewer gets 403 and we just keep it local.
         internal async Task<bool> SaveDayNoteAsync(int colonyId, string nzDate, string note, string token,
-                                                   string observer = "", string recorder = "")
+                                                   int observerId = 0, int recorderId = 0)
         {
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_API_URL}?action=save_day_note&colony_id={colonyId}");
                 request.Headers.Add("Authorization", $"Bearer {token}");
-                var body = JsonConvert.SerializeObject(new { colony_id = colonyId, date = nzDate, note, observer, recorder });
+                var body = JsonConvert.SerializeObject(new { colony_id = colonyId, date = nzDate, note,
+                    observer_id = observerId == 0 ? (int?)null : observerId,
+                    recorder_id = recorderId == 0 ? (int?)null : recorderId });
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
                 var response = await _httpClient.SendAsync(request);
                 return response.IsSuccessStatusCode;
