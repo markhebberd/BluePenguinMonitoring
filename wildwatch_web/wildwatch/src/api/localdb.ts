@@ -1008,6 +1008,38 @@ export function computeAllPenguinsRows(): any[] {
   return rows;
 }
 
+/** BC/LC chick pairs chipped together (same box on the same day = one clutch's chipping), each
+ *  with its chip-day weight and flipper. Feeds the "Little chick out-measures the big chick" data
+ *  check: a Little Chick that weighs (or has a longer flipper than) its Big Chick nest-mate is a
+ *  sign the BC/LC codes were swapped or mis-entered. Both metrics ride along so the check's
+ *  weight/flipper toggle filters without recomputing. First BC and first LC per clutch (a box is
+ *  rarely re-chipped the same day); a clutch missing either code is skipped. */
+export function computeChickSizeMismatch(): any[] {
+  const nests = new Map<string, { bc?: any; lc?: any }>();
+  for (const r of computeAllPenguinsRows()) {
+    if (r.chipped_as_adult) continue;
+    if (r.chick_size_code !== 'BC' && r.chick_size_code !== 'LC') continue;
+    if (!r.first_chip_box || !r.first_chip_date) continue;
+    const key = `${r.first_chip_box}|${String(r.first_chip_date).slice(0, 10)}`;
+    if (!nests.has(key)) nests.set(key, {});
+    const n = nests.get(key)!;
+    if (r.chick_size_code === 'BC') { if (!n.bc) n.bc = r; }
+    else if (!n.lc) n.lc = r;
+  }
+  const out: any[] = [];
+  for (const [key, n] of nests) {
+    if (!n.bc || !n.lc) continue;
+    const [box_name, chip_date] = key.split('|');
+    out.push({
+      box_name, chip_date,
+      bc_peng: n.bc.peng_num, lc_peng: n.lc.peng_num,
+      bc_weight: n.bc.chip_weight ?? null, lc_weight: n.lc.chip_weight ?? null,
+      bc_flipper: n.bc.chip_flipper ?? null, lc_flipper: n.lc.chip_flipper ?? null,
+    });
+  }
+  return out;
+}
+
 /** Distinct boxes each bird has been scanned in, most recent first, keyed by pit_id (any of the
  *  bird's chips maps to the same list) so callers whose peng_nums may be prefix-stripped for
  *  display can still look up. Sightings come from the cached (active-colony) observations. */

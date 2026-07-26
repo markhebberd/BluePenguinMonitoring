@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, saveDayNote, getObserverName } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts } from './api/useLocalDb';
+import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
@@ -7973,6 +7973,19 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const iDupObs = useDuplicateObservations();
   const iDupScans = useDuplicateScans();
   const iSameGender = useSameGenderConflicts();
+  const iChickSize = useChickSizeMismatch();
+  // Which chip-day measurement the BC/LC check compares — a Little Chick larger than its Big
+  // Chick nest-mate on either is a likely swapped/mis-entered size code.
+  const [chickMetric, setChickMetric] = useState<'weight' | 'flipper'>('weight');
+  const chickSizeRows = useMemo(() => {
+    const [lo, hi, unit] = chickMetric === 'weight'
+      ? ['bc_weight', 'lc_weight', 'g'] : ['bc_flipper', 'lc_flipper', 'mm'];
+    return iChickSize
+      .filter((r: any) => r[lo] != null && r[hi] != null && Number(r[hi]) > Number(r[lo]))
+      .map((r: any) => ({ box_name: r.box_name, chip_date: r.chip_date, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
+        bc_val: Number(r[lo]), lc_val: Number(r[hi]), diff: Number(r[hi]) - Number(r[lo]), unit }))
+      .sort((a: any, b: any) => b.diff - a.diff);
+  }, [iChickSize, chickMetric]);
 
   const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); setImpConflicts(false); };
 
@@ -8989,6 +9002,25 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <IntegrityCheck rows={iChicksNoScan} errorType="chicks_no_scan" title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '18px 0 -4px' }}>
+          <span className="muted" style={{ fontSize: 12 }}>Compare on:</span>
+          {([['weight', 'Chip weight'], ['flipper', 'Flipper length']] as const).map(([k, label]) => (
+            <button key={k} className={`day-changed-toggle${chickMetric === k ? ' active' : ''}`}
+              onClick={() => setChickMetric(k)}>{label}</button>
+          ))}
+        </div>
+        <IntegrityCheck rows={chickSizeRows} title="Little chick larger than big chick"
+          desc={`Nests where the chick coded LC out-measures its BC nest-mate on ${chickMetric === 'weight' ? 'chip-day weight' : 'chip-day flipper length'} — the size codes may be swapped or mis-entered. Only clutches where both chicks have a chip-day measurement are checked.`}
+          empty="None — every little chick is smaller than its big chick"
+          columns={[
+            { key: 'box_name', label: 'Box', render: boxCell },
+            { key: 'chip_date', label: 'Chipped' },
+            { key: 'bc_peng', label: 'BC', render: pengCell },
+            { key: 'bc_val', label: `BC (${chickMetric === 'weight' ? 'g' : 'mm'})` },
+            { key: 'lc_peng', label: 'LC', render: pengCell },
+            { key: 'lc_val', label: `LC (${chickMetric === 'weight' ? 'g' : 'mm'})`, render: (v: any) => redNum(v) },
+            { key: 'diff', label: 'LC − BC', render: (v: any, r: any) => redNum(`+${v}${r.unit}`) },
+          ]} />
 
         <h3 style={{ marginTop: 28 }}>Flipper-length import (6 Jul 2026)</h3>
         <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>

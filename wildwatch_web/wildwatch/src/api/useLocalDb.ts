@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts } from './localdb';
+import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts, computeChickSizeMismatch } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -63,6 +63,7 @@ export function useChicksNoScan(): any[] { return useSyncExternalStore(subscribe
 export function useDuplicateObservations(): any[] { return useSyncExternalStore(subscribe, () => cached('duplicateObservations', computeDuplicateObservations)); }
 export function useDuplicateScans(): any[] { return useSyncExternalStore(subscribe, () => cached('duplicateScans', computeDuplicateScans)); }
 export function useSameGenderConflicts(): any[] { return useSyncExternalStore(subscribe, () => cached('sameGenderConflicts', computeSameGenderConflicts)); }
+export function useChickSizeMismatch(): any[] { return useSyncExternalStore(subscribe, () => cached('chickSizeMismatch', computeChickSizeMismatch)); }
 
 export function useBoxDetail(boxName: string | null): any {
   return useSyncExternalStore(subscribe, () => {
