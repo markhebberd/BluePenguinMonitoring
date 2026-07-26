@@ -2484,7 +2484,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {!fullView && <>
                 <tr><td className="muted">Chip date</td><td>
                   {activeChip?.chip_date
-                    ? <><DateLink date={activeChip.chip_date} onDayClick={onDayClick} /> <span className="muted">{durationSince(activeChip.chip_date)}</span></>
+                    ? <><DateLink date={activeChip.chip_date} onDayClick={onDayClick} /> <span className="muted">{agoSince(activeChip.chip_date)}</span></>
                     : <span className="muted">-</span>}
                 </td></tr>
                 {activeChip?.chip_box && <tr><td className="muted">Chip box</td><td>
@@ -2505,7 +2505,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     <tr><td className="muted">{prefix ? `${re}chip ` : ''}PIT ID</td><td>{c.pit_id}{!c.is_active && <span className="bird-badge" style={{background:'#FFCDD2', marginLeft:4}}>Retired</span>}</td></tr>
                     <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Date</td><td>
                       <EditableField value={c.chip_date} type="date" onSave={saveChip(c.pit_id, 'chip_date')} placeholder="date" canEdit={editing} />
-                      {!editing && c.chip_date && <span className="muted"> {durationSince(c.chip_date)}</span>}
+                      {!editing && c.chip_date && <span className="muted"> {agoSince(c.chip_date)}</span>}
                     </td></tr>
                     <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td><EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={editing} /></td></tr>
                     <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={editing} /></td></tr>
@@ -10931,6 +10931,9 @@ function durationSince(d: string): string {
   const y = Math.floor(months / 12), m = months % 12;
   return [y && `${y} year${y !== 1 ? 's' : ''}`, m && `${m} month${m !== 1 ? 's' : ''}`].filter(Boolean).join(', ');
 }
+/** durationSince as an elapsed-time phrase — "3 years, 4 months ago". Empty for a missing
+ *  or future date, so the bare word "ago" can never render on its own. */
+function agoSince(d: string): string { const s = durationSince(d); return s ? `${s} ago` : ''; }
 /** Returns YYYY-MM-DD in NZ time for a datetime string.
  *  Fixed +12 (NZST), matching the bucketing in localdb so dates can't roll over. */
 function toNzDateStr(d: string): string {
