@@ -543,6 +543,10 @@ function DateStatsLine({ stats, showDate, date, hideLabel }: { stats: any; showD
     {reg && (reg.partial
       ? <span style={{color:'#00796b'}}> <b>PM #{reg.number}</b> from {seasonRange(String(reg.season))}</span>
       : <span style={{color: stats.isFullMonitor ? '#2e7d32' : '#e65100'}}> <b>FM #{reg.number}</b> from {seasonRange(String(reg.season))}{stats.isFullMonitor ? '' : missedSuffix}</span>)}
+    {/* Who recorded the boxes. Counts only when more than one person was out, where the
+        split is the interesting part; a solo round just reads "by AL". */}
+    {stats.observers?.length > 0 && <span className="muted"> by {stats.observers
+      .map((o: any) => stats.observers.length > 1 ? `${o.name} (${o.count})` : o.name).join(', ')}</span>}
     {multiObs && <span>, {stats.obs} obs</span>}
     {stats.adults > 0 && <span> {'\uD83D\uDC27'}{stats.adults}</span>}
     {stats.eggs > 0 && <span> {'\uD83E\uDD5A'}{stats.eggs}</span>}

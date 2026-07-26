@@ -162,7 +162,14 @@ function computeDateStatsFromCache(nzDate: string, c: MemCache): any {
   const missingBoxes = c.locations.filter(l => !excluded.has(l.location_name.toUpperCase()) && !boxes.has(l.location_name) && !excusedBoxes.has(l.location_name));
   const isFullMonitor = missingBoxes.length === 0 && boxes.size > 0;
   const missingNames = missingBoxes.map(l => l.location_name).sort(compareBoxNames);
-  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, missingBoxes: missingNames, totalLocations: c.locations.length };
+  // Who recorded the day's box data. observations carry observer_id only; the name comes from
+  // the snapshot's observers list. Busiest first, so the person who did most of the round leads.
+  const obsPerObserver = new Map<number, number>();
+  for (const o of obs) if (o.observer_id) obsPerObserver.set(Number(o.observer_id), (obsPerObserver.get(Number(o.observer_id)) || 0) + 1);
+  const observers = Array.from(obsPerObserver.entries())
+    .map(([id, count]) => ({ name: c.observerById.get(id) || `#${id}`, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return { boxes: boxes.size, obs: obs.length, adults: totalAdults, eggs: totalEggs, chicks: totalChicks, penguins: uniquePenguins.size, chipped: chippedCount, label, isFullMonitor, missingBoxes: missingNames, totalLocations: c.locations.length, observers };
 }
 
 /** Single-date stats computed on demand from the current cache — the one place this logic lives,
