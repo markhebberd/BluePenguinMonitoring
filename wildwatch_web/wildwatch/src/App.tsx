@@ -2328,7 +2328,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const chips: any[] = p.chips || [];
   const activeChip = chips.find((c: any) => c.is_active == 1) || chips[0];
 
-  const boxes = Array.from(new Set(sightings.map((s: any) => s.box)));
+  // Boxes ordered by the bird's most recent visit to each, newest first.
+  const boxLastSeen = new Map<string, number>();
+  for (const s of sightings) {
+    const t = parseDate(s.date).getTime();
+    if (!boxLastSeen.has(s.box) || t > boxLastSeen.get(s.box)!) boxLastSeen.set(s.box, t);
+  }
+  const boxes = Array.from(boxLastSeen.keys()).sort((a, b) => boxLastSeen.get(b)! - boxLastSeen.get(a)!);
+
+  // Shared sightings ordered by the most recent time this bird was seen with each of them,
+  // so whoever it is currently keeping company with sits at the top.
+  const lastSeenWith = (pt: any) => Math.max(...(pt.sightings || []).map((s: any) => parseDate(s.date).getTime()), 0);
+  const partnersByRecent = [...partners].sort((a, b) => lastSeenWith(b) - lastSeenWith(a));
 
   // When the panel opens or switches bird, subtly lift every mini of this bird on the
   // page so the user sees at a glance where it's referenced, for as long as it's open.
@@ -2477,11 +2488,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={true} /></td></tr>
             </Fragment>);
             })}
-            {(editing || !!p.death_date) && <tr><td className="muted">Dead</td><td>{!editing
-              ? <>Dead{p.death_date && <> <span className="muted">({p.death_date.slice(0, 10)})</span></>}</>
+            {(editing || !!p.death_date) && <tr><td className="muted">Date of death</td><td>{!editing
+              ? (p.death_date ? p.death_date.slice(0, 10) : <span className="muted">-</span>)
               // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
               : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
-                  onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="death date" canEdit={true} />}</td></tr>}
+                  onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="date of death" canEdit={true} />}</td></tr>}
             {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td>{!editing ? p.notes : <EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={true} />}</td></tr>}
             <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
           </tbody>
@@ -2586,10 +2597,41 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         <h3 className="collapsible" onClick={() => toggleSection('boxes')}>{expandedSections.boxes ? '▾' : '▸'} Seen in {boxes.length} box{boxes.length !== 1 ? 'es' : ''}</h3>
         {expandedSections.boxes && boxes.map((b: string) => {
           const boxSightings = sightings.filter((s: any) => s.box === b);
+          // Who this bird shared the box with, tallied over every visit — the collapsed
+          // header's "with <mini> 2x, <mini> 1x". Most-shared first; each mini is stamped
+          // with the latest visit they were on, so it shows their stage as last seen.
+          const companionMap = new Map<string, { scan: any; count: number; date: string }>();
+          let noScan = 0;
+          for (const sg of boxSightings) {
+            noScan += sg.no_scan || 0;
+            for (const sw of sg.seen_with || []) {
+              const c = companionMap.get(sw.peng_num);
+              if (c) c.count++;
+              else companionMap.set(sw.peng_num, { scan: sw, count: 1, date: sg.date });
+            }
+          }
+          const companions = Array.from(companionMap.values())
+            .sort((x, y) => y.count - x.count || String(x.scan.peng_num).localeCompare(String(y.scan.peng_num)));
+          const boxKey = `box-${b}`;
+          const boxOpen = !!expandedSections[boxKey];
           return (
             <div key={b} className="obs-card" style={{marginBottom:6}}>
-              <div className="obs-top"><a className="clickable" href={`/box/${b}`} onClick={e => navClick(e, () => onBoxClick(b))}><b>Box {b}</b></a> <span className="muted">{boxSightings.length} visit{boxSightings.length !== 1 ? 's' : ''}</span></div>
-              {boxSightings.map((sg: any, i: number) => (
+              <div className="box-head collapsible" onClick={() => toggleSection(boxKey)}>
+                <span className="partner-toggle">{boxOpen ? '▾' : '▸'}</span>
+                <a className="clickable" href={`/box/${b}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(b)); }}><b>Box {b}</b></a>
+                <span className="muted">Seen {boxSightings.length}x</span>
+                {(companions.length > 0 || noScan > 0) && <span className="muted">with</span>}
+                {companions.map((c, ci) => (
+                  // stopPropagation so opening a companion's panel doesn't also toggle the box.
+                  <span key={c.scan.peng_num} className="box-companion" onClick={e => e.stopPropagation()}>
+                    <PenguinMini scan={c.scan} onClick={() => onBirdClick(c.scan.peng_num)} observationDate={c.date} />
+                    <span className="muted">{c.count}x</span>
+                    {(ci < companions.length - 1 || noScan > 0) && <span className="muted">,</span>}
+                  </span>
+                ))}
+                {noScan > 0 && <span className="box-companion"><span className="scan no-scan">No scan</span><span className="muted">{noScan}x</span></span>}
+              </div>
+              {boxOpen && boxSightings.map((sg: any, i: number) => (
                 <div key={i} style={{marginBottom:3}}>
                   <div className="obs-nums" style={{fontSize:11}}>
                     <DateLink date={sg.date} onDayClick={() => onSightingClick(b, sg.date)} />
@@ -2616,7 +2658,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
         <div className="bird-section">
           <h3 className="collapsible" onClick={() => toggleSection('partners')}>{expandedSections.partners ? '▾' : '▸'} Shared sightings ({partners.length})</h3>
           {expandedSections.partners && <p className="muted">Birds seen in the same box at the same time &middot; "No scan" = unscanned birds present</p>}
-          {expandedSections.partners && partners.map((pt: any, pi: number) => {
+          {expandedSections.partners && partnersByRecent.map((pt: any, pi: number) => {
             const partnerRow = (s: any, i: number) => (
               <a key={i} className="partner-row clickable" href={`/box/${s.box}`} onClick={e => navClick(e, () => onSightingClick(s.box, s.date))}>
                 <DateLink date={s.date} onDayClick={onDayClick} />

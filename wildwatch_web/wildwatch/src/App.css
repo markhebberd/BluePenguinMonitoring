@@ -574,8 +574,16 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .partner-season-label { font-size:10px; font-weight:600; color:#1a5276; margin:4px 0 2px; }
 /* Sighting history split by season */
 .sight-season { margin-bottom:6px; }
-.sight-season-label { font-size:11px; font-weight:700; color:#1a5276; margin:8px 0 3px; padding-bottom:2px; border-bottom:1px solid #dde3e8; }
+.sight-season-label { font-size:11px; font-weight:700; color:#1a5276; margin:18px 0 5px; padding-bottom:2px; border-bottom:1px solid #dde3e8; }
+.sight-season:first-child .sight-season-label { margin-top:6px; }
 .sight-season-label .muted { font-weight:500; font-size:10px; }
+/* "Seen in N boxes": collapsed per-box header — Box 32 · Seen 9x with <mini> 2x, <mini> 1x.
+   Left-packed and wrapping, so a bird with a lot of company still reads as one line-run. */
+.box-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.box-head.collapsible { cursor:pointer; user-select:none; }
+.box-head.collapsible:hover .muted { color:#1a5276; }
+.box-head b { font-size:12px; }
+.box-companion { display:inline-flex; align-items:center; gap:3px; }
 .partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
 .partner-window-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .partner-window-offspring { display:inline-flex; gap:3px; align-items:center; flex-wrap:wrap; }

@@ -593,9 +593,7 @@ function handleGet($pdo, $table, $pk, $id) {
 function stripRetiredColumns($table, $input) {
     $retired = [
         'penguin_biometric_data' => ['condition_underweight', 'condition_dog_attacked', 'condition_attacked', 'condition_dead'],
-        // is_dead is a generated column (derived from death_date); vid_for_scanner was dropped
-        // 2026-07-27, but an older nestcheck build may still send it.
-        'penguins' => ['life_stage', 'is_dead', 'vid_for_scanner'],
+        'penguins' => ['life_stage', 'is_dead'], // is_dead is a generated column (derived from death_date)
     ];
     if (isset($retired[$table]) && is_array($input)) {
         foreach ($retired[$table] as $col) unset($input[$col]);
