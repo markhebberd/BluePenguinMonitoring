@@ -8362,12 +8362,22 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
   }, [token]);
 
+  const [userErr, setUserErr] = useState('');
+  // f_name is UNIQUE and email can collide, so a save can legitimately fail. Show the server's
+  // reason and leave the row as the server has it, rather than optimistically claiming success.
   const updateUser = async (id: number, field: string, value: string) => {
-    await fetch('/api/admin.php?action=update_user', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ observer_id: id, [field]: value })
-    });
-    setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
+    setUserErr('');
+    try {
+      const res = await fetch('/api/admin.php?action=update_user', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ observer_id: id, [field]: value })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.error) { setUserErr(d.error || `Could not save ${field}`); return; }
+      setUsers(users.map(u => u.observer_id === id ? { ...u, [field]: value } : u));
+    } catch (e: any) {
+      setUserErr(e.message || `Could not save ${field}`);
+    }
   };
 
   const [colonies, setColonies] = useState<any[]>([]);
@@ -8939,10 +8949,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             <tbody>
               {users.map(u => (
                 <tr key={u.observer_id}>
-                  <td>{u.observer_name}</td>
+                  <td><EditableField value={u.observer_name} onSave={(v: any) => updateUser(u.observer_id, 'observer_name', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.surname} onSave={(v: any) => updateUser(u.observer_id, 'surname', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.falcon_id} onSave={(v: any) => updateUser(u.observer_id, 'falcon_id', v)} placeholder="-" canEdit={true} /></td>
-                  <td>{u.email}</td>
+                  <td><EditableField value={u.email} onSave={(v: any) => updateUser(u.observer_id, 'email', v)} placeholder="-" canEdit={true} /></td>
                   <td>
                     <select value={u.role || 'viewer'} onChange={e => updateUser(u.observer_id, 'role', e.target.value)}>
                       <option value="viewer">Viewer</option>
@@ -8962,6 +8972,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             </tbody>
           </table>
         )}
+        {userErr && <div style={{ marginTop: 8, fontSize: 13, color: '#c0392b' }}>{userErr}</div>}
         {sendResetMsg && <div style={{ marginTop: 8, fontSize: 13, color: sendResetMsg.startsWith('✓') ? '#2e7d32' : '#c0392b' }}>{sendResetMsg}</div>}
         {resetFor && (
           <div style={{ marginTop: 12, padding: 10, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>

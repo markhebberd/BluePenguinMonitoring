@@ -382,6 +382,23 @@ if ($action === 'update_user') {
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
 
+    // f_name is NOT NULL UNIQUE, so answer the two ways an edit can legitimately fail with a
+    // sentence rather than letting a raw SQL error surface as a 500.
+    if (array_key_exists('f_name', $fields)) {
+        $fields['f_name'] = trim((string)$fields['f_name']);
+        if ($fields['f_name'] === '') { http_response_code(400); echo json_encode(['error'=>'Name cannot be empty']); exit; }
+        $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ? AND id <> ?");
+        $dup->execute([$fields['f_name'], $input['observer_id']]);
+        if ($dup->fetchColumn()) { http_response_code(409); echo json_encode(['error'=>"Another user is already named \"{$fields['f_name']}\""]); exit; }
+    }
+    // Blank surname/falcon_id/email mean "not recorded", not an empty string.
+    foreach (['surname', 'falcon_id', 'email'] as $opt) {
+        if (array_key_exists($opt, $fields)) {
+            $fields[$opt] = trim((string)$fields[$opt]);
+            if ($fields[$opt] === '') $fields[$opt] = null;
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         wwAuditedUpdate($pdo, 'users', $input['observer_id'], $fields, $observer['observer_id']);
