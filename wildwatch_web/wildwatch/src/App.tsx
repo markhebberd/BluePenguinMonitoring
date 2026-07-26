@@ -8389,8 +8389,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const [addingUser, setAddingUser] = useState(false);
   const createUser = async () => {
     setAddUserErr(''); setAddUserOk('');
-    const inviting = !newUser.password && !!newUser.email.trim();
-    if (!newUser.observer_name.trim() || (!newUser.password && !inviting)) { setAddUserErr('Name plus a password — or an email to send an invite — are required'); return; }
+    if (!newUser.observer_name.trim()) { setAddUserErr('A first name is required'); return; }
     if (newUser.password && newUser.password.length < 6) { setAddUserErr('Password must be at least 6 characters'); return; }
     setAddingUser(true);
     try {
@@ -8411,6 +8410,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       setUsers([...users, d]);
       setNewUser(emptyNewUser); setNewUserColonies({});
       if (d.invited) setAddUserOk(d.email_sent ? `✓ Invite emailed to ${d.email}` : `Created, but the invite email failed — use "Email link" to retry`);
+      // No email and no password: the row exists so work can be credited to them, but there is
+      // no way in yet. Say so plainly rather than letting it look like a normal account.
+      else if (d.no_login) setAddUserOk(`✓ Added ${[d.observer_name, d.surname].filter(Boolean).join(' ')} — no login yet (no email, no password). Use "Reset password" to give them one.`);
+      else setAddUserOk(`✓ Added ${[d.observer_name, d.surname].filter(Boolean).join(' ')}`);
     } catch (e: any) { setAddUserErr(e.message || 'Failed to add user'); }
     setAddingUser(false);
   };
@@ -8996,9 +8999,9 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             <option value="editor">Editor</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="text" placeholder="Password (blank = email invite)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 200 }} />
+          <input type="text" placeholder="Password (blank = invite, or no login)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 200 }} />
           <button className="edit-btn" type="button" onClick={() => setNewUser({ ...newUser, password: genPassword() })}>Generate</button>
-          <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : (!newUser.password && newUser.email.trim()) ? 'Add & send invite' : 'Add user'}</button>
+          <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : (!newUser.password && newUser.email.trim()) ? 'Add & send invite' : (!newUser.password ? 'Add (no login)' : 'Add user')}</button>
           {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
           {addUserOk && <span style={{ color: addUserOk.startsWith('✓') ? '#2e7d32' : '#c0392b', fontSize: 13 }}>{addUserOk}</span>}
         </div>

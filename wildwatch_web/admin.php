@@ -382,20 +382,38 @@ if ($action === 'update_user') {
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
 
-    // f_name is NOT NULL UNIQUE, so answer the two ways an edit can legitimately fail with a
-    // sentence rather than letting a raw SQL error surface as a 500.
-    if (array_key_exists('f_name', $fields)) {
-        $fields['f_name'] = trim((string)$fields['f_name']);
-        if ($fields['f_name'] === '') { http_response_code(400); echo json_encode(['error'=>'Name cannot be empty']); exit; }
-        $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ? AND id <> ?");
-        $dup->execute([$fields['f_name'], $input['observer_id']]);
-        if ($dup->fetchColumn()) { http_response_code(409); echo json_encode(['error'=>"Another user is already named \"{$fields['f_name']}\""]); exit; }
-    }
-    // Blank surname/falcon_id/email mean "not recorded", not an empty string.
-    foreach (['surname', 'falcon_id', 'email'] as $opt) {
+    // surname is NOT NULL (blank is ''), so it can take part in the (f_name, surname) key.
+    // falcon_id and email blank out to NULL — for email that is what lets any number of
+    // login-less users coexist under a UNIQUE key that still catches a real duplicate.
+    if (array_key_exists('surname', $fields)) $fields['surname'] = trim((string)$fields['surname']);
+    foreach (['falcon_id', 'email'] as $opt) {
         if (array_key_exists($opt, $fields)) {
             $fields[$opt] = trim((string)$fields[$opt]);
             if ($fields[$opt] === '') $fields[$opt] = null;
+        }
+    }
+
+    // Answer the ways an edit can legitimately fail with a sentence, rather than letting a raw
+    // SQL constraint error surface as a 500. Identity is the (f_name, surname) pair, so either
+    // half changing has to be checked against the other half as it will be after the write.
+    if (array_key_exists('f_name', $fields) || array_key_exists('surname', $fields)) {
+        $cur = $pdo->prepare("SELECT f_name, surname FROM users WHERE id = ?");
+        $cur->execute([$input['observer_id']]);
+        $now = $cur->fetch(PDO::FETCH_ASSOC) ?: ['f_name'=>'', 'surname'=>''];
+        $newFirst = array_key_exists('f_name', $fields) ? trim((string)$fields['f_name']) : $now['f_name'];
+        $newLast  = array_key_exists('surname', $fields) ? $fields['surname'] : $now['surname'];
+        if ($newFirst === '') { http_response_code(400); echo json_encode(['error'=>'Name cannot be empty']); exit; }
+        if (array_key_exists('f_name', $fields)) $fields['f_name'] = $newFirst;
+        $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ? AND surname = ? AND id <> ?");
+        $dup->execute([$newFirst, $newLast, $input['observer_id']]);
+        if ($dup->fetchColumn()) { http_response_code(409); echo json_encode(['error'=>'Another user is already named "' . trim("$newFirst $newLast") . '"']); exit; }
+    }
+    if (!empty($fields['email'])) {
+        $dupe = $pdo->prepare("SELECT f_name, surname FROM users WHERE email = ? AND id <> ?");
+        $dupe->execute([$fields['email'], $input['observer_id']]);
+        if ($e2 = $dupe->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(409);
+            echo json_encode(['error'=>"{$fields['email']} is already the address for " . trim("{$e2['f_name']} {$e2['surname']}")]); exit;
         }
     }
 
@@ -416,27 +434,43 @@ if ($action === 'create_user') {
     $email = trim($input['email'] ?? '');
     $role = $input['role'] ?? 'viewer';
     $password = (string)($input['password'] ?? '');
-    // Two ways in: an explicit password, or (with an email) an invite — the account is
-    // created with an unguessable placeholder password and the user sets their own via
-    // the emailed link.
+    // Three ways to create an account:
+    //   password           -> they can log in straight away (no email needed at all)
+    //   email, no password -> invite: unguessable placeholder hash, they set their own via the link
+    //   neither            -> a person with no login yet. Field volunteers often have no email
+    //                         address; the row exists so work can be attributed to them, and an
+    //                         admin can set a password later. Same unguessable placeholder hash,
+    //                         so "no login yet" is not "logs in with a blank password".
     $invite = $password === '' && $email !== '';
-    if ($name === '' || ($password === '' && !$invite)) { http_response_code(400); echo json_encode(['error'=>'Name and either a password or an email (to send an invite) are required']); exit; }
-    if (!$invite && strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
+    $noLogin = $password === '' && $email === '';
+    if ($name === '') { http_response_code(400); echo json_encode(['error'=>'A first name is required']); exit; }
+    if ($password !== '' && strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
     if (!in_array($role, ['viewer', 'editor', 'admin'], true)) { http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit; }
-    $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ?");
-    $dup->execute([$name]);
-    if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>"A user named \"$name\" already exists"]); exit; }
-    $hash = password_hash($invite ? bin2hex(random_bytes(32)) : $password, PASSWORD_BCRYPT);
+    // Identity is the pair. Surname is stored '' rather than NULL precisely so this key bites
+    // for two people sharing a first name and neither having a surname recorded.
+    $dup = $pdo->prepare("SELECT id FROM users WHERE f_name = ? AND surname = ?");
+    $dup->execute([$name, $surname]);
+    if ($dup->fetch()) { http_response_code(409); echo json_encode(['error'=>'A user named "' . trim("$name $surname") . '" already exists']); exit; }
+    if ($email !== '') {
+        $dupe = $pdo->prepare("SELECT f_name, surname FROM users WHERE email = ?");
+        $dupe->execute([$email]);
+        if ($e2 = $dupe->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(409);
+            echo json_encode(['error'=>"$email is already the address for " . trim("{$e2['f_name']} {$e2['surname']}")]); exit;
+        }
+    }
+    $hash = password_hash($password !== '' ? $password : bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
     $pdo->beginTransaction();
     try {
         $id = (int)wwAuditedInsert($pdo, 'users',
-            ['f_name' => $name, 'surname' => $surname !== '' ? $surname : null, 'falcon_id' => $falconId !== '' ? $falconId : null,
+            ['f_name' => $name, 'surname' => $surname, 'falcon_id' => $falconId !== '' ? $falconId : null,
              'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
-            $observer['observer_id'], $invite ? 'Created with email invite' : 'Created with password');
+            $observer['observer_id'],
+            $invite ? 'Created with email invite' : ($noLogin ? 'Created without a login (no email, no password)' : 'Created with password'));
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
-    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'falcon_id'=>$falconId, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'email_sent'=>$emailSent]);
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'falcon_id'=>$falconId, 'active'=>1, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'no_login'=>$noLogin, 'email_sent'=>$emailSent]);
     exit;
 }
 

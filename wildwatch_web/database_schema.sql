@@ -6,14 +6,21 @@
 -- API keeps publishing observer_id / observer_name and installed nestcheck builds keep working.
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    f_name VARCHAR(100) NOT NULL UNIQUE,
-    surname VARCHAR(100),
+    f_name VARCHAR(100) NOT NULL,
+    -- NOT NULL (blank is '') so the UNIQUE pair below bites for two people who share a first
+    -- name and have no surname recorded — SQL would treat two NULLs as distinct.
+    surname VARCHAR(100) NOT NULL DEFAULT '',
     falcon_id VARCHAR(64),          -- identifier for this person in Falcon; free-form, not validated here
     active BOOLEAN NOT NULL DEFAULT TRUE,  -- deactivated accounts are kept, not deleted (they own observations)
+    -- NULL when the person has no email (field volunteers often don't, and login is by email
+    -- so they simply can't use one). NULLs are distinct under UNIQUE, which is what allows any
+    -- number of them while still rejecting a genuinely duplicated address.
     email VARCHAR(255),
     passphrase_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_user_name (f_name, surname),
+    UNIQUE KEY uniq_user_email (email)
 );
 
 CREATE TABLE IF NOT EXISTS regions (
