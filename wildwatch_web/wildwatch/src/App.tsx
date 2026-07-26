@@ -7982,18 +7982,26 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const iDupScans = useDuplicateScans();
   const iSameGender = useSameGenderConflicts();
   const iChickSize = useChickSizeMismatch();
-  // Which chip-day measurement the BC/LC check compares — a Little Chick larger than its Big
-  // Chick nest-mate on either is a likely swapped/mis-entered size code.
-  const [chickMetric, setChickMetric] = useState<'weight' | 'flipper'>('weight');
+  // A Little Chick that out-measures its Big Chick nest-mate on EITHER chip-day measurement —
+  // weight or flipper — is a likely swapped/mis-entered size code. Both orderings are checked
+  // and both metrics shown, with the offending (LC > BC) value flagged.
   const chickSizeRows = useMemo(() => {
-    const [lo, hi, unit] = chickMetric === 'weight'
-      ? ['bc_weight', 'lc_weight', 'g'] : ['bc_flipper', 'lc_flipper', 'mm'];
+    const num = (v: any) => v == null ? null : Number(v);
     return iChickSize
-      .filter((r: any) => r[lo] != null && r[hi] != null && Number(r[hi]) > Number(r[lo]))
-      .map((r: any) => ({ box_name: r.box_name, chip_date: r.chip_date, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
-        bc_val: Number(r[lo]), lc_val: Number(r[hi]), diff: Number(r[hi]) - Number(r[lo]), unit, _href: r._href }))
-      .sort((a: any, b: any) => b.diff - a.diff);
-  }, [iChickSize, chickMetric]);
+      .map((r: any) => {
+        const bcW = num(r.bc_weight), lcW = num(r.lc_weight);
+        const bcF = num(r.bc_flipper), lcF = num(r.lc_flipper);
+        const wInv = bcW != null && lcW != null && lcW > bcW;
+        const fInv = bcF != null && lcF != null && lcF > bcF;
+        return { box_name: r.box_name, chip_date: r.chip_date, bc_peng: r.bc_peng, lc_peng: r.lc_peng,
+          bc_w: bcW, lc_w: lcW, bc_f: bcF, lc_f: lcF, wInv, fInv,
+          wDiff: wInv ? lcW! - bcW! : 0, fDiff: fInv ? lcF! - bcF! : 0, _href: r._href };
+      })
+      .filter((r: any) => r.wInv || r.fInv)
+      .sort((a: any, b: any) =>
+        ((b.wInv ? 1 : 0) + (b.fInv ? 1 : 0)) - ((a.wInv ? 1 : 0) + (a.fInv ? 1 : 0))
+        || b.wDiff - a.wDiff || b.fDiff - a.fDiff);
+  }, [iChickSize]);
 
   const impReset = () => { setImpAnalysis(null); setImpResult(null); setImpError(''); setImpConflicts(false); };
 
@@ -9010,24 +9018,18 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <IntegrityCheck rows={iChicksNoScan} errorType="chicks_no_scan" title="Chicks present but not scanned"
           desc="Chicks chipped in a box, then chicks recorded there within a month but no scans on that visit — a likely missed scan." empty="No unscanned-chick visits"
           columns={[{ key: 'obs_date', label: 'Date', render: dayCell }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'chicks', label: 'Chicks' }, { key: 'chicks_chipped', label: 'Chipped ≤1mo before' }]} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '18px 0 -4px' }}>
-          <span className="muted" style={{ fontSize: 12 }}>Compare on:</span>
-          {([['weight', 'Chip weight'], ['flipper', 'Flipper length']] as const).map(([k, label]) => (
-            <button key={k} className={`day-changed-toggle${chickMetric === k ? ' active' : ''}`}
-              onClick={() => setChickMetric(k)}>{label}</button>
-          ))}
-        </div>
         <IntegrityCheck rows={chickSizeRows} title="Little chick larger than big chick"
-          desc={`Nests where the chick coded LC out-measures its BC nest-mate on ${chickMetric === 'weight' ? 'chip-day weight' : 'chip-day flipper length'} — the size codes may be swapped or mis-entered. Only clutches where both chicks have a chip-day measurement are checked.`}
-          empty="None — every little chick is smaller than its big chick"
+          desc="Nests where the chick coded LC out-measures its BC nest-mate on chip-day weight and/or flipper length — the size codes may be swapped or mis-entered. Both measurements are compared; the LC value that exceeds its BC is shown in red. Each metric is only compared where both chicks carry it."
+          empty="None — every little chick is smaller than its big chick on both weight and flipper"
           columns={[
             { key: 'box_name', label: 'Box', render: boxCell },
             { key: 'chip_date', label: 'Chipped', render: dayCell },
             { key: 'bc_peng', label: 'BC', render: pengCell },
-            { key: 'bc_val', label: `BC (${chickMetric === 'weight' ? 'g' : 'mm'})` },
             { key: 'lc_peng', label: 'LC', render: pengCell },
-            { key: 'lc_val', label: `LC (${chickMetric === 'weight' ? 'g' : 'mm'})`, render: (v: any) => redNum(v) },
-            { key: 'diff', label: 'LC − BC', render: (v: any, r: any) => redNum(`+${v}${r.unit}`) },
+            { key: 'bc_w', label: 'BC wt (g)', render: (v: any) => v ?? '—' },
+            { key: 'lc_w', label: 'LC wt (g)', render: (v: any, r: any) => v == null ? '—' : (r.wInv ? redNum(v) : v) },
+            { key: 'bc_f', label: 'BC flip (mm)', render: (v: any) => v ?? '—' },
+            { key: 'lc_f', label: 'LC flip (mm)', render: (v: any, r: any) => v == null ? '—' : (r.fInv ? redNum(v) : v) },
           ]} />
 
         <h3 style={{ marginTop: 28 }}>Flipper-length import (6 Jul 2026)</h3>
