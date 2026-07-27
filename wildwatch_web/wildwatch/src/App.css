@@ -152,12 +152,12 @@ header h1:hover { opacity:.8; }
   .obs-columns { flex-direction:row; gap:24px; align-items:stretch; overflow:visible; }
   .obs-col { flex:1 1 0; min-height:0; overflow-y:auto; }
 }
-.detail-bird { width:clamp(256px, 32vw, 416px); flex-shrink:0; overflow-y:auto; height:100%; border-left:1px solid #ddd; padding:0 12px 12px; background:#fff; }
+.detail-bird { width:clamp(256px, 32vw, 416px); flex-shrink:0; overflow-y:auto; height:100%; border-left:1px solid #ddd; padding:0 12px 12px; background:#f5f7fa; }
 /* Only the title row (bird mini + action buttons) sizes the panel; everything below
    fills that width and wraps rather than widening it. width:0 makes a child contribute
    nothing to the panel's intrinsic width; min-width:100% then stretches it back to fit. */
 .detail-bird .bird-detail > :not(.bird-title-row) { width:0; min-width:100%; }
-.detail-bird .bird-title-row { position:sticky; top:0; z-index:2; background:#fff; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
+.detail-bird .bird-title-row { position:sticky; top:0; z-index:2; background:#f5f7fa; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
 
 /* All birds row */
 .all-birds { margin:8px 0 12px; }
@@ -513,9 +513,12 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-with-count { display:inline-flex; flex-direction:column; align-items:center; }
 .scan-count { font-size:10px; color:#999; margin-top:1px; }
 .breeding-pair { display:inline-flex; flex-wrap:wrap; gap:4px; border:2px solid #333; border-radius:8px; padding:4px 8px; margin-right:8px; }
-/* Active breeding window: predicted stage dates (hatch / guard end / chip / fledge).
-   Plain flowing text — a flex gap here would open space before the comma separators. */
+/* Active breeding window: predicted stage dates (hatch / guard end / chip / fledge). Each
+   stage carries its own trailing comma, so the space between them is a margin — that way the
+   run reads as flowing text whether the stages are inline or (with the dates riding the end
+   of the last line) flex items. */
 .clutch-predictions { font-size:10px; color:#666; }
+.clutch-predictions > span:not(:last-child) { margin-right:.28em; }
 /* Emphasised parts (laid date + next upcoming stage) — darker/heavier so they read
    clearly against the muted grey run of dates. */
 .clutch-predictions b { color:#1a5276; font-weight:700; }
@@ -584,13 +587,13 @@ h3.collapsible:hover { color:#1a5276; }
 /* Finished clutches: the window dates flow on the birds' row, pinned right, wrapping to
    their own line only when they don't fit. */
 .clutch-body > .clutch-dates { margin-left:auto; align-self:center; white-space:nowrap; }
-/* Active clutches have a predictions row; the dates ride its right-hand end and bottom-align
-   with its last line, so they land in the card's corner rather than costing a row of their own. */
-.clutch-body > .clutch-foot { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:flex-end; gap:4px 10px; }
-/* 12em basis: the dates drop to a line of their own (still right-aligned) only once the
-   predictions would be squeezed into a sliver — a card that narrow has no corner to spare. */
-.clutch-foot > .clutch-predictions { flex:1 1 12em; min-width:0; text-align:left; }
-.clutch-foot > .clutch-dates { flex:none; margin-left:auto; align-self:flex-end; white-space:nowrap; }
+/* Active clutches: the predictions take a full-width row below, and the dates ride the end of
+   its last line — the card's bottom-right corner — falling back to a right-aligned line of
+   their own. Which is the worst case, so ClutchBody hands them to the birds' row instead
+   whenever that row has the room. */
+.clutch-body > .clutch-predictions { flex-basis:100%; text-align:left; }
+.clutch-predictions.has-trailing { display:flex; flex-wrap:wrap; align-items:baseline; row-gap:2px; }
+.clutch-predictions.has-trailing > .clutch-dates { margin-left:auto; align-self:baseline; white-space:nowrap; }
 .season-visitors { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding-left:2px; }
 .season-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
 .season-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; align-items:flex-start; }
@@ -612,7 +615,7 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .partner-season-label { font-size:10px; font-weight:600; color:#1a5276; margin:4px 0 2px; }
 /* Sighting history split by season */
 .sight-season { margin-bottom:6px; }
-.sight-season-label { font-size:11px; font-weight:700; color:#1a5276; margin:18px 0 5px; padding-bottom:2px; border-bottom:1px solid #dde3e8; }
+.sight-season-label { font-size:11px; font-weight:700; color:#1a5276; margin:36px 0 5px; padding-bottom:2px; border-bottom:1px solid #dde3e8; }
 .sight-season:first-child .sight-season-label { margin-top:6px; }
 .sight-season-label .muted { font-weight:500; font-size:10px; }
 /* "Seen in N boxes": collapsed per-box header — Box 32 · Seen 9x with <mini> 2x, <mini> 1x.
@@ -802,9 +805,9 @@ button.verify-danger { background:#c0453a; }
 .progress-fill { height:100%; background:#2e86c1; border-radius:4px; transition:width .3s ease; }
 /* Reuse the box-view bird panel's sizing + sticky header (see .detail-bird) so the
    date-view panel isn't over-wide and its header stays put while the body scrolls. */
-.day-bird-dock { position:relative; width:clamp(256px, 32vw, 416px); flex-shrink:0; background:#fff; border-left:1px solid #ddd; box-shadow:-4px 0 12px rgba(0,0,0,.06); overflow-y:auto; padding:0 12px 12px; }
+.day-bird-dock { position:relative; width:clamp(256px, 32vw, 416px); flex-shrink:0; background:#f5f7fa; border-left:1px solid #ddd; box-shadow:-4px 0 12px rgba(0,0,0,.06); overflow-y:auto; padding:0 12px 12px; }
 .day-bird-dock .bird-detail > :not(.bird-title-row) { width:0; min-width:100%; }
-.day-bird-dock .bird-title-row { position:sticky; top:0; z-index:2; justify-content:flex-start; background:#fff; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
+.day-bird-dock .bird-title-row { position:sticky; top:0; z-index:2; justify-content:flex-start; background:#f5f7fa; margin:0 -12px 10px; padding:12px 12px 8px; border-bottom:1px solid #e8ecef; }
 .day-bird-dock .bird-title-actions, .detail-bird .bird-title-actions { flex-direction:row; align-items:center; min-width:0; flex-shrink:0; }
 /* Edit stacked over History, sitting left of the × close button on the far right. */
 .bird-action-stack { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
