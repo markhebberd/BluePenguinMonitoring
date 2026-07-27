@@ -580,12 +580,16 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery(''); }
-          if (e.key === 'Enter') { e.preventDefault(); if (matches.length === 1) commit(matches[0].id); }
+          // Enter takes the top match, so "britta" + Enter saves. Guarded on a non-empty
+          // query: with the full list showing, Enter would otherwise assign whoever sorts first.
+          if (e.key === 'Enter') { e.preventDefault(); if (q && matches.length) commit(matches[0].id); }
         }} />
       <div className="day-person-results">
         {userId !== null && <div className="day-person-result muted" onMouseDown={() => commit(null)}>— not recorded —</div>}
-        {matches.map(u => (
-          <div key={u.id} className={`day-person-result${u.id === userId ? ' selected' : ''}`} onMouseDown={() => commit(u.id)}>
+        {matches.map((u, i) => (
+          <div key={u.id}
+            className={`day-person-result${u.id === userId ? ' selected' : ''}${q && i === 0 ? ' top' : ''}`}
+            onMouseDown={() => commit(u.id)}>
             {u.name}{u.active ? '' : <span className="muted"> (inactive)</span>}
           </div>
         ))}

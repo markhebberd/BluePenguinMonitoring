@@ -1978,14 +1978,18 @@ export function getDayPeople(date: string): { observer_id: number | null; record
   return mem?.dayPeopleByDate.get(date) || { observer_id: null, recorder_id: null };
 }
 
-/** Everyone with a user record, for name lookup and pickers. Inactive people are included and
- *  flagged, so a day recorded by someone since deactivated still shows their name. */
+/** People who can be picked as the day's observer or recorder. Inactive people are included
+ *  and flagged — a day is often written up long after the fact, and whoever worked it may
+ *  since have left. Service accounts (the API login) are not people and are left out; getUserName
+ *  still resolves them, so an old row referencing one is not left blank. */
 export function getUsers(): { id: number; name: string; active: boolean }[] {
-  return (mem?.observers || []).map((o: any) => ({
-    id: Number(o.observer_id),
-    name: [o.observer_name, o.surname].filter(Boolean).join(' '),
-    active: o.active == null ? true : o.active == 1,
-  })).sort((a, b) => a.name.localeCompare(b.name));
+  return (mem?.observers || [])
+    .filter((o: any) => (o.role || '') !== 'api')
+    .map((o: any) => ({
+      id: Number(o.observer_id),
+      name: [o.observer_name, o.surname].filter(Boolean).join(' '),
+      active: o.active == null ? true : o.active == 1,
+    })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** A user's display name from their id — "Britta Steude". Null when the id is unknown. */

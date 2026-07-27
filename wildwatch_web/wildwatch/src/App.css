@@ -470,6 +470,8 @@ h3.collapsible:hover { color:#1a5276; }
 .day-person-result:last-child { border-bottom:none; }
 .day-person-result:hover { background:#bbdefb; }
 .day-person-result.selected { font-weight:600; }
+/* The match Enter will take — highlighted so "type a name, press Enter" is visibly safe. */
+.day-person-result.top { background:#bbdefb; box-shadow:inset 2px 0 0 #2196F3; }
 .day-note-input { font-size:13px; font-weight:normal; font-family:inherit; color:#455a64; padding:1px 6px;
   border:1px solid #90caf9; border-radius:4px; width:15em; max-width:100%; vertical-align:baseline; }
 .day-cf-toggles { display:flex; gap:12px; }

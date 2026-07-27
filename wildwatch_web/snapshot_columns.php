@@ -40,5 +40,7 @@ const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.
 function getObservers($pdo) {
     // surname and active ride along so the client can show a full name and offer only
     // current people in a picker, while still resolving the id on an old row to whoever it was.
-    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active FROM users ORDER BY f_name, surname")->fetchAll()];
+    // role rides along so the client can keep service accounts (the API user) out of the
+    // people pickers, while still resolving their id if an old row happens to reference one.
+    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active, role FROM users ORDER BY f_name, surname")->fetchAll()];
 }
