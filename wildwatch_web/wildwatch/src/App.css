@@ -575,8 +575,8 @@ h3.collapsible:hover { color:#1a5276; }
    partner/parents and the box link ("with <mini> in Box 63"). */
 .clutch-box-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-bottom:6px; }
 .clutch-box-row .clutch-label { margin-bottom:0; }
-.clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
-.clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 7px; min-width:0; }
+.clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 5px; }
+.clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 4px; min-width:0; }
 /* Window dates flow on the birds' row, pinned right, wrapping to their own line only
    when they don't fit. Predictions (active clutches) take a full-width row below, left-aligned. */
 .clutch-body > .clutch-dates { margin-left:auto; align-self:center; white-space:nowrap; }
