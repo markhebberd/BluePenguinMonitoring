@@ -861,15 +861,22 @@ function wwPasswordProblem(string $pw, array $identity = []): ?string {
     foreach (array_keys($nameTokens)  as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your name in your password.';
     foreach (array_keys($emailTokens) as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your email address in your password.';
 
-    // Base stems of the passwords a wordlist tries first, plus this project's own words.
-    // Matched as a SUBSTRING (not exact) so a stem catches its suffixed variants too — the
-    // point being that "Wildwatch1" / "password2026" are exactly what people reach for once a
-    // bare word is refused. Every stem is 6+ chars, so substring matching won't snag an
-    // ordinary password by accident. A backstop, not a substitute for the rules above.
-    $weak = ['password','passw0rd','123456','1234567','12345678','qwerty','azerty','iloveyou',
+    // Base stems of the passwords a wordlist tries first, plus this project's own words. Each
+    // is matched as a SUBSTRING and through common character swaps, so a stem catches its
+    // suffixed AND leet-spelled variants — "Wildwatch1", "password2026", "P@ssw0rd", "W1ldw4tch"
+    // are exactly what people reach for once a bare word is refused. Every stem is 6+ chars, so
+    // even with the swaps this won't snag an ordinary password. A backstop, not the main rules.
+    $weak = ['password','123456','1234567','12345678','qwerty','azerty','iloveyou',
              'letmein','motdepasse','changeme','welcome','monkey','dragon','sunshine',
              'wildwatch','nestcheck','penguin','manchot','korora'];
-    foreach ($weak as $w) if (mb_strpos($lp, $w) !== false) return 'That password is too easy to guess — choose something less common.';
+    // letter -> itself plus the digits/symbols people substitute for it
+    $swap = ['a'=>'a4@','b'=>'b8','c'=>'c(','e'=>'e3','g'=>'g9','i'=>'i1!|','l'=>'l1|',
+             'o'=>'o0','s'=>'s5$','t'=>'t7+','z'=>'z2'];
+    foreach ($weak as $w) {
+        $re = '';
+        foreach (str_split($w) as $ch) $re .= isset($swap[$ch]) ? '['.preg_quote($swap[$ch], '/').']' : preg_quote($ch, '/');
+        if (preg_match('/'.$re.'/i', $pw)) return 'That password is too easy to guess — choose something less common.';
+    }
 
     return null;
 }

@@ -3604,6 +3604,19 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
   );
 }
 
+/** Weak-password stems as leet-aware regexes, built once. Each letter also matches the digits
+ *  and symbols people swap in for it, so a stem catches "Wildwatch1", "P@ssw0rd", "W1ldw4tch".
+ *  Mirrors the $weak / $swap logic in config.php — keep the two lists in step. */
+const WEAK_STEMS: RegExp[] = (() => {
+  const stems = ['password','123456','1234567','12345678','qwerty','azerty','iloveyou',
+    'letmein','motdepasse','changeme','welcome','monkey','dragon','sunshine',
+    'wildwatch','nestcheck','penguin','manchot','korora'];
+  const swap: Record<string,string> = {a:'a4@',b:'b8',c:'c(',e:'e3',g:'g9',i:'i1!|',l:'l1|',
+    o:'o0',s:'s5$',t:'t7+',z:'z2'};
+  const escClass = (s: string) => s.replace(/[\]\\^-]/g, '\\$&');
+  return stems.map(w => new RegExp([...w].map(ch => swap[ch] ? '[' + escClass(swap[ch]) + ']' : ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(''), 'i'));
+})();
+
 /** Mirror of wwPasswordProblem() in config.php — the two MUST stay in step, since the server
  *  is the authority and a client that says "fine" then gets rejected is a worse experience than
  *  no check at all. Returns a short problem sentence, or null when the password is acceptable.
@@ -3629,11 +3642,9 @@ function passwordProblem(pw: string, identity: string[] = []): string | null {
   }
   for (const tok of nameTokens) if (lp.includes(tok)) return 'Do not put your name in your password.';
   for (const tok of emailTokens) if (lp.includes(tok)) return 'Do not put your email address in your password.';
-  // Base stems, matched as a substring so "Wildwatch1" / "password2026" are caught too.
-  const weak = ['password','passw0rd','123456','1234567','12345678','qwerty','azerty','iloveyou',
-    'letmein','motdepasse','changeme','welcome','monkey','dragon','sunshine',
-    'wildwatch','nestcheck','penguin','manchot','korora'];
-  if (weak.some(w => lp.includes(w))) return 'That password is too easy to guess — choose something less common.';
+  // Base stems, matched as a substring AND through common character swaps, so "Wildwatch1",
+  // "password2026", "P@ssw0rd", "W1ldw4tch" are all caught. Mirrors config.php.
+  if (WEAK_STEMS.some(re => re.test(pw))) return 'That password is too easy to guess — choose something less common.';
   return null;
 }
 
