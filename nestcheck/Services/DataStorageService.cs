@@ -474,7 +474,10 @@ namespace PenguinMonitor.Services
                     if (serverState?.users != null)
                         File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
                             JsonConvert.SerializeObject(serverState.users, Formatting.Indented));
-                    onLineProgress?.Invoke(0, $"{result.BoxCount} boxes ✓");
+                    // Surface how many people the server returned so an empty picker can be diagnosed
+                    // in the field: -1 = the response had no users field at all, 0 = empty list.
+                    int peopleCount = serverState?.users?.Count ?? -1;
+                    onLineProgress?.Invoke(0, $"{result.BoxCount} boxes, {peopleCount} people ✓");
                     return result.BoxCount;
                 }, "Boxes", s => onLineProgress?.Invoke(0, s), isCancelled);
 
