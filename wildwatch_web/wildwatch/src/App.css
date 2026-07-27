@@ -823,6 +823,11 @@ button.verify-danger { background:#c0453a; }
 .day-bird-dock .bird-title-actions, .detail-bird .bird-title-actions { flex-direction:row; align-items:center; min-width:0; flex-shrink:0; }
 /* Edit stacked over History, sitting left of the × close button on the far right. */
 .bird-action-stack { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+/* Step down/up the peng numbering. Sits with the close button so the header's right edge
+   reads as one group; same weight as the close ×, which it must not compete with. */
+.peng-step { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#999; padding:0 2px; }
+.peng-step:hover:not(:disabled) { color:#1a5276; }
+.peng-step:disabled { opacity:.35; cursor:default; }
 .day-bird-close { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#999; padding:0 4px; }
 .day-bird-close:hover { color:#333; }
 @media (max-width:700px) { .day-bird-dock { flex-basis:100%; width:100%; min-width:0; max-width:100%; border-left:none; } .day-page-docked .day-main { display:none; } }

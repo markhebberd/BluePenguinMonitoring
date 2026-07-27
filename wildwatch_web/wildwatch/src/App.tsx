@@ -2570,6 +2570,39 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
 
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
+  // Step to the next penguin by number. The colony prefix is part of the key, so ordering is
+  // on the numeric tail, and it lands on the next bird that EXISTS rather than peng_num + 1 —
+  // the numbering has gaps wherever a bird was never created or has since gone.
+  const allPenguins = useAllPenguins();
+  const [prevPeng, nextPeng] = useMemo(() => {
+    const num = (n: any) => parseInt(String(n ?? '').replace(/^[A-Z]+/, ''), 10);
+    const here = num(p.peng_num);
+    if (isNaN(here)) return [null, null];
+    let below: string | null = null, belowNum = -Infinity;
+    let above: string | null = null, aboveNum = Infinity;
+    for (const row of allPenguins) {
+      const v = num(row.peng_num);
+      if (v < here && v > belowNum) { belowNum = v; below = row.peng_num; }
+      if (v > here && v < aboveNum) { aboveNum = v; above = row.peng_num; }
+    }
+    return [below, above];
+  }, [allPenguins, p.peng_num]);
+  const bare = (n: any) => String(n ?? '').replace(/^[A-Z]+/, '');
+  // , and . step down/up the numbering, shifted (< and >) too since that's how the pair reads
+  // on the key caps. Same guard as the app's other shortcuts: never while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const step = (e.key === ',' || e.key === '<') ? prevPeng : (e.key === '.' || e.key === '>') ? nextPeng : null;
+      if (!step) return;
+      e.preventDefault();
+      onBirdClick(step);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prevPeng, nextPeng, onBirdClick]);
   const sightings: any[] = data.sightings || [];
   const biometrics: any[] = data.biometrics || [];
   const partners: any[] = data.partners || [];
@@ -2674,6 +2707,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     if (reason === null) return;
     return updateRecord(token || '', 'penguins', p.peng_num, {[field]: val}, reason || undefined);
   };
+  // Stored inverted (chipped_as_adult), so this can't go through savePenguin without the
+  // audit prompt reading "chipped_as_adult from 0 to 1". Ask the question the panel asks.
+  const saveChippedAsChick = async (val: any) => {
+    const asAdult = val === 'Yes' ? 0 : 1;
+    if ((p.chipped_as_adult ? 1 : 0) === asAdult) return;
+    const reason = prompt(`Change chipped as chick on penguin #${p.peng_num} from "${p.chipped_as_adult ? 'No' : 'Yes'}" to "${val}"?\n\nReason (optional):`);
+    if (reason === null) return;
+    return updateRecord(token || '', 'penguins', p.peng_num, { chipped_as_adult: asAdult }, reason || undefined);
+  };
   const saveChip = (pitId: string, field: string) => async (val: any) => {
     const reason = prompt(`Change ${field} on chip ${pitId.slice(-8)}?\n\nReason (optional):`);
     if (reason === null) return;
@@ -2719,6 +2761,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {editing && <span className="edit-btns"><button className="edit-btn" onClick={() => setEditing(false)}>Cancel</button><button className="edit-btn done-btn" onClick={() => setEditing(false)}>Done</button></span>}
             {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
           </span>
+          <button className="peng-step" onClick={() => prevPeng && onBirdClick(prevPeng)} disabled={!prevPeng}
+            title={prevPeng ? `Previous penguin (#${bare(prevPeng)}) — , or <` : 'No lower peng#'} aria-label="Previous penguin">‹</button>
+          <button className="peng-step" onClick={() => nextPeng && onBirdClick(nextPeng)} disabled={!nextPeng}
+            title={nextPeng ? `Next penguin (#${bare(nextPeng)}) — . or >` : 'No higher peng#'} aria-label="Next penguin">›</button>
           {onClose && <button className="day-bird-close" onClick={onClose} title="Close" aria-label="Close">×</button>}
         </span>
       </div>
@@ -2756,8 +2802,12 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
 
               {fullView && <>
                 <tr><td className="muted">Sex</td><td><EditableField value={p.sex} type="select" options={['','M','F']} onSave={savePenguin('sex')} canEdit={editing} /></td></tr>
-                <tr><td className="muted">Chipped as Chick</td><td>{p.chipped_as_adult ? 'No' : 'Yes'}</td></tr>
-                <tr><td className="muted">Chick Size Code</td><td><EditableField value={p.chick_size_code} onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={editing} /></td></tr>
+                <tr><td className="muted">Chipped as Chick</td><td>
+                  <EditableField value={p.chipped_as_adult ? 'No' : 'Yes'} type="select" options={['Yes', 'No']}
+                    onSave={saveChippedAsChick} canEdit={editing} /></td></tr>
+                <tr><td className="muted">Chick Size Code</td><td>
+                  <EditableField value={p.chick_size_code} type="select" options={['', 'BC', 'LC', 'SC']}
+                    onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={editing} /></td></tr>
                 {chips.map((c: any, i: number) => {
                   const re = 'Re'.repeat(i);
                   const prefix = i === 0 ? '' : re.toLowerCase();
@@ -2800,7 +2850,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   ? (p.death_date ? p.death_date.slice(0, 10) : <span className="muted">-</span>)
                   // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
                   : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
-                      onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="date of death" canEdit={true} />}</td></tr>}
+                      onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="-" canEdit={true} />}</td></tr>}
                 {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td><EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={editing} /></td></tr>}
                 <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
               </>}
