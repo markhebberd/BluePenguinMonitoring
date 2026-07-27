@@ -2793,7 +2793,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 </td></tr>
                 {residency && <tr><td className="muted">Residency</td><td>{residency}</td></tr>}
                 {activeChip?.chip_box && <tr><td className="muted">Chip box</td><td>
-                  <a className="clickable" href={`/box/${activeChip.chip_box}`} onClick={e => navClick(e, () => onBoxClick(activeChip.chip_box))}>Box {activeChip.chip_box}</a>
+                  <a className="bird-chip clickable" href={`/box/${activeChip.chip_box}`} onClick={e => navClick(e, () => onBoxClick(activeChip.chip_box))}>Box {activeChip.chip_box}</a>
                   {(getUserName(activeChip.chipper_id) || activeChip.chip_by) &&
                     <span className="chip-by"><span className="muted">by:</span> {getUserName(activeChip.chipper_id) || activeChip.chip_by}</span>}
                 </td></tr>}
