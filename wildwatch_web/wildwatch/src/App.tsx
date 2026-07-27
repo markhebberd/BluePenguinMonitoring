@@ -558,9 +558,10 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
 
   if (!open) return (
     <span className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
-      title={`Who was ${label === 'observer' ? 'observing' : 'recording'}`}
+      title={`Who was ${field === 'observer_id' ? 'observing' : 'recording'}`}
       onClick={() => { setQuery(''); setOpen(true); }}>
-      <span className="day-hdr-people-label">{label}</span>
+      {/* Unset, the "+ Observer" prompt IS the label — showing both would read "Observer + Observer". */}
+      {name && <span className="day-hdr-people-label">{label}</span>}
       {saving ? 'Saving…' : (name || `+ ${label}`)}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
     </span>
@@ -572,7 +573,7 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
     <span className="day-person-picker">
       <span className="day-hdr-people-label">{label}</span>
       <input ref={inputRef} className="day-note-input day-person-input" value={query}
-        placeholder={name || `Search ${label}`}
+        placeholder={name || 'Search people'}
         onChange={e => setQuery(e.target.value)}
         // Blur closes the picker, but a click on a result fires onMouseDown first so the
         // selection still lands.
@@ -604,9 +605,9 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
     <DayField key="note" date={date} token={token} canEdit={canEdit} saved={note}
       placeholder="Monitor notes" addLabel="+ note" maxLength={255} />);
   if (canEdit || observer_id) parts.push(
-    <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id" userId={observer_id} label="observer" />);
+    <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id" userId={observer_id} label="Observer" />);
   if (canEdit || recorder_id) parts.push(
-    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id" userId={recorder_id} label="recorder" />);
+    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id" userId={recorder_id} label="Recorder" />);
   return (<>{parts.map((el, i) => (
     <Fragment key={i}>{i > 0 && <span className="day-hdr-sep"> · </span>}{el}</Fragment>
   ))}</>);
