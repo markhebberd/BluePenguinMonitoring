@@ -617,11 +617,17 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .sight-season-label .muted { font-weight:500; font-size:10px; }
 /* "Seen in N boxes": collapsed per-box header — Box 32 · Seen 9x with <mini> 2x, <mini> 1x.
    Left-packed and wrapping, so a bird with a lot of company still reads as one line-run. */
-.box-head { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+/* Top-aligned so the box name and the companion minis share one line, each with its visit
+   count hanging directly beneath it. */
+.box-head { display:flex; align-items:flex-start; flex-wrap:wrap; gap:3px 8px; }
 .box-head.collapsible { cursor:pointer; user-select:none; }
 .box-head.collapsible:hover .muted { color:#1a5276; }
 .box-head b { font-size:12px; }
-.box-companion { display:inline-flex; align-items:center; gap:3px; }
+.box-count-stack { display:inline-flex; flex-direction:column; align-items:center; }
+.box-companion { display:inline-flex; flex-direction:column; align-items:center; }
+.box-companion .bc-top { display:inline-flex; align-items:center; gap:2px; }
+/* "with" and the toggle sit on the top row, level with the names/minis (counts hang below). */
+.box-head .partner-toggle, .box-head-with { margin-top:3px; }
 .partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
 .partner-window-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .partner-window-offspring { display:inline-flex; gap:3px; align-items:center; flex-wrap:wrap; }

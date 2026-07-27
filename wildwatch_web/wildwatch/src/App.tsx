@@ -2888,18 +2888,29 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             <div key={b} className="obs-card" style={{marginBottom:6}}>
               <div className="box-head collapsible" onClick={() => toggleSection(boxKey)}>
                 <span className="partner-toggle">{boxOpen ? '▾' : '▸'}</span>
-                <a className="clickable" href={`/box/${b}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(b)); }}><b>Box {b}</b></a>
-                <span className="muted">Seen {boxSightings.length}x</span>
-                {(companions.length > 0 || noScan > 0) && <span className="muted">with</span>}
+                {/* Each element sits over its own count: the box over its visit total, each
+                    companion over how many of those visits they shared. */}
+                <span className="box-count-stack">
+                  <a className="clickable" href={`/box/${b}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(b)); }}><b>Box {b}</b></a>
+                  <span className="scan-count">{boxSightings.length}x</span>
+                </span>
+                {(companions.length > 0 || noScan > 0) && <span className="muted box-head-with">with</span>}
                 {companions.map((c, ci) => (
                   // stopPropagation so opening a companion's panel doesn't also toggle the box.
                   <span key={c.scan.peng_num} className="box-companion" onClick={e => e.stopPropagation()}>
-                    <PenguinMini scan={c.scan} onClick={() => onBirdClick(c.scan.peng_num)} observationDate={c.date} />
-                    <span className="muted">{c.count}x</span>
-                    {(ci < companions.length - 1 || noScan > 0) && <span className="muted">,</span>}
+                    <span className="bc-top">
+                      <PenguinMini scan={c.scan} onClick={() => onBirdClick(c.scan.peng_num)} observationDate={c.date} />
+                      {(ci < companions.length - 1 || noScan > 0) && <span className="muted">,</span>}
+                    </span>
+                    <span className="scan-count">{c.count}x</span>
                   </span>
                 ))}
-                {noScan > 0 && <span className="box-companion"><span className="scan no-scan">No scan</span><span className="muted">{noScan}x</span></span>}
+                {noScan > 0 && (
+                  <span className="box-companion">
+                    <span className="bc-top"><span className="scan no-scan">No scan</span></span>
+                    <span className="scan-count">{noScan}x</span>
+                  </span>
+                )}
               </div>
               {boxOpen && boxSightings.map((sg: any, i: number) => (
                 <div key={i} style={{marginBottom:3}}>
