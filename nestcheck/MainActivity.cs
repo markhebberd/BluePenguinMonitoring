@@ -6068,6 +6068,10 @@ namespace PenguinMonitor
                 nestSearchInput.Visibility = ViewStates.Visible;
                 nestSearchInput.RequestFocus();
                 RenderNestResults("");   // show all nests to choose from
+                // Pop the keyboard — posted because the field has only just become visible.
+                var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                new Handler(Looper.MainLooper).Post(() =>
+                    imm?.ShowSoftInput(nestSearchInput, Android.Views.InputMethods.ShowFlags.Implicit));
             };
             nestSearchInput.TextChanged += (s, e) => { if (!suppressNestSearch) RenderNestResults(nestSearchInput.Text); };
 
