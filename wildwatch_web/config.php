@@ -852,7 +852,9 @@ function wwPasswordProblem(string $pw, array $identity = []): ?string {
         $isEmail = strpos($raw, '@') !== false;
         if ($isEmail) $raw = substr($raw, 0, strpos($raw, '@'));
         foreach (preg_split('/[^\p{L}\p{N}]+/u', $raw) as $tok) {
-            if (mb_strlen($tok) < 3) continue;
+            // 4+ so a short whole name ("Amy", "Flo", "Lee") doesn't ban ordinary words that
+            // merely contain it ("creamy", "flourish"). Real names are longer and still caught.
+            if (mb_strlen($tok) < 4) continue;
             if ($isEmail) $emailTokens[$tok] = 1; else $nameTokens[$tok] = 1;
         }
     }

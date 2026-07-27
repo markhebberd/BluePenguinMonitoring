@@ -3624,7 +3624,8 @@ function passwordProblem(pw: string, identity: string[] = []): string | null {
     if (!raw) continue;
     const isEmail = raw.includes('@');
     if (isEmail) raw = raw.slice(0, raw.indexOf('@'));
-    for (const tok of raw.split(/[^\p{L}\p{N}]+/u)) if (tok.length >= 3) (isEmail ? emailTokens : nameTokens).add(tok);
+    // 4+ so a short whole name ("Amy", "Flo") doesn't ban ordinary words containing it.
+    for (const tok of raw.split(/[^\p{L}\p{N}]+/u)) if (tok.length >= 4) (isEmail ? emailTokens : nameTokens).add(tok);
   }
   for (const tok of nameTokens) if (lp.includes(tok)) return 'Do not put your name in your password.';
   for (const tok of emailTokens) if (lp.includes(tok)) return 'Do not put your email address in your password.';
