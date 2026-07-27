@@ -1267,7 +1267,10 @@ function hasClutchPredictions(c: Clutch) {
   return clutchActive(c) && c.laid !== null;
 }
 
-function ClutchPredictions({ clutch }: { clutch: Clutch }) {
+/** `trailing` (the window dates) rides the end of the last line rather than taking a row of
+ *  its own — which needs each stage to be a flex item, so the separator trails its stage
+ *  instead of leading the next one. A stage that starts a line must not start with ", ". */
+function ClutchPredictions({ clutch, trailing }: { clutch: Clutch; trailing?: React.ReactNode }) {
   if (!hasClutchPredictions(clutch)) return null;
   const d = (off: number) => fmtMs(clutch.laid! + off * DAY);
   const t = (off: number) => clutch.laid! + off * DAY;
@@ -1295,9 +1298,60 @@ function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   ];
   const nextIdx = parts.findIndex(p => p.t >= Date.now()); // the stage coming up next
   return (
-    <span className="clutch-predictions">
-      {parts.map((p, i) => <span key={i}>{i > 0 ? ', ' : ''}{(i === nextIdx || i === 0) ? <b>{p.text}</b> : p.text}</span>)}
+    <span className={`clutch-predictions${trailing ? ' has-trailing' : ''}`}>
+      {parts.map((p, i) => <span key={i}>{(i === nextIdx || i === 0) ? <b>{p.text}</b> : p.text}{i < parts.length - 1 ? ',' : ''}</span>)}
+      {trailing}
     </span>
+  );
+}
+
+/**
+ * A clutch card's body: the birds' row (passed in) plus the predictions row, with the window
+ * dates dropped into whichever of the two has room left at its end.
+ *
+ * Preference is the predictions' last line — the card's bottom-right corner — and CSS handles
+ * that on its own. What CSS can't do is compare the two rows, so when the dates would be
+ * pushed onto a line of their own, this measures whether the birds' row could take them
+ * instead. The choice reads only geometry the dates don't affect (the last stage's end, and
+ * the birds' row without them), so it can't oscillate between the two slots.
+ */
+function ClutchBody({ clutch, dates, children }: { clutch: Clutch; dates: React.ReactNode; children: React.ReactNode }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [onBirdsRow, setOnBirdsRow] = useState(false);
+  const measure = useCallback(() => {
+    const body = bodyRef.current;
+    const datesEl = body?.querySelector('.clutch-dates') as HTMLElement | null;
+    const predEl = body?.querySelector('.clutch-predictions') as HTMLElement | null;
+    if (!body || !datesEl || !predEl) return;   // no predictions row — CSS already handles it
+    const right = body.getBoundingClientRect().right;
+    const needed = datesEl.getBoundingClientRect().width;
+    // End of the last stage. getClientRects()' last entry, not the union box, so a stage that
+    // itself wrapped reports where its text actually stops rather than its widest line.
+    const stages = Array.from(predEl.children).filter(el => el !== datesEl);
+    const tail = stages[stages.length - 1]?.getClientRects();
+    const freeOnPredictions = tail?.length ? right - tail[tail.length - 1].right : Infinity;
+    // The birds' row is everything in the body except the predictions and the dates.
+    const firstRow = Array.from(body.children).filter(el => el !== datesEl && el !== predEl);
+    const freeOnBirds = right - Math.max(...firstRow.map(el => el.getBoundingClientRect().right), 0);
+    setOnBirdsRow(freeOnPredictions < needed + 8 && freeOnBirds >= needed + 14);
+  }, []);
+  // Re-measure on every render (the stages restate their dates as a clutch ages) and on any
+  // resize of the card.
+  useLayoutEffect(measure);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(body);
+    return () => ro.disconnect();
+  }, [measure]);
+  const inCorner = hasClutchPredictions(clutch) && !onBirdsRow;
+  return (
+    <div className="clutch-body" ref={bodyRef}>
+      {children}
+      {!inCorner && dates}
+      <ClutchPredictions clutch={clutch} trailing={inCorner ? dates : undefined} />
+    </div>
   );
 }
 
@@ -1726,7 +1780,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const vState = computeClutchVerify(fam, clutchVer);
           const vKey = `${label}:${ci}`;
           const showTick = canEdit || !!clutchVer;
-          const hasPredictions = hasClutchPredictions(clutch);
           const dates = (
             <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
               title="Go to where the egg/chick was first detected"
@@ -1754,7 +1807,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
                 </div>
               )}
-              <div className="clutch-body">
+              <ClutchBody clutch={clutch} dates={dates}>
                 <span className="clutch-birds">
                   {pairBirds.map(b => birdWithCount(b, winCount.get(`${ci}|${b.pit_id.slice(-8)}`) || 0, true))}
                   {famChicks.map(b => {
@@ -1774,16 +1827,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                   <BreedingVerifyTick state={vState} canEdit={canEdit}
                     onOpen={(e) => setOpenVerify({ key: vKey, pos: { x: Math.min(e.clientX + 8, window.innerWidth - 340), y: e.clientY + 8 } })} />
                 )}
-                {/* Window dates: their own slot at the end of the birds' row, unless there's a
-                    predictions row to share — then they sit at the end of that instead. */}
-                {!hasPredictions && dates}
-                {hasPredictions && (
-                  <div className="clutch-foot">
-                    <ClutchPredictions clutch={clutch} />
-                    {dates}
-                  </div>
-                )}
-              </div>
+              </ClutchBody>
               {inNest.length > 0 && (
                 <div className="clutch-visitors"><span className="visitors-lbl">Also in nest</span><span className="visitors-list">{inNest.map(x => birdWithCount(x.b, x.n))}</span></div>
               )}
@@ -2790,7 +2834,6 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                       const c = e.fam.clutch;
                       const active = clutchActive(c);
                       const cardStatus = e.fam.chicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
-                      const hasPredictions = hasClutchPredictions(c);
                       const dates = (
                         <span className={`clutch-dates${c.startObsTime ? ' clickable' : ''}`}
                           title="Go to where the eggs/chicks first appeared"
@@ -2821,7 +2864,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
                             </div>
                           )}
-                          <div className="clutch-body">
+                          <ClutchBody clutch={c} dates={dates}>
                             <span className="clutch-birds">
                               {e.role === 'parent' ? (<>
                                 {e.fam.chicks.map((ck: any) => (
@@ -2843,14 +2886,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 ))}
                               </>}
                             </span>
-                            {!hasPredictions && dates}
-                            {hasPredictions && (
-                              <div className="clutch-foot">
-                                <ClutchPredictions clutch={c} />
-                                {dates}
-                              </div>
-                            )}
-                          </div>
+                          </ClutchBody>
                         </div>
                       );
                     })}

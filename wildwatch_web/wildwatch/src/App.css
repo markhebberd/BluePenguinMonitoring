@@ -592,7 +592,9 @@ h3.collapsible:hover { color:#1a5276; }
    their own. Which is the worst case, so ClutchBody hands them to the birds' row instead
    whenever that row has the room. */
 .clutch-body > .clutch-predictions { flex-basis:100%; text-align:left; }
-.clutch-predictions.has-trailing { display:flex; flex-wrap:wrap; align-items:baseline; row-gap:2px; }
+/* row-gap stays 0: flex lines are then spaced by line-height alone, exactly as the same run
+   of stages is spaced when it renders as inline text elsewhere. */
+.clutch-predictions.has-trailing { display:flex; flex-wrap:wrap; align-items:baseline; row-gap:0; }
 .clutch-predictions.has-trailing > .clutch-dates { margin-left:auto; align-self:baseline; white-space:nowrap; }
 .season-visitors { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding-left:2px; }
 .season-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
