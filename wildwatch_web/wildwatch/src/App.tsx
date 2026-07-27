@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates } from './api/localdb';
-import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
+import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
@@ -10657,6 +10657,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Must stay above the `if (loading)` early return — a hook below it renders on some passes
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
+  // Nest-grid tiles straight from the cache, so their colours and counts land with the numbers
+  // rather than after the overview fetch. stats.box_info replaces it the moment it arrives.
+  const localBoxInfo = useBoxInfo();
   // Header pin → admin/validation, in-app. AdminPanel reads its tab from the URL only at
   // mount, so an already-mounted panel needs this signal to switch tabs and scroll.
   const [checkTarget, setCheckTarget] = useState<{ slug: string; nonce: number } | null>(null);
@@ -11239,7 +11242,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className={selectedBox ? 'split-view' : ''}>
         {/* Box grid - always visible */}
         <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
-          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
+          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info || localBoxInfo} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
         </div>
 
         {/* Box detail */}

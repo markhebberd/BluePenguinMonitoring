@@ -1766,6 +1766,35 @@ export function queryAllLocations(): any[] {
   return mem?.locations || [];
 }
 
+/**
+ * Nest-grid tile data per box: the colour (breeding status) and the 🐧/🥚/🐣 counts.
+ *
+ * The same thing dashboard.php's handleOverview builds and ships as `box_info`, computed from
+ * the local cache so the grid paints its colours with its numbers instead of a round-trip
+ * later. Deliberately mirrors that SQL's semantics, including the odd one: the counts always
+ * come from the newest live observation, but a newest observation with no breeding_status
+ * falls back to the most recent one that has a status, rather than showing none.
+ */
+export function computeBoxInfo(): Record<string, { s: string; a: number; e: number; c: number }> {
+  const cache = mem;
+  if (!cache) return {};
+  const out: Record<string, { s: string; a: number; e: number; c: number }> = {};
+  for (const loc of cache.locations) {
+    const obs = (cache.obsByLocation.get(loc.location_id) || [])
+      .filter((o: any) => !o.is_deleted)
+      .sort((a: any, b: any) => String(b.observation_time_utc).localeCompare(String(a.observation_time_utc)));
+    if (obs.length === 0) continue;   // never observed — dashboard.php omits it too
+    const latest = obs[0];
+    out[loc.location_name] = {
+      s: latest.breeding_status || obs.find((o: any) => o.breeding_status)?.breeding_status || '',
+      a: latest.adults || 0,
+      e: latest.eggs || 0,
+      c: latest.chicks || 0,
+    };
+  }
+  return out;
+}
+
 /** Locations excluded from Full Monitor detection for the active colony. */
 export function getFmExcluded(): Set<string> {
   return mem?.fmExcluded || new Set(DEFAULT_FM_EXCLUDED);

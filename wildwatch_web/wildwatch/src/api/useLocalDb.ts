@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts, computeChickSizeMismatch } from './localdb';
+import { subscribe, getStoreVersion, computeBoxInfo, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts, computeChickSizeMismatch } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -19,6 +19,10 @@ function cached<T>(key: string, fn: () => T): T {
 
 export function useAllPenguins(): any[] {
   return useSyncExternalStore(subscribe, () => cached('allPenguins', queryAllPenguins));
+}
+
+export function useBoxInfo(): Record<string, { s: string; a: number; e: number; c: number }> {
+  return useSyncExternalStore(subscribe, () => cached('boxInfo', computeBoxInfo));
 }
 
 export function useDateStats(): Map<string, any> {
