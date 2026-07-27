@@ -367,7 +367,7 @@ if ($action === 'recent_changes') {
 }
 
 if ($action === 'users') {
-    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, chip_acronym, active, email, role, created_at FROM users WHERE deleted_at IS NULL ORDER BY id");
+    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, chip_acronym, active, email, role, created_at FROM users WHERE deleted_at IS NULL ORDER BY active DESC, f_name, surname");
     echo json_encode($stmt->fetchAll());
     exit;
 }

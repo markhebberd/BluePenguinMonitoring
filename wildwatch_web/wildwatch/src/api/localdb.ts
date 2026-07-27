@@ -1989,7 +1989,9 @@ export function getUsers(): { id: number; name: string; active: boolean }[] {
       id: Number(o.observer_id),
       name: [o.observer_name, o.surname].filter(Boolean).join(' '),
       active: o.active == null ? true : o.active == 1,
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    // Active first, each group alphabetical — the people you are likely to pick sit at the top,
+    // while past volunteers stay reachable below rather than scattered through the list.
+    })).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
 }
 
 /** A user's display name from their id — "Britta Steude". Null when the id is unknown. */
