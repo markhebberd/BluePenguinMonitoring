@@ -3706,10 +3706,13 @@ namespace PenguinMonitor
                     }
                     else
                     {
-                        // Empty box — pre-fill breeding status from previous observation or box notes
-                        if (_adultsEditText != null) _adultsEditText[0].Text = "0";
-                        if (_eggsEditText != null) _eggsEditText[0].Text = "0";
-                        if (_chicksEditText != null) _chicksEditText[0].Text = "0";
+                        // Empty box — no observation yet. Show blank counts while locked (a nest with
+                        // no data reads as empty, not "0 0 0"); once unlocked for editing, start at "0"
+                        // so the steppers have a number to work from. (Redraw on unlock repopulates.)
+                        var emptyCount = _isBoxLocked ? "" : "0";
+                        if (_adultsEditText != null) _adultsEditText[0].Text = emptyCount;
+                        if (_eggsEditText != null) _eggsEditText[0].Text = emptyCount;
+                        if (_chicksEditText != null) _chicksEditText[0].Text = emptyCount;
                         SetSpinnerStatus(_gateStatusSpinner[0], null);
                         if (_notesEditText != null) _notesEditText[0].Text = "";
                         buildScannedIdsLayout(new List<ScanRecord>());
@@ -5947,23 +5950,27 @@ namespace PenguinMonitor
             // picks from), not free text — so a chip record links to the person, and a rename in the
             // web admin reaches every chip they made. ChipBy (the acronym) is gone from the UI.
             var chipUsers = DataStorageService.LoadUsers(this);
-            Spinner MakeChipPersonSpinner(int selectedId)
+            // Only a bander (a user with a falcon/permit id) may be recorded as the chipper; the
+            // assistant can be anyone. Needs sync.php to send falcon_id — until it does, this list
+            // is empty and the chipper picker has only the blank option.
+            var chipperUsers = chipUsers.Where(u => !string.IsNullOrWhiteSpace(u.falcon_id)).ToList();
+            Spinner MakeChipPersonSpinner(List<DataStorageService.SyncUser> src, int selectedId)
             {
                 // Index 0 is the unset option — blank; empty reads as "not set".
                 var labels = new List<string> { "" };
-                labels.AddRange(chipUsers.Select(u => u.name ?? ""));
+                labels.AddRange(src.Select(u => u.name ?? ""));
                 var sp = _uiFactory.CreateDropdownSpinner();
                 // SimpleSpinnerItem closed view (no radio); dropdown list uses the checked item.
                 var ad = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, labels);
                 ad.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
                 sp.Adapter = ad;
-                var idx = chipUsers.FindIndex(u => u.id == selectedId);
+                var idx = src.FindIndex(u => u.id == selectedId);
                 sp.SetSelection(idx >= 0 ? idx + 1 : 0);
                 return sp;
             }
-            // Position 0 is the empty label, so a real selection maps to chipUsers[pos - 1].
-            int SelectedChipUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= chipUsers.Count
-                ? chipUsers[s.SelectedItemPosition - 1].id : 0;
+            // Position 0 is the empty label, so a real selection maps to src[pos - 1].
+            int SelectedChipUserId(Spinner s, List<DataStorageService.SyncUser> src) =>
+                s.SelectedItemPosition > 0 && s.SelectedItemPosition <= src.Count ? src[s.SelectedItemPosition - 1].id : 0;
 
             // Chip box — a search over KNOWN nests, not free text. Typing filters the colony's box
             // names (like the peng search); tapping a result fills the field. Save rejects anything
@@ -6014,13 +6021,20 @@ namespace PenguinMonitor
             var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipperCol.AddView(createLabel("Chipper"));
             // Starts unset — the chipper is chosen explicitly, not assumed to be whoever is logged in.
-            var chipperSpinner = MakeChipPersonSpinner(0);
+            // Only banders (users with a falcon id) appear here.
+            var chipperSpinner = MakeChipPersonSpinner(chipperUsers, 0);
             chipperCol.AddView(chipperSpinner);
+            if (chipperUsers.Count == 0)
+            {
+                var noBanders = new TextView(this) { Text = "No banders synced", TextSize = 12 };
+                noBanders.SetTextColor(UIFactory.TEXT_SECONDARY);
+                chipperCol.AddView(noBanders);
+            }
             card.AddView(chipperCol);
 
             var assistantCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             assistantCol.AddView(createLabel("Assistant"));
-            var assistantSpinner = MakeChipPersonSpinner(0);
+            var assistantSpinner = MakeChipPersonSpinner(chipUsers, 0);
             assistantCol.AddView(assistantSpinner);
             card.AddView(assistantCol);
             if (chipUsers.Count == 0)
@@ -6225,8 +6239,8 @@ namespace PenguinMonitor
                     ChickSizeCode = sizeSel0.Contains("(SC)") ? "SC" : sizeSel0.Contains("(BC)") ? "BC" : sizeSel0.Contains("(LC)") ? "LC" : "",
                     SexCode = ObservedSexOptions.FirstOrDefault(o => o.label == (sexSpinner.SelectedItem?.ToString() ?? "")).code ?? "",
                     ChipBox = chipBoxInput.Text ?? "",
-                    ChipperId = SelectedChipUserId(chipperSpinner),
-                    AssistantId = SelectedChipUserId(assistantSpinner),
+                    ChipperId = SelectedChipUserId(chipperSpinner, chipperUsers),
+                    AssistantId = SelectedChipUserId(assistantSpinner, chipUsers),
                     Weight = weightInput.Text ?? "",
                     Flipper = flipperInput.Text ?? "",
                     Notes = notesInput.Text ?? "",
@@ -6243,7 +6257,7 @@ namespace PenguinMonitor
             if (restore != null)
             {
                 chipBoxInput.Text = restore.ChipBox;
-                if (restore.ChipperId > 0) { var ci = chipUsers.FindIndex(u => u.id == restore.ChipperId); if (ci >= 0) chipperSpinner.SetSelection(ci + 1); }
+                if (restore.ChipperId > 0) { var ci = chipperUsers.FindIndex(u => u.id == restore.ChipperId); if (ci >= 0) chipperSpinner.SetSelection(ci + 1); }
                 if (restore.AssistantId > 0) { var ai = chipUsers.FindIndex(u => u.id == restore.AssistantId); if (ai >= 0) assistantSpinner.SetSelection(ai + 1); }
                 weightInput.Text = restore.Weight;
                 flipperInput.Text = restore.Flipper;
@@ -6279,8 +6293,8 @@ namespace PenguinMonitor
                     ChickSizeCode = qChickSize,
                     SexCode = qSex,
                     ChipBox = chipBoxInput.Text?.Trim() ?? "",
-                    ChipperId = SelectedChipUserId(chipperSpinner),
-                    AssistantId = SelectedChipUserId(assistantSpinner),
+                    ChipperId = SelectedChipUserId(chipperSpinner, chipperUsers),
+                    AssistantId = SelectedChipUserId(assistantSpinner, chipUsers),
                     Weight = weightInput.Text ?? "",
                     Flipper = flipperInput.Text ?? "",
                     Notes = notesInput.Text ?? "",
@@ -6352,8 +6366,8 @@ namespace PenguinMonitor
                     chickSize = sizeSel.Contains("(SC)") ? "SC" : sizeSel.Contains("(BC)") ? "BC" : sizeSel.Contains("(LC)") ? "LC" : "";
                 }
                 // Read the person spinners here on the UI thread — the network POST below runs off it.
-                var chipperId = SelectedChipUserId(chipperSpinner);
-                var assistantId = SelectedChipUserId(assistantSpinner);
+                var chipperId = SelectedChipUserId(chipperSpinner, chipperUsers);
+                var assistantId = SelectedChipUserId(assistantSpinner, chipUsers);
 
                 _ = Task.Run(async () =>
                 {

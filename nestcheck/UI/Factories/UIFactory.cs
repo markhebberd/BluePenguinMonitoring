@@ -89,6 +89,15 @@ namespace PenguinMonitor.UI.Factories
             drawable.SetCornerRadius(radiusDp * _context.Resources?.DisplayMetrics?.Density ?? 8);
             return drawable;
         }
+        // Same, with a thin black outline — for controls (spinners) that would otherwise be
+        // invisible white-on-white against a card.
+        public GradientDrawable CreateBorderedBackground(Color color, int radiusDp)
+        {
+            var drawable = CreateRoundedBackground(color, radiusDp);
+            float density = _context.Resources?.DisplayMetrics?.Density ?? 2f;
+            drawable.SetStroke(System.Math.Max(1, (int)density), Color.Black);
+            return drawable;
+        }
         public Button CreateStyledButton(string text, Color backgroundColor)
         {
             var button = new Button(_context)
@@ -152,7 +161,7 @@ namespace PenguinMonitor.UI.Factories
             var themed = SpinnerThemed;
             var spinner = new DropdownSpinner(themed, SpinnerMode.Dropdown);
             spinner.SetPadding(16, 20, 16, 20);
-            spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
+            spinner.Background = CreateBorderedBackground(LIGHTER_GRAY, 8);
             // Style the popup itself: a white rounded card instead of the theme's bare (often
             // black/transparent) list that reads as "super ugly".
             spinner.SetPopupBackgroundDrawable(CreateRoundedBackground(CARD_COLOR, 8));
@@ -173,6 +182,9 @@ namespace PenguinMonitor.UI.Factories
         public Spinner CreateDropdownSpinner()
         {
             var spinner = new DropdownSpinner(SpinnerThemed, SpinnerMode.Dropdown);
+            // Visible outline so the closed field reads against a white card (was white-on-white).
+            spinner.Background = CreateBorderedBackground(LIGHTER_GRAY, 8);
+            spinner.SetPadding(16, 12, 16, 12);
             spinner.SetPopupBackgroundDrawable(CreateRoundedBackground(CARD_COLOR, 8));
             return spinner;
         }

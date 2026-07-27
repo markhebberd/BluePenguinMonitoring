@@ -464,9 +464,12 @@ namespace PenguinMonitor.Services
                     }
                     // Keep the signing acronym current: an admin assigning one should reach the
                     // phone on the next sync, not the next login.
-                    if (serverState?.observer != null && appSettings.ObserverChipAcronym != (serverState.observer.chip_acronym ?? ""))
+                    if (serverState?.observer != null &&
+                        (appSettings.ObserverChipAcronym != (serverState.observer.chip_acronym ?? "")
+                         || appSettings.ObserverFalconId != (serverState.observer.falcon_id ?? "")))
                     {
                         appSettings.ObserverChipAcronym = serverState.observer.chip_acronym ?? "";
+                        appSettings.ObserverFalconId = serverState.observer.falcon_id ?? "";
                         saveApplicationSettings(appSettings);
                     }
                     // Who can be named as today's observer/recorder. Cached so the pickers still
@@ -894,6 +897,7 @@ namespace PenguinMonitor.Services
             public int observer_id { get; set; }
             public string? name { get; set; }
             public string? chip_acronym { get; set; }
+            public string? falcon_id { get; set; }
         }
         private class SyncBox
         {
@@ -918,11 +922,18 @@ namespace PenguinMonitor.Services
             public string? peng_num { get; set; }
             public string? sex { get; set; }
         }
-        /// <summary>A person who can be named as the day's observer or recorder. Active users only.</summary>
+        /// <summary>A person who can be named as the day's observer or recorder. Active users only.
+        /// falcon_id is the bander/permit id; only users who have one may be picked as the chipper.
+        /// (Requires sync.php to include falcon_id in the users payload — else it's null for all.)</summary>
         public class SyncUser
         {
             public int id { get; set; }
             public string? name { get; set; }
+            public string? f_name { get; set; }
+            public string? surname { get; set; }
+            /// <summary>Initials this person signs a chipping with (users.chip_acronym).</summary>
+            public string? chip_acronym { get; set; }
+            public string? falcon_id { get; set; }
         }
         private class SyncLocation
         {
