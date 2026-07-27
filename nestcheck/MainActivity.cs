@@ -7628,11 +7628,34 @@ namespace PenguinMonitor
 
             // --- Step 1: GPS ---------------------------------------------------------------
             var loc = _bestTagCaptureLocation;
+
+            // What's already on file, and how far away it is. Without the stored accuracy there's
+            // no way to tell whether a new reading is an improvement or a downgrade, and the
+            // distance is what says "you're at the right nest" (or that you aren't).
+            string StoredBlock(Location? from)
+            {
+                if (!hasStoredPosition) return "\n\nNo position stored for this box yet.";
+                var acc = existing!.Accuracy > 0 ? $"±{FormatAccuracy(existing.Accuracy)}" : "accuracy unknown";
+                var when = existing.ScanTimeUTC != default ? $", set {ToNzTime(existing.ScanTimeUTC):d MMM yyyy}" : "";
+                var block = $"\n\nStored position: {acc}{when}";
+                if (from != null)
+                {
+                    var dist = new float[1];
+                    Location.DistanceBetween(existing.Latitude, existing.Longitude, from.Latitude, from.Longitude, dist);
+                    block += $"\nYou are {dist[0]:F0} m from it.";
+                }
+                return block;
+            }
+
             if (!_tagGpsMeasuring)
             {
                 // Nothing is listening yet. The instruction comes first, the receiver second.
-                _tagModeStep1Text.Text = "① Put the phone flat on top of the box.\n\n"
-                    + "Then press Start measuring below.";
+                // Not every nest is a box — burrows and natural sites get held over instead.
+                // The distance here leans on the app-wide fix, which may be stale — it's only
+                // ever shown, never saved, and it's the difference between "right nest" and not.
+                _tagModeStep1Text.Text = "① Put the phone flat on the box, or hold it over the nest.\n\n"
+                    + "Then press Start measuring below."
+                    + StoredBlock(_currentLocation);
                 _tagModeStep1Text.SetTextColor(Color.Black);
                 _tagModeMeasureAgainButton.Visibility = ViewStates.Gone;
             }
@@ -7640,7 +7663,8 @@ namespace PenguinMonitor
             {
                 _tagModeStep1Text.Text = $"① Finding GPS…  {_tagGpsElapsedSeconds}s\n"
                     + "Leave the phone where it is."
-                    + (_tagGpsElapsedSeconds >= 10 ? "\n\nThis can take a minute under trees." : "");
+                    + (_tagGpsElapsedSeconds >= 10 ? "\n\nThis can take a minute under trees." : "")
+                    + StoredBlock(_currentLocation);
                 _tagModeStep1Text.SetTextColor(UIFactory.WARNING_YELLOW);
                 _tagModeMeasureAgainButton.Text = "Restart measuring";
                 _tagModeMeasureAgainButton.Visibility = ViewStates.Visible;
@@ -7651,15 +7675,9 @@ namespace PenguinMonitor
                 // countdown — the user watches it tighten and saves when they're satisfied.
                 bool rough = loc.Accuracy > 15;
                 var quality = loc.Accuracy <= 5 ? "Good" : rough ? "Rough" : "OK";
-                var line = $"① Best so far: {quality} — about {loc.Accuracy:F0} m  ({_tagGpsElapsedSeconds}s)\n"
-                    + "Leaving it a little longer usually tightens this up.";
-                if (hasStoredPosition)
-                {
-                    var dist = new float[1];
-                    Location.DistanceBetween(existing!.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
-                    line += $"\n{dist[0]:F0} m from the position already stored.";
-                }
-                _tagModeStep1Text.Text = line;
+                _tagModeStep1Text.Text = $"① Best so far: {quality} — about {loc.Accuracy:F0} m  ({_tagGpsElapsedSeconds}s)\n"
+                    + "Leaving it a little longer usually tightens this up."
+                    + StoredBlock(loc);
                 _tagModeStep1Text.SetTextColor(loc.Accuracy <= 5 ? UIFactory.SUCCESS_GREEN
                     : rough ? UIFactory.DANGER_RED : UIFactory.WARNING_YELLOW);
                 _tagModeMeasureAgainButton.Text = "Restart measuring";
