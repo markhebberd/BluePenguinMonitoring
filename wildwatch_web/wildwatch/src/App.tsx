@@ -1756,7 +1756,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         const seasonHasChick = families.some((f: any) => f.chicks.length > 0);
         const seasonActive = families.some((f: any) => clutchActive(f.clutch));
         const seasonStatus = clutches.length === 0 ? 'none' : seasonHasChick ? 'bred' : seasonActive ? 'active' : 'fail';
-        const statusLabel = seasonStatus === 'none' ? 'No breeding' : seasonStatus === 'bred' ? 'Bred' : seasonStatus === 'active' ? 'Active' : 'Failed';
+        const statusLabel = seasonStatus === 'none' ? 'None' : seasonStatus === 'bred' ? 'Bred' : seasonStatus === 'active' ? 'Active' : 'Failed';
         // Everything not part of a detected clutch is a visitor, shown once with its season total.
         const visitorBirds = sorted.filter((b: any) => { const k = b.pit_id.slice(-8); return !parentKeys.has(k) && !chickFamily.has(k); });
         // Visitors sit in gap slots by WHEN they were seen: g0 = before the first window (pre),
@@ -2637,7 +2637,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     }
     entries.sort((a, b) => b.seasonYear - a.seasonYear || a.box.localeCompare(b.box));
     // Season timeline (newest first): every year between the bird's first and last breeding
-    // entry, so seasons it wasn't part of a pair render an explicit "No breeding" row.
+    // entry, so seasons it wasn't part of a pair render an explicit "None" row.
     const bySeasonYear = new Map<number, Entry[]>();
     for (const e of entries) { if (!bySeasonYear.has(e.seasonYear)) bySeasonYear.set(e.seasonYear, []); bySeasonYear.get(e.seasonYear)!.push(e); }
     const breedingSeasons: { seasonYear: number; entries: Entry[] }[] = [];
@@ -2829,7 +2829,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               const st = season.entries.length === 0 ? 'none' : hasChick ? 'bred' : anyActive ? 'active' : 'fail';
               // In the bird's own hatch season it IS the chick — "Bred" would read as it breeding.
               const wasChick = season.entries.some(e => e.role === 'chick');
-              const stLabel = st === 'none' ? 'No breeding' : st === 'bred' ? (wasChick ? 'Chick' : 'Bred') : st === 'active' ? 'Active' : 'Failed';
+              const stLabel = st === 'none' ? 'None' : st === 'bred' ? (wasChick ? 'Chick' : 'Bred') : st === 'active' ? 'Active' : 'Failed';
               const stClass = wasChick && st === 'bred' ? 'chick' : st;
               return (
                 <div key={season.seasonYear} className="season-birds">
