@@ -425,3 +425,4 @@ SERVER-ACCESS.local.md
 # nas-mirror/bin holds operational shell scripts (backup mirror), not .NET build
 # output — re-include them despite the generic [Bb]in/ rule above.
 !wildwatch_web/nas-mirror/bin/
+.venv/

@@ -55,8 +55,8 @@ namespace PenguinMonitor
         private LocationManager? _locationManager;
         private Location? _currentLocation;
         private float _gpsAccuracy = -1;
-        // Best (most accurate) fix recorded while a box is unlocked in Edit Box Tags mode
-        private Location? _bestUnlockLocation;
+        // Best (most accurate) fix recorded during an Edit Box Tags capture session
+        private Location? _bestTagCaptureLocation;
 
         // Held scans — penguin chips scanned while no box is unlocked
         private readonly List<ScanRecord> _heldScans = new();
@@ -193,10 +193,29 @@ namespace PenguinMonitor
         private LinearLayout? _prevObsDetailLayout;
         // Which box the expanded previous-obs detail belongs to — auto-collapses on box change.
         private string _prevObsExpandedForBox = "";
+        // --- Edit Box Tags mode ---------------------------------------------------------
+        // A capture session is the ONLY thing that can write a nest position. Merely opening
+        // a box in tag mode changes nothing: the user has to tap "Set nest position or tag",
+        // then explicitly Save. Cancel discards. There is no lock/unlock in this mode.
+        private const int LOCATION_PERMISSION_REQUEST = 3;
+        private bool _tagCaptureActive;
+        private string _tagCaptureBoxName = "";
         private LinearLayout? _tagModeContentLayout;
-        private TextView? _tagModeInstructionText;
-        private LinearLayout? _tagModeTodayCard;
+        private LinearLayout? _tagModeLastObsCard;   // last known contents: black = today, orange = older
+        private TextView? _tagModeTagText;
+        private TextView? _tagModePositionText;
+        private Button? _tagModeSetButton;           // "Set nest position or tag"
+        private LinearLayout? _tagModeCapturePanel;  // live capture UI, shown only while capturing
+        private TextView? _tagModeGpsText;
+        private Button? _tagModeSaveButton;
+        private Button? _tagModeCancelButton;
         private Button? _tagModeRemoveTagButton;
+        private TextView? _tagModeBanner;            // full-width "BOX TAGS MODE" bar at the top
+        private LinearLayout? _tagModeFinishBar;     // fixed bottom bar holding the finish button
+        private View? _tagModeBottomSpacer;          // keeps scrolled content clear of the finish bar
+        // Mode chrome: purple, deliberately unlike the black/orange/green/red/blue data language.
+        private static readonly Color TAG_MODE_PURPLE = Color.ParseColor("#6A1B9A");
+        private static readonly Color TAG_MODE_WASH = Color.ParseColor("#F3E5F5");
 
         private List<LinearLayout?> _scannedIdsLayout;
         private EditText? _penguinSearchEditText;
@@ -545,11 +564,13 @@ namespace PenguinMonitor
                 UpdateStatusText();
             }
 
-            // In Edit Box Tags mode, keep the most accurate fix seen while the box is unlocked
-            if (_appSettings != null && _appSettings.EditBoxTagsMode && !_isBoxLocked
-                && (_bestUnlockLocation == null || location.Accuracy < _bestUnlockLocation.Accuracy))
+            // While a capture session is open, keep the most accurate fix seen and show it live,
+            // so the user can wait for the number to settle before saving.
+            if (_tagCaptureActive)
             {
-                _bestUnlockLocation = location;
+                if (_bestTagCaptureLocation == null || location.Accuracy < _bestTagCaptureLocation.Accuracy)
+                    _bestTagCaptureLocation = location;
+                RunOnUiThread(UpdateTagCaptureGpsText);
             }
         }
         public void OnStatusChanged(string? provider, Availability status, Bundle? extras) { } // required by ILocationListener
@@ -1726,6 +1747,23 @@ namespace PenguinMonitor
 
             var parentLinearLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
 
+            // Box tags mode banner — first thing on the page so the mode is unmistakable.
+            _tagModeBanner = new TextView(this)
+            {
+                Text = "✏️ BOX TAGS MODE\nSetting nest positions and tags — no penguin data is being recorded.",
+                TextSize = 15,
+                Gravity = GravityFlags.Center,
+            };
+            _tagModeBanner.SetTextColor(Color.White);
+            _tagModeBanner.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            _tagModeBanner.SetPadding(16, 14, 16, 14);
+            _tagModeBanner.Background = _uiFactory.CreateRoundedBackground(TAG_MODE_PURPLE, 8);
+            var bannerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            bannerParams.SetMargins(0, 0, 0, 10);
+            _tagModeBanner.LayoutParameters = bannerParams;
+            _tagModeBanner.Visibility = ViewStates.Gone;
+            parentLinearLayout.AddView(_tagModeBanner);
+
             var headerStatusSettingsCard = _uiFactory.CreateCard(padding: 12);
             headerStatusSettingsCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4);            
 
@@ -1741,6 +1779,9 @@ namespace PenguinMonitor
             expandSettingsImageButton.SetImageResource(Resource.Drawable.unfold);
             expandSettingsImageButton.SetBackgroundColor(Color.Transparent);
             expandSettingsImageButton.Click += (s,e) => {
+                // Settings is unreachable in box tags mode — the only way out is the
+                // "Finish editing box tags" bar, so the mode can't be left half-done.
+                if (_appSettings.EditBoxTagsMode) return;
                 if (_settingsCard.Visibility == ViewStates.Gone)
                 {
                     _settingsCard.Visibility = ViewStates.Visible;
@@ -1847,10 +1888,41 @@ namespace PenguinMonitor
             parentLinearLayout.AddView(_multiBoxViewCard);
             parentLinearLayout.AddView(_breedingDatesCard);
 
+            // Keeps the last card scrollable clear of the fixed finish bar in tag mode
+            _tagModeBottomSpacer = new View(this);
+            _tagModeBottomSpacer.LayoutParameters = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, (int)(96 * (Resources?.DisplayMetrics?.Density ?? 2)));
+            _tagModeBottomSpacer.Visibility = ViewStates.Gone;
+            parentLinearLayout.AddView(_tagModeBottomSpacer);
+
             _rootScrollView.AddView(parentLinearLayout);
-            SetContentView(_rootScrollView);
+
+            // The finish bar floats over the scroll view so it's on screen no matter where
+            // the user has scrolled to — in tag mode there is always a visible way out.
+            var rootFrame = new FrameLayout(this);
+            rootFrame.AddView(_rootScrollView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
+
+            _tagModeFinishBar = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _tagModeFinishBar.SetPadding(16, 12, 16, 12);
+            _tagModeFinishBar.Background = _uiFactory.CreateRoundedBackground(TAG_MODE_PURPLE, 0);
+            var finishButton = _uiFactory.CreateStyledButton("✓  Finish editing box tags", Color.White);
+            finishButton.TextSize = 18;
+            finishButton.SetPadding(24, 28, 24, 28);
+            finishButton.LayoutParameters = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            finishButton.Click += (s, e) => FinishBoxTagsMode();
+            _tagModeFinishBar.AddView(finishButton);
+            _tagModeFinishBar.Visibility = ViewStates.Gone;
+            var finishBarParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            finishBarParams.Gravity = GravityFlags.Bottom;
+            rootFrame.AddView(_tagModeFinishBar, finishBarParams);
+
+            SetContentView(rootFrame);
 
             _rootScrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
+            _tagModeFinishBar.SetOnApplyWindowInsetsListener(new BottomInsetListener(12));
 
            JumpToBox(_boxNamesAndIndexes.First().Key); //Contains DrawPageLayouts()
         }
@@ -2937,19 +3009,27 @@ namespace PenguinMonitor
             };
             dailyLabelLayout.AddView(setLabelButton);
 
-            // Edit Box Tags mode toggle button
-            Button editBoxTagsButton = _uiFactory.CreateStyledButton(
-                _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags",
-                _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.SUCCESS_GREEN);
+            // Enter Edit Box Tags mode. There's no matching exit button here — leaving is done
+            // with the "Finish editing box tags" bar, and settings is locked out while in the mode.
+            Button editBoxTagsButton = _uiFactory.CreateStyledButton("Edit Box Tags", UIFactory.SUCCESS_GREEN);
             editBoxTagsButton.Click += (s, e) =>
             {
-                _appSettings.EditBoxTagsMode = !_appSettings.EditBoxTagsMode;
-                _bestUnlockLocation = null;
-                editBoxTagsButton.Text = _appSettings.EditBoxTagsMode ? "Exit Box Tags Mode" : "Edit Box Tags";
-                editBoxTagsButton.Background = _uiFactory.CreateRoundedBackground(
-                    _appSettings.EditBoxTagsMode ? UIFactory.DANGER_RED : UIFactory.SUCCESS_GREEN, 8);
+                // Entering would force the box locked, dropping whatever is half-typed in it
+                if (!_isBoxLocked)
+                {
+                    Toast.MakeText(this, $"Lock Box {_currentBoxName} first", ToastLength.Short)?.Show();
+                    return;
+                }
+                _appSettings.EditBoxTagsMode = true;
+                _tagCaptureActive = false;
+                _tagCaptureBoxName = "";
+                _bestTagCaptureLocation = null;
+                _isBoxLocked = true;
+                if (_settingsCard != null) _settingsCard.Visibility = ViewStates.Gone;
+                if (_expandSettingsButton != null) _expandSettingsButton.SetImageResource(Resource.Drawable.unfold);
                 selectedPage = UIFactory.selectedPage.BoxDataSingle;
                 DrawPageLayouts();
+                ScrollToTop();
             };
             // Region & Colony dropdowns (horizontal)
             var regionColonyLayout = new LinearLayout(this);
@@ -3521,12 +3601,27 @@ namespace PenguinMonitor
                         _settingsCard.Visibility = tagMode ? ViewStates.Gone : _settingsCard.Visibility;
                     if (_breedingDatesCard != null)
                         _breedingDatesCard.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
-                    // Keep prev obs and unsynced cards visible in tag mode, expanded by default
+                    // The tag panel carries its own "last known contents" card, so the normal
+                    // previous-obs badge would just duplicate it.
                     if (tagMode)
                     {
-                        if (_prevObsSummaryLayout != null) _prevObsSummaryLayout.Visibility = ViewStates.Visible;
-                        if (_prevObsDetailLayout != null) _prevObsDetailLayout.Visibility = ViewStates.Visible;
+                        if (_prevObsHeaderText != null) _prevObsHeaderText.Visibility = ViewStates.Gone;
+                        if (_prevObsSummaryLayout != null) _prevObsSummaryLayout.Visibility = ViewStates.Gone;
+                        if (_stickyNoteBar != null) _stickyNoteBar.Visibility = ViewStates.Gone;
+                        if (_stickyNoteBelowPrev != null) _stickyNoteBelowPrev.Visibility = ViewStates.Gone;
                     }
+
+                    // Mode chrome: purple wash, top banner and the fixed finish bar
+                    _rootScrollView?.SetBackgroundColor(tagMode ? TAG_MODE_WASH : UIFactory.LIGHT_GRAY);
+                    if (_tagModeBanner != null)
+                        _tagModeBanner.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                    if (_tagModeFinishBar != null)
+                        _tagModeFinishBar.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                    if (_tagModeBottomSpacer != null)
+                        _tagModeBottomSpacer.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                    // Settings can't be opened from inside the mode
+                    if (_expandSettingsButton != null && tagMode)
+                        _expandSettingsButton.Visibility = ViewStates.Invisible;
 
                     // Force single box view in tag mode
                     if (tagMode)
@@ -3534,45 +3629,71 @@ namespace PenguinMonitor
                         selectedPage = UIFactory.selectedPage.BoxDataSingle;
                     }
 
-                    // Tag mode content: today's data card + instruction text
+                    // Tag mode content: last known contents, current tag/position, capture panel
                     if (_tagModeContentLayout != null)
                     {
                         _tagModeContentLayout.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
                         if (tagMode)
                         {
-                            var tagCurrentObs = _colonyState.GetTodayForBox(_currentBoxName);
-                            _tagModeTodayCard.RemoveAllViews();
-                            if (tagCurrentObs != null)
+                            // Freshest thing we know about the box: today's record if there is one,
+                            // otherwise the last earlier visit. Black border for today, orange for older.
+                            var todayObs = _colonyState.GetTodayForBox(_currentBoxName);
+                            var lastObs = todayObs ?? (_colonyState.PreviousBoxes.ContainsKey(_currentBoxName)
+                                ? _colonyState.PreviousBoxes[_currentBoxName] : null);
+                            _tagModeLastObsCard!.RemoveAllViews();
+                            if (lastObs != null)
                             {
-                                var todayHeader = new TextView(this) { TextSize = 13, Text = BuildObsHeaderText(tagCurrentObs, "Today", true) };
-                                todayHeader.SetTextColor(Color.Black);
-                                todayHeader.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-                                _tagModeTodayCard.AddView(todayHeader);
-                                _tagModeTodayCard.AddView(BuildObsDetailView(tagCurrentObs));
-                                _tagModeTodayCard.Visibility = ViewStates.Visible;
+                                bool isToday = todayObs != null;
+                                var obsNz = ToNzTime(lastObs.WhenDataCollectedUtc);
+                                int daysAgo = (int)(NzToday - obsNz.Date).TotalDays;
+                                var whenStr = isToday ? $"Today {obsNz:HH:mm}"
+                                    : daysAgo == 1 ? $"Yesterday {obsNz:HH:mm}"
+                                    : $"{daysAgo} days ago — {obsNz:d MMM HH:mm}";
+                                var byWhom = !string.IsNullOrEmpty(lastObs.ObserverName) ? $" by {lastObs.ObserverName}" : "";
+
+                                _tagModeLastObsCard.Background = _uiFactory.CreateCardBackground(
+                                    borderWidth: 4, borderColour: isToday ? Color.Black : UIFactory.WARNING_YELLOW);
+                                var obsHeader = new TextView(this)
+                                {
+                                    TextSize = 13,
+                                    Text = $"Last known contents — {whenStr}{byWhom}"
+                                };
+                                obsHeader.SetTextColor(isToday ? Color.Black : UIFactory.WARNING_YELLOW);
+                                obsHeader.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                                _tagModeLastObsCard.AddView(obsHeader);
+                                _tagModeLastObsCard.AddView(BuildObsDetailView(lastObs, showBoxLink: false));
+                                _tagModeLastObsCard.Visibility = ViewStates.Visible;
                             }
                             else
                             {
-                                _tagModeTodayCard.Visibility = ViewStates.Gone;
+                                _tagModeLastObsCard.Visibility = ViewStates.Gone;
                             }
 
-                            var hasTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) && !string.IsNullOrEmpty(tagInfo.TagNumber);
-                            var tagDetails = hasTag
-                                ? $"Current tag: {tagInfo!.TagNumber}" + (tagInfo.Accuracy > 0 ? $" ({FormatAccuracy(tagInfo.Accuracy)})" : "")
-                                : "No tag assigned.";
+                            _boxTags.TryGetValue(_currentBoxName, out var tagInfo);
+                            bool hasTag = tagInfo != null && !string.IsNullOrEmpty(tagInfo.TagNumber);
+                            bool hasPosition = tagInfo != null && (tagInfo.Latitude != 0 || tagInfo.Longitude != 0);
 
-                            if (_isBoxLocked)
+                            _tagModeTagText!.Text = hasTag ? $"🏷 Tag: {tagInfo!.TagNumber}" : "🏷 No tag assigned";
+                            _tagModeTagText.SetTextColor(hasTag ? Color.Black : Color.DarkGray);
+
+                            if (hasPosition)
                             {
-                                _tagModeInstructionText.Text = $"{tagDetails}\nUnlock the box to edit the tag.";
-                                _tagModeInstructionText.SetTextColor(Color.DarkGray);
+                                var acc = tagInfo!.Accuracy > 0 ? $"±{FormatAccuracy(tagInfo.Accuracy)}" : "accuracy unknown";
+                                var when = tagInfo.ScanTimeUTC != default ? ToNzTime(tagInfo.ScanTimeUTC).ToString("d MMM yyyy") : "";
+                                _tagModePositionText!.Text = $"📍 Position stored ({acc})" + (when != "" ? $", set {when}" : "");
+                                _tagModePositionText.SetTextColor(Color.Black);
                             }
                             else
                             {
-                                _tagModeInstructionText.Text = $"{tagDetails}\nPlace your phone on the box and wait for GPS to become accurate.\nThen scan the new box tag.";
-                                _tagModeInstructionText.SetTextColor(UIFactory.PRIMARY_BLUE);
+                                _tagModePositionText!.Text = "📍 No position stored";
+                                _tagModePositionText.SetTextColor(Color.DarkGray);
                             }
-                            if (_tagModeRemoveTagButton != null)
-                                _tagModeRemoveTagButton.Visibility = (!_isBoxLocked && hasTag) ? ViewStates.Visible : ViewStates.Gone;
+
+                            bool capturing = _tagCaptureActive && _tagCaptureBoxName == _currentBoxName;
+                            _tagModeSetButton!.Visibility = capturing ? ViewStates.Gone : ViewStates.Visible;
+                            _tagModeCapturePanel!.Visibility = capturing ? ViewStates.Visible : ViewStates.Gone;
+                            _tagModeRemoveTagButton!.Visibility = (capturing && hasTag) ? ViewStates.Visible : ViewStates.Gone;
+                            if (capturing) UpdateTagCaptureGpsText();
                         }
                     }
 
@@ -3599,6 +3720,9 @@ namespace PenguinMonitor
 
                     if (_dataCardLockIconView != null)
                     {
+                        // No lock language in tag mode — there's nothing to lock, and the icon
+                        // used to imply that tapping it was a harmless "open the box" action.
+                        _dataCardLockIconView.Visibility = tagMode ? ViewStates.Gone : ViewStates.Visible;
                         _dataCardLockIconView.SetColorFilter(null);
                         if (GetDisplayBoxData(_currentBoxName) == null && _isBoxLocked)
                         {
@@ -3640,10 +3764,10 @@ namespace PenguinMonitor
 
                     // Show today's data info or pit_id for empty box
                     var currentObs = GetDisplayBoxData(_currentBoxName);
-                    var tagStr = _boxTags.TryGetValue(_currentBoxName, out var bt) ? bt.TagNumber : "";
                     if (tagMode)
                     {
-                        _boxSavedTimeTextView.Text = !string.IsNullOrEmpty(tagStr) ? $"Tag: {tagStr}" : "No tag";
+                        // Tag and position are spelled out in the panel below — no need to repeat here
+                        _boxSavedTimeTextView.Text = "";
                     }
                     else if (currentObs != null)
                     {
@@ -3789,7 +3913,8 @@ namespace PenguinMonitor
                         {
                             canGo = false;
                         }
-                        button.Enabled = _isBoxLocked && canGo;
+                        // Pinned to the box while capturing, so a position can't land on the wrong nest
+                        button.Enabled = _isBoxLocked && canGo && !_tagCaptureActive;
                         button.Alpha = button.Enabled ? 1.0f : 0.5f;
                     }
 
@@ -4159,6 +4284,18 @@ namespace PenguinMonitor
         {
             if (_prevObsHeaderText == null || _prevObsDetailLayout == null || _prevObsSummaryLayout == null) return;
 
+            // Tag mode shows last-known contents in its own card — this would duplicate it.
+            if (_appSettings.EditBoxTagsMode && !_isHistoricalView)
+            {
+                _prevObsHeaderText.Visibility = ViewStates.Gone;
+                _prevObsSummaryLayout.Visibility = ViewStates.Gone;
+                _prevObsDetailLayout.Visibility = ViewStates.Gone;
+                if (_stickyNoteBar != null) _stickyNoteBar.Visibility = ViewStates.Gone;
+                if (_stickyNoteBelowPrev != null) _stickyNoteBelowPrev.Visibility = ViewStates.Gone;
+                UpdateUnsyncedCards();
+                return;
+            }
+
             var prev = _colonyState.PreviousBoxes.ContainsKey(_currentBoxName) ? _colonyState.PreviousBoxes[_currentBoxName] : null;
             if (prev == null)
             {
@@ -4350,24 +4487,23 @@ namespace PenguinMonitor
             _singleBoxDataTitleLayout.AddView(_webviewButton);
             _singleBoxDataTitleLayout.Click += (sender, e) =>
             {
+                // Box tags mode has no lock: tapping the header used to arm a GPS capture that
+                // then overwrote the nest position on the next tap. Editing is explicit now.
+                if (_appSettings.EditBoxTagsMode && !_isHistoricalView) return;
+
                 _isBoxLocked = !_isBoxLocked;
                 if (!_isBoxLocked)
                 {
                     // Unlock — enter edit mode
                     _dataChangedSinceUnlock = false;
-                    if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
-                    if (!_appSettings.EditBoxTagsMode)
-                        _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                    _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                     DrawPageLayouts();
                 }
                 else
                 {
-                    // In tag mode or historical view, just lock without saving box data
-                    if (_appSettings.EditBoxTagsMode || _isHistoricalView)
+                    // In historical view, just lock without saving box data
+                    if (_isHistoricalView)
                     {
-                        // Tag mode: persist the best GPS fix recorded during this unlock session
-                        if (_appSettings.EditBoxTagsMode && !_isHistoricalView)
-                            SaveBestTagModeLocation();
                         _dataChangedSinceUnlock = false;
                         DrawPageLayouts();
                         return;
@@ -4690,27 +4826,79 @@ namespace PenguinMonitor
             _unsyncedCardsContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _singleBoxDataOuterLayout.AddView(_unsyncedCardsContainer);
 
-            // Tag mode content — shown instead of normal data entry when editing box tags
+            // Tag mode content — shown instead of normal data entry when editing box tags.
+            // Read-only by default; nothing is written until a capture session is saved.
             _tagModeContentLayout = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _tagModeContentLayout.SetPadding(12, 8, 12, 8);
             _tagModeContentLayout.Visibility = ViewStates.Gone;
 
-            _tagModeTodayCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            _tagModeTodayCard.SetPadding(12, 8, 12, 8);
-            _tagModeTodayCard.Background = _uiFactory.CreateCardBackground(borderWidth: 4, borderColour: Color.Black);
-            var todayCardParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            todayCardParams.SetMargins(0, 0, 0, 8);
-            _tagModeTodayCard.LayoutParameters = todayCardParams;
-            _tagModeContentLayout.AddView(_tagModeTodayCard);
+            // Last known contents. Border says how fresh it is: black = recorded today,
+            // orange = the most recent earlier visit. Same language as the overview cards.
+            _tagModeLastObsCard = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _tagModeLastObsCard.SetPadding(12, 8, 12, 8);
+            var lastObsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            lastObsParams.SetMargins(0, 0, 0, 10);
+            _tagModeLastObsCard.LayoutParameters = lastObsParams;
+            _tagModeContentLayout.AddView(_tagModeLastObsCard);
 
-            _tagModeInstructionText = new TextView(this) { TextSize = 14 };
-            _tagModeInstructionText.SetPadding(0, 8, 0, 8);
-            _tagModeContentLayout.AddView(_tagModeInstructionText);
+            _tagModeTagText = new TextView(this) { TextSize = 15 };
+            _tagModeTagText.SetTextColor(Color.Black);
+            _tagModeTagText.SetPadding(0, 2, 0, 2);
+            _tagModeContentLayout.AddView(_tagModeTagText);
 
-            // Remove tag button — visible when the box is unlocked and has a tag assigned
-            _tagModeRemoveTagButton = _uiFactory.CreateStyledButton("Remove tag", UIFactory.DANGER_RED);
+            _tagModePositionText = new TextView(this) { TextSize = 15 };
+            _tagModePositionText.SetTextColor(Color.Black);
+            _tagModePositionText.SetPadding(0, 2, 0, 10);
+            _tagModeContentLayout.AddView(_tagModePositionText);
+
+            // The one and only way into editing. Nothing above this point can change data.
+            _tagModeSetButton = _uiFactory.CreateStyledButton("📍  Set nest position or tag", TAG_MODE_PURPLE);
+            _tagModeSetButton.TextSize = 16;
+            _tagModeSetButton.SetPadding(16, 26, 16, 26);
+            var setBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            setBtnParams.SetMargins(0, 4, 0, 4);
+            _tagModeSetButton.LayoutParameters = setBtnParams;
+            _tagModeSetButton.Click += (s, e) => StartTagCapture();
+            _tagModeContentLayout.AddView(_tagModeSetButton);
+
+            // Capture panel — live GPS plus the explicit Save / Cancel pair
+            _tagModeCapturePanel = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            _tagModeCapturePanel.SetPadding(14, 12, 14, 12);
+            _tagModeCapturePanel.Background = _uiFactory.CreateCardBackground(borderWidth: 6, borderColour: TAG_MODE_PURPLE);
+            var capturePanelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            capturePanelParams.SetMargins(0, 4, 0, 4);
+            _tagModeCapturePanel.LayoutParameters = capturePanelParams;
+            _tagModeCapturePanel.Visibility = ViewStates.Gone;
+
+            _tagModeGpsText = new TextView(this) { TextSize = 15 };
+            _tagModeGpsText.SetTextColor(Color.Black);
+            _tagModeGpsText.SetPadding(0, 0, 0, 10);
+            _tagModeCapturePanel.AddView(_tagModeGpsText);
+
+            _tagModeSaveButton = _uiFactory.CreateStyledButton("✓  Save position", UIFactory.SUCCESS_GREEN);
+            _tagModeSaveButton.TextSize = 16;
+            _tagModeSaveButton.SetPadding(16, 26, 16, 26);
+            var saveBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            saveBtnParams.SetMargins(0, 4, 0, 4);
+            _tagModeSaveButton.LayoutParameters = saveBtnParams;
+            _tagModeSaveButton.Click += (s, e) => SaveTagCaptureLocation();
+            _tagModeCapturePanel.AddView(_tagModeSaveButton);
+
+            _tagModeCancelButton = _uiFactory.CreateStyledButton("Cancel — change nothing", UIFactory.LIGHTER_GRAY);
+            var cancelBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            cancelBtnParams.SetMargins(0, 4, 0, 4);
+            _tagModeCancelButton.LayoutParameters = cancelBtnParams;
+            _tagModeCancelButton.Click += (s, e) =>
+            {
+                EndTagCapture();
+                Toast.MakeText(this, "Cancelled — nothing changed", ToastLength.Short)?.Show();
+            };
+            _tagModeCapturePanel.AddView(_tagModeCancelButton);
+
+            // Removing a tag is destructive, so it only exists inside an open capture session
+            _tagModeRemoveTagButton = _uiFactory.CreateStyledButton("Remove tag from this box", UIFactory.DANGER_RED);
             var removeTagParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            removeTagParams.SetMargins(0, 8, 0, 8);
+            removeTagParams.SetMargins(0, 20, 0, 0);
             _tagModeRemoveTagButton.LayoutParameters = removeTagParams;
             _tagModeRemoveTagButton.Visibility = ViewStates.Gone;
             _tagModeRemoveTagButton.Click += (s, e) =>
@@ -4719,8 +4907,10 @@ namespace PenguinMonitor
                 if (!hasTag) return;
                 new AlertDialog.Builder(this)
                     .SetTitle($"Remove tag from Box {_currentBoxName}?")
-                    .SetMessage($"Tag {tagInfo!.TagNumber} will be removed. The stored location is kept.")
-                    .SetPositiveButton("Remove", (s2, e2) =>
+                    .SetMessage($"Tag {tagInfo!.TagNumber} will no longer point at Box {_currentBoxName}, " +
+                                $"so scanning it won't find this box.\n\nThe stored position is kept.")
+                    .SetNegativeButton("Keep tag", (s2, e2) => { })
+                    .SetPositiveButton("Remove tag", (s2, e2) =>
                     {
                         var internalPath = this.FilesDir?.AbsolutePath;
                         if (!string.IsNullOrEmpty(internalPath))
@@ -4730,10 +4920,11 @@ namespace PenguinMonitor
                             DrawPageLayouts();
                         }
                     })
-                    .SetNegativeButton("Cancel", (s2, e2) => { })
                     .Show();
             };
-            _tagModeContentLayout.AddView(_tagModeRemoveTagButton);
+            _tagModeCapturePanel.AddView(_tagModeRemoveTagButton);
+
+            _tagModeContentLayout.AddView(_tagModeCapturePanel);
 
             _singleBoxDataOuterLayout.AddView(_tagModeContentLayout);
 
@@ -7222,19 +7413,102 @@ namespace PenguinMonitor
             ShowLoginPrompt();
         }
 
-        // Called when a box is locked in Edit Box Tags mode: saves the most accurate GPS fix
-        // recorded between unlock and lock. Works with or without a tag assigned to the box.
-        // If the box already has a stored location, asks before replacing it.
-        private void SaveBestTagModeLocation()
+        // --- Edit Box Tags mode -------------------------------------------------------------
+
+        // Location updates only run when the permission is granted and a provider is on. Without
+        // this the capture panel would sit on "waiting for GPS" forever with no explanation.
+        private bool EnsureGpsReady()
         {
-            var loc = _bestUnlockLocation ?? _currentLocation;
-            _bestUnlockLocation = null;
-            if (loc == null || string.IsNullOrEmpty(_currentBoxName)) return;
+            if (CheckSelfPermission(Android.Manifest.Permission.AccessFineLocation) != Android.Content.PM.Permission.Granted)
+            {
+                RequestPermissions(new[] { Android.Manifest.Permission.AccessFineLocation }, LOCATION_PERMISSION_REQUEST);
+                return false;
+            }
+            bool providerOn = _locationManager?.IsProviderEnabled(LocationManager.GpsProvider) == true
+                           || _locationManager?.IsProviderEnabled(LocationManager.NetworkProvider) == true;
+            if (!providerOn)
+            {
+                new AlertDialog.Builder(this)
+                    .SetTitle("Location is off")
+                    .SetMessage("Nest positions need GPS. Turn location on, then come back and try again.")
+                    .SetPositiveButton("Open location settings", (s, e) =>
+                        StartActivity(new Android.Content.Intent(Android.Provider.Settings.ActionLocationSourceSettings)))
+                    .SetNegativeButton("Cancel", (s, e) => { })
+                    .Show();
+                return false;
+            }
+            // Re-arm updates in case they were never requested (permission granted after startup)
+            InitializeGPS();
+            return true;
+        }
+
+        // Opens a capture session for the current box. Until the user taps Save nothing is
+        // written — this is the whole point of the mode's redesign.
+        private void StartTagCapture()
+        {
+            if (string.IsNullOrEmpty(_currentBoxName)) return;
+            if (!EnsureGpsReady()) return;
+
+            _tagCaptureActive = true;
+            _tagCaptureBoxName = _currentBoxName;
+            _bestTagCaptureLocation = _currentLocation;
+            DrawPageLayouts();
+        }
+
+        private void EndTagCapture()
+        {
+            _tagCaptureActive = false;
+            _tagCaptureBoxName = "";
+            _bestTagCaptureLocation = null;
+            DrawPageLayouts();
+        }
+
+        // Live readout during a capture: current best accuracy, and how far it sits from the
+        // stored position so an obviously-wrong fix is visible before it's committed.
+        private void UpdateTagCaptureGpsText()
+        {
+            if (_tagModeGpsText == null || _tagModeSaveButton == null) return;
+            if (!_tagCaptureActive) return;
+
+            var loc = _bestTagCaptureLocation ?? _currentLocation;
+            var box = _tagCaptureBoxName;
+            var header = $"Setting position for Box {box}\n\n";
+
+            if (loc == null)
+            {
+                _tagModeGpsText.Text = header + "Waiting for GPS…\nStand at the nest with the phone on the box.";
+                _tagModeGpsText.SetTextColor(UIFactory.DANGER_RED);
+                _tagModeSaveButton.Enabled = false;
+                _tagModeSaveButton.Alpha = 0.4f;
+                return;
+            }
+
+            var body = $"GPS ±{loc.Accuracy:F0} m — hold the phone on the box and wait for this to settle.";
+            if (_boxTags.TryGetValue(box, out var existing) && (existing.Latitude != 0 || existing.Longitude != 0))
+            {
+                var dist = new float[1];
+                Location.DistanceBetween(existing.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
+                body += $"\n\n{dist[0]:F0} m from the stored position.";
+            }
+            body += "\n\nScan a box tag now to assign it to this box.";
+
+            _tagModeGpsText.Text = header + body;
+            _tagModeGpsText.SetTextColor(loc.Accuracy <= 10 ? UIFactory.SUCCESS_GREEN : UIFactory.WARNING_YELLOW);
+            _tagModeSaveButton.Enabled = true;
+            _tagModeSaveButton.Alpha = 1.0f;
+        }
+
+        // Commits the best fix of the open capture session. Replacing an existing position
+        // always asks first, showing how far the new one has moved.
+        private void SaveTagCaptureLocation()
+        {
+            var loc = _bestTagCaptureLocation ?? _currentLocation;
+            var boxName = _tagCaptureBoxName;
+            if (loc == null || string.IsNullOrEmpty(boxName)) return;
 
             var internalPath = this.FilesDir?.AbsolutePath;
             if (string.IsNullOrEmpty(internalPath)) return;
 
-            var boxName = _currentBoxName;
             // Preserve the existing tag number if one is assigned; empty means location-only
             var existing = _boxTags.TryGetValue(boxName, out var bt) ? bt : null;
             var existingTag = existing?.TagNumber ?? "";
@@ -7243,7 +7517,8 @@ namespace PenguinMonitor
             {
                 BoxTagService.AssignBoxTag(_boxTags, boxName, existingTag,
                     loc.Latitude, loc.Longitude, loc.Accuracy, internalPath, _appSettings.ObserverId);
-                Toast.MakeText(this, $"📍 Location saved for Box {boxName} (±{loc.Accuracy:F0}m)", ToastLength.Short)?.Show();
+                Toast.MakeText(this, $"📍 Position saved for Box {boxName} (±{loc.Accuracy:F0}m)", ToastLength.Short)?.Show();
+                EndTagCapture();
             }
 
             bool hasStoredLocation = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
@@ -7257,13 +7532,43 @@ namespace PenguinMonitor
             Location.DistanceBetween(existing!.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
             var oldAcc = existing.Accuracy >= 0 ? $"±{existing.Accuracy:F0}m" : "unknown accuracy";
             new AlertDialog.Builder(this)
-                .SetTitle($"Replace location for Box {boxName}?")
-                .SetMessage($"Stored: {existing.Latitude:F6}, {existing.Longitude:F6} ({oldAcc})\n" +
+                .SetTitle($"Replace stored position for Box {boxName}?")
+                .SetMessage($"Box {boxName} already has a position.\n\n" +
+                            $"Stored: {existing.Latitude:F6}, {existing.Longitude:F6} ({oldAcc})\n" +
                             $"New: {loc.Latitude:F6}, {loc.Longitude:F6} (±{loc.Accuracy:F0}m)\n\n" +
-                            $"New position is {dist[0]:F0}m from the stored one.")
-                .SetPositiveButton("Replace", (s, e) => Save())
+                            $"The new position is {dist[0]:F0}m from the stored one.")
                 .SetNegativeButton("Keep existing", (s, e) => { })
+                .SetPositiveButton("Replace", (s, e) => Save())
                 .Show();
+        }
+
+        // Leaves box tags mode. An open capture is unsaved work, so it's confirmed first.
+        private void FinishBoxTagsMode()
+        {
+            if (_tagCaptureActive)
+            {
+                new AlertDialog.Builder(this)
+                    .SetTitle($"Still setting Box {_tagCaptureBoxName}")
+                    .SetMessage("The position you're capturing hasn't been saved yet.")
+                    .SetNegativeButton("Keep editing", (s, e) => { })
+                    .SetPositiveButton("Discard and finish", (s, e) => ExitBoxTagsMode())
+                    .Show();
+                return;
+            }
+            ExitBoxTagsMode();
+        }
+
+        private void ExitBoxTagsMode()
+        {
+            _appSettings.EditBoxTagsMode = false;
+            _tagCaptureActive = false;
+            _tagCaptureBoxName = "";
+            _bestTagCaptureLocation = null;
+            _isBoxLocked = true;
+            if (_expandSettingsButton != null) _expandSettingsButton.Visibility = ViewStates.Visible;
+            selectedPage = UIFactory.selectedPage.BoxDataSingle;
+            DrawPageLayouts();
+            ScrollToTop();
         }
 
         private void HandleBoxTagScan(string cleanTagId)
@@ -7273,82 +7578,46 @@ namespace PenguinMonitor
                 // Check if this tag is already assigned to a box
                 string? assignedBoxId = BoxTagService.GetBoxIdByTag(_boxTags, cleanTagId);
 
+                // Box tags mode has its own rules and never touches the lock state.
+                if (_appSettings.EditBoxTagsMode && !_isHistoricalView)
+                {
+                    HandleTagModeScan(cleanTagId, assignedBoxId);
+                    return;
+                }
+
                 if (!_isBoxLocked)
                 {
-                    if (_appSettings.EditBoxTagsMode)
+                    // Normal mode — a box tag means "navigate to that box".
+                    if (_pendingBoxTagNavigation != null && assignedBoxId != _pendingBoxTagNavigation)
                     {
-                        // Edit box tags mode — assign/move tags
-                        if (assignedBoxId != null && assignedBoxId != _currentBoxName)
-                        {
-                            TriggerAlert();
-                            new AlertDialog.Builder(this)
-                                .SetTitle("Tag already assigned")
-                                .SetMessage($"This tag is currently assigned to Box {assignedBoxId}.\n\nMove it to Box {_currentBoxName}?")
-                                .SetPositiveButton($"Move to Box {_currentBoxName}", (s, e) =>
-                                {
-                                    var internalPath = this.FilesDir?.AbsolutePath;
-                                    if (!string.IsNullOrEmpty(internalPath))
-                                    {
-                                        // Clear the tag from the old box (server included), keeping its location
-                                        BoxTagService.ClearBoxTagNumber(_boxTags, assignedBoxId, internalPath);
-                                        var moveLoc = _bestUnlockLocation ?? _currentLocation;
-                                        BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
-                                            moveLoc?.Latitude ?? 0, moveLoc?.Longitude ?? 0,
-                                            moveLoc?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
-                                        Toast.MakeText(this, $"📌 Tag moved from Box {assignedBoxId} to Box {_currentBoxName}", ToastLength.Short)?.Show();
-                                        DrawPageLayouts();
-                                    }
-                                })
-                                .SetNegativeButton("Cancel", (s, e) => { })
-                                .Show();
-                            return;
-                        }
-
-                        var internalPath = this.FilesDir?.AbsolutePath;
-                        if (!string.IsNullOrEmpty(internalPath))
-                        {
-                            var assignLoc = _bestUnlockLocation ?? _currentLocation;
-                            BoxTagService.AssignBoxTag(_boxTags, _currentBoxName, cleanTagId,
-                                assignLoc?.Latitude ?? 0, assignLoc?.Longitude ?? 0,
-                                assignLoc?.Accuracy ?? -1, internalPath, _appSettings.ObserverId);
-                            Toast.MakeText(this, $"📌 Box tag assigned to Box {_currentBoxName}", ToastLength.Short)?.Show();
-                            DrawPageLayouts();
-                        }
+                        // A navigation is already pending and the user scanned a *different* box tag.
+                        // Keep the original destination (first tag wins) and freeze the scan queue
+                        // so nothing else is recorded into it.
+                        _pendingScanQueueFrozen = true;
+                        TriggerAlert();
+                        Toast.MakeText(this, $"⚠️ Lock Box {_currentBoxName} first — heading to Box {_pendingBoxTagNavigation}", ToastLength.Long)?.Show();
+                    }
+                    else if (assignedBoxId != null && assignedBoxId != _currentBoxName)
+                    {
+                        // Current box is unlocked — the user forgot to lock it before moving on.
+                        // Remind them, defer the navigation, and record incoming scans until they lock.
+                        _pendingBoxTagNavigation = assignedBoxId;
+                        _pendingScanQueueFrozen = false;
+                        TriggerAlert();
+                        new AlertDialog.Builder(this)
+                            .SetTitle("Box not locked")
+                            .SetMessage($"You forgot to lock Box {_currentBoxName}!\n\nValidate the data and lock the box — we'll continue to Box {assignedBoxId} once it's locked.")
+                            .SetCancelable(false)
+                            .SetPositiveButton("OK", (s, e) => { })
+                            .Show();
+                    }
+                    else if (assignedBoxId == _currentBoxName)
+                    {
+                        Toast.MakeText(this, $"Already at Box {_currentBoxName} — lock it when done", ToastLength.Short)?.Show();
                     }
                     else
                     {
-                        // Normal mode — a box tag means "navigate to that box".
-                        if (_pendingBoxTagNavigation != null && assignedBoxId != _pendingBoxTagNavigation)
-                        {
-                            // A navigation is already pending and the user scanned a *different* box tag.
-                            // Keep the original destination (first tag wins) and freeze the scan queue
-                            // so nothing else is recorded into it.
-                            _pendingScanQueueFrozen = true;
-                            TriggerAlert();
-                            Toast.MakeText(this, $"⚠️ Lock Box {_currentBoxName} first — heading to Box {_pendingBoxTagNavigation}", ToastLength.Long)?.Show();
-                        }
-                        else if (assignedBoxId != null && assignedBoxId != _currentBoxName)
-                        {
-                            // Current box is unlocked — the user forgot to lock it before moving on.
-                            // Remind them, defer the navigation, and record incoming scans until they lock.
-                            _pendingBoxTagNavigation = assignedBoxId;
-                            _pendingScanQueueFrozen = false;
-                            TriggerAlert();
-                            new AlertDialog.Builder(this)
-                                .SetTitle("Box not locked")
-                                .SetMessage($"You forgot to lock Box {_currentBoxName}!\n\nValidate the data and lock the box — we'll continue to Box {assignedBoxId} once it's locked.")
-                                .SetCancelable(false)
-                                .SetPositiveButton("OK", (s, e) => { })
-                                .Show();
-                        }
-                        else if (assignedBoxId == _currentBoxName)
-                        {
-                            Toast.MakeText(this, $"Already at Box {_currentBoxName} — lock it when done", ToastLength.Short)?.Show();
-                        }
-                        else
-                        {
-                            Toast.MakeText(this, $"Unassigned tag — enter Edit Box Tags mode to assign", ToastLength.Short)?.Show();
-                        }
+                        Toast.MakeText(this, $"Unassigned tag — enter Edit Box Tags mode to assign", ToastLength.Short)?.Show();
                     }
                 }
                 else
@@ -7361,7 +7630,6 @@ namespace PenguinMonitor
                         {
                             // Same box - just unlock
                             _isBoxLocked = false;
-                            if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
                             selectedPage = UIFactory.selectedPage.BoxDataSingle;
                             if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                             if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
@@ -7375,8 +7643,7 @@ namespace PenguinMonitor
                                 _currentBoxIndex = _boxNamesAndIndexes[assignedBoxId];
                                 _currentBoxName = assignedBoxId;
                                 _isBoxLocked = false;
-                                if (_appSettings.EditBoxTagsMode) _bestUnlockLocation = _currentLocation;
-                                selectedPage = UIFactory.selectedPage.BoxDataSingle;
+                                    selectedPage = UIFactory.selectedPage.BoxDataSingle;
                                 if (_singleBoxDataContentLayout != null) _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
                                 if (_heldScans.Count > 0) FlushHeldScansToCurrentBox();
                                 else { DrawPageLayouts(); ScrollToTop(); Toast.MakeText(this, $"📍 Jumped to Box {assignedBoxId} and unlocked", ToastLength.Short)?.Show(); }
@@ -7395,6 +7662,123 @@ namespace PenguinMonitor
                     }
                 }
             });
+        }
+
+        // Scans while in box tags mode. Outside a capture session a tag only navigates — it can
+        // never assign, move or overwrite anything, so walking the colony with the reader running
+        // is safe. Inside a session it assigns to the box on screen, always confirming first if
+        // that would take a tag off another box or replace one already on this box.
+        private void HandleTagModeScan(string cleanTagId, string? assignedBoxId)
+        {
+            bool capturing = _tagCaptureActive && _tagCaptureBoxName == _currentBoxName;
+
+            if (!capturing)
+            {
+                if (assignedBoxId == _currentBoxName)
+                {
+                    Toast.MakeText(this, $"That's Box {_currentBoxName}'s tag", ToastLength.Short)?.Show();
+                }
+                else if (assignedBoxId != null && _boxNamesAndIndexes.ContainsKey(assignedBoxId))
+                {
+                    JumpToBox(assignedBoxId);
+                    ScrollToTop();
+                    Toast.MakeText(this, $"📍 Box {assignedBoxId}", ToastLength.Short)?.Show();
+                }
+                else if (assignedBoxId != null)
+                {
+                    Toast.MakeText(this, $"⚠️ Box {assignedBoxId} not in current scope", ToastLength.Long)?.Show();
+                }
+                else
+                {
+                    TriggerAlert();
+                    Toast.MakeText(this, "Unassigned tag — open the box it belongs to, then tap 'Set nest position or tag'", ToastLength.Long)?.Show();
+                }
+                return;
+            }
+
+            var internalPath = this.FilesDir?.AbsolutePath;
+            if (string.IsNullOrEmpty(internalPath)) return;
+
+            if (assignedBoxId == _currentBoxName)
+            {
+                Toast.MakeText(this, $"Box {_currentBoxName} already has this tag", ToastLength.Short)?.Show();
+                return;
+            }
+
+            var boxName = _currentBoxName;
+            _boxTags.TryGetValue(boxName, out var existing);
+            var existingTag = existing?.TagNumber ?? "";
+            bool hasPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
+
+            // A tag scan sets the tag. It only sets the position when the box has none yet —
+            // replacing a stored position stays behind the explicit Save position button.
+            void Assign()
+            {
+                var loc = _bestTagCaptureLocation ?? _currentLocation;
+                double lat = hasPosition ? existing!.Latitude : loc?.Latitude ?? 0;
+                double lon = hasPosition ? existing!.Longitude : loc?.Longitude ?? 0;
+                float acc = hasPosition ? existing!.Accuracy : loc?.Accuracy ?? -1;
+                BoxTagService.AssignBoxTag(_boxTags, boxName, cleanTagId, lat, lon, acc,
+                    internalPath, _appSettings.ObserverId);
+                Toast.MakeText(this, $"📌 Tag assigned to Box {boxName}", ToastLength.Short)?.Show();
+                DrawPageLayouts();
+            }
+
+            void Proceed()
+            {
+                // Case 1: the tag currently belongs to another box — moving it orphans that box.
+                if (assignedBoxId != null)
+                {
+                    TriggerAlert();
+                    new AlertDialog.Builder(this)
+                        .SetTitle("Tag belongs to another box")
+                        .SetMessage($"This tag is Box {assignedBoxId}'s.\n\nMove it to Box {boxName}? " +
+                                    $"Box {assignedBoxId} will be left with no tag.")
+                        .SetNegativeButton("Cancel", (s, e) => { })
+                        .SetPositiveButton($"Move to Box {boxName}", (s, e) =>
+                        {
+                            // Clear the tag from the old box (server included), keeping its location
+                            BoxTagService.ClearBoxTagNumber(_boxTags, assignedBoxId, internalPath);
+                            Assign();
+                        })
+                        .Show();
+                    return;
+                }
+
+                // Case 2: this box already has a different tag — replacing it breaks the old one.
+                if (!string.IsNullOrEmpty(existingTag))
+                {
+                    TriggerAlert();
+                    new AlertDialog.Builder(this)
+                        .SetTitle($"Replace Box {boxName}'s tag?")
+                        .SetMessage($"Box {boxName} currently has tag {existingTag}.\n\n" +
+                                    $"Replace it with the tag you just scanned? Scanning {existingTag} will no longer find this box.")
+                        .SetNegativeButton("Keep existing tag", (s, e) => { })
+                        .SetPositiveButton("Replace", (s, e) => Assign())
+                        .Show();
+                    return;
+                }
+
+                // Case 3: free tag onto an untagged box — nothing is lost, so no confirmation.
+                Assign();
+            }
+
+            // A bird sitting in the nest reads just as easily as the box tag stuck to the lid.
+            // Nailing a penguin's chip to a box would misroute every future scan of that bird.
+            if (BoxTagService.IsPenguinTag(cleanTagId))
+            {
+                TriggerAlert();
+                new AlertDialog.Builder(this)
+                    .SetTitle("That's a penguin chip")
+                    .SetMessage($"{cleanTagId} is in the penguin range, not the box tag range.\n\n" +
+                                "Did you mean to scan the tag on the box?")
+                    .SetNegativeButton("Ignore it", (s, e) => { })
+                    .SetPositiveButton($"Use it as Box {boxName}'s tag anyway", (s, e) => Proceed())
+                    .Show();
+                return;
+            }
+
+            Proceed();
         }
 
         // Completes a deferred "forgot to lock" navigation: jump to the box whose tag was scanned
@@ -7680,6 +8064,18 @@ namespace PenguinMonitor
                             .ToArray();
 
                         Toast.MakeText(this, $"⚠️ Some permissions denied. App functionality may be limited.\nDenied: {string.Join(", ", deniedPermissions.Select(p => p.Split('.').Last()))}", ToastLength.Long)?.Show();
+                    }
+                }
+                else if (requestCode == LOCATION_PERMISSION_REQUEST) // location asked for by a box tag capture
+                {
+                    if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
+                    {
+                        InitializeGPS();
+                        Toast.MakeText(this, "✅ Location granted — tap 'Set nest position or tag' again", ToastLength.Long)?.Show();
+                    }
+                    else
+                    {
+                        Toast.MakeText(this, "❌ Location denied — nest positions can't be recorded", ToastLength.Long)?.Show();
                     }
                 }
                 else if (requestCode == 2) // READ_EXTERNAL_STORAGE request from LoadJsonDataFromFile
