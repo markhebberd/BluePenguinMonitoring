@@ -3141,6 +3141,43 @@ namespace PenguinMonitor
                             return;
                         }
 
+                        // First run (or a fresh login) has no colony picked, which leaves the app
+                        // on the "no colony loaded" banner until someone works the dropdowns.
+                        // Port Tarakohe is the home colony, so default to it when the user is
+                        // allowed it — colonies.php only ever returns colonies they can access,
+                        // so its presence in this list IS the permission check.
+                        // Only when nothing is chosen: a colony the user picked is never overridden,
+                        // even if its box sets haven't downloaded yet.
+                        if (_appSettings.SelectedColonyId <= 0)
+                        {
+                            var home = allColonies.FirstOrDefault(c =>
+                                    string.Equals(c.TryGetValue("colony_prefix", out var p) ? p?.ToString() : "",
+                                                  "PT", StringComparison.OrdinalIgnoreCase))
+                                ?? allColonies.FirstOrDefault(c =>
+                                    (c["colony_name"]?.ToString() ?? "").Contains("Tarakohe", StringComparison.OrdinalIgnoreCase));
+                            if (home != null)
+                            {
+                                _appSettings.SelectedColonyId = Convert.ToInt32(home["colony_id"]);
+                                _appSettings.SelectedColonyName = home["colony_name"]?.ToString() ?? "";
+                                _appSettings.SelectedColonyPrefix = home.TryGetValue("colony_prefix", out var hp) ? hp?.ToString() ?? "" : "";
+                                _appSettings.AllBoxSetsString = home["location_sets_string"]?.ToString() ?? "";
+                                _appSettings.BoxSetString = "All";
+                                DataStorageService.saveApplicationSettings(_appSettings);
+
+                                // No cached state to clear — nothing was loaded for any colony yet.
+                                CreateBoxSetsDictionary();
+                                if (_boxNamesAndIndexes.Count > 0)
+                                {
+                                    var firstBox = _boxNamesAndIndexes.First().Key;
+                                    _currentBoxName = firstBox;
+                                    _currentBoxIndex = _boxNamesAndIndexes[firstBox];
+                                    _isBoxLocked = true;
+                                }
+                                DrawPageLayouts();
+                                StartSync();
+                            }
+                        }
+
                         // Build region list
                         var regions = allColonies.Select(c => c["region_name"]?.ToString() ?? "").Distinct().ToList();
                         regionSpinner.Adapter = _uiFactory.CreateSpinnerAdapter(regions);
