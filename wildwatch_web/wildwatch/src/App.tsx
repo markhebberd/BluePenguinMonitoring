@@ -8245,7 +8245,8 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   // ---- Mirror tab: backup-status view + on-demand actions (mirror server only) ----
   const [mirrorHtml, setMirrorHtml] = useState<string>('');
   const [mirrorMsg, setMirrorMsg] = useState<string>('');
-  const [mirrorBusy, setMirrorBusy] = useState<'' | 'backup' | 'release'>('');
+  const [mirrorRunning, setMirrorRunning] = useState(false);
+  const mirrorPoll = useRef<number | null>(null);
   const loadMirrorStatus = () => {
     const t = localStorage.getItem('ww_token') || '';
     fetch('/api/status.php', { headers: { 'Authorization': `Bearer ${t}` } })
@@ -8253,21 +8254,30 @@ function AdminPanel({ token, observationDates, checkTarget }: {
       .then(setMirrorHtml)
       .catch(() => setMirrorHtml('<p style="font-family:system-ui;padding:2rem;color:#900">Could not load backup status.</p>'));
   };
+  const stopMirrorPoll = () => { if (mirrorPoll.current) { clearInterval(mirrorPoll.current); mirrorPoll.current = null; } setMirrorRunning(false); };
   useEffect(() => { if (adminTab === 'mirror') loadMirrorStatus(); }, [adminTab]);
-  const triggerMirror = async (action: 'backup' | 'release') => {
+  useEffect(() => stopMirrorPoll, []); // clear the interval if the tab/app unmounts mid-run
+
+  // One action: the full nightly — fresh dump, restore, verify, AND code refresh. (The
+  // code-only path still exists server-side as action=release, but a standalone "update code"
+  // button was a footgun: run right after a schema change, the mirror serves new code against
+  // an un-restored old database. Backup does everything and is always safe.) The status page
+  // only changes when the run finishes writing it, so we poll it ourselves rather than leaving
+  // a manual "refresh" button — every 15s for ~8 min, which covers the ~1 min queue + restore.
+  const triggerMirror = async () => {
     const t = localStorage.getItem('ww_token') || '';
-    setMirrorBusy(action);
-    setMirrorMsg(action === 'backup'
-      ? 'Backup + restore queued — this takes a few minutes. Refresh the status below to watch progress.'
-      : 'Refreshing app code from production...');
+    setMirrorRunning(true);
+    setMirrorMsg('Backup + restore queued — starts within a minute, takes a few. The status below updates itself.');
     try {
-      const r = await fetch(`/api/status.php?action=${action}`, { method: 'POST', headers: { 'Authorization': `Bearer ${t}` } });
+      const r = await fetch('/api/status.php?action=backup', { method: 'POST', headers: { 'Authorization': `Bearer ${t}` } });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) setMirrorMsg(d.error || `Failed (HTTP ${r.status})`);
-      else setMirrorMsg(d.message || 'Queued.');
-    } catch { setMirrorMsg('Failed to reach the server.'); }
-    setMirrorBusy('');
-    setTimeout(loadMirrorStatus, action === 'release' ? 12000 : 20000);
+      if (!r.ok) { setMirrorMsg(d.error || `Failed (HTTP ${r.status})`); stopMirrorPoll(); return; }
+      setMirrorMsg(d.message || 'Queued.');
+    } catch { setMirrorMsg('Failed to reach the server.'); stopMirrorPoll(); return; }
+    stopMirrorPoll();
+    setMirrorRunning(true);
+    let ticks = 0;
+    mirrorPoll.current = window.setInterval(() => { loadMirrorStatus(); if (++ticks >= 32) stopMirrorPoll(); }, 15000);
   };
 
   // In-app arrival from a header pin. selectTab writes ?tab=validation; the scroll waits a
@@ -9467,15 +9477,11 @@ function AdminPanel({ token, observationDates, checkTarget }: {
 
       <div style={{ display: adminTab === 'mirror' ? undefined : 'none' }}>
         <h3>Backup mirror</h3>
-        <p className="muted">This server is the offline, restore-tested copy of Wildwatch. It pulls production&rsquo;s backup and code automatically each night; the buttons run those on demand.</p>
+        <p className="muted">This server is the offline, restore-tested copy of Wildwatch. It pulls production&rsquo;s backup and code automatically each night; the button runs that on demand.</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
-          <button className="edit-btn" disabled={!!mirrorBusy} onClick={() => triggerMirror('release')}>
-            {mirrorBusy === 'release' ? 'Updating…' : 'Update live code to mirror'}
+          <button className="edit-btn" disabled={mirrorRunning} onClick={triggerMirror}>
+            {mirrorRunning ? 'Running…' : 'Back up & update mirror now'}
           </button>
-          <button className="edit-btn" disabled={!!mirrorBusy} onClick={() => triggerMirror('backup')}>
-            {mirrorBusy === 'backup' ? 'Backing up…' : 'Back up live to mirror now'}
-          </button>
-          <button className="edit-btn" onClick={loadMirrorStatus}>Refresh status</button>
         </div>
         {mirrorMsg && <p className="muted" style={{ color: '#1a6b8f' }}>{mirrorMsg}</p>}
         <iframe title="Backup status" srcDoc={mirrorHtml}
