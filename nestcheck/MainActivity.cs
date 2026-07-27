@@ -8191,8 +8191,9 @@ namespace PenguinMonitor
             }
             _currentBoxIndex = _boxNamesAndIndexes[targetBox];
             _currentBoxName = targetBox;
-            // Box changed
-            _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+            // Box changed. Don't touch card visibility here: DrawPageLayouts posts its work to
+            // the next looper pass, so unhiding synchronously drew one frame of the empty data
+            // entry card before the tag panel replaced it. DrawPageLayouts owns this either way.
             DrawPageLayouts();
         }
         private string? GetSelectedStatus(Spinner spinner)
