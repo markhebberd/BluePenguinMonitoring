@@ -2588,14 +2588,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     return [below, above];
   }, [allPenguins, p.peng_num]);
   const bare = (n: any) => String(n ?? '').replace(/^[A-Z]+/, '');
-  // , and . step down/up the numbering, shifted (< and >) too since that's how the pair reads
-  // on the key caps. Same guard as the app's other shortcuts: never while typing in a field.
+  // Left/right step down/up the numbering (. and , do boxes). Same guard as the app's other
+  // shortcuts: never while typing in a field. The day overlay owns the arrows for stepping
+  // dates and marks them handled, so a peng docked there doesn't move on the same press.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-      const step = (e.key === ',' || e.key === '<') ? prevPeng : (e.key === '.' || e.key === '>') ? nextPeng : null;
+      const step = e.key === 'ArrowLeft' ? prevPeng : e.key === 'ArrowRight' ? nextPeng : null;
       if (!step) return;
       e.preventDefault();
       onBirdClick(step);
@@ -2762,9 +2763,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
             {canEdit && hasHistory && <button className="history-btn" onClick={() => setShowHistory({table:'penguins', id:p.peng_num})}>History</button>}
           </span>
           <button className="peng-step" onClick={() => prevPeng && onBirdClick(prevPeng)} disabled={!prevPeng}
-            title={prevPeng ? `Previous penguin (#${bare(prevPeng)}) — , or <` : 'No lower peng#'} aria-label="Previous penguin">‹</button>
+            title={prevPeng ? `Previous penguin (#${bare(prevPeng)}) — ←` : 'No lower peng#'} aria-label="Previous penguin">‹</button>
           <button className="peng-step" onClick={() => nextPeng && onBirdClick(nextPeng)} disabled={!nextPeng}
-            title={nextPeng ? `Next penguin (#${bare(nextPeng)}) — . or >` : 'No higher peng#'} aria-label="Next penguin">›</button>
+            title={nextPeng ? `Next penguin (#${bare(nextPeng)}) — →` : 'No higher peng#'} aria-label="Next penguin">›</button>
           {onClose && <button className="day-bird-close" onClick={onClose} title="Close" aria-label="Close">×</button>}
         </span>
       </div>
@@ -10915,12 +10916,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (!selectedBox || sortedBoxIds.length === 0) return;
     const idx = sortedBoxIds.indexOf(selectedBox);
     if (idx < 0) return;
-    // Box → box: the date-scroll came from a day view link into the old box — it
-    // doesn't apply to a different box, so drop it.
-    if (e.key === 'ArrowRight' && idx < sortedBoxIds.length - 1) {
+    // Box → box on . and , (shifted too), leaving the arrow keys to the peng panel.
+    // The date-scroll came from a day view link into the old box — it doesn't apply to a
+    // different box, so drop it.
+    if ((e.key === '.' || e.key === '>') && idx < sortedBoxIds.length - 1) {
+      e.preventDefault();
       setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx + 1]);
-    } else if (e.key === 'ArrowLeft' && idx > 0) {
+    } else if ((e.key === ',' || e.key === '<') && idx > 0) {
+      e.preventDefault();
       setHighlightObs(null); setScrollToObs(null);
       setSelectedBox(sortedBoxIds[idx - 1]);
     } else if (e.key === 'Escape') {
