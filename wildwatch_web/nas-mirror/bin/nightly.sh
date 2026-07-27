@@ -385,6 +385,10 @@ elif ssh -i "$SHARED/id_nas" -o BatchMode=yes -o ConnectTimeout=20 \
       SCRIPTS_UPD=""; SCRIPTS_BAD=""
       for S in "$REL_TMP"/bin/*.sh; do
         B=$(basename "$S")
+        # Refresh in place only. The release carries the VPS-side scripts too (rebuild-kit,
+        # release-tar, nas-fetch...), which have no business running here — installing what
+        # is already present keeps this directory to the NAS's own three.
+        [ -f "$WW_ROOT/bin/$B" ] || continue
         if ! bash -n "$S" 2>>"$LOG"; then SCRIPTS_BAD="$SCRIPTS_BAD $B"; continue; fi
         cmp -s "$S" "$WW_ROOT/bin/$B" && continue
         if cp "$S" "$WW_ROOT/bin/.$B.new" && chmod 755 "$WW_ROOT/bin/.$B.new" \
