@@ -369,6 +369,40 @@ elif ssh -i "$SHARED/id_nas" -o BatchMode=yes -o ConnectTimeout=20 \
     ln -sfn /var/www/shared/secrets.php "$WW_ROOT/app/api/secrets.php"
     REL_ID=$(tr -d '\n' < "$WW_ROOT/app/.release" 2>/dev/null)
     step ok "App code" "${REL_ID:-refreshed} (pulled from production release)"
+
+    # --- and keep OUR OWN scripts current, from the same release -------------------
+    # Without this, every change to a mirror script needs a hand-install over the tunnel.
+    #
+    # Two things make overwriting safe. First, this very file is one of the candidates, and
+    # bash reads a script as it executes — overwriting in place would make the RUNNING
+    # process read the tail of a different file. Writing a temp file and mv-ing it swaps
+    # only the directory entry; the running copy keeps its open inode and finishes intact,
+    # and the new version takes effect on the NEXT run. Second, a script that does not parse
+    # is never installed: a broken nightly.sh would leave the mirror with no way back in but
+    # the tunnel, which is exactly the situation this is meant to end.
+    if [ -d "$REL_TMP/bin" ] && ls "$REL_TMP"/bin/*.sh >/dev/null 2>&1; then
+      mkdir -p "$WW_ROOT/bin"
+      SCRIPTS_UPD=""; SCRIPTS_BAD=""
+      for S in "$REL_TMP"/bin/*.sh; do
+        B=$(basename "$S")
+        if ! bash -n "$S" 2>>"$LOG"; then SCRIPTS_BAD="$SCRIPTS_BAD $B"; continue; fi
+        cmp -s "$S" "$WW_ROOT/bin/$B" && continue
+        if cp "$S" "$WW_ROOT/bin/.$B.new" && chmod 755 "$WW_ROOT/bin/.$B.new" \
+           && mv -f "$WW_ROOT/bin/.$B.new" "$WW_ROOT/bin/$B"; then
+          SCRIPTS_UPD="$SCRIPTS_UPD $B"
+        else
+          SCRIPTS_BAD="$SCRIPTS_BAD $B"; rm -f "$WW_ROOT/bin/.$B.new"
+        fi
+      done
+      if [ -n "$SCRIPTS_BAD" ]; then
+        step warn "Scripts" "kept on-disk copy of:$SCRIPTS_BAD (syntax or write failed)"
+      elif [ -n "$SCRIPTS_UPD" ]; then
+        # trigger-watch.sh runs as a long-lived daemon; its new copy is used when it restarts.
+        step ok "Scripts" "updated:$SCRIPTS_UPD — in effect next run"
+      else
+        step ok "Scripts" "up to date"
+      fi
+    fi
   else
     step warn "App code" "release payload incomplete — serving on-disk copy"
   fi

@@ -32,4 +32,16 @@ ls "$APP"/api/*.php >/dev/null 2>&1 || { echo "release-tar: no PHP API in releas
 { basename "$REL"; git -C /var/www/wildwatch/repo rev-parse --short HEAD 2>/dev/null; } \
   | paste -sd' ' - > "$APP/.release" 2>/dev/null || true
 
-tar -czf - -C "$WORK" app
+# The mirror's OWN scripts, straight from the repo, so the NAS can keep itself current
+# instead of needing a hand-install every time one changes. Shipped inside the release it
+# was built from rather than as a separate fetch verb: one round trip, one thing to keep
+# working, and the scripts are versioned with the code they operate on.
+SRC_BIN=/var/www/wildwatch/repo/wildwatch_web/nas-mirror/bin
+PAYLOAD="app"
+if [ -d "$SRC_BIN" ]; then
+  mkdir -p "$WORK/bin"
+  cp "$SRC_BIN"/*.sh "$WORK/bin/" 2>/dev/null || true
+  ls "$WORK"/bin/*.sh >/dev/null 2>&1 && PAYLOAD="app bin"
+fi
+
+tar -czf - -C "$WORK" $PAYLOAD
