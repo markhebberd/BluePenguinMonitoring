@@ -2805,7 +2805,7 @@ namespace PenguinMonitor
             var dailyLabelInput = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapSentences,
-                Hint = "e.g. Morning check",
+                Hint = "",
                 Text = _colonyState.DailyLabel ?? "",
                 TextSize = 14,
             };
@@ -3128,8 +3128,8 @@ namespace PenguinMonitor
             // 1. Region/Colony (top)
             _settingsCard.AddView(regionColonyLayout);
             // 2. Daily label
-            _settingsCard.AddView(dailyLabelLayout);
             _settingsCard.AddView(dayPeopleLayout);
+            _settingsCard.AddView(dailyLabelLayout);
             // 3. Bluetooth enable + Scan BT are added together as a row below
 
             // Scanner device picker
