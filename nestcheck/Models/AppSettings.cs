@@ -662,6 +662,22 @@ namespace PenguinMonitor.Models
             }
         }
 
+        /// <summary>The initials this user signs a chipping with (users.chip_acronym), refreshed
+        /// on every sync. Empty when they have none — the chipper box then falls back to their name.</summary>
+        private string observerChipAcronym = "";
+        public string ObserverChipAcronym
+        {
+            get => observerChipAcronym;
+            set
+            {
+                if (observerChipAcronym != value)
+                {
+                    observerChipAcronym = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
         [JsonIgnore]
         public bool IsAuthenticated => !string.IsNullOrEmpty(AuthToken);
 

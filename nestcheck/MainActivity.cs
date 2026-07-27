@@ -2840,11 +2840,13 @@ namespace PenguinMonitor
             }
             var observerSpinner = MakePersonSpinner("— observer —", _colonyState.DailyObserverId);
             var recorderSpinner = MakePersonSpinner("— recorder —", _colonyState.DailyRecorderId);
+            var chipperSpinner = MakePersonSpinner("— chipper —", _colonyState.DailyChipperId);
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
             dayPeopleLayout.AddView(observerSpinner);
             dayPeopleLayout.AddView(recorderSpinner);
+            dayPeopleLayout.AddView(chipperSpinner);
             if (dayUsers.Count == 0)
             {
                 var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
@@ -2863,6 +2865,7 @@ namespace PenguinMonitor
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
                 var newObserverId = SelectedUserId(observerSpinner);
                 var newRecorderId = SelectedUserId(recorderSpinner);
+                var newChipperId = SelectedUserId(chipperSpinner);
                 var nzToday = NzToday;
 
                 // Hide keyboard
@@ -2877,6 +2880,7 @@ namespace PenguinMonitor
                 _colonyState.DailyLabel = newLabel;
                 _colonyState.DailyObserverId = newObserverId;
                 _colonyState.DailyRecorderId = newRecorderId;
+                _colonyState.DailyChipperId = newChipperId;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
                 DataStorageService.SaveColonyState(this, _colonyState);
 
@@ -2887,7 +2891,7 @@ namespace PenguinMonitor
                     var token = _appSettings.AuthToken;
                     _ = Task.Run(async () =>
                     {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId);
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId, newChipperId);
                         new Handler(Looper.MainLooper).Post(() =>
                             Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
                     });
@@ -5941,7 +5945,11 @@ namespace PenguinMonitor
             chipByCol.LayoutParameters = chipByColParams;
             chipByCol.AddView(createLabel("Chipped by"));
             var chippedByInput = createInput("Observer name");
-            chippedByInput.Text = _appSettings?.ObserverName ?? "";
+            // Sign with the acronym chip records use ("BS"); fall back to the display name only
+            // when this user has none, so the field is never left blank.
+            chippedByInput.Text = !string.IsNullOrEmpty(_appSettings?.ObserverChipAcronym)
+                ? _appSettings.ObserverChipAcronym
+                : (_appSettings?.ObserverName ?? "");
             chipByCol.AddView(chippedByInput);
             chipRow.AddView(chipByCol);
             card.AddView(chipRow);
@@ -6779,6 +6787,7 @@ namespace PenguinMonitor
                     _colonyState.DailyLabelDate = "";
                     _colonyState.DailyObserverId = 0;
                     _colonyState.DailyRecorderId = 0;
+                    _colonyState.DailyChipperId = 0;
                     DataStorageService.SaveColonyState(this, _colonyState);
                 }
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)

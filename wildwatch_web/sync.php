@@ -224,7 +224,12 @@ function handleDownload($pdo, $colonyId, $observer) {
 
     echo json_encode([
         'snapshot_time' => date('c'),
-        'observer' => ['observer_id' => (int)$observer['observer_id'], 'name' => $observer['observer_name']],
+        // chip_acronym rides along so the phone signs a chipping with the initials the chip
+        // record expects ("BS"), not the login's display name ("Britta") — which is what put 26
+        // rows of "Britta" in penguin_chips.chip_by. Refreshed every sync, so assigning or
+        // changing an acronym in the admin screen reaches the phone without a re-login.
+        'observer' => ['observer_id' => (int)$observer['observer_id'], 'name' => $observer['observer_name'],
+                       'chip_acronym' => $observer['chip_acronym'] ?? null],
         'boxes' => (object)$boxes,
         'previous' => (object)$previous,
         'locations' => $locStmt->fetchAll(),
