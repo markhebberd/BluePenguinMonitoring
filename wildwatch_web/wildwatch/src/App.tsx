@@ -528,20 +528,24 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
   );
 }
 
-/** Observer or recorder for the day: a person from the user table, not free text. Only active
- *  people are offered, but whoever is already set stays listed even if since deactivated —
- *  otherwise the picker would silently misrepresent an old day as having nobody. */
+/** Observer or recorder for the day: a person from the user table, not free text. Click the
+ *  name to get a search box — every user is listed, active or not, because a day is often
+ *  recorded long after the fact and the person who worked it may since have left. */
 function DayPersonField({ date, token, canEdit, field, userId, label }: {
   date: string; token?: string; canEdit?: boolean;
   field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const users = getUsers();
+  const inputRef = useRef<HTMLInputElement>(null);
   const name = getUserName(userId);
 
-  const commit = async (v: string) => {
-    const next = v === '' ? null : Number(v);
+  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+
+  const commit = async (next: number | null) => {
+    setOpen(false); setQuery('');
     if (!token || next === userId) return;
     setSaving(true); setError(null);
     try {
@@ -551,17 +555,41 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
   };
 
   if (!canEdit) return name ? <span className="day-hdr-note"><span className="day-hdr-people-label">{label}</span>{name}</span> : null;
-  const options = users.filter(u => u.active || u.id === userId);
-  return (
-    <span className="day-hdr-note">
+
+  if (!open) return (
+    <span className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
+      title={`Who was ${label === 'observer' ? 'observing' : 'recording'}`}
+      onClick={() => { setQuery(''); setOpen(true); }}>
       <span className="day-hdr-people-label">{label}</span>
-      <select className="day-person-select" value={userId ?? ''} disabled={saving}
-        title={`Who was ${label === 'observer' ? 'observing' : 'recording'}`}
-        onChange={e => commit(e.target.value)}>
-        <option value="">{saving ? 'Saving…' : '—'}</option>
-        {options.map(u => <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ' (inactive)'}</option>)}
-      </select>
+      {saving ? 'Saving…' : (name || `+ ${label}`)}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
+    </span>
+  );
+
+  const q = query.trim().toLowerCase();
+  const matches = getUsers().filter(u => !q || u.name.toLowerCase().includes(q));
+  return (
+    <span className="day-person-picker">
+      <span className="day-hdr-people-label">{label}</span>
+      <input ref={inputRef} className="day-note-input day-person-input" value={query}
+        placeholder={name || `Search ${label}`}
+        onChange={e => setQuery(e.target.value)}
+        // Blur closes the picker, but a click on a result fires onMouseDown first so the
+        // selection still lands.
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery(''); }
+          if (e.key === 'Enter') { e.preventDefault(); if (matches.length === 1) commit(matches[0].id); }
+        }} />
+      <div className="day-person-results">
+        {userId !== null && <div className="day-person-result muted" onMouseDown={() => commit(null)}>— not recorded —</div>}
+        {matches.map(u => (
+          <div key={u.id} className={`day-person-result${u.id === userId ? ' selected' : ''}`} onMouseDown={() => commit(u.id)}>
+            {u.name}{u.active ? '' : <span className="muted"> (inactive)</span>}
+          </div>
+        ))}
+        {matches.length === 0 && <div className="day-person-result muted">No one matches "{query}"</div>}
+      </div>
     </span>
   );
 }

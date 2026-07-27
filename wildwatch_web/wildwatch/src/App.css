@@ -459,9 +459,17 @@ h3.collapsible:hover { color:#1a5276; }
 /* "observer Britta · recorder Mark H" beside the day's note */
 .day-hdr-people-label { color:#90a4ae; font-style:normal; font-size:11px; margin-right:4px; }
 .day-hdr-sep { color:#b0bec5; font-style:normal; }
-.day-person-select { font-size:12px; font-family:inherit; color:#455a64; border:1px solid transparent;
-  background:transparent; border-radius:4px; padding:0 2px; max-width:170px; }
-.day-person-select:hover { border-color:#b0bec5; background:#fff; }
+/* Observer / recorder picker: click the name, type to filter, click a result. Lists every
+   user, active or not, so an old day can still be attributed to whoever actually worked it. */
+.day-person-picker { position:relative; display:inline-flex; align-items:center; }
+.day-person-input { max-width:150px; }
+.day-person-results { position:absolute; top:100%; left:0; z-index:600; background:#fff;
+  border:1px solid #ddd; border-radius:0 0 6px 6px; margin-top:2px; max-height:260px;
+  overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.12); min-width:190px; white-space:nowrap; }
+.day-person-result { padding:6px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer; font-size:13px; font-style:normal; }
+.day-person-result:last-child { border-bottom:none; }
+.day-person-result:hover { background:#bbdefb; }
+.day-person-result.selected { font-weight:600; }
 .day-note-input { font-size:13px; font-weight:normal; font-family:inherit; color:#455a64; padding:1px 6px;
   border:1px solid #90caf9; border-radius:4px; width:15em; max-width:100%; vertical-align:baseline; }
 .day-cf-toggles { display:flex; gap:12px; }
