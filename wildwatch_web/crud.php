@@ -332,7 +332,20 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($existingId) {
             wwAuditedUpdate($pdo, 'day_notes', (int)$existingId, $fields, $oid);
         } else {
-            wwAuditedInsert($pdo, 'day_notes', ['colony_id'=>$colonyId, 'note_date'=>$date] + $fields, $oid);
+            // (colony_id, note_date) is UNIQUE. Two saves for the same day can be in flight at
+            // once — one client double-submitting, or two people editing the same day — and the
+            // loser of that race must not surface a constraint violation to a field worker.
+            // Treat a duplicate as what it is: the row now exists, so update it.
+            try {
+                wwAuditedInsert($pdo, 'day_notes', ['colony_id'=>$colonyId, 'note_date'=>$date] + $fields, $oid);
+            } catch (PDOException $e) {
+                if ($e->getCode() !== '23000') throw $e;
+                $again = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+                $again->execute([$colonyId, $date]);
+                $raced = $again->fetchColumn();
+                if (!$raced) throw $e;
+                wwAuditedUpdate($pdo, 'day_notes', (int)$raced, $fields, $oid, 'Concurrent save for the same day');
+            }
         }
         $pdo->commit();
         echo json_encode(['success'=>true, 'note'=>$finalNote, 'observer_id'=>$finalObserver, 'recorder_id'=>$finalRecorder]);

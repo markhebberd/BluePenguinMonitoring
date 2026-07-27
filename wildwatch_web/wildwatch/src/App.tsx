@@ -496,18 +496,26 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
   useEffect(() => { if (!editing) setText(saved); }, [saved, editing]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
+  // Enter commits and then moves focus on, which blurs this input — and blur commits too. Both
+  // calls read the same not-yet-updated `saved`, so without this guard the day gets saved twice
+  // and the second insert trips the (colony_id, note_date) unique key.
+  const committing = useRef(false);
   const commit = async () => {
+    if (committing.current) return;
     const next = text.trim();
     setEditing(false);
     if (!token || next === saved.trim()) { setText(saved); return; }
+    committing.current = true;
     setSaving(true); setError(null);
     try {
       await saveDayNote(token, date, { note: next });
     } catch (e: any) {
       setError(e.message || 'Failed to save');
       setText(saved);
+    } finally {
+      committing.current = false;
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   if (!canEdit) return saved ? <span className="day-hdr-note">{saved}</span> : null;
