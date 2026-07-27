@@ -161,6 +161,9 @@ namespace PenguinMonitor.UI.Factories
             var spinnerParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
             spinnerParams.SetMargins(4, 0, 4, 0);
             spinner.LayoutParameters = spinnerParams;
+            // Hold full height from the first layout pass — without this a spinner paints collapsed
+            // (~half height) until its adapter/selection settles.
+            spinner.SetMinimumHeight((int)(48 * (_context.Resources?.DisplayMetrics?.Density ?? 2f)));
             var adapter = new CustomSpinnerAdapter(themed, Android.Resource.Layout.SimpleSpinnerItem, options);
             adapter.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
             spinner.Adapter = adapter;
@@ -176,6 +179,9 @@ namespace PenguinMonitor.UI.Factories
             // Grey fill so the closed field reads against a white card (was white-on-white).
             spinner.Background = CreateRoundedBackground(LIGHTER_GRAY, 8);
             spinner.SetPadding(16, 12, 16, 12);
+            // Hold full height from the first layout pass — the colony/region pickers get their
+            // adapter async, and without a floor they paint collapsed (~half height) until it lands.
+            spinner.SetMinimumHeight((int)(48 * (_context.Resources?.DisplayMetrics?.Density ?? 2f)));
             spinner.SetPopupBackgroundDrawable(CreateRoundedBackground(CARD_COLOR, 8));
             return spinner;
         }
