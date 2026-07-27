@@ -1260,8 +1260,12 @@ function OffspringFinal({ kind, active }: { kind: 'egg' | 'chick'; active: boole
 }
 
 /** Whether ClutchPredictions renders anything. Callers need to know before laying the card
- *  out: when there IS a predictions row, the window dates ride its right-hand end. */
-const hasClutchPredictions = (c: Clutch) => clutchActive(c) && c.laid !== null;
+ *  out: when there IS a predictions row, the window dates ride its right-hand end.
+ *  Declared (and fingerprinted) alongside the component so the "only while running"
+ *  rule the Algorithm tab states can't drift out of the doc check. */
+function hasClutchPredictions(c: Clutch) {
+  return clutchActive(c) && c.laid !== null;
+}
 
 function ClutchPredictions({ clutch }: { clutch: Clutch }) {
   if (!hasClutchPredictions(clutch)) return null;

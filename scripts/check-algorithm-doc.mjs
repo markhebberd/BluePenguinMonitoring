@@ -45,6 +45,7 @@ const REGIONS = [
   { file: 'App.tsx', name: 'boxSightings' },
   { file: 'App.tsx', name: 'detectClutchPair' },
   { file: 'App.tsx', name: 'guessedSex' },
+  { file: 'App.tsx', name: 'hasClutchPredictions' },
   { file: 'App.tsx', name: 'ClutchPredictions' },
   { file: 'App.tsx', name: 'BoxFamily', kind: 'interface' },
   { file: 'App.tsx', name: 'computeBoxFamilies' },
