@@ -2826,20 +2826,25 @@ namespace PenguinMonitor
             dayPeopleLayout.SetPadding(8, 0, 8, 8);
             var dayUsers = DataStorageService.LoadUsers(this);
             // Index 0 is "not recorded", so a spinner position maps to dayUsers[pos - 1].
-            Spinner MakePersonSpinner(string emptyLabel, int selectedId)
+            Spinner MakePersonSpinner(int selectedId)
             {
-                var labels = new List<string> { emptyLabel };
+                // Index 0 is the unset option — blank, not a placeholder; empty reads as "not set".
+                var labels = new List<string> { "" };
                 labels.AddRange(dayUsers.Select(u => u.name ?? ""));
                 var spinner = _uiFactory.CreateDropdownSpinner();
                 spinner.SetPadding(8, 4, 8, 4);
-                spinner.Adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
+                // SimpleSpinnerItem for the closed view (plain text, no radio); the checked
+                // SimpleSpinnerDropDownItem is only for the open list.
+                var ad = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, labels);
+                ad.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+                spinner.Adapter = ad;
                 var idx = dayUsers.FindIndex(u => u.id == selectedId);
                 spinner.SetSelection(idx >= 0 ? idx + 1 : 0);
                 spinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
                 return spinner;
             }
-            var observerSpinner = MakePersonSpinner("— observer —", _colonyState.DailyObserverId);
-            var recorderSpinner = MakePersonSpinner("— recorder —", _colonyState.DailyRecorderId);
+            var observerSpinner = MakePersonSpinner(_colonyState.DailyObserverId);
+            var recorderSpinner = MakePersonSpinner(_colonyState.DailyRecorderId);
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
@@ -5609,7 +5614,7 @@ namespace PenguinMonitor
         // First entry is the blank "not recorded" default.
         private static readonly (string code, string label)[] ObservedSexOptions = new[]
         {
-            ("", "Not recorded"),
+            ("", ""),   // unset — blank, so an empty field reads as "not recorded"
             ("PM", "Probably male"),
             ("MM", "Maybe male"),
             ("U", "Unsure"),
@@ -5662,13 +5667,13 @@ namespace PenguinMonitor
 
             // Weight
             card.AddView(createLabel("Weight (g)"));
-            var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            var weightInput = createInput("", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             weightInput.Text = existing?.Weight ?? "";
             card.AddView(weightInput);
 
             // Right flipper length
             card.AddView(createLabel("Flipper (mm)"));
-            var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            var flipperInput = createInput("", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             flipperInput.Text = existing?.FlipperLength ?? "";
             card.AddView(flipperInput);
 
@@ -5929,12 +5934,16 @@ namespace PenguinMonitor
             // picks from), not free text — so a chip record links to the person, and a rename in the
             // web admin reaches every chip they made. ChipBy (the acronym) is gone from the UI.
             var chipUsers = DataStorageService.LoadUsers(this);
-            Spinner MakeChipPersonSpinner(string emptyLabel, int selectedId)
+            Spinner MakeChipPersonSpinner(int selectedId)
             {
-                var labels = new List<string> { emptyLabel };
+                // Index 0 is the unset option — blank; empty reads as "not set".
+                var labels = new List<string> { "" };
                 labels.AddRange(chipUsers.Select(u => u.name ?? ""));
                 var sp = _uiFactory.CreateDropdownSpinner();
-                sp.Adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
+                // SimpleSpinnerItem closed view (no radio); dropdown list uses the checked item.
+                var ad = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerItem, labels);
+                ad.SetDropDownViewResource(Android.Resource.Layout.SimpleSpinnerDropDownItem);
+                sp.Adapter = ad;
                 var idx = chipUsers.FindIndex(u => u.id == selectedId);
                 sp.SetSelection(idx >= 0 ? idx + 1 : 0);
                 return sp;
@@ -5943,31 +5952,62 @@ namespace PenguinMonitor
             int SelectedChipUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= chipUsers.Count
                 ? chipUsers[s.SelectedItemPosition - 1].id : 0;
 
-            // Chip box + Chipper on one line (two labelled columns) to keep the form short
-            var chipRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            // Chip box — a search over KNOWN nests, not free text. Typing filters the colony's box
+            // names (like the peng search); tapping a result fills the field. Save rejects anything
+            // that isn't a known nest, so a chip can't be filed against a mistyped box.
             var chipBoxCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             chipBoxCol.AddView(createLabel("Chip box"));
-            var chipBoxInput = createInput("Box name");
+            var chipBoxInput = createInput("Search nest");
             chipBoxInput.Text = _currentBoxName;
             chipBoxCol.AddView(chipBoxInput);
-            chipRow.AddView(chipBoxCol);
+            var nestResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            chipBoxCol.AddView(nestResults);
+            card.AddView(chipBoxCol);
 
+            bool IsKnownNest(string name) => _boxNamesAndIndexes != null
+                && _boxNamesAndIndexes.Keys.Any(k => string.Equals(k, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+            bool suppressNestSearch = false;
+            chipBoxInput.TextChanged += (s, e) =>
+            {
+                if (suppressNestSearch) return;
+                nestResults.RemoveAllViews();
+                var q = (chipBoxInput.Text ?? "").Trim().ToUpper();
+                if (q.Length < 1 || _boxNamesAndIndexes == null) return;
+                if (IsKnownNest(q)) return; // already an exact nest — nothing to disambiguate
+                var matches = _boxNamesAndIndexes.Keys
+                    .Where(k => k.ToUpper().Contains(q))
+                    .OrderBy(k => k.ToUpper().StartsWith(q) ? 0 : 1).ThenBy(k => k)
+                    .Take(8).ToList();
+                foreach (var m in matches)
+                {
+                    var row = new TextView(this) { Text = m, TextSize = 15 };
+                    row.SetTextColor(UIFactory.TEXT_PRIMARY);
+                    row.SetPadding(12, 10, 12, 10);
+                    row.Clickable = true;
+                    row.Click += (s2, e2) =>
+                    {
+                        suppressNestSearch = true; chipBoxInput.Text = m; suppressNestSearch = false;
+                        chipBoxInput.SetSelection(m.Length);
+                        nestResults.RemoveAllViews();
+                        var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                        imm?.HideSoftInputFromWindow(chipBoxInput.WindowToken, 0);
+                    };
+                    nestResults.AddView(row);
+                }
+            };
+
+            // Chipper below the chip box, then Assistant — one person per row
             var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            var chipperColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
-            chipperColParams.SetMargins(12, 0, 0, 0);
-            chipperCol.LayoutParameters = chipperColParams;
             chipperCol.AddView(createLabel("Chipper"));
             // Default to the logged-in user — usually the person doing the chipping.
-            var chipperSpinner = MakeChipPersonSpinner("— chipper —", _appSettings?.ObserverId ?? 0);
+            var chipperSpinner = MakeChipPersonSpinner(_appSettings?.ObserverId ?? 0);
             chipperCol.AddView(chipperSpinner);
-            chipRow.AddView(chipperCol);
-            card.AddView(chipRow);
+            card.AddView(chipperCol);
 
-            // Assistant on its own row (optional second person)
             var assistantCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             assistantCol.AddView(createLabel("Assistant"));
-            var assistantSpinner = MakeChipPersonSpinner("— assistant —", 0);
+            var assistantSpinner = MakeChipPersonSpinner(0);
             assistantCol.AddView(assistantSpinner);
             card.AddView(assistantCol);
             if (chipUsers.Count == 0)
@@ -5989,7 +6029,7 @@ namespace PenguinMonitor
             var weightCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             weightCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
             weightCol.AddView(createLabel("Weight (g)"));
-            var weightInput = createInput("e.g. 1250", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            var weightInput = createInput("", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             weightCol.AddView(weightInput);
             bioRow.AddView(weightCol);
 
@@ -5998,7 +6038,7 @@ namespace PenguinMonitor
             flipperColParams.SetMargins(12, 0, 0, 0);
             flipperCol.LayoutParameters = flipperColParams;
             flipperCol.AddView(createLabel("Flipper (mm)"));
-            var flipperInput = createInput("e.g. 185", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
+            var flipperInput = createInput("", Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberFlagDecimal);
             flipperCol.AddView(flipperInput);
             bioRow.AddView(flipperCol);
             card.AddView(bioRow);
@@ -6568,6 +6608,15 @@ namespace PenguinMonitor
                     Toast.MakeText(this, "Search and select a penguin to rechip first", ToastLength.Short)?.Show();
                     return;
                 }
+                // The chip box must be a real nest — reject a mistyped or unknown name so a chip
+                // can't be filed against a box that doesn't exist. (Skip when the colony has no
+                // box list at all, e.g. an unconfigured install.)
+                if (_boxNamesAndIndexes != null && _boxNamesAndIndexes.Count > 0 && !IsKnownNest(chipBoxInput.Text))
+                {
+                    Toast.MakeText(this, "Pick a known nest for the chip box", ToastLength.Short)?.Show();
+                    chipBoxInput.RequestFocus();
+                    return;
+                }
                 // Confirmation screen listing everything that will be saved, worded the way
                 // the user entered it. "No" just closes this dialog — the input form
                 // underneath stays open with its values intact for editing or Cancel.
@@ -6585,7 +6634,10 @@ namespace PenguinMonitor
                     if (chippedAsChick.Checked)
                         summary.Add($"Chick size: {chickSizeSpinner.SelectedItem?.ToString() ?? "Unknown"}");
                     else
-                        summary.Add($"Sex: {sexSpinner.SelectedItem?.ToString() ?? "Not recorded"}");
+                    {
+                        var sexSel = sexSpinner.SelectedItem?.ToString();
+                        summary.Add($"Sex: {(string.IsNullOrEmpty(sexSel) ? "Not recorded" : sexSel)}");
+                    }
                 }
                 summary.Add($"Chip box: {chipBoxInput.Text?.Trim()}");
                 summary.Add($"Chipper: {(chipperSpinner.SelectedItemPosition > 0 ? chipperSpinner.SelectedItem?.ToString() : "Not recorded")}");

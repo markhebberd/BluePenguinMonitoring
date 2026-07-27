@@ -219,12 +219,10 @@ namespace PenguinMonitor.UI.Factories
 
         private class CustomSpinnerAdapter : ArrayAdapter<string>
         {
-            private readonly string[] _values;
             private readonly int _padH, _padV;
             public CustomSpinnerAdapter(Context context, int resource, string[] values)
                 : base(context, resource, values)
             {
-                _values = values;
                 float d = context.Resources?.DisplayMetrics?.Density ?? 2f;
                 _padH = (int)(16 * d);
                 _padV = (int)(12 * d);
@@ -250,8 +248,7 @@ namespace PenguinMonitor.UI.Factories
                     // highlight — instant on/off, and it stays lit while the row is under the finger.
                     tv.SetBackgroundResource(Resource.Drawable.spinner_drag_selector);
                     tv.SetPadding(_padH, _padV, _padH, _padV);
-                    if (position == 0 && _values[0] == "")
-                        tv.Text = "Gate-open or no-data";
+                    // A blank first option stays blank — empty reads as "unset", no placeholder text.
                 }
                 return view;
             }
