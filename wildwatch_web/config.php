@@ -805,6 +805,63 @@ function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $obs
     return true;
 }
 
+/**
+ * Password policy for NEWLY SET passwords — the one place the rules live, so every set/reset
+ * path enforces the same thing and the client can mirror it. Returns null if acceptable, or a
+ * short human sentence naming the first problem (safe to show to the person choosing it).
+ *
+ * This gates only WRITES. Login still verifies whatever hash is stored, so existing accounts
+ * with a weak old password keep working until they next change it — a policy change must never
+ * lock people out, only stop new weak passwords going in.
+ *
+ * The client mirrors these exact rules in passwordProblem() (App.tsx) to colour the field and
+ * gate the button; this function is the authority, since the client check is only advisory.
+ *
+ * $identity: any strings tied to the person — first name, surname, email. Each is tokenised
+ * (email split at '@' and on separators, names on whitespace) and any token of 3+ chars may
+ * not appear in the password. That is what stops "florence" for Florence, or "munoz" from
+ * florence-munoz@hotmail.fr.
+ */
+function wwPasswordProblem(string $pw, array $identity = []): ?string {
+    if (strlen($pw) < 8) return 'Use at least 8 characters.';
+
+    // A long passphrase earns an exemption from the character-mix rule — "correcthorsestaple"
+    // is stronger than "Pw2!x" and we should not punish it. Short ones need variety.
+    if (strlen($pw) < 12) {
+        $classes = (preg_match('/[a-z]/', $pw) ? 1 : 0)
+                 + (preg_match('/[A-Z]/', $pw) ? 1 : 0)
+                 + (preg_match('/[0-9]/', $pw) ? 1 : 0)
+                 + (preg_match('/[^a-zA-Z0-9]/', $pw) ? 1 : 0);
+        if ($classes < 2) return 'Mix at least two of: lower case, upper case, numbers, symbols — or make it 12+ characters.';
+    }
+
+    $lp = mb_strtolower($pw);
+
+    // Not the person's own name or email. Tokenise, drop anything under 3 chars (too short to
+    // be a meaningful match), and reject the password if it contains any token.
+    $tokens = [];
+    foreach ($identity as $raw) {
+        $raw = mb_strtolower(trim((string)$raw));
+        if ($raw === '') continue;
+        if (strpos($raw, '@') !== false) $raw = substr($raw, 0, strpos($raw, '@')); // email local part
+        foreach (preg_split('/[^\p{L}\p{N}]+/u', $raw) as $tok) {
+            if (mb_strlen($tok) >= 3) $tokens[$tok] = 1;
+        }
+    }
+    foreach (array_keys($tokens) as $tok) {
+        if (mb_strpos($lp, $tok) !== false) return 'Do not put your name or email in your password.';
+    }
+
+    // A tiny blocklist of the passwords a wordlist tries first, including this project's own
+    // words. Not a substitute for the rules above — a backstop for the obvious.
+    $weak = ['password','passw0rd','password1','12345678','123456789','1234567890','qwertyui',
+             'azertyui','iloveyou','letmein1','motdepasse','changeme','000000000',
+             'wildwatch','nestcheck','penguins','penguin1','manchot1'];
+    if (in_array($lp, $weak, true)) return 'That password is too easy to guess — choose something less common.';
+
+    return null;
+}
+
 // The audited write primitives (wwAuditedInsert / Update / Delete / Upsert) live in db_write.php,
 // the one gateway between the clients and the data tables. Every endpoint gets them via config.php.
 require_once __DIR__ . '/db_write.php';

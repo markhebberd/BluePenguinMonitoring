@@ -634,6 +634,12 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .login-card button[type="submit"]:hover, .login-card form > button:hover { background:#2e86c1; }
 .login-card button:disabled { background:#999; }
 .login-error { color:#F44336; font-size:13px; margin-bottom:8px; }
+/* A password field that fails the policy — red border on the input, red hint beneath. Applied
+   live while the field is non-empty and invalid, so a weak password reads as wrong before submit. */
+input.pw-invalid, .login-card input.pw-invalid { border-color:#F44336; }
+input.pw-invalid:focus, .login-card input.pw-invalid:focus { border-color:#F44336; }
+.pw-hint { font-size:12px; margin:-4px 0 10px; line-height:1.35; }
+.pw-invalid-text { color:#F44336; }
 .login-info { color:#2e7d32; font-size:13px; margin-bottom:8px; }
 .login-alt { margin-top:14px; font-size:13px; }
 .login-alt a { color:#1a5276; text-decoration:underline; cursor:pointer; }

@@ -539,7 +539,7 @@ if ($action === 'create_user') {
     $invite = $password === '' && $email !== '';
     $noLogin = $password === '' && $email === '';
     if ($name === '') { http_response_code(400); echo json_encode(['error'=>'A first name is required']); exit; }
-    if ($password !== '' && strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
+    if ($password !== '' && ($pwProblem = wwPasswordProblem($password, [$name, $surname, $email]))) { http_response_code(400); echo json_encode(['error'=>$pwProblem]); exit; }
     if (!in_array($role, ['viewer', 'editor', 'admin'], true)) { http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit; }
     // Identity is the pair. Surname is stored '' rather than NULL precisely so this key bites
     // for two people sharing a first name and neither having a surname recorded.
@@ -640,11 +640,11 @@ if ($action === 'reset_password') {
     $id = (int)($input['observer_id'] ?? 0);
     $password = (string)($input['password'] ?? '');
     if (!$id) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
-    if (strlen($password) < 6) { http_response_code(400); echo json_encode(['error'=>'Password must be at least 6 characters']); exit; }
-    $chk = $pdo->prepare("SELECT f_name AS observer_name FROM users WHERE id = ?");
+    $chk = $pdo->prepare("SELECT f_name AS observer_name, surname, email FROM users WHERE id = ?");
     $chk->execute([$id]);
     $row = $chk->fetch();
     if (!$row) { http_response_code(404); echo json_encode(['error'=>'User not found']); exit; }
+    if ($pwProblem = wwPasswordProblem($password, [$row['observer_name'], $row['surname'] ?? '', $row['email'] ?? ''])) { http_response_code(400); echo json_encode(['error'=>$pwProblem]); exit; }
     // The gateway redacts passphrase_hash — the log records that it was reset, never the value.
     $hash = password_hash($password, PASSWORD_BCRYPT);
     $pdo->beginTransaction();

@@ -503,8 +503,11 @@ function handleRegister($pdo) {
     if (!in_array(strtolower($email), $allowed)) {
         http_response_code(403); echo json_encode(['error'=>'Registration not allowed for this email']); return;
     }
-    if (empty($name) || empty($email) || strlen($password) < 6) {
-        http_response_code(400); echo json_encode(['error'=>'Name, email, and password (6+ chars) required']); return;
+    if (empty($name) || empty($email)) {
+        http_response_code(400); echo json_encode(['error'=>'Name, email, and password required']); return;
+    }
+    if ($pwProblem = wwPasswordProblem($password, [$name, $email])) {
+        http_response_code(400); echo json_encode(['error'=>$pwProblem]); return;
     }
 
     $hash = password_hash($password, PASSWORD_BCRYPT);
@@ -564,7 +567,9 @@ function handleResetPassword($pdo) {
     $row = findResetToken($pdo, (string)($input['token'] ?? ''));
     $newPass = (string)($input['password'] ?? '');
     if (!$row) { http_response_code(400); echo json_encode(['error' => 'This link is invalid or has expired.']); return; }
-    if (strlen($newPass) < 6) { http_response_code(400); echo json_encode(['error' => 'Password must be at least 6 characters']); return; }
+    if ($pwProblem = wwPasswordProblem($newPass, [$row['observer_name'] ?? '', $row['email'] ?? ''])) {
+        http_response_code(400); echo json_encode(['error' => $pwProblem]); return;
+    }
 
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
     // The observer is their own actor: they authenticated with the emailed token, not a session.
@@ -835,8 +840,8 @@ function handleChangePassword($pdo, $observer) {
     if (!password_verify($current, $observer['passphrase_hash'])) {
         http_response_code(401); echo json_encode(['error'=>'Current password incorrect']); return;
     }
-    if (strlen($newPass) < 6) {
-        http_response_code(400); echo json_encode(['error'=>'New password must be 6+ characters']); return;
+    if ($pwProblem = wwPasswordProblem($newPass, [$observer['observer_name'] ?? '', $observer['surname'] ?? '', $observer['email'] ?? ''])) {
+        http_response_code(400); echo json_encode(['error'=>$pwProblem]); return;
     }
 
     // Changing your own password left no audit trail. The hash is redacted by the gateway.

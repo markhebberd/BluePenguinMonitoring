@@ -3604,6 +3604,33 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
   );
 }
 
+/** Mirror of wwPasswordProblem() in config.php — the two MUST stay in step, since the server
+ *  is the authority and a client that says "fine" then gets rejected is a worse experience than
+ *  no check at all. Returns a short problem sentence, or null when the password is acceptable.
+ *  `identity` is the strings a password must not contain: the person's name parts and email. */
+function passwordProblem(pw: string, identity: string[] = []): string | null {
+  if (pw.length < 8) return 'Use at least 8 characters.';
+  if (pw.length < 12) {
+    const classes = (/[a-z]/.test(pw) ? 1 : 0) + (/[A-Z]/.test(pw) ? 1 : 0)
+                  + (/[0-9]/.test(pw) ? 1 : 0) + (/[^a-zA-Z0-9]/.test(pw) ? 1 : 0);
+    if (classes < 2) return 'Mix at least two of: lower case, upper case, numbers, symbols — or make it 12+ characters.';
+  }
+  const lp = pw.toLowerCase();
+  const tokens = new Set<string>();
+  for (let raw of identity) {
+    raw = (raw || '').toLowerCase().trim();
+    if (!raw) continue;
+    if (raw.includes('@')) raw = raw.slice(0, raw.indexOf('@'));
+    for (const tok of raw.split(/[^\p{L}\p{N}]+/u)) if (tok.length >= 3) tokens.add(tok);
+  }
+  for (const tok of tokens) if (lp.includes(tok)) return 'Do not put your name or email in your password.';
+  const weak = ['password','passw0rd','password1','12345678','123456789','1234567890','qwertyui',
+    'azertyui','iloveyou','letmein1','motdepasse','changeme','000000000','wildwatch','nestcheck',
+    'penguins','penguin1','manchot1'];
+  if (weak.includes(lp)) return 'That password is too easy to guess — choose something less common.';
+  return null;
+}
+
 /** Set-password screen for emailed links (/?setpw=TOKEN) — covers both new-user
  *  invites and forgot-password resets. On success the API returns a session, so the
  *  user lands straight in the app. */
@@ -3626,10 +3653,15 @@ function SetPasswordScreen({ setpwToken, onLogin }: { setpwToken: string; onLogi
     }).catch(() => { setError('Connection failed'); setChecking(false); });
   }, [setpwToken]);
 
+  // Live checks: the same rule the server enforces, plus the two fields matching. Shown red
+  // while the field is non-empty and wrong, and the button stays disabled until both pass.
+  const pwProblem = pw ? passwordProblem(pw, who ? [who.observer_name] : []) : null;
+  const mismatch = pw2.length > 0 && pw !== pw2;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (pw.length < 6) { setError('Password must be at least 6 characters'); return; }
+    if (pwProblem) { setError(pwProblem); return; }
     if (pw !== pw2) { setError('Passwords do not match'); return; }
     setSubmitting(true);
     try {
@@ -3656,12 +3688,14 @@ function SetPasswordScreen({ setpwToken, onLogin }: { setpwToken: string; onLogi
             <p className="login-sub">{who.purpose === 'invite' ? `Welcome, ${who.observer_name} — choose a password for your account.` : `Hi ${who.observer_name} — set a new password.`}</p>
             <form onSubmit={submit}>
               <div className="password-field">
-                <input type={showPassword ? 'text' : 'password'} placeholder="New password" value={pw} onChange={e => setPw(e.target.value)} required minLength={6} autoFocus />
+                <input className={pwProblem ? 'pw-invalid' : ''} type={showPassword ? 'text' : 'password'} placeholder="New password" value={pw} onChange={e => setPw(e.target.value)} required minLength={8} autoFocus />
                 <button type="button" className="toggle-pw" onClick={() => setShowPassword(!showPassword)}>{'\u{1F441}'}</button>
               </div>
-              <input type={showPassword ? 'text' : 'password'} placeholder="Repeat password" value={pw2} onChange={e => setPw2(e.target.value)} required minLength={6} />
+              {pwProblem && <div className="pw-hint pw-invalid-text">{pwProblem}</div>}
+              <input className={mismatch ? 'pw-invalid' : ''} type={showPassword ? 'text' : 'password'} placeholder="Repeat password" value={pw2} onChange={e => setPw2(e.target.value)} required minLength={8} />
+              {mismatch && <div className="pw-hint pw-invalid-text">Passwords do not match.</div>}
               {error && <div className="login-error">{error}</div>}
-              <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : 'Set password & log in'}</button>
+              <button type="submit" disabled={submitting || !!pwProblem || pw.length === 0 || pw !== pw2}>{submitting ? 'Please wait...' : 'Set password & log in'}</button>
             </form>
           </>
         ) : (
@@ -7122,7 +7156,7 @@ function App() {
   return <AuthenticatedAppWithTooltip token={authToken} userName={userName || ''} userRole={userRole} onLogout={handleLogout} />;
 }
 
-function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () => void }) {
+function ChangePasswordDialog({ token, userName, onClose }: { token: string; userName?: string; onClose: () => void }) {
   const [current, setCurrent] = useState('');
   const [newPass, setNewPass] = useState('');
   const [msg, setMsg] = useState('');
@@ -7130,8 +7164,11 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
+  const pwProblem = newPass ? passwordProblem(newPass, userName ? [userName] : []) : null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pwProblem) { setMsg(pwProblem); return; }
     setSaving(true); setMsg('');
     try {
       const r = await fetch('/api/crud.php?action=change_password', {
@@ -7168,11 +7205,12 @@ function ChangePasswordDialog({ token, onClose }: { token: string; onClose: () =
             <button type="button" className="toggle-pw" onClick={() => setShowCurrent(!showCurrent)}>{'\u{1F441}'}</button>
           </div>
           <div className="password-field">
-            <input type={showNew ? 'text' : 'password'} placeholder="New password (6+ chars)" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={6} />
+            <input className={pwProblem ? 'pw-invalid' : ''} type={showNew ? 'text' : 'password'} placeholder="New password" value={newPass} onChange={e => setNewPass(e.target.value)} required minLength={8} />
             <button type="button" className="toggle-pw" onClick={() => setShowNew(!showNew)}>{'\u{1F441}'}</button>
           </div>
+          {pwProblem && <div className="pw-hint pw-invalid-text">{pwProblem}</div>}
           {msg && <div className="login-error">{msg}</div>}
-          <button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Change password'}</button>
+          <button type="submit" disabled={saving || !!pwProblem || newPass.length === 0 || current.length === 0}>{saving ? 'Saving...' : 'Change password'}</button>
         </form>
         <button className="toggle-auth" onClick={onClose}>Cancel</button>
       </div>
@@ -8577,7 +8615,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const createUser = async () => {
     setAddUserErr(''); setAddUserOk('');
     if (!newUser.observer_name.trim()) { setAddUserErr('A first name is required'); return; }
-    if (newUser.password && newUser.password.length < 6) { setAddUserErr('Password must be at least 6 characters'); return; }
+    if (newUser.password) { const p = passwordProblem(newUser.password, [newUser.observer_name, newUser.surname, newUser.email]); if (p) { setAddUserErr(p); return; } }
     setAddingUser(true);
     try {
       const r = await fetch('/api/admin.php?action=create_user', {
@@ -8636,7 +8674,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const resetPassword = async () => {
     if (!resetFor) return;
     setResetMsg('');
-    if (resetPw.length < 6) { setResetMsg('Password must be at least 6 characters'); return; }
+    { const p = passwordProblem(resetPw, resetFor ? [resetFor.observer_name, resetFor.surname, resetFor.email] : []); if (p) { setResetMsg(p); return; } }
     setResetting(true);
     try {
       const r = await fetch('/api/admin.php?action=reset_password', {
@@ -9177,7 +9215,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           <div style={{ marginTop: 12, padding: 10, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>
             <b>Reset password for {resetFor.observer_name}</b>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
-              <input type="text" value={resetPw} onChange={e => setResetPw(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') resetPassword(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 180 }} />
+              <input type="text" value={resetPw} onChange={e => setResetPw(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') resetPassword(); }} className={resetPw && resetFor && passwordProblem(resetPw, [resetFor.observer_name, resetFor.surname, resetFor.email]) ? 'pw-invalid' : ''} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 180 }} />
               <button className="edit-btn" type="button" onClick={() => setResetPw(genPassword())}>Generate</button>
               <button className="edit-btn" onClick={resetPassword} disabled={resetting}>{resetting ? 'Setting…' : 'Set password'}</button>
               <button className="edit-btn" onClick={() => { setResetFor(null); setResetPw(''); setResetMsg(''); }}>Close</button>
@@ -9196,7 +9234,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             <option value="editor">Editor</option>
             <option value="admin">Admin</option>
           </select>
-          <input type="text" placeholder="Password (blank = invite, or no login)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 200 }} />
+          <input type="text" placeholder="Password (blank = invite, or no login)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') createUser(); }} className={newUser.password && passwordProblem(newUser.password, [newUser.observer_name, newUser.surname, newUser.email]) ? 'pw-invalid' : ''} style={{ padding: '5px 8px', fontFamily: 'monospace', minWidth: 200 }} />
           <button className="edit-btn" type="button" onClick={() => setNewUser({ ...newUser, password: genPassword() })}>Generate</button>
           <button className="edit-btn" onClick={createUser} disabled={addingUser}>{addingUser ? 'Adding…' : (!newUser.password && newUser.email.trim()) ? 'Add & send invite' : (!newUser.password ? 'Add (no login)' : 'Add user')}</button>
           {addUserErr && <span style={{ color: '#c0392b', fontSize: 13 }}>{addUserErr}</span>}
@@ -10728,7 +10766,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }
 
   // Password dialog renders on top of any page
-  const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} onClose={() => setShowChangePassword(false)} /> : null;
+  const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} userName={userName} onClose={() => setShowChangePassword(false)} /> : null;
 
   const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter' | 'birds') => {
     // Drop any ?tab from the previous section so admin/reports don't inherit each other's tab.
