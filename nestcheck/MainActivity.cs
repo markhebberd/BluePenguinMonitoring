@@ -205,13 +205,13 @@ namespace PenguinMonitor
         private string? _pendingTagId;        // tag scanned this session, not yet written
         private string? _pendingTagFromBox;   // box the pending tag has to be taken off first
         private bool _pendingTagRemoval;      // clear this box's existing tag on save
-        // Box tags get set once in a blue moon, so the GPS step measures itself: it samples for
-        // a fixed spell and keeps the best reading, rather than asking the user to interpret a
-        // live accuracy number and judge when it's good enough.
-        private const int TAG_GPS_SAMPLE_SECONDS = 20;
+        // The GPS does not start with the capture panel: the phone is still in the user's hand
+        // being read at that point, and an in-hand fix would win the best-of and be saved as the
+        // box's position. Listening starts only when they tap Start measuring, i.e. after the
+        // instruction to put the phone on the box has been read and followed. There's no timer —
+        // readings keep improving until the user is happy and saves.
         private bool _tagGpsMeasuring;
-        private int _tagGpsSecondsLeft;
-        private int _tagGpsWaitSeconds;       // spent waiting for the very first fix (cold start)
+        private int _tagGpsElapsedSeconds;
         private Handler? _tagGpsHandler;
         private Java.Lang.Runnable? _tagGpsRunnable;
         private LinearLayout? _tagModeContentLayout;
@@ -1771,7 +1771,7 @@ namespace PenguinMonitor
             // Box tags mode banner — first thing on the page so the mode is unmistakable.
             _tagModeBanner = new TextView(this)
             {
-                Text = "✏️ BOX TAGS MODE\nSetting nest positions and tags — no penguin data is being recorded.",
+                Text = "✏️ BOX TAGS MODE",
                 TextSize = 15,
                 Gravity = GravityFlags.Center,
             };
@@ -1967,7 +1967,12 @@ namespace PenguinMonitor
             var saveBarParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
             saveBarParams.SetMargins(6, 0, 0, 0);
             _tagModeSaveButton.LayoutParameters = saveBarParams;
-            _tagModeSaveButton.Click += (s, e) => SaveTagCapture();
+            _tagModeSaveButton.Click += (s, e) =>
+            {
+                if (!_tagCaptureActive) return;
+                if (!_tagGpsMeasuring) StartTagGpsMeasurement();   // phone is on the box now
+                else SaveTagCapture();
+            };
             _tagModeCaptureBar.AddView(_tagModeSaveButton);
 
             _tagModeCaptureBar.Visibility = ViewStates.Gone;
@@ -4962,8 +4967,7 @@ namespace PenguinMonitor
             _tagModeMeasureAgainButton.Click += (s, e) =>
             {
                 if (!_tagCaptureActive) return;
-                StartTagGpsMeasurement();
-                UpdateTagCaptureSteps();
+                StartTagGpsMeasurement();   // throws away the readings so far and starts over
             };
             _tagModeCapturePanel.AddView(_tagModeMeasureAgainButton);
 
@@ -7524,49 +7528,44 @@ namespace PenguinMonitor
         private void StartTagCapture()
         {
             if (string.IsNullOrEmpty(_currentBoxName)) return;
-            if (!EnsureGpsReady()) return;
-
+            // Note: no EnsureGpsReady() here. Opening the panel must not switch the receiver on —
+            // the instruction to put the phone on the box hasn't even been drawn yet.
             _tagCaptureActive = true;
             _tagCaptureBoxName = _currentBoxName;
+            _tagGpsMeasuring = false;
+            _bestTagCaptureLocation = null;
             _pendingTagId = null;
             _pendingTagFromBox = null;
             _pendingTagRemoval = false;
-            StartTagGpsMeasurement();
             DrawPageLayouts();
         }
 
-        // Samples the GPS for a fixed spell and keeps the best reading of that spell. The clock
-        // only starts once a fix actually arrives, so a cold start (scanner setting off, so the
-        // receiver was idle) shows "finding GPS" instead of a countdown stuck at 20.
+        // Starts listening. Called from the bottom bar once the phone is on the box, and again
+        // by "Restart measuring" if the user moved or wants to throw the readings away.
         private void StartTagGpsMeasurement()
         {
+            if (!EnsureGpsReady()) return;
+
             // Deliberately NOT seeded from _currentLocation: that fix was taken wherever the
             // user last stood, and being the more accurate one it would beat every reading
             // taken at this box and get saved as this box's position.
             _bestTagCaptureLocation = null;
             _tagGpsMeasuring = true;
-            _tagGpsSecondsLeft = TAG_GPS_SAMPLE_SECONDS;
-            _tagGpsWaitSeconds = 0;
+            _tagGpsElapsedSeconds = 0;
 
+            // Ticks purely to keep the elapsed time honest — nothing stops the measurement but
+            // the user. They watch the accuracy and save when it's good enough for them.
             _tagGpsHandler ??= new Handler(Looper.MainLooper);
             if (_tagGpsRunnable != null) _tagGpsHandler.RemoveCallbacks(_tagGpsRunnable);
             _tagGpsRunnable = new Java.Lang.Runnable(() =>
             {
                 if (!_tagCaptureActive || !_tagGpsMeasuring) return;
-                if (_bestTagCaptureLocation == null)
-                {
-                    _tagGpsWaitSeconds++;          // still hunting for the first fix
-                }
-                else if (--_tagGpsSecondsLeft <= 0)
-                {
-                    _tagGpsMeasuring = false;      // done — best reading of the spell is locked in
-                    TriggerAlert();
-                }
+                _tagGpsElapsedSeconds++;
                 UpdateTagCaptureSteps();
-                if (_tagGpsMeasuring)
-                    _tagGpsHandler?.PostDelayed(_tagGpsRunnable, 1000);
+                _tagGpsHandler?.PostDelayed(_tagGpsRunnable, 1000);
             });
             _tagGpsHandler.PostDelayed(_tagGpsRunnable, 1000);
+            DrawPageLayouts();
         }
 
         private void StopTagGpsMeasurement()
@@ -7627,43 +7626,33 @@ namespace PenguinMonitor
 
             _tagModeCaptureTitle.Text = $"Setting up Box {box}";
 
-            // --- Step 1: GPS. Measures itself; the user just has to keep the phone still. ----
+            // --- Step 1: GPS ---------------------------------------------------------------
             var loc = _bestTagCaptureLocation;
-            if (_tagGpsMeasuring && loc == null)
+            if (!_tagGpsMeasuring)
             {
-                _tagModeStep1Text.Text = "① Finding GPS…\n"
-                    + "Put the phone on the box and leave it there."
-                    + (_tagGpsWaitSeconds >= 8 ? "\n\nThis can take up to a minute under trees." : "");
-                _tagModeStep1Text.SetTextColor(UIFactory.WARNING_YELLOW);
-                _tagModeMeasureAgainButton!.Visibility = ViewStates.Gone;
-            }
-            else if (_tagGpsMeasuring)
-            {
-                int done = TAG_GPS_SAMPLE_SECONDS - _tagGpsSecondsLeft;
-                int bars = Math.Max(0, Math.Min(10, done * 10 / TAG_GPS_SAMPLE_SECONDS));
-                _tagModeStep1Text.Text = "① Measuring position…\n"
-                    + new string('█', bars) + new string('░', 10 - bars) + $"  {_tagGpsSecondsLeft}s\n"
-                    + "Keep the phone on the box.";
-                _tagModeStep1Text.SetTextColor(UIFactory.WARNING_YELLOW);
-                _tagModeMeasureAgainButton!.Visibility = ViewStates.Gone;
+                // Nothing is listening yet. The instruction comes first, the receiver second.
+                _tagModeStep1Text.Text = "① Put the phone flat on top of the box.\n\n"
+                    + "Then press Start measuring below.";
+                _tagModeStep1Text.SetTextColor(Color.Black);
+                _tagModeMeasureAgainButton.Visibility = ViewStates.Gone;
             }
             else if (loc == null)
             {
-                _tagModeStep1Text.Text = "① No GPS signal.\n"
-                    + "Step into the open and measure again.";
-                _tagModeStep1Text.SetTextColor(UIFactory.DANGER_RED);
-                _tagModeMeasureAgainButton!.Text = "Measure again";
+                _tagModeStep1Text.Text = $"① Finding GPS…  {_tagGpsElapsedSeconds}s\n"
+                    + "Leave the phone where it is."
+                    + (_tagGpsElapsedSeconds >= 10 ? "\n\nThis can take a minute under trees." : "");
+                _tagModeStep1Text.SetTextColor(UIFactory.WARNING_YELLOW);
+                _tagModeMeasureAgainButton.Text = "Restart measuring";
                 _tagModeMeasureAgainButton.Visibility = ViewStates.Visible;
             }
             else
             {
-                // Plain words, not a raw accuracy figure to be judged. Rough is still saveable —
-                // a rough position beats no position — it just says so.
+                // Best reading since measuring started, updating live. No target to hit and no
+                // countdown — the user watches it tighten and saves when they're satisfied.
                 bool rough = loc.Accuracy > 15;
-                var line = rough
-                    ? $"① Position measured, but roughly (about {loc.Accuracy:F0} m out).\n"
-                      + "Good enough to save, or measure again in the open."
-                    : $"① Position measured ✓ (accurate to about {loc.Accuracy:F0} m)";
+                var quality = loc.Accuracy <= 5 ? "Good" : rough ? "Rough" : "OK";
+                var line = $"① Best so far: {quality} — about {loc.Accuracy:F0} m  ({_tagGpsElapsedSeconds}s)\n"
+                    + "Leaving it a little longer usually tightens this up.";
                 if (hasStoredPosition)
                 {
                     var dist = new float[1];
@@ -7671,8 +7660,9 @@ namespace PenguinMonitor
                     line += $"\n{dist[0]:F0} m from the position already stored.";
                 }
                 _tagModeStep1Text.Text = line;
-                _tagModeStep1Text.SetTextColor(rough ? UIFactory.WARNING_YELLOW : UIFactory.SUCCESS_GREEN);
-                _tagModeMeasureAgainButton!.Text = "Measure again";
+                _tagModeStep1Text.SetTextColor(loc.Accuracy <= 5 ? UIFactory.SUCCESS_GREEN
+                    : rough ? UIFactory.DANGER_RED : UIFactory.WARNING_YELLOW);
+                _tagModeMeasureAgainButton.Text = "Restart measuring";
                 _tagModeMeasureAgainButton.Visibility = ViewStates.Visible;
             }
 
@@ -7707,17 +7697,29 @@ namespace PenguinMonitor
                 _tagModeTagActionButton.Visibility = ViewStates.Gone;
             }
 
-            // --- Save --------------------------------------------------------------------
-            // Held shut while measuring so a half-sampled position can't be committed, then
-            // labelled with exactly what it's about to write.
+            // --- Primary action ------------------------------------------------------------
+            // Before measuring it starts the GPS; after, it saves. One button, one obvious next
+            // step, and it never lets you commit a position that hasn't been measured here.
             bool tagChanged = _pendingTagId != null || _pendingTagRemoval;
-            bool canSave = !_tagGpsMeasuring && (loc != null || tagChanged);
-            _tagModeSaveButton.Text = _tagGpsMeasuring ? "Measuring…"
-                : loc != null && tagChanged ? "✓  Save position and tag"
-                : tagChanged ? "✓  Save tag"
-                : "✓  Save position";
-            _tagModeSaveButton.Enabled = canSave;
-            _tagModeSaveButton.Alpha = canSave ? 1.0f : 0.4f;
+            if (!_tagGpsMeasuring)
+            {
+                _tagModeSaveButton.Text = "Start measuring";
+                _tagModeSaveButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
+                _tagModeSaveButton.SetTextColor(Color.White);
+                _tagModeSaveButton.Enabled = true;
+                _tagModeSaveButton.Alpha = 1.0f;
+            }
+            else
+            {
+                bool canSave = loc != null || tagChanged;
+                _tagModeSaveButton.Text = loc != null && tagChanged ? "✓  Save position and tag"
+                    : tagChanged && loc == null ? "✓  Save tag"
+                    : "✓  Save position";
+                _tagModeSaveButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.SUCCESS_GREEN, 8);
+                _tagModeSaveButton.SetTextColor(Color.White);
+                _tagModeSaveButton.Enabled = canSave;
+                _tagModeSaveButton.Alpha = canSave ? 1.0f : 0.4f;
+            }
         }
 
         // The inline step-2 action: clears a scanned tag, or stages/undoes removal of the stored one.
