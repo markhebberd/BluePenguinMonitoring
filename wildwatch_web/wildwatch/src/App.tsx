@@ -7866,6 +7866,14 @@ function SeasonBreedingReport() {
       // Segment over the box's whole history: a clutch laid just after 1 April needs the
       // pre-season empty check to anchor its laid estimate.
       const clutches = segmentClutches(sObs);
+      // Chick outcome per clutch — chipped and fledged counts — from the SAME family detection
+      // the box and bird views use, matched to each clutch by its anchor observation. Chipped
+      // chicks reached chipping age (~fledge); fledged also counts unchipped chicks a monitor
+      // recorded as presumed fledged.
+      const famByStart = new Map<number, any>();
+      for (const sd of computeBoxFamilies(bd.observations, (bd as any).all_penguins))
+        for (const fam of sd.families)
+          if (fam.clutch.startObsId != null) famByStart.set(fam.clutch.startObsId, fam);
       clutches.forEach((c, i) => {
         const y = getSeasonStart(new Date(c.start)).getFullYear();
         seasons.add(y);
@@ -7889,11 +7897,14 @@ function SeasonBreedingReport() {
           hatch = c.laid + BREEDING_OFFSETS.hatch * DAY;
         }
         const latest = inClutch[inClutch.length - 1];
+        const fam = c.startObsId != null ? famByStart.get(c.startObsId) : null;
         all.push({
           box, boxNum: parseInt(box, 10),
           attempt: i, // index within the box's whole history; renumbered per season below
           clutch: c, hatch, hatchObserved,
           twoEggs: (c.maxEggs || 2) >= 2,
+          chipped: fam ? fam.chicks.length : 0,
+          fledged: fam ? fam.chicks.length + fam.fledgedUnchipped : 0,
           status: latest ? displayStatusOrPrev(latest, box) : null,
           startObsTime: c.startObsTime,
         });
@@ -7908,6 +7919,8 @@ function SeasonBreedingReport() {
     // Renumber attempts within the season so a box's second clutch reads "2nd", not "5th".
     const seen = new Map<string, number>();
     for (const r of all) { const n = (seen.get(r.box) || 0) + 1; seen.set(r.box, n); r.attempt = n; }
+    // Running clutch number down the whole report (first column).
+    all.forEach((r, i) => { r.clutchNo = i + 1; });
     return { rows: all, seasons: [...seasons].sort((a, b) => b - a) };
   }, [v, seasonYear]);
   const [shown, showAllBtn] = useTopRows(rows, 3, 'Show first 3');
@@ -7921,6 +7934,11 @@ function SeasonBreedingReport() {
     return <td title={title || (est ? 'Predicted from the estimated laid date' : 'From observations')}
       style={{ whiteSpace: 'nowrap', color: past ? '#4a4a4a' : '#111', fontWeight: next ? 700 : 400 }}>{fmtMs(t)}</td>;
   };
+  /** Chick-outcome cell: one ✓ per chick, or a dash for none. More visual than a bare count. */
+  const Ticks = ({ n, title }: { n: number; title: string }) =>
+    n > 0
+      ? <td title={title} style={{ whiteSpace: 'nowrap', color: '#2f8f5b', fontSize: 15, letterSpacing: 2 }}>{'✓'.repeat(n)}</td>
+      : <td title={title} style={{ color: '#ccc', textAlign: 'center' }}>—</td>;
 
   return (
     <div className="report-card">
@@ -7933,15 +7951,19 @@ function SeasonBreedingReport() {
       <p className="muted">
         One row per breeding attempt ({rows.length}), earliest first egg first. Dates come from the estimated
         laid date (2nd egg +2d, hatch +{BREEDING_OFFSETS.hatch}d, guard ends +{BREEDING_OFFSETS.pg}d,
-        chip +{BREEDING_OFFSETS.chip}d, fledge +{BREEDING_OFFSETS.fledge}d); an observed hatch
-        replaces the predicted one. Past dates are dimmed, the next one due is bold.
+        chip window +{BREEDING_OFFSETS.chip}d to +{BREEDING_OFFSETS.chip + 7}d, fledge +{BREEDING_OFFSETS.fledge}d);
+        an observed hatch replaces the predicted one. Chipped / Fledged show one ✓ per chick.
+        Past dates are dimmed, the next one due is bold.
       </p>
       {rows.length === 0 ? <p className="muted">No breeding attempts recorded this season.</p> : (
         <table className="guess-rank-table mini-list-table">
           <thead>
             <tr>
-              <th>Box</th><th>1st egg</th><th>2nd egg</th><th>Hatch</th><th>PG (guard ends)</th>
-              <th>Chip from</th><th>Fledge</th><th>Eggs / chicks</th><th>Status</th>
+              <th>Clutch</th><th>Box</th><th>1st egg</th><th>2nd egg</th><th>Hatch</th><th>PG (guard ends)</th>
+              <th>Chip from</th><th>Chip to</th><th>Fledge</th>
+              <th title="Chicks chipped in this clutch">Chipped</th>
+              <th title="Chicks fledged (chipped chicks reach fledge age; plus unchipped chicks recorded as fledged)">Fledged</th>
+              <th>Eggs / chicks</th><th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -7949,14 +7971,17 @@ function SeasonBreedingReport() {
               const c = r.clutch as Clutch;
               const off = (n: number) => c.laid === null ? null : c.laid + n * DAY;
               const active = clutchActive(c);
+              // Chip window: opens at +chip days, runs 7 days. "Chip to" = chip from + 7.
               const parts: (number | null)[] = [off(0), r.twoEggs ? off(2) : null, r.hatch,
-                off(BREEDING_OFFSETS.pg), off(BREEDING_OFFSETS.chip), off(BREEDING_OFFSETS.fledge)];
+                off(BREEDING_OFFSETS.pg), off(BREEDING_OFFSETS.chip), off(BREEDING_OFFSETS.chip + 7),
+                off(BREEDING_OFFSETS.fledge)];
               // Only a running clutch has a "next" milestone to highlight.
               const nextIdx = active ? parts.findIndex(p => p !== null && p >= now) : -1;
               const unc = c.laidUncertainty !== null && c.laidUncertainty > 0
                 ? `± ${c.laidUncertainty} day${c.laidUncertainty !== 1 ? 's' : ''}` : '';
               return (
                 <tr key={`${r.box}-${c.start}`}>
+                  <td style={{ color: '#666', fontVariantNumeric: 'tabular-nums' }}>{r.clutchNo}</td>
                   <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>
                     <a className="day-box-link" href={`/?box=${encodeURIComponent(r.box)}&obs=${encodeURIComponent(r.startObsTime)}`}>Box {r.box}</a>
                     {r.attempt > 1 && <span className="muted" style={{ fontWeight: 400 }}> ({ordinal(r.attempt)})</span>}
@@ -7973,8 +7998,11 @@ function SeasonBreedingReport() {
                   <Cell t={parts[2]} next={nextIdx === 2} est={!r.hatchObserved}
                     title={r.hatchObserved ? 'Observed: midpoint of the last egg-only check and the first chick check' : undefined} />
                   <Cell t={parts[3]} next={nextIdx === 3} est />
-                  <Cell t={parts[4]} next={nextIdx === 4} est />
-                  <Cell t={parts[5]} next={nextIdx === 5} est />
+                  <Cell t={parts[4]} next={nextIdx === 4} est title="Chip window opens (estimated)" />
+                  <Cell t={parts[5]} next={nextIdx === 5} est title="Chip window closes — 7 days after it opens (estimated)" />
+                  <Cell t={parts[6]} next={nextIdx === 6} est />
+                  <Ticks n={r.chipped} title={`${r.chipped} chick${r.chipped !== 1 ? 's' : ''} chipped`} />
+                  <Ticks n={r.fledged} title={`${r.fledged} chick${r.fledged !== 1 ? 's' : ''} fledged`} />
                   <td style={{ whiteSpace: 'nowrap', color: '#4a4a4a' }}>{c.maxEggs} / {c.maxChicks}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {active
