@@ -145,10 +145,12 @@ header h1:hover { opacity:.8; }
 .detail-obs { flex:1; min-width:0; overflow:hidden; padding:0 16px 16px; container-type:inline-size; }
 /* Breeding overview and Observations stack and scroll together when narrow; once there's
    room (e.g. no peng panel open, which widens this area) they sit side by side and each
-   column scrolls independently. The container query keys off this area's own width. */
+   column scrolls independently. The container query keys off this area's own width.
+   580px holds the two columns side by side down to ~280px each — about 70% of the ~400px
+   they bottomed out at when the threshold was 820px. */
 .obs-columns { display:flex; flex-direction:column; gap:16px; height:100%; overflow-y:auto; }
 .obs-col { min-width:0; }
-@container (min-width:820px) {
+@container (min-width:580px) {
   .obs-columns { flex-direction:row; gap:24px; align-items:stretch; overflow:visible; }
   .obs-col { flex:1 1 0; min-height:0; overflow-y:auto; }
 }

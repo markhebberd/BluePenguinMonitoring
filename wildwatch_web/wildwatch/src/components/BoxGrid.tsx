@@ -27,9 +27,12 @@ interface BoxGridProps {
 export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBox, boxNames }: BoxGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [flashBox, setFlashBox] = useState<string|null>(null);
-  // Sidebar mode (a box is open) can collapse to a single narrow column via the title.
+  // Sidebar mode (a box is open) can collapse to a single narrow column via the title. The
+  // choice sticks across boxes and sessions — someone who works with it collapsed shouldn't
+  // have to re-collapse it every time a box opens.
   const sidebar = selectedBox !== null;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ww_nests_collapsed') === '1');
+  useEffect(() => { localStorage.setItem('ww_nests_collapsed', collapsed ? '1' : '0'); }, [collapsed]);
   useEffect(() => {
     if (scrollToBox && gridRef.current) {
       const el = gridRef.current.querySelector(`[data-box="${scrollToBox}"]`);
