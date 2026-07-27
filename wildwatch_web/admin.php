@@ -494,7 +494,7 @@ if ($action === 'delete_user' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         wwAuditedUpdate($pdo, 'users', $target, ['deleted_at' => date('Y-m-d H:i:s'), 'active' => 0],
             $observer['observer_id'], 'User deleted (soft) — no data attached');
         // A hidden account must not keep working from a browser that is already logged in.
-        $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$target]);
+        wwSessionsDeleteForObserver($pdo, $target);
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true, 'observer_id'=>$target, 'name'=>$name]);
