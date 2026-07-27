@@ -680,7 +680,7 @@ input.pw-invalid:focus, .login-card input.pw-invalid:focus { border-color:#F4433
 .watched-tick.on { color:#4CAF50; }
 
 /* ---- Breeding verification: per-clutch tick + modal ---- */
-.verify-tick { position:absolute; top:7px; right:9px; font-size:16px; font-weight:700; line-height:1; user-select:none; }
+.verify-tick { align-self:center; font-size:16px; font-weight:700; line-height:1; user-select:none; }
 .verify-tick.clickable { cursor:pointer; }
 .verify-tick.vt-grey { color:#c3ccd4; }
 .verify-tick.vt-green { color:#2f8f5b; }

@@ -1720,10 +1720,6 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           const showTick = canEdit || !!clutchVer;
           return (
             <div key={`cl${ci}`} className={`clutch-card ${cardStatus}`}>
-              {showTick && (
-                <BreedingVerifyTick state={vState} canEdit={canEdit}
-                  onOpen={(e) => setOpenVerify({ key: vKey, pos: { x: Math.min(e.clientX + 8, window.innerWidth - 340), y: e.clientY + 8 } })} />
-              )}
               {openVerify?.key === vKey && (
                 // A verdict refreshes in place — the modal stays open so both halves can be
                 // reviewed in one sitting; only clicking away (backdrop/✕) closes it.
@@ -1760,6 +1756,10 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                   ))}
                 </span>
+                {showTick && (
+                  <BreedingVerifyTick state={vState} canEdit={canEdit}
+                    onOpen={(e) => setOpenVerify({ key: vKey, pos: { x: Math.min(e.clientX + 8, window.innerWidth - 340), y: e.clientY + 8 } })} />
+                )}
                 <span className={`clutch-dates${clutch.startObsTime ? ' clickable' : ''}`}
                   title="Go to where the egg/chick was first detected"
                   onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{windowRange(clutch)}</span>
