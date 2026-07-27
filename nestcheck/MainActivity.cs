@@ -2893,7 +2893,7 @@ namespace PenguinMonitor
         }
         // Rebuild the settings card in place so a completed sync's fresh data — the people list
         // especially — shows without an app restart. createSettingsCard reads the caches at build
-        // time and is otherwise only called once at startup, so the Observer/Recorder pickers would
+        // time and is otherwise only called once at startup, so the Observer/Scribe pickers would
         // stay on "Sync to load people" until relaunch.
         private void RebuildSettingsCard()
         {
@@ -2978,8 +2978,8 @@ namespace PenguinMonitor
             // Index 0 is "not recorded", so a spinner position maps to dayUsers[pos - 1].
             Spinner MakePersonSpinner(int selectedId, string emptyLabel = "")
             {
-                // Index 0 is the unset option (users.id 0). Blank for the observer; the recorder
-                // labels it "Solo" — one person doing both roles, i.e. no separate recorder.
+                // Index 0 is the unset option (users.id 0). Blank for the observer; the scribe
+                // labels it "Solo" — one person doing both roles, i.e. no separate scribe.
                 var labels = new List<string> { emptyLabel };
                 labels.AddRange(dayUsers.Select(u => u.name ?? ""));
                 var spinner = _uiFactory.CreateDropdownSpinner();
@@ -2995,7 +2995,7 @@ namespace PenguinMonitor
                 return spinner;
             }
             var observerSpinner = MakePersonSpinner(_colonyState.DailyObserverId);
-            var recorderSpinner = MakePersonSpinner(_colonyState.DailyRecorderId, "Solo");
+            var scribeSpinner = MakePersonSpinner(_colonyState.DailyScribeId, "Solo");
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
@@ -3015,7 +3015,7 @@ namespace PenguinMonitor
                 return col;
             }
             dayPeopleLayout.AddView(LabelledPerson("Observer", observerSpinner));
-            dayPeopleLayout.AddView(LabelledPerson("Recorder", recorderSpinner));
+            dayPeopleLayout.AddView(LabelledPerson("Scribe", scribeSpinner));
             if (dayUsers.Count == 0)
             {
                 var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
@@ -3033,7 +3033,7 @@ namespace PenguinMonitor
             {
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
                 var newObserverId = SelectedUserId(observerSpinner);
-                var newRecorderId = SelectedUserId(recorderSpinner);
+                var newScribeId = SelectedUserId(scribeSpinner);
                 var nzToday = NzToday;
 
                 // Hide keyboard
@@ -3041,13 +3041,13 @@ namespace PenguinMonitor
                 imm?.HideSoftInputFromWindow(dailyLabelInput.WindowToken, 0);
 
                 // The daily label is the colony's day note (one per colony per day) — no longer a
-                // per-observation filename — and observer/recorder are fields of that same row.
+                // per-observation filename — and observer/scribe are fields of that same row.
                 // Set them locally (they also ride along on the next observation upload), then
                 // upsert straight to the server so a change takes effect even when today's
                 // observations are already synced.
                 _colonyState.DailyLabel = newLabel;
                 _colonyState.DailyObserverId = newObserverId;
-                _colonyState.DailyRecorderId = newRecorderId;
+                _colonyState.DailyScribeId = newScribeId;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
                 DataStorageService.SaveColonyState(this, _colonyState);
 
@@ -3058,7 +3058,7 @@ namespace PenguinMonitor
                     var token = _appSettings.AuthToken;
                     _ = Task.Run(async () =>
                     {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId);
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newScribeId);
                         new Handler(Looper.MainLooper).Post(() =>
                             Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
                     });
@@ -7293,7 +7293,7 @@ namespace PenguinMonitor
                     _colonyState.DailyLabel = "";
                     _colonyState.DailyLabelDate = "";
                     _colonyState.DailyObserverId = 0;
-                    _colonyState.DailyRecorderId = 0;
+                    _colonyState.DailyScribeId = 0;
                     DataStorageService.SaveColonyState(this, _colonyState);
                 }
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)

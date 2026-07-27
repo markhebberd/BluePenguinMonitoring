@@ -330,7 +330,7 @@ namespace PenguinMonitor.Services
                     var uploadBody = JsonConvert.SerializeObject(new {
                         daily_label = colonyState.DailyLabel,
                         daily_observer_id = colonyState.DailyObserverId,
-                        daily_recorder_id = colonyState.DailyRecorderId,
+                        daily_scribe_id = colonyState.DailyScribeId,
                         observations = pendingBoxes,
                     });
                     var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
@@ -472,7 +472,7 @@ namespace PenguinMonitor.Services
                         appSettings.ObserverFalconId = serverState.observer.falcon_id ?? "";
                         saveApplicationSettings(appSettings);
                     }
-                    // Who can be named as today's observer/recorder. Cached so the pickers still
+                    // Who can be named as today's observer/scribe. Cached so the pickers still
                     // work in the field with no signal — a colony's people rarely change mid-round.
                     if (serverState?.users != null)
                         File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
@@ -657,7 +657,7 @@ namespace PenguinMonitor.Services
             if (uploads.Count == 0) return 0;
 
             var body = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
-                daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId,
+                daily_observer_id = colonyState.DailyObserverId, daily_scribe_id = colonyState.DailyScribeId,
                 observations = uploads });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=confirm");
             request.Headers.Add("Authorization", $"Bearer {token}");
@@ -725,7 +725,7 @@ namespace PenguinMonitor.Services
             }
 
             var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
-                daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId,
+                daily_observer_id = colonyState.DailyObserverId, daily_scribe_id = colonyState.DailyScribeId,
                 observations = pendingBoxes });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
             request.Headers.Add("Authorization", $"Bearer {token}");
@@ -922,7 +922,7 @@ namespace PenguinMonitor.Services
             public string? peng_num { get; set; }
             public string? sex { get; set; }
         }
-        /// <summary>A person who can be named as the day's observer or recorder. Active users only.
+        /// <summary>A person who can be named as the day's observer or scribe. Active users only.
         /// falcon_id is the chipper/permit id; only users who have one may be picked as the chipper.
         /// (Requires sync.php to include falcon_id in the users payload — else it's null for all.)</summary>
         public class SyncUser
@@ -1235,7 +1235,7 @@ namespace PenguinMonitor.Services
             return new Dictionary<string, BoxNoteData>();
         }
 
-        /// <summary>Cached list of people who can be the day's observer or recorder. Empty until
+        /// <summary>Cached list of people who can be the day's observer or scribe. Empty until
         /// the first sync; the pickers then fall back to "not recorded".</summary>
         internal static List<SyncUser> LoadUsers(Context context)
         {
@@ -1253,7 +1253,7 @@ namespace PenguinMonitor.Services
         // fills a day that has no note yet — this upserts, so re-setting the label actually changes
         // it. Needs editor/admin role server-side; a viewer gets 403 and we just keep it local.
         internal async Task<bool> SaveDayNoteAsync(int colonyId, string nzDate, string note, string token,
-                                                   int observerId = 0, int recorderId = 0)
+                                                   int observerId = 0, int scribeId = 0)
         {
             try
             {
@@ -1261,7 +1261,7 @@ namespace PenguinMonitor.Services
                 request.Headers.Add("Authorization", $"Bearer {token}");
                 var body = JsonConvert.SerializeObject(new { colony_id = colonyId, date = nzDate, note,
                     observer_id = observerId == 0 ? (int?)null : observerId,
-                    recorder_id = recorderId == 0 ? (int?)null : recorderId });
+                    scribe_id = scribeId == 0 ? (int?)null : scribeId });
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
                 var response = await _httpClient.SendAsync(request);
                 return response.IsSuccessStatusCode;

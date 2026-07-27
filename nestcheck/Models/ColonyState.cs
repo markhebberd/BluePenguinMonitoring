@@ -14,7 +14,7 @@ namespace PenguinMonitor.Models
         /// the colony's day_notes row. Cleared with it at rollover. (The chipper is recorded
         /// per-chip in the chip workflow, not here.)</summary>
         public int DailyObserverId { get; set; }
-        public int DailyRecorderId { get; set; }
+        public int DailyScribeId { get; set; }
 
         /// <summary>
         /// Pending observations not yet uploaded to server.
@@ -83,7 +83,7 @@ namespace PenguinMonitor.Models
                 DailyLabel = "";
                 DailyLabelDate = "";
                 DailyObserverId = 0;
-                DailyRecorderId = 0;
+                DailyScribeId = 0;
             }
 
             // Drop downloaded biometrics from a previous day; keep unsynced edits so they aren't lost
