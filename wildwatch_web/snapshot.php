@@ -103,7 +103,7 @@ if ($since) {
     $penguins->execute([$ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
-    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.solo
+    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.chipper_id, pc.assistant_id, pc.solo
         FROM penguin_chips pc
         WHERE pc.created_at >= ?
            OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");

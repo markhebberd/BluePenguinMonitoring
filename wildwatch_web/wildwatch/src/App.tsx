@@ -528,12 +528,13 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
   );
 }
 
-/** Observer or recorder for the day: a person from the user table, not free text. Click the
- *  name to get a search box — every user is listed, active or not, because a day is often
- *  recorded long after the fact and the person who worked it may since have left. */
-function DayPersonField({ date, token, canEdit, field, userId, label }: {
-  date: string; token?: string; canEdit?: boolean;
-  field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
+/** Pick a person from the user table. Every user is listed, active or not: attribution is
+ *  historical, and whoever did the work may since have left. Service accounts are excluded
+ *  (getUsers drops them). Typing filters; Enter takes the top match; the blue bar shows which
+ *  that is. Used for the day's observer/recorder and for a chip's chipper/assistant. */
+function UserPickerField({ userId, label, onSave, addLabel, title }: {
+  userId: number | null; label?: string; onSave: (id: number | null) => Promise<any>;
+  addLabel?: string; title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -546,23 +547,17 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
 
   const commit = async (next: number | null) => {
     setOpen(false); setQuery('');
-    if (!token || next === userId) return;
+    if (next === userId) return;
     setSaving(true); setError(null);
-    try {
-      await saveDayNote(token, date, { [field]: next });
-    } catch (e: any) { setError(e.message || 'Failed to save'); }
+    try { await onSave(next); } catch (e: any) { setError(e.message || 'Failed to save'); }
     setSaving(false);
   };
 
-  if (!canEdit) return name ? <span className="day-hdr-note"><span className="day-hdr-people-label">{label}</span>{name}</span> : null;
-
   if (!open) return (
     <span className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
-      title={`Who was ${field === 'observer_id' ? 'observing' : 'recording'}`}
-      onClick={() => { setQuery(''); setOpen(true); }}>
-      {/* Unset, the "+ Observer" prompt IS the label — showing both would read "Observer + Observer". */}
-      {name && <span className="day-hdr-people-label">{label}</span>}
-      {saving ? 'Saving…' : (name || `+ ${label}`)}
+      title={title} onClick={() => { setQuery(''); setOpen(true); }}>
+      {name && label && <span className="day-hdr-people-label">{label}</span>}
+      {saving ? 'Saving…' : (name || addLabel || '-')}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
     </span>
   );
@@ -571,17 +566,16 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
   const matches = getUsers().filter(u => !q || u.name.toLowerCase().includes(q));
   return (
     <span className="day-person-picker">
-      <span className="day-hdr-people-label">{label}</span>
+      {label && <span className="day-hdr-people-label">{label}</span>}
       <input ref={inputRef} className="day-note-input day-person-input" value={query}
         placeholder={name || 'Search people'}
         onChange={e => setQuery(e.target.value)}
-        // Blur closes the picker, but a click on a result fires onMouseDown first so the
-        // selection still lands.
+        // Blur closes the picker, but a result's onMouseDown fires first so the click lands.
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery(''); }
-          // Enter takes the top match, so "britta" + Enter saves. Guarded on a non-empty
-          // query: with the full list showing, Enter would otherwise assign whoever sorts first.
+          // Guarded on a non-empty query: with the full list showing, Enter would otherwise
+          // assign whoever happens to sort first.
           if (e.key === 'Enter') { e.preventDefault(); if (q && matches.length) commit(matches[0].id); }
         }} />
       <div className="day-person-results">
@@ -597,6 +591,18 @@ function DayPersonField({ date, token, canEdit, field, userId, label }: {
       </div>
     </span>
   );
+}
+
+/** Observer or recorder for the day — the shared picker, wired to this day's note row. */
+function DayPersonField({ date, token, canEdit, field, userId, label }: {
+  date: string; token?: string; canEdit?: boolean;
+  field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
+}) {
+  const name = getUserName(userId);
+  if (!canEdit) return name ? <span className="day-hdr-note"><span className="day-hdr-people-label">{label}</span>{name}</span> : null;
+  return <UserPickerField userId={userId} label={label} addLabel={`+ ${label}`}
+    title={`Who was ${field === 'observer_id' ? 'observing' : 'recording'}`}
+    onSave={id => saveDayNote(token || '', date, { [field]: id })} />;
 }
 
 /** The day's record beside the stats line: what happened, and who was out. The two people are
@@ -2525,6 +2531,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     if (reason === null) return;
     return updateRecord(token || '', 'penguin_chips', pitId, {[field]: val}, reason || undefined);
   };
+  // chipper_id / assistant_id are user references, so they save as ids rather than through
+  // saveChip's text path. No reason prompt: picking a name from a list is unambiguous, and
+  // audit_log records the change either way.
+  const saveChipPerson = (pitId: string, field: 'chipper_id' | 'assistant_id', id: number | null) =>
+    updateRecord(token || '', 'penguin_chips', pitId, { [field]: id });
   // Weight and flipper as measured on the chipping day: the biometric row dated the same NZ
   // day as the chip. Editing writes through to that row — these are not fields of the chip.
   // Residency: chipping to the bird's most recent sighting — how long it has been on the
@@ -2589,7 +2600,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 {residency && <tr><td className="muted">Residency</td><td>{residency}</td></tr>}
                 {activeChip?.chip_box && <tr><td className="muted">Chip box</td><td>
                   <a className="clickable" href={`/box/${activeChip.chip_box}`} onClick={e => navClick(e, () => onBoxClick(activeChip.chip_box))}>Box {activeChip.chip_box}</a>
-                  {activeChip.chip_by && <span className="chip-by"><span className="muted">by:</span> {activeChip.chip_by}</span>}
+                  {(getUserName(activeChip.chipper_id) || activeChip.chip_by) &&
+                    <span className="chip-by"><span className="muted">by:</span> {getUserName(activeChip.chipper_id) || activeChip.chip_by}</span>}
                 </td></tr>}
                 {!!p.notes && <tr><td className="muted">Notes</td><td>{p.notes}</td></tr>}
               </>}
@@ -2610,7 +2622,18 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     {/* Whole-bird figure, so it hangs off the original chip only, not each rechip. */}
                     {i === 0 && !!residency && <tr><td className="muted">Residency</td><td>{residency}</td></tr>}
                     <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Box</td><td><EditableField value={c.chip_box} onSave={saveChip(c.pit_id, 'chip_box')} placeholder="box" canEdit={editing} /></td></tr>
-                    <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td><EditableField value={c.chip_by} onSave={saveChip(c.pit_id, 'chip_by')} placeholder="who" canEdit={editing} /></td></tr>
+                    <tr><td className="muted">{prefix ? `${re}chipped ` : 'Chipped '}By</td><td>
+                      {editing
+                        ? <UserPickerField userId={c.chipper_id ?? null} addLabel="+ chipper" title="Who fitted the transponder"
+                            onSave={id => saveChipPerson(c.pit_id, 'chipper_id', id)} />
+                        : (getUserName(c.chipper_id) || c.chip_by || <span className="muted">-</span>)}
+                    </td></tr>
+                    <tr><td className="muted">Assistant</td><td>
+                      {editing
+                        ? <UserPickerField userId={c.assistant_id ?? null} addLabel="+ assistant" title="Who assisted with the chipping"
+                            onSave={id => saveChipPerson(c.pit_id, 'assistant_id', id)} />
+                        : (getUserName(c.assistant_id) || <span className="muted">-</span>)}
+                    </td></tr>
                     {(() => { const bio = chipBio(c); return (<>
                       <tr><td className="muted">{prefix ? `${re}chip ` : 'Chip '}Weight</td><td><span className="chip-measure">
                         <EditableField value={bio?.weight ? parseFloat(bio.weight).toFixed(0) : ''} type="number" min={0}

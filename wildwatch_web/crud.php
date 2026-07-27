@@ -153,6 +153,22 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
             'is_active' => 1,
         ];
         foreach (['chip_box', 'chip_by'] as $f) if (isset($in[$f])) $chip[$f] = $in[$f];
+        // Who chipped it, as a user. An explicit id wins; otherwise derive it from the acronym
+        // the phone signed with, so a client that knows nothing about users still lands both
+        // columns and chip_by never drifts from chipper_id.
+        $asChipUser = function ($v) use ($pdo) {
+            if ($v === null || $v === '' || (int)$v === 0) return null;
+            $c = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+            $c->execute([(int)$v]);
+            return $c->fetchColumn() ? (int)$v : null;
+        };
+        $chip['chipper_id'] = $asChipUser($in['chipper_id'] ?? null);
+        if ($chip['chipper_id'] === null && !empty($chip['chip_by'])) {
+            $byAcr = $pdo->prepare("SELECT id FROM users WHERE chip_acronym = ?");
+            $byAcr->execute([trim($chip['chip_by'])]);
+            $chip['chipper_id'] = ($hit = $byAcr->fetchColumn()) ? (int)$hit : null;
+        }
+        $chip['assistant_id'] = $asChipUser($in['assistant_id'] ?? null);
         wwAuditedInsert($pdo, 'penguin_chips', $chip, $obsId, $reason);
 
         $bio = [];
