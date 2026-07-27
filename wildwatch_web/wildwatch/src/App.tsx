@@ -2987,7 +2987,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 {/* Each element sits over its own count: the box over its visit total, each
                     companion over how many of those visits they shared. */}
                 <span className="box-count-stack">
-                  <a className="clickable" href={`/box/${b}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(b)); }}><b>Box {b}</b></a>
+                  <a className="bird-chip clickable" href={`/box/${b}`} onClick={e => { e.stopPropagation(); navClick(e, () => onBoxClick(b)); }}>Box {b}</a>
                   <span className="scan-count">{boxSightings.length}x</span>
                 </span>
                 {(companions.length > 0 || noScan > 0) && <span className="muted box-head-with">with</span>}
