@@ -400,6 +400,7 @@ namespace PenguinMonitor
                 new Handler(Looper.MainLooper).Post(() =>
                 {
                     CreateBoxSetsDictionary();
+                    RebuildSettingsCard();   // pick up the freshly-synced people list without a restart
                     if (_isBoxLocked)
                         DrawPageLayouts();
                     // Refresh the previous-obs card explicitly — a locked redraw can skip the
@@ -1402,6 +1403,7 @@ namespace PenguinMonitor
                         _syncButton.Enabled = true;
                     }
                     CreateBoxSetsDictionary();
+                    RebuildSettingsCard();   // pick up the freshly-synced people list without a restart
                     DrawPageLayouts();
                     // Refresh the previous-obs card explicitly so an updated breeding string
                     // (or summary) from this sync shows without a manual collapse/expand.
@@ -2755,6 +2757,21 @@ namespace PenguinMonitor
 
                 slideOut.Start();
             }
+        }
+        // Rebuild the settings card in place so a completed sync's fresh data — the people list
+        // especially — shows without an app restart. createSettingsCard reads the caches at build
+        // time and is otherwise only called once at startup, so the Observer/Recorder pickers would
+        // stay on "Sync to load people" until relaunch.
+        private void RebuildSettingsCard()
+        {
+            var parent = _settingsCard?.Parent as ViewGroup;
+            if (parent == null) return;
+            int idx = parent.IndexOfChild(_settingsCard);
+            var wasVisible = _settingsCard.Visibility;
+            parent.RemoveView(_settingsCard);
+            createSettingsCard();
+            _settingsCard.Visibility = wasVisible;
+            parent.AddView(_settingsCard, idx);
         }
         private void createSettingsCard()
         {
