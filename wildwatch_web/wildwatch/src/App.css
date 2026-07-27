@@ -584,8 +584,12 @@ h3.collapsible:hover { color:#1a5276; }
    partner/parents and the box link ("with <mini> in Box 63"). */
 .clutch-box-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-bottom:6px; }
 .clutch-box-row .clutch-label { margin-bottom:0; }
-.clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:6px 5px; }
-.clutch-birds { display:inline-flex; flex-wrap:wrap; align-items:center; gap:5px 4px; min-width:0; }
+.clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:5px 4px; }
+/* Boxless on purpose: as a flex item of its own, a wrapped set of birds fills the row and
+   shoves the tick and window dates onto a line below. With display:contents the minis, eggs,
+   tick and dates are all items of .clutch-body, so the tick and dates ride the last line the
+   birds actually end on. Descendant rules (the 13px offspring lift) still match. */
+.clutch-birds { display:contents; }
 /* Finished clutches: the window dates flow on the birds' row, pinned right, wrapping to
    their own line only when they don't fit. */
 .clutch-body > .clutch-dates { margin-left:auto; align-self:center; white-space:nowrap; }

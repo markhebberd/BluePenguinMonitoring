@@ -1325,14 +1325,23 @@ function ClutchBody({ clutch, dates, children }: { clutch: Clutch; dates: React.
     if (!body || !datesEl || !predEl) return;   // no predictions row — CSS already handles it
     const right = body.getBoundingClientRect().right;
     const needed = datesEl.getBoundingClientRect().width;
-    // End of the last stage. getClientRects()' last entry, not the union box, so a stage that
-    // itself wrapped reports where its text actually stops rather than its widest line.
+    // Where a row's content stops: its last item's last rect, not a union box — an item that
+    // wrapped reports where it actually ends rather than its widest line.
+    const endOf = (el?: Element) => {
+      const rects = el?.getClientRects();
+      return rects?.length ? rects[rects.length - 1].right : null;
+    };
+    // .clutch-birds is display:contents, so it has no box — descend to what it holds.
+    const boxed = (el: Element): Element[] =>
+      el.getClientRects().length ? [el] : Array.from(el.children).flatMap(boxed);
     const stages = Array.from(predEl.children).filter(el => el !== datesEl);
-    const tail = stages[stages.length - 1]?.getClientRects();
-    const freeOnPredictions = tail?.length ? right - tail[tail.length - 1].right : Infinity;
-    // The birds' row is everything in the body except the predictions and the dates.
-    const firstRow = Array.from(body.children).filter(el => el !== datesEl && el !== predEl);
-    const freeOnBirds = right - Math.max(...firstRow.map(el => el.getBoundingClientRect().right), 0);
+    const predictionsEnd = endOf(stages[stages.length - 1]);
+    const freeOnPredictions = predictionsEnd === null ? Infinity : right - predictionsEnd;
+    // The birds' row is everything in the body bar the predictions and the dates, and it's the
+    // last of those — on the last line the birds wrapped to — that the dates have to fit after.
+    const items = Array.from(body.children).filter(el => el !== datesEl && el !== predEl).flatMap(boxed);
+    const birdsEnd = endOf(items[items.length - 1]);
+    const freeOnBirds = right - (birdsEnd ?? body.getBoundingClientRect().left);
     setOnBirdsRow(freeOnPredictions < needed + 8 && freeOnBirds >= needed + 14);
   }, []);
   // Re-measure on every render (the stages restate their dates as a clutch ages) and on any
