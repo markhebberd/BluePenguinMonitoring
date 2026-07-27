@@ -6651,6 +6651,12 @@ namespace PenguinMonitor
                     chipBoxInput.RequestFocus();
                     return;
                 }
+                // A chip must be attributed to a chipper — no save without one selected.
+                if (SelectedChipUserId(chipperSpinner, chipperUsers) == 0)
+                {
+                    Toast.MakeText(this, chipperUsers.Count == 0 ? "No chippers — Sync to load them" : "Select a chipper", ToastLength.Short)?.Show();
+                    return;
+                }
                 // Confirmation screen listing everything that will be saved, worded the way
                 // the user entered it. "No" just closes this dialog — the input form
                 // underneath stays open with its values intact for editing or Cancel.
