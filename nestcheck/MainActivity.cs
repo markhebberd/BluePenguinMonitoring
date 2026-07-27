@@ -6004,81 +6004,82 @@ namespace PenguinMonitor
             int SelectedChipUserId(Spinner s, List<DataStorageService.SyncUser> src) =>
                 s.SelectedItemPosition > 0 && s.SelectedItemPosition <= src.Count ? src[s.SelectedItemPosition - 1].id : 0;
 
-            // Chip box — SELECT a known nest, exactly like the rechip penguin selector: you search
-            // and tap a nest; you cannot type a free value. The chosen nest shows as a chip with an
-            // ✕ to change it. selectedNest holds the value used on save (never the raw search text).
+            // Chip box — SELECT a known nest (no free typing). The current nest shows full-width;
+            // tapping it opens the list below to pick another, keeping the current value until you
+            // actually choose a different one — no destructive ✕/clear.
             var chipBoxCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             chipBoxCol.AddView(createLabel("Chip box"));
-            var nestSearchInput = createInput("Search nest");
-            chipBoxCol.AddView(nestSearchInput);
-            var nestResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            chipBoxCol.AddView(nestResults);
-            var nestSelectedRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
-            nestSelectedRow.Visibility = ViewStates.Gone;
-            chipBoxCol.AddView(nestSelectedRow);
-            card.AddView(chipBoxCol);
 
             // All real nests for this colony (drop the "fake" placeholder an empty box-set leaves).
             var nestNames = _boxNamesAndIndexes?.Keys.Where(k => k != "fake").OrderBy(k => k).ToList()
                             ?? new List<string>();
             string selectedNest = "";
             bool suppressNestSearch = false;
-            void ClearNest()
+
+            // Full-width current-nest field; tap to change.
+            var nestSelectedView = new TextView(this) { Text = "Tap to choose nest", TextSize = 15 };
+            nestSelectedView.SetTextColor(Color.Black);
+            nestSelectedView.SetPadding(16, 16, 16, 16);
+            nestSelectedView.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+            nestSelectedView.Clickable = true;
+            nestSelectedView.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            chipBoxCol.AddView(nestSelectedView);
+
+            var nestSearchInput = createInput("Search nest");
+            nestSearchInput.Visibility = ViewStates.Gone;
+            nestSearchInput.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            chipBoxCol.AddView(nestSearchInput);
+            var nestResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            chipBoxCol.AddView(nestResults);
+            card.AddView(chipBoxCol);
+
+            void RenderNestResults(string q)
             {
-                selectedNest = "";
-                nestSelectedRow.RemoveAllViews();
-                nestSelectedRow.Visibility = ViewStates.Gone;
-                nestSearchInput.Visibility = ViewStates.Visible;
-            }
-            void SelectNest(string nest)
-            {
-                selectedNest = nest;
                 nestResults.RemoveAllViews();
-                suppressNestSearch = true; nestSearchInput.Text = ""; suppressNestSearch = false;
-                nestSearchInput.Visibility = ViewStates.Gone;
-                var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
-                imm?.HideSoftInputFromWindow(nestSearchInput.WindowToken, 0);
-                // Selected-nest chip: name + ✕ to change it
-                nestSelectedRow.RemoveAllViews();
-                var chip = new TextView(this) { Text = nest, TextSize = 15 };
-                chip.SetTextColor(Color.Black);
-                chip.SetPadding(16, 8, 16, 8);
-                chip.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
-                nestSelectedRow.AddView(chip);
-                var clear = new TextView(this) { Text = "  ✕  change", TextSize = 14 };
-                clear.SetTextColor(UIFactory.PRIMARY_BLUE);
-                clear.SetPadding(12, 8, 8, 8);
-                clear.Clickable = true;
-                clear.Click += (s2, e2) => ClearNest();
-                nestSelectedRow.AddView(clear);
-                nestSelectedRow.Visibility = ViewStates.Visible;
-            }
-            nestSearchInput.TextChanged += (s, e) =>
-            {
-                if (suppressNestSearch) return;
-                nestResults.RemoveAllViews();
-                var q = (nestSearchInput.Text ?? "").Trim().ToUpper();
-                if (q.Length < 1) return;
-                foreach (var m in nestNames
-                    .Where(k => k.ToUpper().Contains(q))
-                    .OrderBy(k => k.ToUpper().StartsWith(q) ? 0 : 1).ThenBy(k => k).Take(8))
+                var qU = (q ?? "").Trim().ToUpper();
+                var matches = string.IsNullOrEmpty(qU)
+                    ? nestNames.AsEnumerable()
+                    : nestNames.Where(k => k.ToUpper().Contains(qU)).OrderBy(k => k.ToUpper().StartsWith(qU) ? 0 : 1).ThenBy(k => k);
+                foreach (var m in matches.Take(12))
                 {
                     var row = new TextView(this) { Text = m, TextSize = 15 };
                     row.SetTextColor(UIFactory.TEXT_PRIMARY);
-                    row.SetPadding(12, 10, 12, 10);
+                    row.SetPadding(16, 12, 16, 12);
                     row.Clickable = true;
                     row.Click += (s2, e2) => SelectNest(m);
                     nestResults.AddView(row);
                 }
+            }
+            void SelectNest(string nest)
+            {
+                selectedNest = nest;
+                nestSelectedView.Text = nest;
+                nestSelectedView.Visibility = ViewStates.Visible;
+                nestSearchInput.Visibility = ViewStates.Gone;
+                suppressNestSearch = true; nestSearchInput.Text = ""; suppressNestSearch = false;
+                nestResults.RemoveAllViews();
+                var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                imm?.HideSoftInputFromWindow(nestSearchInput.WindowToken, 0);
+            }
+            // Tapping the current nest opens the picker below WITHOUT losing the current value.
+            nestSelectedView.Click += (s, e) =>
+            {
+                nestSearchInput.Visibility = ViewStates.Visible;
+                nestSearchInput.RequestFocus();
+                RenderNestResults("");   // show all nests to choose from
             };
+            nestSearchInput.TextChanged += (s, e) => { if (!suppressNestSearch) RenderNestResults(nestSearchInput.Text); };
+
             // Pre-select the box being worked on, if it's a real nest.
             var currentNestKey = nestNames.FirstOrDefault(k => string.Equals(k, _currentBoxName?.Trim(), StringComparison.OrdinalIgnoreCase));
             if (currentNestKey != null) SelectNest(currentNestKey);
             // No nest list at all (unconfigured colony) — fall back to a plain box-name field so
-            // chipping isn't blocked entirely; there's nothing to pick from.
+            // chipping isn't blocked; there's nothing to pick from.
             if (nestNames.Count == 0)
             {
+                nestSelectedView.Visibility = ViewStates.Gone;
+                nestSearchInput.Visibility = ViewStates.Visible;
                 nestSearchInput.Hint = "Box name";
                 nestSearchInput.Text = _currentBoxName;
             }
