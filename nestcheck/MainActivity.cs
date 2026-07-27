@@ -216,7 +216,8 @@ namespace PenguinMonitor
         private LinearLayout? _tagModeLastObsCard;   // last known contents: black = today, orange = older
         private TextView? _tagModeTagText;
         private TextView? _tagModePositionText;
-        private Button? _tagModeSetButton;           // "Set up this box"
+        private Button? _tagModeSetButton;           // "Set location"
+        private Button? _tagModeSetTagButton;        // "Set tag" — never needs a GPS reading
         private LinearLayout? _tagModeCapturePanel;  // live capture UI, shown only while capturing
         private TextView? _tagModeCaptureTitle;
         private TextView? _tagModeStep1Text;         // step 1 — GPS
@@ -3767,6 +3768,7 @@ namespace PenguinMonitor
 
                             bool capturing = _tagCaptureActive && _tagCaptureBoxName == _currentBoxName;
                             _tagModeSetButton!.Visibility = capturing ? ViewStates.Gone : ViewStates.Visible;
+                            _tagModeSetTagButton!.Visibility = capturing ? ViewStates.Gone : ViewStates.Visible;
                             _tagModeCapturePanel!.Visibility = capturing ? ViewStates.Visible : ViewStates.Gone;
                             if (capturing) UpdateTagCaptureSteps();
                         }
@@ -4930,14 +4932,31 @@ namespace PenguinMonitor
 
             // The one and only way into editing. Nothing above this point can change data,
             // and nothing above this point turns the GPS on.
+            // Two independent jobs, two independent ways in. Setting a tag must never require
+            // taking a GPS reading, and vice versa.
+            var tagModeActionRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            var actionRowParams2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            actionRowParams2.SetMargins(0, 4, 0, 4);
+            tagModeActionRow.LayoutParameters = actionRowParams2;
+
+            _tagModeSetTagButton = _uiFactory.CreateStyledButton("🏷  Set tag", TAG_MODE_PURPLE);
+            _tagModeSetTagButton.TextSize = 16;
+            _tagModeSetTagButton.SetPadding(8, 28, 8, 28);
+            var setTagParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            setTagParams.SetMargins(0, 0, 5, 0);
+            _tagModeSetTagButton.LayoutParameters = setTagParams;
+            _tagModeSetTagButton.Click += (s, e) => StartTagOnlyCapture();
+            tagModeActionRow.AddView(_tagModeSetTagButton);
+
             _tagModeSetButton = _uiFactory.CreateStyledButton("📍  Set location", TAG_MODE_PURPLE);
-            _tagModeSetButton.TextSize = 17;
-            _tagModeSetButton.SetPadding(16, 28, 16, 28);
-            var setBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            setBtnParams.SetMargins(0, 4, 0, 4);
+            _tagModeSetButton.TextSize = 16;
+            _tagModeSetButton.SetPadding(8, 28, 8, 28);
+            var setBtnParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            setBtnParams.SetMargins(5, 0, 0, 0);
             _tagModeSetButton.LayoutParameters = setBtnParams;
             _tagModeSetButton.Click += (s, e) => StartTagCapture();
-            _tagModeContentLayout.AddView(_tagModeSetButton);
+            tagModeActionRow.AddView(_tagModeSetButton);
+            _tagModeContentLayout.AddView(tagModeActionRow);
 
             // Capture panel — the guided two-step, then one Save that commits both steps
             _tagModeCapturePanel = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
@@ -4974,7 +4993,9 @@ namespace PenguinMonitor
             _tagModeMeasureAgainButton.Click += (s, e) =>
             {
                 if (!_tagCaptureActive) return;
-                StartTagGpsMeasurement();   // throws away the readings so far and starts over
+                // Same placement confirmation either way — restarting mid-session is exactly as
+                // dependent on the phone being on the nest as starting was.
+                StartTagCapture();
             };
             _tagModeCapturePanel.AddView(_tagModeMeasureAgainButton);
 
@@ -7551,14 +7572,39 @@ namespace PenguinMonitor
                 .SetNegativeButton("Not yet", (s, e) => { })
                 .SetPositiveButton("Start recording", (s, e) =>
                 {
-                    _tagCaptureActive = true;
-                    _tagCaptureBoxName = box;
-                    _pendingTagId = null;
-                    _pendingTagFromBox = null;
-                    _pendingTagRemoval = false;
+                    // Joining a tag session that's already open must not discard the scan it holds
+                    if (!_tagCaptureActive || _tagCaptureBoxName != box)
+                    {
+                        _tagCaptureActive = true;
+                        _tagCaptureBoxName = box;
+                        _pendingTagId = null;
+                        _pendingTagFromBox = null;
+                        _pendingTagRemoval = false;
+                    }
                     StartTagGpsMeasurement();
                 })
                 .Show();
+        }
+
+        // "Set tag" — a tag session with no GPS involved at all. Assigning a tag used to be
+        // reachable only by going through a location recording, which made one job hostage to
+        // the other; they're independent and they're now entered independently.
+        private void StartTagOnlyCapture()
+        {
+            if (string.IsNullOrEmpty(_currentBoxName)) return;
+            if (!_appSettings.IsBlueToothEnabled)
+            {
+                Toast.MakeText(this, "Scanner is off — turn on 'Connect scanner' in settings", ToastLength.Long)?.Show();
+                return;
+            }
+            _tagCaptureActive = true;
+            _tagCaptureBoxName = _currentBoxName;
+            _tagGpsMeasuring = false;
+            _bestTagCaptureLocation = null;
+            _pendingTagId = null;
+            _pendingTagFromBox = null;
+            _pendingTagRemoval = false;
+            DrawPageLayouts();
         }
 
         // Starts listening. Called from the bottom bar once the phone is on the box, and again
@@ -7645,7 +7691,9 @@ namespace PenguinMonitor
             _boxTags.TryGetValue(box, out var existing);
             bool hasStoredPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
 
-            _tagModeCaptureTitle.Text = $"Recording location — Box {box}";
+            _tagModeCaptureTitle.Text = _tagGpsMeasuring
+                ? $"Recording location — Box {box}"
+                : $"Set tag — Box {box}";
 
             // --- Step 1: GPS ---------------------------------------------------------------
             var loc = _bestTagCaptureLocation;
@@ -7668,7 +7716,17 @@ namespace PenguinMonitor
                 return block;
             }
 
-            if (loc == null)
+            if (!_tagGpsMeasuring)
+            {
+                // Tag-only session: the position is not being touched, and saying so matters —
+                // otherwise "Save tag" looks like it might move the nest.
+                _tagModeStep1Text.Text = "Location: not being changed."
+                    + StoredBlock(_currentLocation);
+                _tagModeStep1Text.SetTextColor(Color.DarkGray);
+                _tagModeMeasureAgainButton.Text = "Set location too";
+                _tagModeMeasureAgainButton.Visibility = ViewStates.Visible;
+            }
+            else if (loc == null)
             {
                 _tagModeStep1Text.Text = $"Finding GPS…  {_tagGpsElapsedSeconds}s\n"
                     + "Leave the phone where it is."
