@@ -8985,7 +8985,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <h3>Users</h3>
         {loading ? <p className="muted">Loading...</p> : (
           <table className="bird-table" style={{width:'100%'}}>
-            <thead><tr><th>Name</th><th>Surname</th><th>Chip</th><th>Falcon ID</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>
+            <thead><tr><th>First name</th><th>Surname</th><th>Chip</th><th>Falcon ID</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.observer_id}>
@@ -9028,7 +9028,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           </div>
         )}
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <input type="text" placeholder="Name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
+          <input type="text" placeholder="First name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="text" placeholder="Surname (optional)" value={newUser.surname} onChange={e => setNewUser({ ...newUser, surname: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="text" placeholder="Chip acronym (e.g. BS)" value={newUser.chip_acronym} onChange={e => setNewUser({ ...newUser, chip_acronym: e.target.value })} style={{ padding: '5px 8px', width: 130 }} />
           <input type="text" placeholder="Falcon ID (optional)" value={newUser.falcon_id} onChange={e => setNewUser({ ...newUser, falcon_id: e.target.value })} style={{ padding: '5px 8px' }} />
