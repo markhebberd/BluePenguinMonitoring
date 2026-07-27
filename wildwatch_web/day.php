@@ -63,7 +63,7 @@ $chippings = $stmt->fetchAll();
 stripPengPrefix($chippings, $viewPrefix);
 
 // The day's note and who was out — one row for this colony on this date, or none.
-$noteStmt = $pdo->prepare("SELECT note, observer_id, recorder_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+$noteStmt = $pdo->prepare("SELECT note, observer_id, scribe_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
 $noteStmt->execute([$colonyId, $date]);
 $dayRow = $noteStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -71,7 +71,7 @@ echo json_encode([
     'date' => $date,
     'day_note' => $dayRow['note'] ?? null,
     'day_observer_id' => isset($dayRow['observer_id']) ? (int)$dayRow['observer_id'] : null,
-    'day_recorder_id' => isset($dayRow['recorder_id']) ? (int)$dayRow['recorder_id'] : null,
+    'day_scribe_id' => isset($dayRow['scribe_id']) ? (int)$dayRow['scribe_id'] : null,
     'observations' => $observations,
     'chippings' => $chippings,
 ]);

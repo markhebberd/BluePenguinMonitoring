@@ -291,11 +291,11 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // Collapse whitespace so a note pasted over two lines still fits the column and reads as one line.
     $clean = fn($v, $max) => mb_substr(trim(preg_replace('/\s+/', ' ', (string)$v)), 0, $max);
     $note = $clean($in['note'] ?? '', 255);
-    // observer_id/recorder_id are only touched when the caller sends them, so a client that
+    // observer_id/scribe_id are only touched when the caller sends them, so a client that
     // knows nothing about the people fields (posting just a note) can't blank them. '' / 0 /
     // null all mean "nobody recorded".
     $sentObserver = array_key_exists('observer_id', $in);
-    $sentRecorder = array_key_exists('recorder_id', $in);
+    $sentScribe = array_key_exists('scribe_id', $in);
     $asUserId = function ($v) use ($pdo) {
         if ($v === null || $v === '' || (int)$v === 0) return null;
         $chk = $pdo->prepare("SELECT id FROM users WHERE id = ?");
@@ -307,10 +307,10 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         $observerId = $sentObserver ? $asUserId($in['observer_id']) : null;
-        $recorderId = $sentRecorder ? $asUserId($in['recorder_id']) : null;
+        $scribeId = $sentScribe ? $asUserId($in['scribe_id']) : null;
 
         $pdo->beginTransaction();
-        $ex = $pdo->prepare("SELECT day_note_id, note, observer_id, recorder_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
+        $ex = $pdo->prepare("SELECT day_note_id, note, observer_id, scribe_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
         $ex->execute([$colonyId, $date]);
         $row = $ex->fetch(PDO::FETCH_ASSOC);
         $existingId = $row['day_note_id'] ?? null;
@@ -320,12 +320,12 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         // say: delete, so "no record for this day" has one representation.
         $finalNote     = $note;
         $finalObserver = $sentObserver ? $observerId : (isset($row['observer_id']) ? (int)$row['observer_id'] : null);
-        $finalRecorder = $sentRecorder ? $recorderId : (isset($row['recorder_id']) ? (int)$row['recorder_id'] : null);
-        $allBlank = $finalNote === '' && $finalObserver === null && $finalRecorder === null;
+        $finalScribe = $sentScribe ? $scribeId : (isset($row['scribe_id']) ? (int)$row['scribe_id'] : null);
+        $allBlank = $finalNote === '' && $finalObserver === null && $finalScribe === null;
 
         $fields = ['note' => $finalNote === '' ? null : $finalNote];
         if ($sentObserver) $fields['observer_id'] = $observerId;
-        if ($sentRecorder) $fields['recorder_id'] = $recorderId;
+        if ($sentScribe) $fields['scribe_id'] = $scribeId;
 
         if ($allBlank) {
             if ($existingId) wwAuditedDelete($pdo, 'day_notes', (int)$existingId, $oid, 'Cleared day note');
@@ -348,7 +348,7 @@ if ($action === 'save_day_note' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         $pdo->commit();
-        echo json_encode(['success'=>true, 'note'=>$finalNote, 'observer_id'=>$finalObserver, 'recorder_id'=>$finalRecorder]);
+        echo json_encode(['success'=>true, 'note'=>$finalNote, 'observer_id'=>$finalObserver, 'scribe_id'=>$finalScribe]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         http_response_code(400); echo json_encode(['error'=>$e->getMessage()]);

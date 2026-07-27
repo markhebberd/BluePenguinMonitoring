@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS day_notes (
     note_date   DATE NOT NULL,
     note        VARCHAR(255) NULL,        -- what happened that day
     observer_id INT NULL,                 -- who was looking in the boxes
-    recorder_id INT NULL,                 -- who was working the phone
+    scribe_id INT NULL,                 -- who was working the phone
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_colony_date (colony_id, note_date),
@@ -124,10 +124,10 @@ CREATE TABLE IF NOT EXISTS day_notes (
     CONSTRAINT chk_dn_any CHECK (
           CHAR_LENGTH(TRIM(COALESCE(note, ''))) > 0
        OR observer_id IS NOT NULL
-       OR recorder_id IS NOT NULL),
+       OR scribe_id IS NOT NULL),
     CONSTRAINT fk_dn_colony FOREIGN KEY (colony_id) REFERENCES colonies (colony_id),
     CONSTRAINT fk_dn_observer FOREIGN KEY (observer_id) REFERENCES users (id),
-    CONSTRAINT fk_dn_recorder FOREIGN KEY (recorder_id) REFERENCES users (id)
+    CONSTRAINT fk_dn_scribe FOREIGN KEY (scribe_id) REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS penguins (

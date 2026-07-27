@@ -27,7 +27,7 @@ const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date
 // array of peng_nums (prefix-stripped per element in getVerificationData). Alias v = breeding_verifications.
 // The day's note — one row per colony per NZ date. Alias d = day_notes. updated_at rides along
 // so the client can tell an edited note from an unchanged one on an incremental snapshot.
-const SNAP_COLS_DAYNOTE = 'd.day_note_id, d.note_date, d.note, d.observer_id, d.recorder_id, d.updated_at';
+const SNAP_COLS_DAYNOTE = 'd.day_note_id, d.note_date, d.note, d.observer_id, d.scribe_id, d.updated_at';
 
 const SNAP_COLS_VER = 'v.verification_id, v.observation_id, v.adults_verdict, v.male_peng_num, v.female_peng_num, v.adults_reviewed_by, oa.f_name AS adults_reviewed_by_name, v.adults_reviewed_at, v.adults_note, v.chicks_verdict, v.chicks, v.dead_eggs, v.dead_chicks, v.fledged_unchipped, v.chicks_reviewed_by, oc.f_name AS chicks_reviewed_by_name, v.chicks_reviewed_at, v.chicks_note, v.created_at, v.updated_at';
 

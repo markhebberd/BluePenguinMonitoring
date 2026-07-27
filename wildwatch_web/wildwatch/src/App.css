@@ -456,10 +456,10 @@ h3.collapsible:hover { color:#1a5276; }
 .day-note-editable { cursor:text; border-bottom:1px dashed transparent; }
 .day-note-editable:hover { border-bottom-color:#b0bec5; }
 .day-note-empty { color:#90a4ae; font-style:normal; font-size:12px; }
-/* "observer Britta · recorder Mark H" beside the day's note */
+/* "observer Britta · scribe Mark H" beside the day's note */
 .day-hdr-people-label { color:#90a4ae; font-style:normal; font-size:11px; margin-right:4px; }
 .day-hdr-sep { color:#b0bec5; font-style:normal; }
-/* Observer / recorder picker: click the name, type to filter, click a result. Lists every
+/* Observer / scribe picker: click the name, type to filter, click a result. Lists every
    user, active or not, so an old day can still be attributed to whoever actually worked it. */
 .day-person-picker { position:relative; display:inline-flex; align-items:center; }
 /* The closed field is tab-focusable, so it needs a visible focus ring — otherwise tabbing

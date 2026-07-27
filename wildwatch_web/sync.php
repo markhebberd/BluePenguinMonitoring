@@ -50,26 +50,26 @@ function authenticate($pdo) {
 /**
  * GET: Download latest observation per box with scans.
  */
-/** The colony's day notes as note_date => [note, observer, recorder], for stamping onto each
+/** The colony's day notes as note_date => [note, observer, scribe], for stamping onto each
  *  observation below. Note stays a plain string in the payload; the people ride beside it. */
 function dayNoteMap($pdo, $colonyId): array {
     // The people are FKs to users; resolve them to display names here so the phone can show
     // "who was out" without carrying a copy of the user table.
-    $s = $pdo->prepare("SELECT d.note_date, d.note, d.observer_id, d.recorder_id,
+    $s = $pdo->prepare("SELECT d.note_date, d.note, d.observer_id, d.scribe_id,
             TRIM(CONCAT(uo.f_name, ' ', uo.surname)) AS observer_name,
-            TRIM(CONCAT(ur.f_name, ' ', ur.surname)) AS recorder_name
+            TRIM(CONCAT(ur.f_name, ' ', ur.surname)) AS scribe_name
         FROM day_notes d
         LEFT JOIN users uo ON uo.id = d.observer_id
-        LEFT JOIN users ur ON ur.id = d.recorder_id
+        LEFT JOIN users ur ON ur.id = d.scribe_id
         WHERE d.colony_id = ?");
     $s->execute([$colonyId]);
     $map = [];
     foreach ($s->fetchAll() as $r) $map[$r['note_date']] = [
         'note' => $r['note'],
         'observer_id' => $r['observer_id'] !== null ? (int)$r['observer_id'] : null,
-        'recorder_id' => $r['recorder_id'] !== null ? (int)$r['recorder_id'] : null,
+        'scribe_id' => $r['scribe_id'] !== null ? (int)$r['scribe_id'] : null,
         'observer' => $r['observer_name'] ?: null,
-        'recorder' => $r['recorder_name'] ?: null,
+        'scribe' => $r['scribe_name'] ?: null,
     ];
     return $map;
 }
@@ -177,9 +177,9 @@ function handleDownload($pdo, $colonyId, $observer) {
             'observation_time_utc' => $obs['observation_time_utc'],
             'day_note' => $note,
             'day_observer' => $day['observer'] ?? null,
-            'day_recorder' => $day['recorder'] ?? null,
+            'day_scribe' => $day['scribe'] ?? null,
             'day_observer_id' => $day['observer_id'] ?? null,
-            'day_recorder_id' => $day['recorder_id'] ?? null,
+            'day_scribe_id' => $day['scribe_id'] ?? null,
             'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
@@ -217,7 +217,7 @@ function handleDownload($pdo, $colonyId, $observer) {
     $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes, watched FROM observation_locations WHERE colony_id = ?");
     $locStmt->execute([$colonyId]);
 
-    // Everyone who can be named as the day's observer or recorder. Active only — the phone is
+    // Everyone who can be named as the day's observer or scribe. Active only — the phone is
     // picking who is out today, and a deactivated person is by definition not. Names are
     // pre-joined so the app never has to compose them.
     $userStmt = $pdo->query("SELECT id, TRIM(CONCAT(f_name, ' ', surname)) AS name, f_name, surname, chip_acronym, falcon_id
@@ -269,7 +269,7 @@ function handleUpload($pdo, $colonyId, $observer) {
     $forceReplace = ($_GET['action'] === 'confirm');
     $dailyLabel = $input['daily_label'] ?? '';
     $dailyObserverId = (int)($input['daily_observer_id'] ?? 0) ?: null;
-    $dailyRecorderId = (int)($input['daily_recorder_id'] ?? 0) ?: null;
+    $dailyScribeId = (int)($input['daily_scribe_id'] ?? 0) ?: null;
     $observerId = (int)$observer['observer_id'];
     $created = [];
     $conflicts = [];
@@ -454,7 +454,7 @@ function handleUpload($pdo, $colonyId, $observer) {
         // arrives the note may have been corrected in the web day view, and a re-sync of the same
         // label should not undo that edit.
         foreach (array_keys($labelDates) as $noteDate) {
-            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync', $dailyObserverId, $dailyRecorderId);
+            wwFillDayNote($pdo, $colonyId, $noteDate, $dailyLabel, $observerId, 'nestcheck_sync', $dailyObserverId, $dailyScribeId);
         }
 
         $pdo->commit();

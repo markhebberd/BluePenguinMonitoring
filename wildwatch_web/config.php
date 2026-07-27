@@ -782,9 +782,9 @@ function ww_cleanMonitorLabel(string $raw): string {
  * not silently replace that. Returns true if a note was written. Caller owns the transaction.
  */
 function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $observerId, $reason = null,
-                       ?int $dayObserverId = null, ?int $dayRecorderId = null): bool {
+                       ?int $dayObserverId = null, ?int $dayScribeId = null): bool {
     $note = mb_substr(trim(preg_replace('/\s+/', ' ', $note)), 0, 255);
-    if ($note === '' && $dayObserverId === null && $dayRecorderId === null) return false;
+    if ($note === '' && $dayObserverId === null && $dayScribeId === null) return false;
     $ex = $pdo->prepare("SELECT day_note_id FROM day_notes WHERE colony_id = ? AND note_date = ?");
     $ex->execute([$colonyId, $noteDate]);
     if ($ex->fetchColumn()) return false;
@@ -800,7 +800,7 @@ function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $obs
         'colony_id' => $colonyId, 'note_date' => $noteDate,
         'note'        => $note === '' ? null : $note,
         'observer_id' => $known($dayObserverId),
-        'recorder_id' => $known($dayRecorderId),
+        'scribe_id' => $known($dayScribeId),
     ], $observerId, $reason);
     return true;
 }

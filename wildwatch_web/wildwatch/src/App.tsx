@@ -541,7 +541,7 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
 /** Pick a person from the user table. Every user is listed, active or not: attribution is
  *  historical, and whoever did the work may since have left. Service accounts are excluded
  *  (getUsers drops them). Typing filters; Enter takes the top match; the blue bar shows which
- *  that is. Used for the day's observer/recorder and for a chip's chipper/assistant. */
+ *  that is. Used for the day's observer/scribe and for a chip's chipper/assistant. */
 function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onAfterCommit }: {
   userId: number | null; label?: string; onSave: (id: number | null) => Promise<any>;
   addLabel?: string; title?: string;
@@ -657,10 +657,10 @@ function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onA
   );
 }
 
-/** Observer or recorder for the day — the shared picker, wired to this day's note row. */
+/** Observer or scribe for the day — the shared picker, wired to this day's note row. */
 function DayPersonField({ date, token, canEdit, field, userId, label, fieldRef, onAfterCommit }: {
   date: string; token?: string; canEdit?: boolean;
-  field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
+  field: 'observer_id' | 'scribe_id'; userId: number | null; label: string;
   fieldRef?: React.MutableRefObject<HTMLSpanElement | null>;
   onAfterCommit?: () => void;
 }) {
@@ -676,13 +676,13 @@ function DayPersonField({ date, token, canEdit, field, userId, label, fieldRef, 
  *  users, picked from the user table; the note is free text.
  *
  *  The three are chained for the keyboard: Enter (or Tab) out of the note opens Observer, and
- *  choosing an observer jumps straight to Recorder — so "brit ⏎ mar ⏎" fills both without
+ *  choosing an observer jumps straight to Scribe — so "brit ⏎ mar ⏎" fills both without
  *  touching the mouse. */
 function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
-  const { observer_id, recorder_id } = getDayPeople(date);
+  const { observer_id, scribe_id } = getDayPeople(date);
   const note = getDayNote(date) || '';
   const observerRef = useRef<HTMLSpanElement | null>(null);
-  const recorderRef = useRef<HTMLSpanElement | null>(null);
+  const scribeRef = useRef<HTMLSpanElement | null>(null);
   const parts: React.ReactNode[] = [];
   if (canEdit || note) parts.push(
     <DayField key="note" date={date} token={token} canEdit={canEdit} saved={note}
@@ -690,10 +690,10 @@ function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string;
   if (canEdit || observer_id) parts.push(
     <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id"
       userId={observer_id} label="Observer" fieldRef={observerRef}
-      onAfterCommit={() => recorderRef.current?.focus()} />);
-  if (canEdit || recorder_id) parts.push(
-    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id"
-      userId={recorder_id} label="Recorder" fieldRef={recorderRef} />);
+      onAfterCommit={() => scribeRef.current?.focus()} />);
+  if (canEdit || scribe_id) parts.push(
+    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="scribe_id"
+      userId={scribe_id} label="Scribe" fieldRef={scribeRef} />);
   return (<>{parts.map((el, i) => (
     <Fragment key={i}>{i > 0 && <span className="day-hdr-sep"> · </span>}{el}</Fragment>
   ))}</>);

@@ -485,7 +485,7 @@ if ($action === 'delete_user' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         ['observations',           'observer_id',         'recorded %d observation%s'],
         ['observations',           'deleted_by',          'deleted %d observation%s'],
         ['day_notes',              'observer_id',         'observer on %d day%s'],
-        ['day_notes',              'recorder_id',         'recorder on %d day%s'],
+        ['day_notes',              'scribe_id',         'scribe on %d day%s'],
         ['penguin_scans',          'deleted_by',          'deleted %d scan%s'],
         ['penguin_biometric_data', 'deleted_by',          'deleted %d biometric%s'],
         ['breeding_verifications', 'adults_reviewed_by',  'verified adults on %d clutch%s'],
