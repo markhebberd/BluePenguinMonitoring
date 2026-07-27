@@ -2826,10 +2826,11 @@ namespace PenguinMonitor
             dayPeopleLayout.SetPadding(8, 0, 8, 8);
             var dayUsers = DataStorageService.LoadUsers(this);
             // Index 0 is "not recorded", so a spinner position maps to dayUsers[pos - 1].
-            Spinner MakePersonSpinner(int selectedId)
+            Spinner MakePersonSpinner(int selectedId, string emptyLabel = "")
             {
-                // Index 0 is the unset option — blank, not a placeholder; empty reads as "not set".
-                var labels = new List<string> { "" };
+                // Index 0 is the unset option (users.id 0). Blank for the observer; the recorder
+                // labels it "Solo" — one person doing both roles, i.e. no separate recorder.
+                var labels = new List<string> { emptyLabel };
                 labels.AddRange(dayUsers.Select(u => u.name ?? ""));
                 var spinner = _uiFactory.CreateDropdownSpinner();
                 spinner.SetPadding(8, 4, 8, 4);
@@ -2844,7 +2845,7 @@ namespace PenguinMonitor
                 return spinner;
             }
             var observerSpinner = MakePersonSpinner(_colonyState.DailyObserverId);
-            var recorderSpinner = MakePersonSpinner(_colonyState.DailyRecorderId);
+            var recorderSpinner = MakePersonSpinner(_colonyState.DailyRecorderId, "Solo");
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
