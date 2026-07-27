@@ -4532,7 +4532,12 @@ namespace PenguinMonitor
             _discardButton.Clickable = true;
             _discardButton.Click += (s, e) =>
             {
-                if (_dataChangedSinceUnlock)
+                // There's something to discard if the box has an in-session edit OR a stored local
+                // observation for today (a draft — including one restored from a previous session,
+                // when _dataChangedSinceUnlock has reset to false). Without the latter, a restored
+                // draft could never be cleared back to a no-data state.
+                bool hasLocal = _colonyState.PendingObservations.Any(p => p.BoxName == _currentBoxName && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday);
+                if (_dataChangedSinceUnlock || hasLocal)
                 {
                     bool hasServerData = _colonyState.TodayBoxes.ContainsKey(_currentBoxName);
                     new AlertDialog.Builder(this)
@@ -4540,6 +4545,7 @@ namespace PenguinMonitor
                         .SetPositiveButton(hasServerData ? "Discard changes" : "Discard data", (s2, e2) =>
                         {
                             _colonyState.PendingObservations.RemoveAll(p => p.BoxName == _currentBoxName && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday);
+                            SaveToAppDataDir();   // persist the removal so the draft doesn't return on restart
                             _isBoxLocked = true;
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
