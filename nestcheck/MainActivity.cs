@@ -3632,9 +3632,13 @@ namespace PenguinMonitor
                     {
                         var nzTime = ToNzTime(currentObs.WhenDataCollectedUtc);
                         var who = !string.IsNullOrEmpty(currentObs.ObserverName) ? currentObs.ObserverName : "";
-                        var syncLine = currentObs.IsPendingUpload ? "⏳ Unsynced" : "Synced";
+                        // Three states: an unsaved draft (edits made since unlock, not yet locked)
+                        // is neither synced nor queued — don't claim "Synced". Locked-and-committed
+                        // is "⏳ Unsynced" (waiting to upload); otherwise it matches the server.
+                        bool unsavedDraft = !_isBoxLocked && _dataChangedSinceUnlock;
+                        var syncLine = unsavedDraft ? "Not saved" : currentObs.IsPendingUpload ? "⏳ Unsynced" : "Synced";
                         _boxSavedTimeTextView.Text = $"{syncLine}\n{nzTime:HH:mm}" + (!string.IsNullOrEmpty(who) ? $"\n{who}" : "");
-                        _boxSavedTimeTextView.SetTextColor(currentObs.IsPendingUpload ? UIFactory.DANGER_RED : Color.Black);
+                        _boxSavedTimeTextView.SetTextColor(unsavedDraft || currentObs.IsPendingUpload ? UIFactory.DANGER_RED : Color.Black);
                     }
                     else
                     {
@@ -5979,57 +5983,97 @@ namespace PenguinMonitor
             int SelectedChipUserId(Spinner s, List<DataStorageService.SyncUser> src) =>
                 s.SelectedItemPosition > 0 && s.SelectedItemPosition <= src.Count ? src[s.SelectedItemPosition - 1].id : 0;
 
-            // Chip box — a search over KNOWN nests, not free text. Typing filters the colony's box
-            // names (like the peng search); tapping a result fills the field. Save rejects anything
-            // that isn't a known nest, so a chip can't be filed against a mistyped box.
+            // Chip box — SELECT a known nest, exactly like the rechip penguin selector: you search
+            // and tap a nest; you cannot type a free value. The chosen nest shows as a chip with an
+            // ✕ to change it. selectedNest holds the value used on save (never the raw search text).
             var chipBoxCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             chipBoxCol.AddView(createLabel("Chip box"));
-            var chipBoxInput = createInput("Search nest");
-            chipBoxInput.Text = _currentBoxName;
-            chipBoxCol.AddView(chipBoxInput);
+            var nestSearchInput = createInput("Search nest");
+            chipBoxCol.AddView(nestSearchInput);
             var nestResults = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipBoxCol.AddView(nestResults);
+            var nestSelectedRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            nestSelectedRow.Visibility = ViewStates.Gone;
+            chipBoxCol.AddView(nestSelectedRow);
             card.AddView(chipBoxCol);
 
-            bool IsKnownNest(string name) => _boxNamesAndIndexes != null
-                && _boxNamesAndIndexes.Keys.Any(k => string.Equals(k, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+            // All real nests for this colony (drop the "fake" placeholder an empty box-set leaves).
+            var nestNames = _boxNamesAndIndexes?.Keys.Where(k => k != "fake").OrderBy(k => k).ToList()
+                            ?? new List<string>();
+            string selectedNest = "";
             bool suppressNestSearch = false;
-            chipBoxInput.TextChanged += (s, e) =>
+            void ClearNest()
+            {
+                selectedNest = "";
+                nestSelectedRow.RemoveAllViews();
+                nestSelectedRow.Visibility = ViewStates.Gone;
+                nestSearchInput.Visibility = ViewStates.Visible;
+            }
+            void SelectNest(string nest)
+            {
+                selectedNest = nest;
+                nestResults.RemoveAllViews();
+                suppressNestSearch = true; nestSearchInput.Text = ""; suppressNestSearch = false;
+                nestSearchInput.Visibility = ViewStates.Gone;
+                var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+                imm?.HideSoftInputFromWindow(nestSearchInput.WindowToken, 0);
+                // Selected-nest chip: name + ✕ to change it
+                nestSelectedRow.RemoveAllViews();
+                var chip = new TextView(this) { Text = nest, TextSize = 15 };
+                chip.SetTextColor(Color.Black);
+                chip.SetPadding(16, 8, 16, 8);
+                chip.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                nestSelectedRow.AddView(chip);
+                var clear = new TextView(this) { Text = "  ✕  change", TextSize = 14 };
+                clear.SetTextColor(UIFactory.PRIMARY_BLUE);
+                clear.SetPadding(12, 8, 8, 8);
+                clear.Clickable = true;
+                clear.Click += (s2, e2) => ClearNest();
+                nestSelectedRow.AddView(clear);
+                nestSelectedRow.Visibility = ViewStates.Visible;
+            }
+            nestSearchInput.TextChanged += (s, e) =>
             {
                 if (suppressNestSearch) return;
                 nestResults.RemoveAllViews();
-                var q = (chipBoxInput.Text ?? "").Trim().ToUpper();
-                if (q.Length < 1 || _boxNamesAndIndexes == null) return;
-                if (IsKnownNest(q)) return; // already an exact nest — nothing to disambiguate
-                var matches = _boxNamesAndIndexes.Keys
+                var q = (nestSearchInput.Text ?? "").Trim().ToUpper();
+                if (q.Length < 1) return;
+                foreach (var m in nestNames
                     .Where(k => k.ToUpper().Contains(q))
-                    .OrderBy(k => k.ToUpper().StartsWith(q) ? 0 : 1).ThenBy(k => k)
-                    .Take(8).ToList();
-                foreach (var m in matches)
+                    .OrderBy(k => k.ToUpper().StartsWith(q) ? 0 : 1).ThenBy(k => k).Take(8))
                 {
                     var row = new TextView(this) { Text = m, TextSize = 15 };
                     row.SetTextColor(UIFactory.TEXT_PRIMARY);
                     row.SetPadding(12, 10, 12, 10);
                     row.Clickable = true;
-                    row.Click += (s2, e2) =>
-                    {
-                        suppressNestSearch = true; chipBoxInput.Text = m; suppressNestSearch = false;
-                        chipBoxInput.SetSelection(m.Length);
-                        nestResults.RemoveAllViews();
-                        var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
-                        imm?.HideSoftInputFromWindow(chipBoxInput.WindowToken, 0);
-                    };
+                    row.Click += (s2, e2) => SelectNest(m);
                     nestResults.AddView(row);
                 }
             };
+            // Pre-select the box being worked on, if it's a real nest.
+            var currentNestKey = nestNames.FirstOrDefault(k => string.Equals(k, _currentBoxName?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (currentNestKey != null) SelectNest(currentNestKey);
+            // No nest list at all (unconfigured colony) — fall back to a plain box-name field so
+            // chipping isn't blocked entirely; there's nothing to pick from.
+            if (nestNames.Count == 0)
+            {
+                nestSearchInput.Hint = "Box name";
+                nestSearchInput.Text = _currentBoxName;
+            }
+            // The chip box value used on save — the selected nest, or the free-text fallback when
+            // the colony has no nest list to pick from.
+            string ChipBoxValue() => nestNames.Count == 0 ? (nestSearchInput.Text?.Trim() ?? "") : selectedNest;
 
             // Chipper below the chip box, then Assistant — one person per row
             var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            chipperCol.AddView(createLabel("Chipper"));
+            var chipperLabel = createLabel("Chipper");
+            chipperCol.AddView(chipperLabel);
             // Starts unset — the chipper is chosen explicitly, not assumed to be whoever is logged in.
             // Only chippers (users with a falcon id) appear here.
             var chipperSpinner = MakeChipPersonSpinner(chipperUsers, 0);
+            // Picking a chipper clears the red "required" highlight raised by a failed save.
+            chipperSpinner.ItemSelected += (s, e) => { if (e.Position > 0) chipperLabel.SetTextColor(UIFactory.TEXT_PRIMARY); };
             chipperCol.AddView(chipperSpinner);
             if (chipperUsers.Count == 0)
             {
@@ -6245,7 +6289,7 @@ namespace PenguinMonitor
                     IsChick = chippedAsChick.Checked,
                     ChickSizeCode = sizeSel0.Contains("(SC)") ? "SC" : sizeSel0.Contains("(BC)") ? "BC" : sizeSel0.Contains("(LC)") ? "LC" : "",
                     SexCode = ObservedSexOptions.FirstOrDefault(o => o.label == (sexSpinner.SelectedItem?.ToString() ?? "")).code ?? "",
-                    ChipBox = chipBoxInput.Text ?? "",
+                    ChipBox = ChipBoxValue(),
                     ChipperId = SelectedChipUserId(chipperSpinner, chipperUsers),
                     AssistantId = SelectedChipUserId(assistantSpinner, chipUsers),
                     Weight = weightInput.Text ?? "",
@@ -6263,7 +6307,8 @@ namespace PenguinMonitor
             // Restore a form snapshot after a process kill
             if (restore != null)
             {
-                chipBoxInput.Text = restore.ChipBox;
+                if (nestNames.Count == 0) nestSearchInput.Text = restore.ChipBox;
+                else { var rk = nestNames.FirstOrDefault(k => string.Equals(k, restore.ChipBox?.Trim(), StringComparison.OrdinalIgnoreCase)); if (rk != null) SelectNest(rk); }
                 if (restore.ChipperId > 0) { var ci = chipperUsers.FindIndex(u => u.id == restore.ChipperId); if (ci >= 0) chipperSpinner.SetSelection(ci + 1); }
                 if (restore.AssistantId > 0) { var ai = chipUsers.FindIndex(u => u.id == restore.AssistantId); if (ai >= 0) assistantSpinner.SetSelection(ai + 1); }
                 weightInput.Text = restore.Weight;
@@ -6299,7 +6344,7 @@ namespace PenguinMonitor
                     IsChick = qIsChick,
                     ChickSizeCode = qChickSize,
                     SexCode = qSex,
-                    ChipBox = chipBoxInput.Text?.Trim() ?? "",
+                    ChipBox = ChipBoxValue(),
                     ChipperId = SelectedChipUserId(chipperSpinner, chipperUsers),
                     AssistantId = SelectedChipUserId(assistantSpinner, chipUsers),
                     Weight = weightInput.Text ?? "",
@@ -6375,6 +6420,7 @@ namespace PenguinMonitor
                 // Read the person spinners here on the UI thread — the network POST below runs off it.
                 var chipperId = SelectedChipUserId(chipperSpinner, chipperUsers);
                 var assistantId = SelectedChipUserId(assistantSpinner, chipUsers);
+                var chipBoxVal = ChipBoxValue();
 
                 _ = Task.Run(async () =>
                 {
@@ -6401,7 +6447,7 @@ namespace PenguinMonitor
                                 ["chipped_as_adult"] = isChick ? 0 : 1,
                                 ["chip_date"] = today,
                                 ["observation_date"] = today,
-                                ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
+                                ["chip_box"] = chipBoxVal,
                             };
                             if (chipperId > 0) birdFields["chipper_id"] = chipperId;
                             if (assistantId > 0) birdFields["assistant_id"] = assistantId;
@@ -6448,7 +6494,7 @@ namespace PenguinMonitor
                                 ["pit_id"] = fullPitId,
                                 ["chip_date"] = today,
                                 ["is_active"] = 1,
-                                ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
+                                ["chip_box"] = chipBoxVal,
                             };
                             if (chipperId > 0) chipFields["chipper_id"] = chipperId;
                             if (assistantId > 0) chipFields["assistant_id"] = assistantId;
@@ -6642,18 +6688,17 @@ namespace PenguinMonitor
                     Toast.MakeText(this, "Search and select a penguin to rechip first", ToastLength.Short)?.Show();
                     return;
                 }
-                // The chip box must be a real nest — reject a mistyped or unknown name so a chip
-                // can't be filed against a box that doesn't exist. (Skip when the colony has no
-                // box list at all, e.g. an unconfigured install.)
-                if (_boxNamesAndIndexes != null && _boxNamesAndIndexes.Count > 0 && !IsKnownNest(chipBoxInput.Text))
+                // A nest must be selected (or typed, in the no-nest-list fallback) before saving.
+                if (string.IsNullOrEmpty(ChipBoxValue()))
                 {
-                    Toast.MakeText(this, "Pick a known nest for the chip box", ToastLength.Short)?.Show();
-                    chipBoxInput.RequestFocus();
+                    Toast.MakeText(this, "Select a nest for the chip box", ToastLength.Short)?.Show();
                     return;
                 }
-                // A chip must be attributed to a chipper — no save without one selected.
+                // A chip must be attributed to a chipper — no save without one selected. Flag the
+                // Chipper label red so it's obvious what's missing.
                 if (SelectedChipUserId(chipperSpinner, chipperUsers) == 0)
                 {
+                    chipperLabel.SetTextColor(UIFactory.DANGER_RED);
                     Toast.MakeText(this, chipperUsers.Count == 0 ? "No chippers — Sync to load them" : "Select a chipper", ToastLength.Short)?.Show();
                     return;
                 }
@@ -6679,7 +6724,7 @@ namespace PenguinMonitor
                         summary.Add($"Sex: {(string.IsNullOrEmpty(sexSel) ? "Not recorded" : sexSel)}");
                     }
                 }
-                summary.Add($"Chip box: {chipBoxInput.Text?.Trim()}");
+                summary.Add($"Chip box: {ChipBoxValue()}");
                 summary.Add($"Chipper: {(chipperSpinner.SelectedItemPosition > 0 ? chipperSpinner.SelectedItem?.ToString() : "Not recorded")}");
                 if (assistantSpinner.SelectedItemPosition > 0)
                     summary.Add($"Assistant: {assistantSpinner.SelectedItem?.ToString()}");
