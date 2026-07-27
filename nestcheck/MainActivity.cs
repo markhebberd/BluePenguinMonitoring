@@ -2852,7 +2852,9 @@ namespace PenguinMonitor
             LinearLayout LabelledPerson(string label, Spinner sp)
             {
                 var col = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-                col.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+                var colParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+                colParams.SetMargins(4, 0, 4, 0);   // a little gap between the two selectors
+                col.LayoutParameters = colParams;
                 var lbl = new TextView(this) { Text = label, TextSize = 13 };
                 lbl.SetTextColor(Color.Black);
                 lbl.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
@@ -2939,13 +2941,17 @@ namespace PenguinMonitor
             var regionSpinner = _uiFactory.CreateDropdownSpinner();
             regionSpinner.SetPadding(8, 4, 8, 4);
             regionSpinner.Prompt = "Region";
-            regionSpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            var regionParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            regionParams.SetMargins(4, 0, 4, 0);   // a little gap between the two selectors
+            regionSpinner.LayoutParameters = regionParams;
             regionColonyLayout.AddView(regionSpinner);
 
             var colonySpinner = _uiFactory.CreateDropdownSpinner();
             colonySpinner.SetPadding(8, 4, 8, 4);
             colonySpinner.Prompt = "Colony";
-            colonySpinner.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            var colonyParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+            colonyParams.SetMargins(4, 0, 4, 0);
+            colonySpinner.LayoutParameters = colonyParams;
             regionColonyLayout.AddView(colonySpinner);
 
 
