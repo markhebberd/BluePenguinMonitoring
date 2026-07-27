@@ -298,22 +298,43 @@ step ok "Tables" "$TABLES tables"
 
 COUNTS=""
 COUNT_FAIL=0
-for T in observations penguins observers penguin_scans colonies; do
-  N=$(dbq "-D $TARGET -e \"SELECT COUNT(*) FROM $T;\"")
+# Every base table in the restored slot, DISCOVERED rather than listed. A table added,
+# renamed or dropped in production is picked up on the next run with no edit here — which
+# is the point: a hardcoded list turns a schema change into a silent nightly abort.
+TABLE_NAMES=$(dbq "-N -B -e \"SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema='$TARGET' AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME;\"")
+TBL_SEEN=0; ROWS_TOTAL=0; PREV_TOTAL=0
+for T in $TABLE_NAMES; do
+  N=$(dbq "-D $TARGET -e \"SELECT COUNT(*) FROM \\\`$T\\\`;\"")
   N=${N:-0}
   PREV=$(grep "^$T	" "$STATUS/last-counts.tsv" 2>/dev/null | cut -f2)
   PREV=${PREV:-0}
   COUNTS="${COUNTS}$T	$N
 "
-  if [ "$N" -eq 0 ]; then
-    step fail "Rows: $T" "0 rows"; COUNT_FAIL=1
+  TBL_SEEN=$(( TBL_SEEN + 1 )); ROWS_TOTAL=$(( ROWS_TOTAL + N )); PREV_TOTAL=$(( PREV_TOTAL + PREV ))
+  # Judge each table against ITSELF last night. A table that is new, renamed-into, or simply
+  # empty has PREV=0 and just gets a baseline — only losing rows is suspicious.
+  #
+  # A shrink is a WARNING, not a failure, because plenty of tables shrink honestly: sessions
+  # expire, password_resets are consumed, disk_history is pruned, a dismissal is withdrawn.
+  # Failing on those would cry wolf nightly and train everyone to ignore the badge. The one
+  # case still worth failing on its own is a substantial table emptied outright.
+  if [ "$PREV" -ge 500 ] && [ "$N" -eq 0 ]; then
+    step fail "Rows: $T" "0 rows, was $PREV last night"; COUNT_FAIL=1
   elif [ "$PREV" -gt 0 ] && [ "$N" -lt $(( PREV * 95 / 100 )) ]; then
-    # A shrinking table means a truncated dump far more often than a real deletion.
-    step fail "Rows: $T" "$N rows, down from $PREV last night"; COUNT_FAIL=1
-  else
-    step ok "Rows: $T" "$N rows$( [ "$PREV" -gt 0 ] && echo " (was $PREV)")"
+    step warn "Rows: $T" "$N rows, down from $PREV last night"
   fi
 done
+if [ "$TBL_SEEN" -eq 0 ]; then
+  step fail "Rows" "no base tables found in $TARGET"; COUNT_FAIL=1
+elif [ "$PREV_TOTAL" -gt 0 ] && [ "$ROWS_TOTAL" -lt $(( PREV_TOTAL * 95 / 100 )) ]; then
+  # This is the truncated-dump signal, and it needs no table names to spot: the database as
+  # a whole does not lose 5% of its rows overnight.
+  step fail "Rows" "$ROWS_TOTAL rows across $TBL_SEEN tables, down from $PREV_TOTAL last night"; COUNT_FAIL=1
+else
+  # One summary line rather than a row per table — the list is schema-length now, and anything
+  # that moved the wrong way has already said so above.
+  step ok "Rows" "$TBL_SEEN tables, $ROWS_TOTAL rows$( [ "$PREV_TOTAL" -gt 0 ] && echo " (was $PREV_TOTAL)")"
+fi
 
 # The dump should contain recent fieldwork, not a stale snapshot served from cache.
 LATEST=$(dbq "-D $TARGET -e \"SELECT COALESCE(DATE(MAX(observation_time_utc)),'') FROM observations;\"")
@@ -375,9 +396,35 @@ fi
 SMK_EMAIL='__nightly_smoke__@local'
 SMK_HASH=$(docker exec "$DB_CT" php -r 'echo password_hash("nightly-smoke", PASSWORD_BCRYPT);' 2>>"$LOG")
 AUTH_OK=0; AUTH_WHY="setup failed"
+# The account table is discovered from the foreign key sessions already carries, and its
+# columns from information_schema, so a rename (observers -> users, observer_name -> f_name)
+# or a new NOT NULL column needs no edit here.
+UTBL=$(dbq "-N -B -e \"SELECT REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='$TARGET' AND TABLE_NAME='sessions' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1;\"" | tr -d '[:space:]')
+UPK=$(dbq "-N -B -e \"SELECT REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA='$TARGET' AND TABLE_NAME='sessions' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1;\"" | tr -d '[:space:]')
+ucol() {  # first column of $UTBL whose name matches $1, or empty
+  dbq "-N -B -e \"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE table_schema='$TARGET' AND table_name='$UTBL' AND COLUMN_NAME LIKE '$1' ORDER BY ORDINAL_POSITION LIMIT 1;\"" | tr -d '[:space:]'
+}
+UEMAIL=$(ucol '%email%'); UHASH=$(ucol '%pass%')
+if [ -z "$UTBL" ] || [ -z "$UPK" ] || [ -z "$UEMAIL" ] || [ -z "$UHASH" ]; then
+  SMK_HASH=""; AUTH_WHY="could not locate the account table via the sessions foreign key"
+fi
 if [ -n "$SMK_HASH" ]; then
-  docker exec "$DB_CT" mariadb -uroot -e "INSERT INTO $TARGET.observers (observer_name,email,passphrase_hash,role) VALUES ('Nightly Smoke','$SMK_EMAIL','$SMK_HASH','viewer');" 2>>"$LOG"
-  SMK_OID=$(docker exec "$DB_CT" mariadb -uroot -N -B -e "SELECT observer_id FROM $TARGET.observers WHERE email='$SMK_EMAIL';" 2>>"$LOG")
+  # Every other column that must be supplied: NOT NULL, no default, not auto-increment.
+  # Numeric ones get 0 and everything else a label, so a column added upstream cannot break
+  # the insert. Read as tab-separated name/type pairs.
+  UCOLS="$UEMAIL,$UHASH"; UVALS="'$SMK_EMAIL','$SMK_HASH'"
+  REQ_COLS=$(dbq "-N -B -e \"SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE table_schema='$TARGET' AND table_name='$UTBL' AND IS_NULLABLE='NO' AND COLUMN_DEFAULT IS NULL AND EXTRA NOT LIKE '%auto_increment%' AND COLUMN_NAME NOT IN ('$UEMAIL','$UHASH') AND COLUMN_NAME <> '$UPK';\"")
+  OLDIFS=$IFS; IFS='
+'
+  for LINE in $REQ_COLS; do
+    CN=$(printf '%s' "$LINE" | cut -f1); CT=$(printf '%s' "$LINE" | cut -f2)
+    [ -n "$CN" ] || continue
+    case "$CT" in int|bigint|smallint|tinyint|decimal|float|double) CV="0" ;; *) CV="'Nightly Smoke'" ;; esac
+    UCOLS="$UCOLS,$CN"; UVALS="$UVALS,$CV"
+  done
+  IFS=$OLDIFS
+  docker exec "$DB_CT" mariadb -uroot -e "INSERT INTO $TARGET.$UTBL ($UCOLS) VALUES ($UVALS);" 2>>"$LOG"
+  SMK_OID=$(docker exec "$DB_CT" mariadb -uroot -N -B -e "SELECT $UPK FROM $TARGET.$UTBL WHERE $UEMAIL='$SMK_EMAIL';" 2>>"$LOG")
   TOK=$(docker exec "$DB_CT" curl -s --max-time 20 -X POST 'http://127.0.0.1/api/crud.php?action=login' \
         -H 'Content-Type: application/json' -d "{\"email\":\"$SMK_EMAIL\",\"password\":\"nightly-smoke\"}" \
         2>/dev/null | sed -n 's/.*"token":"\([a-f0-9]*\)".*/\1/p')
@@ -390,7 +437,7 @@ if [ -n "$SMK_HASH" ]; then
       *) AUTH_WHY="token rejected on next request (Authorization header stripped?)" ;;
     esac
   fi
-  [ -n "${SMK_OID:-}" ] && docker exec "$DB_CT" mariadb -uroot -e "DELETE FROM $TARGET.sessions WHERE observer_id=$SMK_OID; DELETE FROM $TARGET.observers WHERE observer_id=$SMK_OID;" 2>>"$LOG"
+  [ -n "${SMK_OID:-}" ] && docker exec "$DB_CT" mariadb -uroot -e "DELETE FROM $TARGET.sessions WHERE observer_id=$SMK_OID; DELETE FROM $TARGET.$UTBL WHERE $UPK=$SMK_OID;" 2>>"$LOG"
 fi
 if [ "$AUTH_OK" = 1 ]; then
   step ok "Login" "logged in and the token was accepted on the next request"
