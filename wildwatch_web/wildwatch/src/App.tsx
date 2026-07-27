@@ -3629,10 +3629,11 @@ function passwordProblem(pw: string, identity: string[] = []): string | null {
   }
   for (const tok of nameTokens) if (lp.includes(tok)) return 'Do not put your name in your password.';
   for (const tok of emailTokens) if (lp.includes(tok)) return 'Do not put your email address in your password.';
-  const weak = ['password','passw0rd','password1','12345678','123456789','1234567890','qwertyui',
-    'azertyui','iloveyou','letmein1','motdepasse','changeme','000000000','wildwatch','nestcheck',
-    'penguins','penguin1','manchot1'];
-  if (weak.includes(lp)) return 'That password is too easy to guess — choose something less common.';
+  // Base stems, matched as a substring so "Wildwatch1" / "password2026" are caught too.
+  const weak = ['password','passw0rd','123456','1234567','12345678','qwerty','azerty','iloveyou',
+    'letmein','motdepasse','changeme','welcome','monkey','dragon','sunshine',
+    'wildwatch','nestcheck','penguin','manchot','korora'];
+  if (weak.some(w => lp.includes(w))) return 'That password is too easy to guess — choose something less common.';
   return null;
 }
 

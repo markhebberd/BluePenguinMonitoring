@@ -861,12 +861,15 @@ function wwPasswordProblem(string $pw, array $identity = []): ?string {
     foreach (array_keys($nameTokens)  as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your name in your password.';
     foreach (array_keys($emailTokens) as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your email address in your password.';
 
-    // A tiny blocklist of the passwords a wordlist tries first, including this project's own
-    // words. Not a substitute for the rules above — a backstop for the obvious.
-    $weak = ['password','passw0rd','password1','12345678','123456789','1234567890','qwertyui',
-             'azertyui','iloveyou','letmein1','motdepasse','changeme','000000000',
-             'wildwatch','nestcheck','penguins','penguin1','manchot1'];
-    if (in_array($lp, $weak, true)) return 'That password is too easy to guess — choose something less common.';
+    // Base stems of the passwords a wordlist tries first, plus this project's own words.
+    // Matched as a SUBSTRING (not exact) so a stem catches its suffixed variants too — the
+    // point being that "Wildwatch1" / "password2026" are exactly what people reach for once a
+    // bare word is refused. Every stem is 6+ chars, so substring matching won't snag an
+    // ordinary password by accident. A backstop, not a substitute for the rules above.
+    $weak = ['password','passw0rd','123456','1234567','12345678','qwerty','azerty','iloveyou',
+             'letmein','motdepasse','changeme','welcome','monkey','dragon','sunshine',
+             'wildwatch','nestcheck','penguin','manchot','korora'];
+    foreach ($weak as $w) if (mb_strpos($lp, $w) !== false) return 'That password is too easy to guess — choose something less common.';
 
     return null;
 }
