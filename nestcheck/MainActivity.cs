@@ -205,12 +205,14 @@ namespace PenguinMonitor
         private string? _pendingTagId;        // tag scanned this session, not yet written
         private string? _pendingTagFromBox;   // box the pending tag has to be taken off first
         private bool _pendingTagRemoval;      // clear this box's existing tag on save
-        // The GPS does not start with the capture panel: the phone is still in the user's hand
-        // being read at that point, and an in-hand fix would win the best-of and be saved as the
-        // box's position. Listening starts only when they tap Start measuring, i.e. after the
-        // instruction to put the phone on the box has been read and followed. There's no timer —
-        // readings keep improving until the user is happy and saves.
-        private bool _tagGpsMeasuring;
+        // The session runs in three phases, in the order the job is actually done:
+        //   Instructions — what's about to happen, phone still in hand, nothing listening
+        //   Placing      — "put the phone on the nest", still nothing listening
+        //   Measuring    — GPS on, best reading so far shown live until the user saves
+        // The split exists because the GPS used to start while the phone was in the user's hand
+        // being read, and with best-of-session that in-hand fix could win and be saved.
+        private enum TagCapturePhase { Instructions, Placing, Measuring }
+        private TagCapturePhase _tagCapturePhase = TagCapturePhase.Instructions;
         private int _tagGpsElapsedSeconds;
         private Handler? _tagGpsHandler;
         private Java.Lang.Runnable? _tagGpsRunnable;
@@ -587,7 +589,7 @@ namespace PenguinMonitor
             // Only collect during the measuring window. Once it closes, the reading shown is the
             // one that will be saved — letting later fixes keep changing it would mean the panel
             // said "measured" while the value underneath quietly moved.
-            if (_tagCaptureActive && _tagGpsMeasuring)
+            if (_tagCaptureActive && _tagCapturePhase == TagCapturePhase.Measuring)
             {
                 if (_bestTagCaptureLocation == null || location.Accuracy < _bestTagCaptureLocation.Accuracy)
                     _bestTagCaptureLocation = location;
@@ -1970,8 +1972,20 @@ namespace PenguinMonitor
             _tagModeSaveButton.Click += (s, e) =>
             {
                 if (!_tagCaptureActive) return;
-                if (!_tagGpsMeasuring) StartTagGpsMeasurement();   // phone is on the box now
-                else SaveTagCapture();
+                switch (_tagCapturePhase)
+                {
+                    case TagCapturePhase.Instructions:
+                        // Show where to put the phone; still nothing listening
+                        _tagCapturePhase = TagCapturePhase.Placing;
+                        DrawPageLayouts();
+                        break;
+                    case TagCapturePhase.Placing:
+                        StartTagGpsMeasurement();   // phone is on the nest now
+                        break;
+                    default:
+                        SaveTagCapture();
+                        break;
+                }
             };
             _tagModeCaptureBar.AddView(_tagModeSaveButton);
 
@@ -7532,7 +7546,7 @@ namespace PenguinMonitor
             // the instruction to put the phone on the box hasn't even been drawn yet.
             _tagCaptureActive = true;
             _tagCaptureBoxName = _currentBoxName;
-            _tagGpsMeasuring = false;
+            _tagCapturePhase = TagCapturePhase.Instructions;
             _bestTagCaptureLocation = null;
             _pendingTagId = null;
             _pendingTagFromBox = null;
@@ -7550,7 +7564,7 @@ namespace PenguinMonitor
             // user last stood, and being the more accurate one it would beat every reading
             // taken at this box and get saved as this box's position.
             _bestTagCaptureLocation = null;
-            _tagGpsMeasuring = true;
+            _tagCapturePhase = TagCapturePhase.Measuring;
             _tagGpsElapsedSeconds = 0;
 
             // Ticks purely to keep the elapsed time honest — nothing stops the measurement but
@@ -7559,7 +7573,7 @@ namespace PenguinMonitor
             if (_tagGpsRunnable != null) _tagGpsHandler.RemoveCallbacks(_tagGpsRunnable);
             _tagGpsRunnable = new Java.Lang.Runnable(() =>
             {
-                if (!_tagCaptureActive || !_tagGpsMeasuring) return;
+                if (!_tagCaptureActive || _tagCapturePhase != TagCapturePhase.Measuring) return;
                 _tagGpsElapsedSeconds++;
                 UpdateTagCaptureSteps();
                 _tagGpsHandler?.PostDelayed(_tagGpsRunnable, 1000);
@@ -7570,7 +7584,7 @@ namespace PenguinMonitor
 
         private void StopTagGpsMeasurement()
         {
-            _tagGpsMeasuring = false;
+            _tagCapturePhase = TagCapturePhase.Instructions;
             if (_tagGpsHandler != null && _tagGpsRunnable != null)
                 _tagGpsHandler.RemoveCallbacks(_tagGpsRunnable);
         }
@@ -7624,7 +7638,9 @@ namespace PenguinMonitor
             _boxTags.TryGetValue(box, out var existing);
             bool hasStoredPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
 
-            _tagModeCaptureTitle.Text = $"Setting up Box {box}";
+            _tagModeCaptureTitle.Text = _tagCapturePhase == TagCapturePhase.Instructions
+                ? $"Instructions — Box {box}"
+                : $"Set location — Box {box}";
 
             // --- Step 1: GPS ---------------------------------------------------------------
             var loc = _bestTagCaptureLocation;
@@ -7647,21 +7663,36 @@ namespace PenguinMonitor
                 return block;
             }
 
-            if (!_tagGpsMeasuring)
+            if (_tagCapturePhase == TagCapturePhase.Instructions)
             {
-                // Nothing is listening yet. The instruction comes first, the receiver second.
-                // Not every nest is a box — burrows and natural sites get held over instead.
-                // The distance here leans on the app-wide fix, which may be stale — it's only
-                // ever shown, never saved, and it's the difference between "right nest" and not.
-                _tagModeStep1Text.Text = "① Put the phone flat on the box, or hold it over the nest.\n\n"
-                    + "Then press Start measuring below."
+                // What the whole job is, before any of it starts. Phone is still in the hand
+                // being read, and nothing is listening. The distance here leans on the app-wide
+                // fix, which may be stale — it's only ever shown, never saved, and it's what
+                // tells you whether you're standing at the right nest before you commit to this.
+                _tagModeStep1Text.Text =
+                      "What happens next:\n\n"
+                    + "1.  Set location — you put the phone on the nest and it finds the position.\n"
+                    + "2.  Scan the box tag — optional.\n"
+                    + "3.  Save — nothing is recorded until you do."
                     + StoredBlock(_currentLocation);
                 _tagModeStep1Text.SetTextColor(Color.Black);
                 _tagModeMeasureAgainButton.Visibility = ViewStates.Gone;
             }
+            else if (_tagCapturePhase == TagCapturePhase.Placing)
+            {
+                // Placement instruction on its own screen, so the phone is down BEFORE anything
+                // is recorded. Not every nest is a box — burrows and natural sites get held over.
+                _tagModeStep1Text.Text =
+                      "Put the phone flat on the box,\n"
+                    + "or hold it over the nest.\n\n"
+                    + "Leave it there, then press Find position."
+                    + StoredBlock(_currentLocation);
+                _tagModeStep1Text.SetTextColor(TAG_MODE_PURPLE);
+                _tagModeMeasureAgainButton.Visibility = ViewStates.Gone;
+            }
             else if (loc == null)
             {
-                _tagModeStep1Text.Text = $"① Finding GPS…  {_tagGpsElapsedSeconds}s\n"
+                _tagModeStep1Text.Text = $"Finding GPS…  {_tagGpsElapsedSeconds}s\n"
                     + "Leave the phone where it is."
                     + (_tagGpsElapsedSeconds >= 10 ? "\n\nThis can take a minute under trees." : "")
                     + StoredBlock(_currentLocation);
@@ -7675,7 +7706,7 @@ namespace PenguinMonitor
                 // countdown — the user watches it tighten and saves when they're satisfied.
                 bool rough = loc.Accuracy > 15;
                 var quality = loc.Accuracy <= 5 ? "Good" : rough ? "Rough" : "OK";
-                _tagModeStep1Text.Text = $"① Best so far: {quality} — about {loc.Accuracy:F0} m  ({_tagGpsElapsedSeconds}s)\n"
+                _tagModeStep1Text.Text = $"Best so far: {quality} — about {loc.Accuracy:F0} m  ({_tagGpsElapsedSeconds}s)\n"
                     + "Leaving it a little longer usually tightens this up."
                     + StoredBlock(loc);
                 _tagModeStep1Text.SetTextColor(loc.Accuracy <= 5 ? UIFactory.SUCCESS_GREEN
@@ -7688,20 +7719,20 @@ namespace PenguinMonitor
             var existingTag = existing?.TagNumber ?? "";
             if (_pendingTagRemoval)
             {
-                _tagModeStep2Text.Text = $"② Tag — {existingTag} will be removed on save.";
+                _tagModeStep2Text.Text = $"Tag: {existingTag} will be removed on save.";
                 _tagModeStep2Text.SetTextColor(UIFactory.DANGER_RED);
                 SetTagActionStyle("Undo removal", TAG_MODE_PURPLE);
             }
             else if (_pendingTagId != null)
             {
                 var from = _pendingTagFromBox != null ? $"\nTaken off Box {_pendingTagFromBox}." : "";
-                _tagModeStep2Text.Text = $"② Tag ✓ {_pendingTagId}{from}";
+                _tagModeStep2Text.Text = $"Tag: {_pendingTagId} ✓{from}";
                 _tagModeStep2Text.SetTextColor(UIFactory.SUCCESS_GREEN);
                 SetTagActionStyle("Clear scanned tag", TAG_MODE_PURPLE);
             }
             else if (!string.IsNullOrEmpty(existingTag))
             {
-                _tagModeStep2Text.Text = $"② Tag ✓ {existingTag} (already set)\n"
+                _tagModeStep2Text.Text = $"Tag: {existingTag} ✓ (already set)\n"
                     + "Scan a different tag to replace it.";
                 _tagModeStep2Text.SetTextColor(Color.Black);
                 SetTagActionStyle("Remove tag", UIFactory.DANGER_RED);
@@ -7709,19 +7740,27 @@ namespace PenguinMonitor
             else
             {
                 _tagModeStep2Text.Text = _appSettings.IsBlueToothEnabled
-                    ? "② Tag — waiting for a scan…\nScan the tag on the box. Optional: you can save a position without one."
-                    : "② Tag — scanner is off.\nTurn on 'Connect scanner' in settings to assign a tag. You can still save a position.";
+                    ? "Tag: waiting for a scan…\nScan the tag on the box. Optional — you can save a position without one."
+                    : "Tag: scanner is off.\nTurn on 'Connect scanner' in settings to assign a tag. You can still save a position.";
                 _tagModeStep2Text.SetTextColor(Color.DarkGray);
                 _tagModeTagActionButton.Visibility = ViewStates.Gone;
             }
 
             // --- Primary action ------------------------------------------------------------
-            // Before measuring it starts the GPS; after, it saves. One button, one obvious next
-            // step, and it never lets you commit a position that hasn't been measured here.
+            // One button carrying the phase forward: Set location -> Find position -> Save.
+            // Always exactly one obvious next thing to press.
             bool tagChanged = _pendingTagId != null || _pendingTagRemoval;
-            if (!_tagGpsMeasuring)
+            if (_tagCapturePhase == TagCapturePhase.Instructions)
             {
-                _tagModeSaveButton.Text = "Start measuring";
+                _tagModeSaveButton.Text = "Set location";
+                _tagModeSaveButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
+                _tagModeSaveButton.SetTextColor(Color.White);
+                _tagModeSaveButton.Enabled = true;
+                _tagModeSaveButton.Alpha = 1.0f;
+            }
+            else if (_tagCapturePhase == TagCapturePhase.Placing)
+            {
+                _tagModeSaveButton.Text = "Find position";
                 _tagModeSaveButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
                 _tagModeSaveButton.SetTextColor(Color.White);
                 _tagModeSaveButton.Enabled = true;
