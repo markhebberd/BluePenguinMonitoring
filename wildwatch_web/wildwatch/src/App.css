@@ -545,15 +545,19 @@ h3.collapsible:hover { color:#1a5276; }
 /* Box breeding overview — year spine (left) + lightweight outcome cards (right). Replaces the
    heavy black-box rows: the year anchors on the left, each clutch is a light card whose left
    edge encodes the outcome, and non-breeding visitors drop to an "also seen" row below. */
-.all-birds .season-birds { display:grid; grid-template-columns:100px 1fr; gap:10px; align-items:start; padding:22px 0; margin:0; }
+/* The year column is sized for the year itself, not the widest status pill — the clutch
+   cards are worth more than the whitespace, so "No breeding" wraps instead of setting it. */
+.all-birds .season-birds { display:grid; grid-template-columns:76px 1fr; gap:8px; align-items:start; padding:22px 0; margin:0; }
 .all-birds .season-birds:first-child { padding-top:14px; border-top:1px solid #d5dce3; }
 .all-birds .season-birds + .season-birds { border-top:1px solid #d5dce3; }
 .season-year { position:relative; }
-.season-yr { font-size:17px; font-weight:800; letter-spacing:-.02em; color:#1b2a38; font-variant-numeric:tabular-nums; line-height:1.15; }
+.season-yr { font-size:17px; font-weight:800; letter-spacing:-.02em; color:#1b2a38; font-variant-numeric:tabular-nums; line-height:1.15; white-space:nowrap; }
 .season-yr.clickable { cursor:pointer; }
 .season-yr.clickable:hover { color:#1a5276; }
 .season-birdcount { font-size:11px; color:#98a4b0; margin-top:1px; }
-.season-status { display:inline-flex; align-items:center; gap:5px; margin-top:8px; padding:2px 8px 2px 6px; border-radius:999px; font-size:10.5px; font-weight:600; white-space:nowrap; }
+/* Wraps to two lines in the narrow column ("No breeding"), so the radius is a tag's rather
+   than a lozenge's — indistinguishable on the one-line statuses, tidier on the two-line one. */
+.season-status { display:inline-flex; align-items:center; gap:4px; margin-top:7px; padding:2px 7px 2px 5px; border-radius:8px; font-size:10px; font-weight:600; line-height:1.3; max-width:100%; text-align:center; }
 .season-status .ss-dot { width:6px; height:6px; border-radius:50%; flex:none; }
 .st-bred { background:#eaf5ee; color:#1f6b41; } .st-bred .ss-dot { background:#2f8f5b; }
 .st-fail { background:#fbeceb; color:#a4362d; } .st-fail .ss-dot { background:#c0453a; }
@@ -584,9 +588,6 @@ h3.collapsible:hover { color:#1a5276; }
 .season-visitors { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding-left:2px; }
 .season-visitors .visitors-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; flex:none; }
 .season-visitors .visitors-list { display:inline-flex; flex-wrap:wrap; gap:5px 7px; align-items:flex-start; }
-/* Peng-panel breeding history: the panel is narrow, so the year column hugs its content
-   instead of the box view's fixed 100px, giving the clutch cards the width. */
-.bird-detail .season-birds { grid-template-columns:auto 1fr; column-gap:8px; }
 @media (max-width:560px) { .all-birds .season-birds { grid-template-columns:1fr; gap:8px; } }
 /* Section divider only — must not bleed onto .scan chips that share this class name */
 div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
