@@ -462,6 +462,10 @@ h3.collapsible:hover { color:#1a5276; }
 /* Observer / recorder picker: click the name, type to filter, click a result. Lists every
    user, active or not, so an old day can still be attributed to whoever actually worked it. */
 .day-person-picker { position:relative; display:inline-flex; align-items:center; }
+/* The closed field is tab-focusable, so it needs a visible focus ring — otherwise tabbing
+   through the day header moves an invisible cursor. */
+.day-note-editable:focus { outline:2px solid #2196F3; outline-offset:1px; border-radius:3px; }
+.day-note-editable:focus-visible { outline:2px solid #2196F3; outline-offset:1px; }
 .day-person-input { max-width:150px; }
 .day-person-results { position:absolute; top:100%; left:0; z-index:600; background:#fff;
   border:1px solid #ddd; border-radius:0 0 6px 6px; margin-top:2px; max-height:260px;

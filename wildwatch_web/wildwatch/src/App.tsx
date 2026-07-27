@@ -541,11 +541,27 @@ function UserPickerField({ userId, label, onSave, addLabel, title }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closedRef = useRef<HTMLSpanElement>(null);
+  // A commit hands focus back to the closed field so the next Tab moves on. That focus must
+  // not spring the picker open again, or selecting someone would trap you in the same field.
+  const skipFocusOpen = useRef(false);
   const name = getUserName(userId);
 
-  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+  // Focus follows the open/closed flip, and only after the re-render — at commit time the
+  // closed span does not exist yet, so focusing it there would be a no-op.
+  const wantRefocus = useRef(false);
+  useEffect(() => {
+    if (open) { inputRef.current?.focus(); return; }
+    if (wantRefocus.current) {
+      wantRefocus.current = false;
+      skipFocusOpen.current = true;
+      closedRef.current?.focus();
+      setTimeout(() => { skipFocusOpen.current = false; }, 0);
+    }
+  }, [open]);
 
   const commit = async (next: number | null) => {
+    wantRefocus.current = true;   // hand focus back so the next Tab moves to the next field
     setOpen(false); setQuery('');
     if (next === userId) return;
     setSaving(true); setError(null);
@@ -553,9 +569,15 @@ function UserPickerField({ userId, label, onSave, addLabel, title }: {
     setSaving(false);
   };
 
+  // tabIndex puts the closed field in the tab order, so Tab out of the day note lands here and
+  // opens it ready to type — and Tab again moves on to the next person field.
   if (!open) return (
-    <span className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
-      title={title} onClick={() => { setQuery(''); setOpen(true); }}>
+    <span ref={closedRef} tabIndex={0} role="button"
+      className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
+      title={title}
+      onClick={() => { setQuery(''); setOpen(true); }}
+      onFocus={() => { if (!skipFocusOpen.current) { setQuery(''); setOpen(true); } }}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setQuery(''); setOpen(true); } }}>
       {name && label && <span className="day-hdr-people-label">{label}</span>}
       {saving ? 'Saving…' : (name || addLabel || '-')}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
