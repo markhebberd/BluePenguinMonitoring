@@ -2840,13 +2840,11 @@ namespace PenguinMonitor
             }
             var observerSpinner = MakePersonSpinner("— observer —", _colonyState.DailyObserverId);
             var recorderSpinner = MakePersonSpinner("— recorder —", _colonyState.DailyRecorderId);
-            var chipperSpinner = MakePersonSpinner("— chipper —", _colonyState.DailyChipperId);
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
             dayPeopleLayout.AddView(observerSpinner);
             dayPeopleLayout.AddView(recorderSpinner);
-            dayPeopleLayout.AddView(chipperSpinner);
             if (dayUsers.Count == 0)
             {
                 var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
@@ -2865,7 +2863,6 @@ namespace PenguinMonitor
                 var newLabel = dailyLabelInput.Text?.Trim() ?? "";
                 var newObserverId = SelectedUserId(observerSpinner);
                 var newRecorderId = SelectedUserId(recorderSpinner);
-                var newChipperId = SelectedUserId(chipperSpinner);
                 var nzToday = NzToday;
 
                 // Hide keyboard
@@ -2880,7 +2877,6 @@ namespace PenguinMonitor
                 _colonyState.DailyLabel = newLabel;
                 _colonyState.DailyObserverId = newObserverId;
                 _colonyState.DailyRecorderId = newRecorderId;
-                _colonyState.DailyChipperId = newChipperId;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
                 DataStorageService.SaveColonyState(this, _colonyState);
 
@@ -2891,7 +2887,7 @@ namespace PenguinMonitor
                     var token = _appSettings.AuthToken;
                     _ = Task.Run(async () =>
                     {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId, newChipperId);
+                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newRecorderId);
                         new Handler(Looper.MainLooper).Post(() =>
                             Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
                     });
@@ -5929,7 +5925,25 @@ namespace PenguinMonitor
                 sexLayout.Visibility = chippedAsChick.Checked ? ViewStates.Gone : ViewStates.Visible;
             };
 
-            // Chip box + Chipped by on one line (two labelled columns) to keep the form short
+            // Chipper + assistant are people from the user table (same active-user list the day note
+            // picks from), not free text — so a chip record links to the person, and a rename in the
+            // web admin reaches every chip they made. ChipBy (the acronym) is gone from the UI.
+            var chipUsers = DataStorageService.LoadUsers(this);
+            Spinner MakeChipPersonSpinner(string emptyLabel, int selectedId)
+            {
+                var labels = new List<string> { emptyLabel };
+                labels.AddRange(chipUsers.Select(u => u.name ?? ""));
+                var sp = _uiFactory.CreateDropdownSpinner();
+                sp.Adapter = new ArrayAdapter<string>(this, Android.Resource.Layout.SimpleSpinnerDropDownItem, labels);
+                var idx = chipUsers.FindIndex(u => u.id == selectedId);
+                sp.SetSelection(idx >= 0 ? idx + 1 : 0);
+                return sp;
+            }
+            // Position 0 is the empty label, so a real selection maps to chipUsers[pos - 1].
+            int SelectedChipUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= chipUsers.Count
+                ? chipUsers[s.SelectedItemPosition - 1].id : 0;
+
+            // Chip box + Chipper on one line (two labelled columns) to keep the form short
             var chipRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
             var chipBoxCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipBoxCol.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
@@ -5939,20 +5953,29 @@ namespace PenguinMonitor
             chipBoxCol.AddView(chipBoxInput);
             chipRow.AddView(chipBoxCol);
 
-            var chipByCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            var chipByColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
-            chipByColParams.SetMargins(12, 0, 0, 0);
-            chipByCol.LayoutParameters = chipByColParams;
-            chipByCol.AddView(createLabel("Chipped by"));
-            var chippedByInput = createInput("Observer name");
-            // Sign with the acronym chip records use ("BS"); fall back to the display name only
-            // when this user has none, so the field is never left blank.
-            chippedByInput.Text = !string.IsNullOrEmpty(_appSettings?.ObserverChipAcronym)
-                ? _appSettings.ObserverChipAcronym
-                : (_appSettings?.ObserverName ?? "");
-            chipByCol.AddView(chippedByInput);
-            chipRow.AddView(chipByCol);
+            var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            var chipperColParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
+            chipperColParams.SetMargins(12, 0, 0, 0);
+            chipperCol.LayoutParameters = chipperColParams;
+            chipperCol.AddView(createLabel("Chipper"));
+            // Default to the logged-in user — usually the person doing the chipping.
+            var chipperSpinner = MakeChipPersonSpinner("— chipper —", _appSettings?.ObserverId ?? 0);
+            chipperCol.AddView(chipperSpinner);
+            chipRow.AddView(chipperCol);
             card.AddView(chipRow);
+
+            // Assistant on its own row (optional second person)
+            var assistantCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            assistantCol.AddView(createLabel("Assistant"));
+            var assistantSpinner = MakeChipPersonSpinner("— assistant —", 0);
+            assistantCol.AddView(assistantSpinner);
+            card.AddView(assistantCol);
+            if (chipUsers.Count == 0)
+            {
+                var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
+                noUsers.SetTextColor(UIFactory.TEXT_SECONDARY);
+                card.AddView(noUsers);
+            }
 
             // --- Biometric data ---
             var bioHeader = new TextView(this) { Text = "Biometric Data (optional)", TextSize = 15 };
@@ -6149,7 +6172,8 @@ namespace PenguinMonitor
                     ChickSizeCode = sizeSel0.Contains("(SC)") ? "SC" : sizeSel0.Contains("(BC)") ? "BC" : sizeSel0.Contains("(LC)") ? "LC" : "",
                     SexCode = ObservedSexOptions.FirstOrDefault(o => o.label == (sexSpinner.SelectedItem?.ToString() ?? "")).code ?? "",
                     ChipBox = chipBoxInput.Text ?? "",
-                    ChipBy = chippedByInput.Text ?? "",
+                    ChipperId = SelectedChipUserId(chipperSpinner),
+                    AssistantId = SelectedChipUserId(assistantSpinner),
                     Weight = weightInput.Text ?? "",
                     Flipper = flipperInput.Text ?? "",
                     Notes = notesInput.Text ?? "",
@@ -6166,7 +6190,8 @@ namespace PenguinMonitor
             if (restore != null)
             {
                 chipBoxInput.Text = restore.ChipBox;
-                chippedByInput.Text = restore.ChipBy;
+                if (restore.ChipperId > 0) { var ci = chipUsers.FindIndex(u => u.id == restore.ChipperId); if (ci >= 0) chipperSpinner.SetSelection(ci + 1); }
+                if (restore.AssistantId > 0) { var ai = chipUsers.FindIndex(u => u.id == restore.AssistantId); if (ai >= 0) assistantSpinner.SetSelection(ai + 1); }
                 weightInput.Text = restore.Weight;
                 flipperInput.Text = restore.Flipper;
                 notesInput.Text = restore.Notes;
@@ -6201,7 +6226,8 @@ namespace PenguinMonitor
                     ChickSizeCode = qChickSize,
                     SexCode = qSex,
                     ChipBox = chipBoxInput.Text?.Trim() ?? "",
-                    ChipBy = chippedByInput.Text?.Trim() ?? "",
+                    ChipperId = SelectedChipUserId(chipperSpinner),
+                    AssistantId = SelectedChipUserId(assistantSpinner),
                     Weight = weightInput.Text ?? "",
                     Flipper = flipperInput.Text ?? "",
                     Notes = notesInput.Text ?? "",
@@ -6272,6 +6298,9 @@ namespace PenguinMonitor
                     var sizeSel = chickSizeSpinner.SelectedItem?.ToString() ?? "";
                     chickSize = sizeSel.Contains("(SC)") ? "SC" : sizeSel.Contains("(BC)") ? "BC" : sizeSel.Contains("(LC)") ? "LC" : "";
                 }
+                // Read the person spinners here on the UI thread — the network POST below runs off it.
+                var chipperId = SelectedChipUserId(chipperSpinner);
+                var assistantId = SelectedChipUserId(assistantSpinner);
 
                 _ = Task.Run(async () =>
                 {
@@ -6299,8 +6328,9 @@ namespace PenguinMonitor
                                 ["chip_date"] = today,
                                 ["observation_date"] = today,
                                 ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
-                                ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
                             };
+                            if (chipperId > 0) birdFields["chipper_id"] = chipperId;
+                            if (assistantId > 0) birdFields["assistant_id"] = assistantId;
                             if (!string.IsNullOrEmpty(chickSize)) birdFields["chick_size_code"] = chickSize;
                             if (!string.IsNullOrEmpty(weightInput.Text)) birdFields["weight"] = weightInput.Text;
                             if (!string.IsNullOrEmpty(flipperInput.Text)) birdFields["flipper_length"] = flipperInput.Text;
@@ -6345,8 +6375,9 @@ namespace PenguinMonitor
                                 ["chip_date"] = today,
                                 ["is_active"] = 1,
                                 ["chip_box"] = chipBoxInput.Text?.Trim() ?? "",
-                                ["chip_by"] = chippedByInput.Text?.Trim() ?? "",
                             };
+                            if (chipperId > 0) chipFields["chipper_id"] = chipperId;
+                            if (assistantId > 0) chipFields["assistant_id"] = assistantId;
                             var chipReq = new HttpRequestMessage(HttpMethod.Post,
                                 $"{DataStorageService.WILDWATCH_BASE_URL}/crud.php?action=create&table=penguin_chips&colony_id={colonyId}");
                             chipReq.Headers.Add("Authorization", $"Bearer {token}");
@@ -6557,7 +6588,9 @@ namespace PenguinMonitor
                         summary.Add($"Sex: {sexSpinner.SelectedItem?.ToString() ?? "Not recorded"}");
                 }
                 summary.Add($"Chip box: {chipBoxInput.Text?.Trim()}");
-                summary.Add($"Chipped by: {chippedByInput.Text?.Trim()}");
+                summary.Add($"Chipper: {(chipperSpinner.SelectedItemPosition > 0 ? chipperSpinner.SelectedItem?.ToString() : "Not recorded")}");
+                if (assistantSpinner.SelectedItemPosition > 0)
+                    summary.Add($"Assistant: {assistantSpinner.SelectedItem?.ToString()}");
                 if (!string.IsNullOrWhiteSpace(weightInput.Text)) summary.Add($"Weight: {weightInput.Text} g");
                 if (!string.IsNullOrWhiteSpace(flipperInput.Text)) summary.Add($"Flipper: {flipperInput.Text} mm");
                 if (!string.IsNullOrWhiteSpace(notesInput.Text)) summary.Add($"Notes: {notesInput.Text}");
@@ -6787,7 +6820,6 @@ namespace PenguinMonitor
                     _colonyState.DailyLabelDate = "";
                     _colonyState.DailyObserverId = 0;
                     _colonyState.DailyRecorderId = 0;
-                    _colonyState.DailyChipperId = 0;
                     DataStorageService.SaveColonyState(this, _colonyState);
                 }
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)

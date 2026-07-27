@@ -17,6 +17,10 @@ namespace PenguinMonitor.Models
         public string ChickSizeCode { get; set; } = "";
         public string SexCode { get; set; } = "";
         public string ChipBox { get; set; } = "";
+        // Who chipped and who assisted, as users.id (0 = not set). ChipBy is the legacy acronym,
+        // kept only as a server-side fallback when ChipperId is 0 (e.g. the user list hadn't synced).
+        public int ChipperId { get; set; }
+        public int AssistantId { get; set; }
         public string ChipBy { get; set; } = "";
         public string Weight { get; set; } = "";
         public string Flipper { get; set; } = "";

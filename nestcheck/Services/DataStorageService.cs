@@ -331,7 +331,6 @@ namespace PenguinMonitor.Services
                         daily_label = colonyState.DailyLabel,
                         daily_observer_id = colonyState.DailyObserverId,
                         daily_recorder_id = colonyState.DailyRecorderId,
-                        daily_chipper_id = colonyState.DailyChipperId,
                         observations = pendingBoxes,
                     });
                     var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
@@ -653,7 +652,7 @@ namespace PenguinMonitor.Services
 
             var body = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
                 daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId,
-                daily_chipper_id = colonyState.DailyChipperId, observations = uploads });
+                observations = uploads });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=confirm");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -721,7 +720,7 @@ namespace PenguinMonitor.Services
 
             var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
                 daily_observer_id = colonyState.DailyObserverId, daily_recorder_id = colonyState.DailyRecorderId,
-                daily_chipper_id = colonyState.DailyChipperId, observations = pendingBoxes });
+                observations = pendingBoxes });
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
@@ -1094,8 +1093,10 @@ namespace PenguinMonitor.Services
                         ["chip_date"] = chipDate,
                         ["observation_date"] = chipDate,
                         ["chip_box"] = q.ChipBox,
-                        ["chip_by"] = q.ChipBy,
                     };
+                    if (q.ChipperId > 0) fields["chipper_id"] = q.ChipperId;
+                    else if (!string.IsNullOrEmpty(q.ChipBy)) fields["chip_by"] = q.ChipBy;   // legacy queued item (pre-dropdown)
+                    if (q.AssistantId > 0) fields["assistant_id"] = q.AssistantId;
                     if (!string.IsNullOrEmpty(q.ChickSizeCode)) fields["chick_size_code"] = q.ChickSizeCode;
                     if (!string.IsNullOrEmpty(q.RequestedPengNum)) fields["requested_peng_num"] = q.RequestedPengNum;
                     if (!string.IsNullOrEmpty(q.Weight)) fields["weight"] = q.Weight;
@@ -1238,7 +1239,7 @@ namespace PenguinMonitor.Services
         // fills a day that has no note yet — this upserts, so re-setting the label actually changes
         // it. Needs editor/admin role server-side; a viewer gets 403 and we just keep it local.
         internal async Task<bool> SaveDayNoteAsync(int colonyId, string nzDate, string note, string token,
-                                                   int observerId = 0, int recorderId = 0, int chipperId = 0)
+                                                   int observerId = 0, int recorderId = 0)
         {
             try
             {
@@ -1246,8 +1247,7 @@ namespace PenguinMonitor.Services
                 request.Headers.Add("Authorization", $"Bearer {token}");
                 var body = JsonConvert.SerializeObject(new { colony_id = colonyId, date = nzDate, note,
                     observer_id = observerId == 0 ? (int?)null : observerId,
-                    recorder_id = recorderId == 0 ? (int?)null : recorderId,
-                    chipper_id = chipperId == 0 ? (int?)null : chipperId });
+                    recorder_id = recorderId == 0 ? (int?)null : recorderId });
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
                 var response = await _httpClient.SendAsync(request);
                 return response.IsSuccessStatusCode;
