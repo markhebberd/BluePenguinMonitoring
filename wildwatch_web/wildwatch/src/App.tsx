@@ -7963,7 +7963,6 @@ function SeasonBreedingReport() {
               <th>Chip from</th><th>Chip to</th><th>Fledge</th>
               <th title="Chicks chipped in this clutch">Chipped</th>
               <th title="Chicks fledged (chipped chicks reach fledge age; plus unchipped chicks recorded as fledged)">Fledged</th>
-              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -8003,12 +8002,6 @@ function SeasonBreedingReport() {
                   <Cell t={parts[6]} next={nextIdx === 6} est />
                   <Ticks n={r.chipped} title={`${r.chipped} chick${r.chipped !== 1 ? 's' : ''} chipped`} />
                   <Ticks n={r.fledged} title={`${r.fledged} chick${r.fledged !== 1 ? 's' : ''} fledged`} />
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {active
-                      ? (r.status && <span className={`badge ${DARK_TEXT_STATUSES.has(r.status) ? 'bordered' : ''}`}
-                          style={{ background: STATUS_COLORS[r.status] || '#ccc', color: DARK_TEXT_STATUSES.has(r.status) ? '#333' : '#fff' }}>{r.status}</span>)
-                      : <span style={{ color: '#4a4a4a' }}>Ended{c.end !== null ? ` ${fmtMs(c.end)}` : ''}</span>}
-                  </td>
                 </tr>
               );
             })}
