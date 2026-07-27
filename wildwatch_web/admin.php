@@ -367,7 +367,7 @@ if ($action === 'recent_changes') {
 }
 
 if ($action === 'users') {
-    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, active, email, role, created_at FROM users ORDER BY id");
+    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, chip_acronym, active, email, role, created_at FROM users ORDER BY id");
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -377,7 +377,8 @@ if ($action === 'update_user') {
     if (!$input || !$input['observer_id']) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
     // The API still speaks observer_name; the column behind it is users.f_name.
     $fields = [];
-    foreach (['role' => 'role', 'observer_name' => 'f_name', 'surname' => 'surname', 'falcon_id' => 'falcon_id', 'active' => 'active', 'email' => 'email'] as $in => $col) {
+    foreach (['role' => 'role', 'observer_name' => 'f_name', 'surname' => 'surname', 'falcon_id' => 'falcon_id',
+              'chip_acronym' => 'chip_acronym', 'active' => 'active', 'email' => 'email'] as $in => $col) {
         if (isset($input[$in])) $fields[$col] = $col === 'active' ? (int)(bool)$input[$in] : $input[$in];
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
@@ -386,7 +387,12 @@ if ($action === 'update_user') {
     // falcon_id and email blank out to NULL — for email that is what lets any number of
     // login-less users coexist under a UNIQUE key that still catches a real duplicate.
     if (array_key_exists('surname', $fields)) $fields['surname'] = trim((string)$fields['surname']);
-    foreach (['falcon_id', 'email'] as $opt) {
+    // Acronyms are stored uppercase so the list reads consistently; the key is already
+    // case-insensitive under this collation, so this is presentation, not enforcement.
+    if (array_key_exists('chip_acronym', $fields) && $fields['chip_acronym'] !== null) {
+        $fields['chip_acronym'] = mb_strtoupper(trim((string)$fields['chip_acronym']));
+    }
+    foreach (['falcon_id', 'chip_acronym', 'email'] as $opt) {
         if (array_key_exists($opt, $fields)) {
             $fields[$opt] = trim((string)$fields[$opt]);
             if ($fields[$opt] === '') $fields[$opt] = null;
@@ -416,6 +422,14 @@ if ($action === 'update_user') {
             echo json_encode(['error'=>"{$fields['email']} is already the address for " . trim("{$e2['f_name']} {$e2['surname']}")]); exit;
         }
     }
+    if (!empty($fields['chip_acronym'])) {
+        $dupa = $pdo->prepare("SELECT f_name, surname FROM users WHERE chip_acronym = ? AND id <> ?");
+        $dupa->execute([$fields['chip_acronym'], $input['observer_id']]);
+        if ($a2 = $dupa->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(409);
+            echo json_encode(['error'=>"Chip acronym \"{$fields['chip_acronym']}\" already belongs to " . trim("{$a2['f_name']} {$a2['surname']}")]); exit;
+        }
+    }
 
     $pdo->beginTransaction();
     try {
@@ -431,6 +445,7 @@ if ($action === 'create_user') {
     $name = trim($input['observer_name'] ?? '');
     $surname = trim($input['surname'] ?? '');
     $falconId = trim($input['falcon_id'] ?? '');
+    $chipAcronym = mb_strtoupper(trim($input['chip_acronym'] ?? ''));
     $email = trim($input['email'] ?? '');
     $role = $input['role'] ?? 'viewer';
     $password = (string)($input['password'] ?? '');
@@ -459,18 +474,27 @@ if ($action === 'create_user') {
             echo json_encode(['error'=>"$email is already the address for " . trim("{$e2['f_name']} {$e2['surname']}")]); exit;
         }
     }
+    if ($chipAcronym !== '') {
+        $dupa = $pdo->prepare("SELECT f_name, surname FROM users WHERE chip_acronym = ?");
+        $dupa->execute([$chipAcronym]);
+        if ($a2 = $dupa->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(409);
+            echo json_encode(['error'=>"Chip acronym \"$chipAcronym\" already belongs to " . trim("{$a2['f_name']} {$a2['surname']}")]); exit;
+        }
+    }
     $hash = password_hash($password !== '' ? $password : bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
     $pdo->beginTransaction();
     try {
         $id = (int)wwAuditedInsert($pdo, 'users',
             ['f_name' => $name, 'surname' => $surname, 'falcon_id' => $falconId !== '' ? $falconId : null,
+             'chip_acronym' => $chipAcronym !== '' ? $chipAcronym : null,
              'email' => $email !== '' ? $email : null, 'passphrase_hash' => $hash, 'role' => $role],
             $observer['observer_id'],
             $invite ? 'Created with email invite' : ($noLogin ? 'Created without a login (no email, no password)' : 'Created with password'));
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     $emailSent = $invite && sendPasswordSetupEmail($pdo, ['observer_id'=>$id, 'observer_name'=>$name, 'email'=>$email], 'invite');
-    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'falcon_id'=>$falconId, 'active'=>1, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'no_login'=>$noLogin, 'email_sent'=>$emailSent]);
+    echo json_encode(['observer_id'=>$id, 'observer_name'=>$name, 'surname'=>$surname, 'falcon_id'=>$falconId, 'chip_acronym'=>$chipAcronym, 'active'=>1, 'email'=>$email, 'role'=>$role, 'created_at'=>date('Y-m-d H:i:s'), 'invited'=>$invite, 'no_login'=>$noLogin, 'email_sent'=>$emailSent]);
     exit;
 }
 

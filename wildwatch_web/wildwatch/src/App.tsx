@@ -8418,7 +8418,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   };
 
   const [colonies, setColonies] = useState<any[]>([]);
-  const emptyNewUser = { observer_name: '', surname: '', falcon_id: '', email: '', role: 'viewer', password: '' };
+  const emptyNewUser = { observer_name: '', surname: '', chip_acronym: '', falcon_id: '', email: '', role: 'viewer', password: '' };
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [newUserColonies, setNewUserColonies] = useState<Record<string, string>>({}); // colony_id -> 'view' | 'edit'
   const [addUserErr, setAddUserErr] = useState('');
@@ -8432,7 +8432,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     try {
       const r = await fetch('/api/admin.php?action=create_user', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ observer_name: newUser.observer_name, surname: newUser.surname, falcon_id: newUser.falcon_id, email: newUser.email, role: newUser.role, password: newUser.password }),
+        body: JSON.stringify({ observer_name: newUser.observer_name, surname: newUser.surname, chip_acronym: newUser.chip_acronym, falcon_id: newUser.falcon_id, email: newUser.email, role: newUser.role, password: newUser.password }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
@@ -8985,12 +8985,13 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <h3>Users</h3>
         {loading ? <p className="muted">Loading...</p> : (
           <table className="bird-table" style={{width:'100%'}}>
-            <thead><tr><th>Name</th><th>Surname</th><th>Falcon ID</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Surname</th><th>Chip</th><th>Falcon ID</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.observer_id}>
                   <td><EditableField value={u.observer_name} onSave={(v: any) => updateUser(u.observer_id, 'observer_name', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.surname} onSave={(v: any) => updateUser(u.observer_id, 'surname', v)} placeholder="-" canEdit={true} /></td>
+                  <td><EditableField value={u.chip_acronym} onSave={(v: any) => updateUser(u.observer_id, 'chip_acronym', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.falcon_id} onSave={(v: any) => updateUser(u.observer_id, 'falcon_id', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.email} onSave={(v: any) => updateUser(u.observer_id, 'email', v)} placeholder="-" canEdit={true} /></td>
                   <td>
@@ -9029,6 +9030,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <input type="text" placeholder="Name" value={newUser.observer_name} onChange={e => setNewUser({ ...newUser, observer_name: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="text" placeholder="Surname (optional)" value={newUser.surname} onChange={e => setNewUser({ ...newUser, surname: e.target.value })} style={{ padding: '5px 8px' }} />
+          <input type="text" placeholder="Chip acronym (e.g. BS)" value={newUser.chip_acronym} onChange={e => setNewUser({ ...newUser, chip_acronym: e.target.value })} style={{ padding: '5px 8px', width: 130 }} />
           <input type="text" placeholder="Falcon ID (optional)" value={newUser.falcon_id} onChange={e => setNewUser({ ...newUser, falcon_id: e.target.value })} style={{ padding: '5px 8px' }} />
           <input type="email" placeholder="Email (optional)" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} style={{ padding: '5px 8px' }} />
           <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} style={{ padding: '5px 8px' }}>

@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
     -- name and have no surname recorded — SQL would treat two NULLs as distinct.
     surname VARCHAR(100) NOT NULL DEFAULT '',
     falcon_id VARCHAR(64),          -- identifier for this person in Falcon; free-form, not validated here
+    -- The initials a chipping is signed with (penguin_chips.chip_by): 'BS', 'AL'. UNIQUE so an
+    -- acronym identifies one person, NULLable because most users never chip.
+    chip_acronym VARCHAR(10),
     active BOOLEAN NOT NULL DEFAULT TRUE,  -- deactivated accounts are kept, not deleted (they own observations)
     -- NULL when the person has no email (field volunteers often don't, and login is by email
     -- so they simply can't use one). NULLs are distinct under UNIQUE, which is what allows any
@@ -20,7 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_user_name (f_name, surname),
-    UNIQUE KEY uniq_user_email (email)
+    UNIQUE KEY uniq_user_email (email),
+    UNIQUE KEY uniq_user_chip_acronym (chip_acronym)
 );
 
 CREATE TABLE IF NOT EXISTS regions (
