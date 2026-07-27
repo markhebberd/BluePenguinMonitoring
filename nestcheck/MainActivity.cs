@@ -7540,13 +7540,16 @@ namespace PenguinMonitor
 
             new AlertDialog.Builder(this)
                 .SetTitle($"Set location for Box {box}")
+                // Keep the button label short — an AlertDialog button is one line at a fixed
+                // height, so anything longer wraps and gets clipped. The confirmation lives in
+                // the message, which ends on the question the button answers.
                 .SetMessage("Put the phone flat on the box, or hold it over the nest.\n\n"
-                          + "Start recording will then keep reading the GPS and hold on to the "
-                          + "most accurate position it sees. Leave the phone where it is and save "
-                          + "when you're happy with it.\n\n"
-                          + "Nothing is saved until you press Save.")
-                .SetNegativeButton("Cancel", (s, e) => { })
-                .SetPositiveButton("Phone is in place — start recording", (s, e) =>
+                          + "Recording will keep reading the GPS and hold on to the most accurate "
+                          + "position it sees. Leave the phone where it is, and save when you're "
+                          + "happy with it. Nothing is saved until you press Save.\n\n"
+                          + "Is the phone in place?")
+                .SetNegativeButton("Not yet", (s, e) => { })
+                .SetPositiveButton("Start recording", (s, e) =>
                 {
                     _tagCaptureActive = true;
                     _tagCaptureBoxName = box;
