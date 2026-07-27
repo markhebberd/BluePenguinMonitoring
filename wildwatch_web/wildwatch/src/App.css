@@ -631,6 +631,10 @@ div.chipped-here { margin-top:8px; padding-top:8px; border-top:1px solid #eee; }
 .box-count-stack { display:inline-flex; flex-direction:column; align-items:center; }
 .box-companion { display:inline-flex; flex-direction:column; align-items:center; }
 .box-companion .bc-top { display:inline-flex; align-items:center; gap:2px; }
+/* The separating comma's default line box is taller than the 9px mini pill, so left as-is it
+   inflates its companion's row and pushes that mini down out of line with the others. Shrink
+   it so the mini alone sets the row height and every mini stays on one line. */
+.box-companion .bc-top .muted { line-height:1; font-size:11px; }
 /* "with" and the toggle sit on the top row, level with the names/minis (counts hang below). */
 .box-head .partner-toggle, .box-head-with { margin-top:3px; }
 .partner-window-box { border:2px solid #333; border-radius:8px; padding:2px 8px 4px; margin:3px 0; }
