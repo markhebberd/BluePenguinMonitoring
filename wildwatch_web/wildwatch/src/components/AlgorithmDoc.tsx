@@ -144,7 +144,7 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         </li>
         <li>The gap measured is the box’s real monitoring gap — the last check of any kind, including one in the previous season. A season boundary is not a gap.</li>
         <li>An attempt <b>ends</b> at the first check that finds the box empty (offspring removed or dead), or at an observation marked <code>ABN</code> (abandoned) — whichever comes first.</li>
-        <li>After an <code>ABN</code>, doomed eggs often linger in later checks. A new attempt cannot start until an empty check has actually been seen, so those leftovers can’t masquerade as a second clutch.</li>
+        <li>After an <code>ABN</code>, doomed eggs often linger in later checks. Curently A new attempt is not detected until an empty check has actually been seen, but this needs further analysis.</li>
         <li>The highest egg count and highest chick count seen anywhere in the attempt are kept — they drive the offspring tally in step 10.</li>
       </ul>
 

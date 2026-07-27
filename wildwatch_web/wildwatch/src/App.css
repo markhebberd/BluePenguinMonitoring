@@ -682,7 +682,9 @@ input.pw-invalid:focus, .login-card input.pw-invalid:focus { border-color:#F4433
 /* ---- Breeding verification: per-clutch tick + modal ---- */
 /* Text glyph, so it needs a larger font-size than the 16px egg/chick emoji to match their
    visual height in the offspring row. */
-.verify-tick { align-self:center; font-size:20px; font-weight:700; line-height:1; user-select:none; }
+/* Same 13px lift the eggs get (.clutch-birds .offspring-final), so the tick sits on the egg
+   row rather than centering on the taller parent stacks (mini + "7x"/"8x" attendance count). */
+.verify-tick { align-self:center; margin-bottom:13px; font-size:20px; font-weight:700; line-height:1; user-select:none; }
 .verify-tick.clickable { cursor:pointer; }
 .verify-tick.vt-grey { color:#c3ccd4; }
 .verify-tick.vt-green { color:#2f8f5b; }
