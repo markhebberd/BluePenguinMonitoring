@@ -2848,8 +2848,21 @@ namespace PenguinMonitor
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
-            dayPeopleLayout.AddView(observerSpinner);
-            dayPeopleLayout.AddView(recorderSpinner);
+            // Each spinner sits under its own label so a blank picker is still identifiable.
+            LinearLayout LabelledPerson(string label, Spinner sp)
+            {
+                var col = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+                col.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1);
+                var lbl = new TextView(this) { Text = label, TextSize = 13 };
+                lbl.SetTextColor(Color.Black);
+                lbl.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                col.AddView(lbl);
+                sp.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                col.AddView(sp);
+                return col;
+            }
+            dayPeopleLayout.AddView(LabelledPerson("Observer", observerSpinner));
+            dayPeopleLayout.AddView(LabelledPerson("Recorder", recorderSpinner));
             if (dayUsers.Count == 0)
             {
                 var noUsers = new TextView(this) { Text = "Sync to load people", TextSize = 12 };
