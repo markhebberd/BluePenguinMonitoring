@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates } from './api/localdb';
 import { useAllPenguins, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -10613,18 +10613,31 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     [dateStatsCache, stats]
   );
 
-  // FM dates registered in the enter-date workflow (all seasons), keyed by NZ date.
+  // FM dates registered in the enter-date workflow (all seasons), keyed by NZ date. Not in the
+  // sync snapshot, so the local copy is painted first and the fetch revalidates behind it —
+  // otherwise the tags land a round-trip after the dates they belong to.
   const [registeredFmDates, setRegisteredFmDates] = useState<Map<string, { season: number; number: number; partial: boolean }>>(new Map());
   useEffect(() => {
     if (!token) return;
+    let live = true, revalidated = false;
+    const asMap = (rows: any) => {
+      const m = new Map<string, { season: number; number: number; partial: boolean }>();
+      if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number), partial: !!Number(r.partial_monitor) });
+      return m;
+    };
+    // `revalidated` guards the order, not the speed: a slow IndexedDB read must never land on
+    // top of a server response that already arrived.
+    getCachedFmDates().then(rows => { if (live && !revalidated && rows) setRegisteredFmDates(asMap(rows)); });
     fetch(`/api/crud.php?action=all_fm_dates&colony_id=${getColonyId()}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(rows => {
-        const m = new Map<string, { season: number; number: number; partial: boolean }>();
-        if (Array.isArray(rows)) for (const r of rows) if (r.actual_date) m.set(r.actual_date, { season: Number(r.season_year), number: Number(r.date_number), partial: !!Number(r.partial_monitor) });
-        setRegisteredFmDates(m);
+        if (!live) return;
+        revalidated = true;
+        setRegisteredFmDates(asMap(rows));
+        if (Array.isArray(rows)) setCachedFmDates(rows);
       })
       .catch(() => {});
+    return () => { live = false; };
   }, [token, colonyId]);
 
   const dateTip = useDateTooltip();

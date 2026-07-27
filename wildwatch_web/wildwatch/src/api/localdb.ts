@@ -2030,6 +2030,26 @@ export async function saveDayNote(token: string, date: string,
   triggerSync();
 }
 
+/**
+ * Registered FM/PM dates (the server's date_mappings), cached verbatim in `meta`.
+ *
+ * These are NOT part of the sync snapshot — the app refetches them each load — so without a
+ * cache every date paints bare and gains its "(FM 3)" tag a round-trip later, which reads as
+ * a correction rather than a load. The cache is per colony because the whole database is, and
+ * it survives a re-sync (clearAll skips `meta`) but not a resetDatabase, where the fetch
+ * refills it. Failures are swallowed: this is only ever an optimisation over the network.
+ */
+export async function getCachedFmDates(): Promise<any[] | null> {
+  try {
+    const rows = await getMeta(await openDB(), 'fm_dates');
+    return Array.isArray(rows) ? rows : null;
+  } catch { return null; }
+}
+
+export async function setCachedFmDates(rows: any[]): Promise<void> {
+  try { await setMeta(await openDB(), 'fm_dates', rows); } catch { /* cache only */ }
+}
+
 // ============ Lifecycle ============
 
 export async function isLoaded(): Promise<boolean> {
