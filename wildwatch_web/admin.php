@@ -383,6 +383,25 @@ if ($action === 'update_user') {
     }
     if (empty($fields)) { echo json_encode(['success'=>true]); exit; }
 
+    // The API service account authenticates by api_key and is hidden from the people pickers on
+    // the strength of role='api'. The admin dropdown only offers viewer/editor/admin, so it
+    // renders that row as "Viewer" — one careless change would break the legacy auth path AND
+    // put the account back in every picker. Refuse it, and validate the role either way, since
+    // this endpoint previously accepted any string at all.
+    if (array_key_exists('role', $fields)) {
+        $cur = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+        $cur->execute([$input['observer_id']]);
+        $curRole = $cur->fetchColumn();
+        if ($curRole === 'api' && $fields['role'] !== 'api') {
+            http_response_code(409);
+            echo json_encode(['error'=>"The API service account's role cannot be changed — it authenticates by API key and is hidden from people pickers on the strength of it."]);
+            exit;
+        }
+        if ($curRole !== 'api' && !in_array($fields['role'], ['viewer', 'editor', 'admin'], true)) {
+            http_response_code(400); echo json_encode(['error'=>'Invalid role']); exit;
+        }
+    }
+
     // surname is NOT NULL (blank is ''), so it can take part in the (f_name, surname) key.
     // falcon_id and email blank out to NULL — for email that is what lets any number of
     // login-less users coexist under a UNIQUE key that still catches a real duplicate.

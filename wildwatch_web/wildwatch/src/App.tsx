@@ -9069,11 +9069,16 @@ function AdminPanel({ token, observationDates, checkTarget }: {
                   <td><EditableField value={u.falcon_id} onSave={(v: any) => updateUser(u.observer_id, 'falcon_id', v)} placeholder="-" canEdit={true} /></td>
                   <td><EditableField value={u.email} onSave={(v: any) => updateUser(u.observer_id, 'email', v)} placeholder="-" canEdit={true} /></td>
                   <td>
-                    <select value={u.role || 'viewer'} onChange={e => updateUser(u.observer_id, 'role', e.target.value)}>
-                      <option value="viewer">Viewer</option>
-                      <option value="editor">Editor</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    {/* The service account's role is load-bearing — it is what keeps it out of the
+                        people pickers — and the dropdown has no 'api' option, so it would render
+                        as "Viewer" and silently downgrade on any change. Show it, don't offer it. */}
+                    {u.role === 'api'
+                      ? <span className="muted" title="Service account — authenticates by API key">API</span>
+                      : <select value={u.role || 'viewer'} onChange={e => updateUser(u.observer_id, 'role', e.target.value)}>
+                          <option value="viewer">Viewer</option>
+                          <option value="editor">Editor</option>
+                          <option value="admin">Admin</option>
+                        </select>}
                   </td>
                   <td><input type="checkbox" checked={u.active == 1} onChange={e => updateUser(u.observer_id, 'active', e.target.checked ? '1' : '0')} title="Inactive accounts are kept for their history" /></td>
                   <td style={{ whiteSpace: 'nowrap' }}>

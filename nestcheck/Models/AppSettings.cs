@@ -678,6 +678,22 @@ namespace PenguinMonitor.Models
             }
         }
 
+        /// <summary>This user's identifier in Falcon (users.falcon_id), refreshed every sync.
+        /// Empty when they have none.</summary>
+        private string observerFalconId = "";
+        public string ObserverFalconId
+        {
+            get => observerFalconId;
+            set
+            {
+                if (observerFalconId != value)
+                {
+                    observerFalconId = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
         [JsonIgnore]
         public bool IsAuthenticated => !string.IsNullOrEmpty(AuthToken);
 
