@@ -1,0 +1,40 @@
+-- users.deleted_at: retire an account without erasing it.
+--
+-- A user is never hard-deleted: ten tables carry an FK to users.id, and audit_log records every
+-- edit they ever made. Removing the row would either be refused by the constraints or, worse,
+-- strip the author from history. deleted_at hides them instead — out of the admin list, out of
+-- every people picker — while their name still resolves wherever the past refers to them.
+--
+-- DELETION IS REFUSED while the account owns data. crud/admin checks, and names the count:
+--   penguin_chips.chipper_id        penguin_chips.assistant_id
+--   observations.observer_id        observations.deleted_by
+--   day_notes.observer_id           day_notes.recorder_id
+--   penguin_scans.deleted_by        penguin_biometric_data.deleted_by
+--   breeding_verifications.adults_reviewed_by / .chicks_reviewed_by
+--   api_key IS NOT NULL             -- an integration is authenticating as this account
+--
+-- audit_log is deliberately NOT a blocker. Almost every account that has ever logged in has
+-- audit rows, so blocking on it would make deletion impossible in practice. Those rows keep
+-- pointing at the user, and the client still resolves the name — getObservers returns deleted
+-- users flagged rather than omitting them, so a history entry never reads "unknown user".
+--
+-- Soft-deleting also revokes sessions and clears active, so a hidden account cannot keep
+-- working from a browser that was already logged in.
+--
+-- Current state at time of writing — who this would allow:
+--   deletable now: Mark test user, Michael Cartwright, mark3 test user, Mike McManaway,
+--                  Lisa Nelson, Luke Easton, Joyce Ballance, Alve Pilo, Jax
+--   refused:       Mark Hebberd (40512 observations), Britta Steude (512 chips, 4190 obs),
+--                  Angela Lees (335 chips), Linda Jenkins (74), Amy McKenzie (55),
+--                  John Cockrem (48), Larry Lumsden (21), Karen Saunders (7),
+--                  Henry Elsom (2), Marian Vlaar (1 day as recorder),
+--                  Florence Muñoz de Noronha (1 day as recorder), API (holds an api_key)
+
+ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL AFTER active;
+
+-- Verify:
+-- SHOW CREATE TABLE users;
+-- SELECT id, f_name, surname, active, deleted_at FROM users ORDER BY id;
+--
+-- Undelete (there is no UI for it — hidden means hidden):
+-- UPDATE users SET deleted_at = NULL WHERE id = ?;

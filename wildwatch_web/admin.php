@@ -367,7 +367,7 @@ if ($action === 'recent_changes') {
 }
 
 if ($action === 'users') {
-    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, chip_acronym, active, email, role, created_at FROM users ORDER BY id");
+    $stmt = $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, falcon_id, chip_acronym, active, email, role, created_at FROM users WHERE deleted_at IS NULL ORDER BY id");
     echo json_encode($stmt->fetchAll());
     exit;
 }
@@ -437,6 +437,67 @@ if ($action === 'update_user') {
         $pdo->commit();
     } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
     echo json_encode(['success'=>true]);
+    exit;
+}
+
+/**
+ * Soft-delete a user: hide them from the admin list and every people picker, without erasing
+ * the row that ten tables and audit_log point at. Refused while the account owns data — the
+ * response names what and how much, so "why can't I delete this" is answerable from the UI.
+ */
+if ($action === 'delete_user' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $target = (int)($input['observer_id'] ?? 0);
+    if (!$target) { http_response_code(400); echo json_encode(['error'=>'observer_id required']); exit; }
+    if ($target === (int)$observer['observer_id']) { http_response_code(400); echo json_encode(['error'=>'You cannot delete your own account']); exit; }
+
+    $who = $pdo->prepare("SELECT f_name, surname, api_key, deleted_at FROM users WHERE id = ?");
+    $who->execute([$target]);
+    $row = $who->fetch(PDO::FETCH_ASSOC);
+    if (!$row) { http_response_code(404); echo json_encode(['error'=>'No such user']); exit; }
+    if ($row['deleted_at'] !== null) { echo json_encode(['success'=>true, 'already'=>true]); exit; }
+    $name = trim($row['f_name'] . ' ' . $row['surname']);
+
+    // Every place a user can own data. audit_log is deliberately absent: it records what they
+    // did, not data they own, and blocking on it would make deletion impossible in practice.
+    $blockers = [
+        ['penguin_chips',          'chipper_id',          'chipper on %d chip%s'],
+        ['penguin_chips',          'assistant_id',        'assistant on %d chip%s'],
+        ['observations',           'observer_id',         'recorded %d observation%s'],
+        ['observations',           'deleted_by',          'deleted %d observation%s'],
+        ['day_notes',              'observer_id',         'observer on %d day%s'],
+        ['day_notes',              'recorder_id',         'recorder on %d day%s'],
+        ['penguin_scans',          'deleted_by',          'deleted %d scan%s'],
+        ['penguin_biometric_data', 'deleted_by',          'deleted %d biometric%s'],
+        ['breeding_verifications', 'adults_reviewed_by',  'verified adults on %d clutch%s'],
+        ['breeding_verifications', 'chicks_reviewed_by',  'verified chicks on %d clutch%s'],
+    ];
+    $found = [];
+    foreach ($blockers as [$table, $col, $fmt]) {
+        $c = $pdo->prepare("SELECT COUNT(*) FROM `$table` WHERE `$col` = ?");
+        $c->execute([$target]);
+        $n = (int)$c->fetchColumn();
+        if ($n > 0) $found[] = sprintf($fmt, $n, $n === 1 ? '' : (str_contains($fmt, 'clutch%s') ? 'es' : 's'));
+    }
+    if ($row['api_key'] !== null) $found[] = 'holds an API key';
+
+    if ($found) {
+        http_response_code(409);
+        echo json_encode(['error' => "$name still has data attached — " . implode(', ', $found) . ". Deactivate instead of deleting.",
+                          'blockers' => $found]);
+        exit;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        // active=0 alongside deleted_at so anything still reading `active` also sees them gone.
+        wwAuditedUpdate($pdo, 'users', $target, ['deleted_at' => date('Y-m-d H:i:s'), 'active' => 0],
+            $observer['observer_id'], 'User deleted (soft) — no data attached');
+        // A hidden account must not keep working from a browser that is already logged in.
+        $pdo->prepare("DELETE FROM sessions WHERE observer_id = ?")->execute([$target]);
+        $pdo->commit();
+    } catch (Exception $e) { $pdo->rollBack(); http_response_code(500); echo json_encode(['error'=>$e->getMessage()]); exit; }
+    echo json_encode(['success'=>true, 'observer_id'=>$target, 'name'=>$name]);
     exit;
 }
 

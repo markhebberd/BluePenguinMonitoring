@@ -220,7 +220,7 @@ function handleDownload($pdo, $colonyId, $observer) {
     // Everyone who can be named as the day's observer or recorder. Active only — the phone is
     // picking who is out today, and a deactivated person is by definition not. Names are
     // pre-joined so the app never has to compose them.
-    $userStmt = $pdo->query("SELECT id, TRIM(CONCAT(f_name, ' ', surname)) AS name FROM users WHERE active = 1 ORDER BY f_name, surname");
+    $userStmt = $pdo->query("SELECT id, TRIM(CONCAT(f_name, ' ', surname)) AS name FROM users WHERE active = 1 AND deleted_at IS NULL ORDER BY f_name, surname");
 
     echo json_encode([
         'snapshot_time' => date('c'),

@@ -42,5 +42,7 @@ function getObservers($pdo) {
     // current people in a picker, while still resolving the id on an old row to whoever it was.
     // role rides along so the client can keep service accounts (the API user) out of the
     // people pickers, while still resolving their id if an old row happens to reference one.
-    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active, role FROM users ORDER BY f_name, surname")->fetchAll()];
+    // Soft-deleted users are returned FLAGGED, not omitted: the client hides them from pickers
+    // but still needs their name for the history that points at them.
+    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active, role, (deleted_at IS NOT NULL) AS deleted FROM users ORDER BY f_name, surname")->fetchAll()];
 }

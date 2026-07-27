@@ -1984,7 +1984,7 @@ export function getDayPeople(date: string): { observer_id: number | null; record
  *  still resolves them, so an old row referencing one is not left blank. */
 export function getUsers(): { id: number; name: string; active: boolean }[] {
   return (mem?.observers || [])
-    .filter((o: any) => (o.role || '') !== 'api')
+    .filter((o: any) => (o.role || '') !== 'api' && !(o.deleted == 1))
     .map((o: any) => ({
       id: Number(o.observer_id),
       name: [o.observer_name, o.surname].filter(Boolean).join(' '),

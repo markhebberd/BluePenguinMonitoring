@@ -8474,6 +8474,24 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   };
 
   const [colonies, setColonies] = useState<any[]>([]);
+  // Soft delete. The server refuses while the account owns data and says what it owns.
+  const [deletingUser, setDeletingUser] = useState<number | null>(null);
+  const deleteUser = async (u: any) => {
+    const name = [u.observer_name, u.surname].filter(Boolean).join(' ');
+    if (!confirm(`Delete ${name}?\n\nThey are hidden from the user list and every people picker. Their name still shows on anything they previously recorded. Refused if they own any data.`)) return;
+    setUserErr(''); setDeletingUser(u.observer_id);
+    try {
+      const res = await fetch('/api/admin.php?action=delete_user', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ observer_id: u.observer_id })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.error) { setUserErr(d.error || 'Could not delete user'); return; }
+      setUsers(users.filter(x => x.observer_id !== u.observer_id));
+    } catch (e: any) { setUserErr(e.message || 'Could not delete user'); }
+    finally { setDeletingUser(null); }
+  };
+
   const emptyNewUser = { observer_name: '', surname: '', chip_acronym: '', falcon_id: '', email: '', role: 'viewer', password: '' };
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [newUserColonies, setNewUserColonies] = useState<Record<string, string>>({}); // colony_id -> 'view' | 'edit'
@@ -9063,6 +9081,9 @@ function AdminPanel({ token, observationDates, checkTarget }: {
                     {u.email && <button className="edit-btn" style={{ marginLeft: 6 }} disabled={sendingResetFor === u.observer_id}
                       title={`Email ${u.email} a link to set their own password`}
                       onClick={() => sendResetEmail(u)}>{sendingResetFor === u.observer_id ? 'Sending…' : 'Email link'}</button>}
+                    <button className="edit-btn" style={{ marginLeft: 6, color: '#c0392b' }} disabled={deletingUser === u.observer_id}
+                      title="Hide this user. Refused if they own any chips, observations or day records."
+                      onClick={() => deleteUser(u)}>{deletingUser === u.observer_id ? 'Deleting…' : 'Delete'}</button>
                   </td>
                 </tr>
               ))}
