@@ -554,6 +554,9 @@ function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onA
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which option the arrow keys are sitting on. -1 = none highlighted, which is the state with
+  // an empty box: Enter must not fire until you have either typed or arrowed to something.
+  const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const closedRef = useRef<HTMLSpanElement | null>(null);
   // A commit hands focus back to the closed field so the next Tab moves on. That focus must
@@ -592,9 +595,9 @@ function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onA
     <span ref={el => { closedRef.current = el; if (fieldRef) fieldRef.current = el; }} tabIndex={0} role="button"
       className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
       title={title}
-      onClick={() => { setQuery(''); setOpen(true); }}
-      onFocus={() => { if (!skipFocusOpen.current) { setQuery(''); setOpen(true); } }}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setQuery(''); setOpen(true); } }}>
+      onClick={() => { setQuery(''); setActive(-1); setOpen(true); }}
+      onFocus={() => { if (!skipFocusOpen.current) { setQuery(''); setActive(-1); setOpen(true); } }}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setQuery(''); setActive(-1); setOpen(true); } }}>
       {name && label && <span className="day-hdr-people-label">{label}</span>}
       {saving ? 'Saving…' : (name || addLabel || '-')}
       {error && <span style={{color:'#F44336'}}> {error}</span>}
@@ -603,29 +606,51 @@ function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onA
 
   const q = query.trim().toLowerCase();
   const matches = getUsers().filter(u => !q || u.name.toLowerCase().includes(q));
+  // One flat list so the arrows walk "— not recorded —" too: clearing is an option like any
+  // other. null stands for that row; everything else is a user id.
+  const options: (number | null)[] = [...(userId !== null ? [null] : []), ...matches.map(u => u.id)];
+  // Typing highlights the top match (so "brit ⏎" still works); an empty box highlights nothing,
+  // and a query matching nobody highlights nothing — Enter must not fall through to "— not
+  // recorded —" and silently clear the field.
+  const topIdx = matches.length ? (userId !== null ? 1 : 0) : -1;
+  const shown = active >= 0 ? Math.min(active, options.length - 1) : (q ? topIdx : -1);
+  const move = (d: number) => setActive(i => {
+    const from = i >= 0 ? i : (shown >= 0 ? shown : -1);
+    return Math.max(0, Math.min(from + d, options.length - 1));
+  });
   return (
     <span className="day-person-picker">
       {label && <span className="day-hdr-people-label">{label}</span>}
       <input ref={inputRef} className="day-note-input day-person-input" value={query}
         placeholder={name || 'Search people'}
-        onChange={e => setQuery(e.target.value)}
+        onChange={e => { setQuery(e.target.value); setActive(-1); }}
         // Blur closes the picker, but a result's onMouseDown fires first so the click lands.
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
-          if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery(''); }
-          // Guarded on a non-empty query: with the full list showing, Enter would otherwise
-          // assign whoever happens to sort first.
-          if (e.key === 'Enter') { e.preventDefault(); if (q && matches.length) commit(matches[0].id); }
+          if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery(''); setActive(-1); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+          if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+          // Only fires on something actually highlighted — typed-and-matched, or arrowed to.
+          if (e.key === 'Enter') { e.preventDefault(); if (shown >= 0) commit(options[shown]); }
         }} />
       <div className="day-person-results">
-        {userId !== null && <div className="day-person-result muted" onMouseDown={() => commit(null)}>— not recorded —</div>}
-        {matches.map((u, i) => (
-          <div key={u.id}
-            className={`day-person-result${u.id === userId ? ' selected' : ''}${q && i === 0 ? ' top' : ''}`}
-            onMouseDown={() => commit(u.id)}>
-            {u.name}{u.active ? '' : <span className="muted"> (inactive)</span>}
-          </div>
-        ))}
+        {userId !== null && (
+          <div className={`day-person-result muted${shown === 0 ? ' top' : ''}`}
+            ref={el => { if (shown === 0) el?.scrollIntoView({ block: 'nearest' }); }}
+            onMouseDown={() => commit(null)}>— not recorded —</div>
+        )}
+        {matches.map((u, i) => {
+          const idx = userId !== null ? i + 1 : i;
+          return (
+            <div key={u.id}
+              className={`day-person-result${u.id === userId ? ' selected' : ''}${shown === idx ? ' top' : ''}`}
+              // Keep the highlighted row visible: the list is long enough to scroll.
+              ref={el => { if (shown === idx) el?.scrollIntoView({ block: 'nearest' }); }}
+              onMouseDown={() => commit(u.id)}>
+              {u.name}{u.active ? '' : <span className="muted"> (inactive)</span>}
+            </div>
+          );
+        })}
         {matches.length === 0 && <div className="day-person-result muted">No one matches "{query}"</div>}
       </div>
     </span>
