@@ -6725,7 +6725,7 @@ namespace PenguinMonitor
                 if (SelectedChipUserId(chipperSpinner, chipperUsers) == 0)
                 {
                     chipperLabel.SetTextColor(UIFactory.DANGER_RED);
-                    Toast.MakeText(this, chipperUsers.Count == 0 ? "No chippers — Sync to load them" : "Select a chipper", ToastLength.Short)?.Show();
+                    Toast.MakeText(this, chipperUsers.Count == 0 ? "No chippers — Sync to load them" : "Select chipper", ToastLength.Short)?.Show();
                     return;
                 }
                 // Confirmation screen listing everything that will be saved, worded the way
