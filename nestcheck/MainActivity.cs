@@ -6013,8 +6013,8 @@ namespace PenguinMonitor
             // Chipper below the chip box, then Assistant — one person per row
             var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipperCol.AddView(createLabel("Chipper"));
-            // Default to the logged-in user — usually the person doing the chipping.
-            var chipperSpinner = MakeChipPersonSpinner(_appSettings?.ObserverId ?? 0);
+            // Starts unset — the chipper is chosen explicitly, not assumed to be whoever is logged in.
+            var chipperSpinner = MakeChipPersonSpinner(0);
             chipperCol.AddView(chipperSpinner);
             card.AddView(chipperCol);
 
