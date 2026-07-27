@@ -34,6 +34,12 @@ namespace PenguinMonitor.Models
         /// <summary>Server observation_id this edit was confirmed against (for optimistic concurrency).</summary>
         public int? ConfirmedAgainstObsId { get; set; }
 
+        /// <summary>Local draft: edited but not yet committed for upload (the box hasn't been locked).
+        /// Persisted so a draft that survives an app restart is still shown as unsynced rather than
+        /// being mistaken for server-synced data (IsPendingUpload is false for both). Cleared when
+        /// the draft is committed for upload or replaced by server data.</summary>
+        public bool IsDraft { get; set; }
+
         public BoxObservation()
         {
             WhenDataCollectedUtc = DateTime.UtcNow;

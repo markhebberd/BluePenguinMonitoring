@@ -2460,9 +2460,9 @@ namespace PenguinMonitor
 
             // Border: today=solid black, old data=orange border, loss=red, changed=blue, default=grey
             bool differenceFound = false;
-            if (currentExists && thisBoxData?.IsPendingUpload == true)
+            if (currentExists && (thisBoxData?.IsPendingUpload == true || thisBoxData?.IsDraft == true))
             {
-                // Unsynced today's edit — orange border
+                // Unsynced today's edit (queued OR an uncommitted draft) — orange border
                 boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.WARNING_YELLOW, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
             }
             else if (currentExists)
@@ -3649,10 +3649,11 @@ namespace PenguinMonitor
                     {
                         var nzTime = ToNzTime(currentObs.WhenDataCollectedUtc);
                         var who = !string.IsNullOrEmpty(currentObs.ObserverName) ? currentObs.ObserverName : "";
-                        // Three states: an unsaved draft (edits made since unlock, not yet locked)
-                        // is neither synced nor queued — don't claim "Synced". Locked-and-committed
-                        // is "⏳ Unsynced" (waiting to upload); otherwise it matches the server.
-                        bool unsavedDraft = !_isBoxLocked && _dataChangedSinceUnlock;
+                        // Three states: a draft (local edits not yet committed for upload) is neither
+                        // synced nor queued — never claim "Synced". IsDraft is persisted, so this holds
+                        // after an app restart too (not just via the in-memory _dataChangedSinceUnlock).
+                        // Locked-and-committed is "⏳ Unsynced"; otherwise it matches the server.
+                        bool unsavedDraft = currentObs.IsDraft || (!_isBoxLocked && _dataChangedSinceUnlock);
                         var syncLine = unsavedDraft ? "Not saved" : currentObs.IsPendingUpload ? "⏳ Unsynced" : "Synced";
                         _boxSavedTimeTextView.Text = $"{syncLine}\n{nzTime:HH:mm}" + (!string.IsNullOrEmpty(who) ? $"\n{who}" : "");
                         _boxSavedTimeTextView.SetTextColor(unsavedDraft || currentObs.IsPendingUpload ? UIFactory.DANGER_RED : Color.Black);
@@ -4372,9 +4373,22 @@ namespace PenguinMonitor
                         return;
                     }
 
-                    // No changes and box already has today data — lock silently
-                    if (!_dataChangedSinceUnlock && _colonyState.GetTodayForBox(_currentBoxName) != null)
+                    // No in-session changes and the box already has today data.
+                    var todayObs = _colonyState.GetTodayForBox(_currentBoxName);
+                    if (!_dataChangedSinceUnlock && todayObs != null)
                     {
+                        if (todayObs.IsDraft)
+                        {
+                            // A draft (typically restored from a previous session) was never committed
+                            // for upload. Locking finalises it: commit directly so it actually syncs —
+                            // no server-compare dialog, since the stored copy IS the draft, not server data.
+                            CommitDraftForUpload();
+                            _dataChangedSinceUnlock = false;
+                            DrawPageLayouts();
+                            TryBackgroundUpload();
+                            return;
+                        }
+                        // Genuinely committed/synced with no changes — lock silently.
                         _dataChangedSinceUnlock = false;
                         DrawPageLayouts();
                         return;
@@ -5121,6 +5135,8 @@ namespace PenguinMonitor
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
                 // Draft only — not flagged for upload until the box is locked (see CommitDraftForUpload).
+                // IsDraft persists so a restart doesn't make this look synced (both are IsPendingUpload=false).
+                boxData.IsDraft = true;
                 _colonyState.SaveBoxObservation(_currentBoxName, boxData);
                 SaveToAppDataDir();
             }
@@ -5135,6 +5151,7 @@ namespace PenguinMonitor
             var obs = _colonyState.GetTodayForBox(_currentBoxName);
             if (obs == null) return;
             obs.IsPendingUpload = true;
+            obs.IsDraft = false;   // committed now — IsPendingUpload tracks it from here
             obs.PendingUploadSinceUtc ??= DateTime.UtcNow;
             // Auto-replace on server if this box was already synced
             if (obs.ObservationId.HasValue)
@@ -5228,6 +5245,7 @@ namespace PenguinMonitor
                 boxData.ScannedIds.Add(new ScanRecord { BirdId = noScanId, Timestamp = DateTime.UtcNow });
                 boxData.WhenDataCollectedUtc = DateTime.UtcNow;
                 boxData.ObserverName = _appSettings.ObserverName;
+                boxData.IsDraft = true;   // draft until the box is locked; persists across restart
                 _colonyState.SaveBoxObservation(_currentBoxName, boxData); // draft until the box is locked
                 SaveCurrentBoxData();
                 _dataChangedSinceUnlock = true;
