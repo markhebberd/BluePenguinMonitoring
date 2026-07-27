@@ -825,6 +825,11 @@ function wwFillDayNote($pdo, int $colonyId, string $noteDate, string $note, $obs
 function wwPasswordProblem(string $pw, array $identity = []): ?string {
     if (strlen($pw) < 8) return 'Use at least 8 characters.';
 
+    // At least 4 distinct characters, checked BEFORE the length exemption below — otherwise
+    // "000000000000" is 12 long, skips the class rule, and passes. Counts by byte, which is
+    // fine here: a repeated multibyte char repeats its bytes too, so it still fails.
+    if (count(array_unique(str_split($pw))) < 4) return 'Use at least 4 different characters.';
+
     // A long passphrase earns an exemption from the character-mix rule — "correcthorsestaple"
     // is stronger than "Pw2!x" and we should not punish it. Short ones need variety.
     if (strlen($pw) < 12) {
@@ -837,20 +842,22 @@ function wwPasswordProblem(string $pw, array $identity = []): ?string {
 
     $lp = mb_strtolower($pw);
 
-    // Not the person's own name or email. Tokenise, drop anything under 3 chars (too short to
-    // be a meaningful match), and reject the password if it contains any token.
-    $tokens = [];
+    // Not the person's own name or email. Tokenise (email at '@' then on separators, names on
+    // separators), drop anything under 3 chars, and keep name and email tokens apart so the
+    // message can name the exact thing that matched rather than a vague "name or email".
+    $nameTokens = $emailTokens = [];
     foreach ($identity as $raw) {
         $raw = mb_strtolower(trim((string)$raw));
         if ($raw === '') continue;
-        if (strpos($raw, '@') !== false) $raw = substr($raw, 0, strpos($raw, '@')); // email local part
+        $isEmail = strpos($raw, '@') !== false;
+        if ($isEmail) $raw = substr($raw, 0, strpos($raw, '@'));
         foreach (preg_split('/[^\p{L}\p{N}]+/u', $raw) as $tok) {
-            if (mb_strlen($tok) >= 3) $tokens[$tok] = 1;
+            if (mb_strlen($tok) < 3) continue;
+            if ($isEmail) $emailTokens[$tok] = 1; else $nameTokens[$tok] = 1;
         }
     }
-    foreach (array_keys($tokens) as $tok) {
-        if (mb_strpos($lp, $tok) !== false) return 'Do not put your name or email in your password.';
-    }
+    foreach (array_keys($nameTokens)  as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your name in your password.';
+    foreach (array_keys($emailTokens) as $tok) if (mb_strpos($lp, $tok) !== false) return 'Do not put your email address in your password.';
 
     // A tiny blocklist of the passwords a wordlist tries first, including this project's own
     // words. Not a substitute for the rules above — a backstop for the obvious.

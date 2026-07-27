@@ -3610,20 +3610,24 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
  *  `identity` is the strings a password must not contain: the person's name parts and email. */
 function passwordProblem(pw: string, identity: string[] = []): string | null {
   if (pw.length < 8) return 'Use at least 8 characters.';
+  // At least 4 distinct chars, before the length exemption — else "000000000000" passes.
+  if (new Set(pw).size < 4) return 'Use at least 4 different characters.';
   if (pw.length < 12) {
     const classes = (/[a-z]/.test(pw) ? 1 : 0) + (/[A-Z]/.test(pw) ? 1 : 0)
                   + (/[0-9]/.test(pw) ? 1 : 0) + (/[^a-zA-Z0-9]/.test(pw) ? 1 : 0);
     if (classes < 2) return 'Mix at least two of: lower case, upper case, numbers, symbols — or make it 12+ characters.';
   }
   const lp = pw.toLowerCase();
-  const tokens = new Set<string>();
+  const nameTokens = new Set<string>(), emailTokens = new Set<string>();
   for (let raw of identity) {
     raw = (raw || '').toLowerCase().trim();
     if (!raw) continue;
-    if (raw.includes('@')) raw = raw.slice(0, raw.indexOf('@'));
-    for (const tok of raw.split(/[^\p{L}\p{N}]+/u)) if (tok.length >= 3) tokens.add(tok);
+    const isEmail = raw.includes('@');
+    if (isEmail) raw = raw.slice(0, raw.indexOf('@'));
+    for (const tok of raw.split(/[^\p{L}\p{N}]+/u)) if (tok.length >= 3) (isEmail ? emailTokens : nameTokens).add(tok);
   }
-  for (const tok of tokens) if (lp.includes(tok)) return 'Do not put your name or email in your password.';
+  for (const tok of nameTokens) if (lp.includes(tok)) return 'Do not put your name in your password.';
+  for (const tok of emailTokens) if (lp.includes(tok)) return 'Do not put your email address in your password.';
   const weak = ['password','passw0rd','password1','12345678','123456789','1234567890','qwertyui',
     'azertyui','iloveyou','letmein1','motdepasse','changeme','000000000','wildwatch','nestcheck',
     'penguins','penguin1','manchot1'];
