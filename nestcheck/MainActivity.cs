@@ -228,7 +228,10 @@ namespace PenguinMonitor
         private Button? _tagModeSaveButton;
         private Button? _tagModeCancelButton;
         private TextView? _tagModeBanner;            // full-width "BOX TAGS MODE" bar at the top
-        private LinearLayout? _tagModeFinishBar;     // fixed bottom bar holding the finish button
+        // Only ever one of these two occupies the bottom of the screen, so there is exactly one
+        // primary action in thumb reach at a time: Save while capturing, Finish otherwise.
+        private LinearLayout? _tagModeFinishBar;
+        private LinearLayout? _tagModeCaptureBar;
         private View? _tagModeBottomSpacer;          // keeps scrolled content clear of the finish bar
         // Mode chrome: purple, deliberately unlike the black/orange/green/red/blue data language.
         private static readonly Color TAG_MODE_PURPLE = Color.ParseColor("#6A1B9A");
@@ -1909,7 +1912,7 @@ namespace PenguinMonitor
             // Keeps the last card scrollable clear of the fixed finish bar in tag mode
             _tagModeBottomSpacer = new View(this);
             _tagModeBottomSpacer.LayoutParameters = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent, (int)(96 * (Resources?.DisplayMetrics?.Density ?? 2)));
+                ViewGroup.LayoutParams.MatchParent, (int)(140 * (Resources?.DisplayMetrics?.Density ?? 2)));
             _tagModeBottomSpacer.Visibility = ViewStates.Gone;
             parentLinearLayout.AddView(_tagModeBottomSpacer);
 
@@ -1937,10 +1940,47 @@ namespace PenguinMonitor
             finishBarParams.Gravity = GravityFlags.Bottom;
             rootFrame.AddView(_tagModeFinishBar, finishBarParams);
 
+            // Capture actions take over the bottom of the screen while a session is open. They
+            // live here rather than in the scrolling card because the user is holding the phone
+            // flat on the box while it measures — they can't go hunting for a button.
+            _tagModeCaptureBar = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            _tagModeCaptureBar.SetPadding(12, 10, 12, 10);
+            _tagModeCaptureBar.Background = _uiFactory.CreateRoundedBackground(TAG_MODE_PURPLE, 0);
+
+            _tagModeCancelButton = _uiFactory.CreateStyledButton("Cancel", UIFactory.LIGHTER_GRAY);
+            _tagModeCancelButton.TextSize = 15;
+            _tagModeCancelButton.SetPadding(8, 26, 8, 26);
+            var cancelBarParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+            cancelBarParams.SetMargins(0, 0, 6, 0);
+            _tagModeCancelButton.LayoutParameters = cancelBarParams;
+            _tagModeCancelButton.Click += (s, e) =>
+            {
+                EndTagCapture();
+                Toast.MakeText(this, "Cancelled — nothing changed", ToastLength.Short)?.Show();
+            };
+            _tagModeCaptureBar.AddView(_tagModeCancelButton);
+
+            // Affirmative action on the right and twice the width — the one you reach for
+            _tagModeSaveButton = _uiFactory.CreateStyledButton("✓  Save", UIFactory.SUCCESS_GREEN);
+            _tagModeSaveButton.TextSize = 17;
+            _tagModeSaveButton.SetPadding(8, 26, 8, 26);
+            var saveBarParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 2f);
+            saveBarParams.SetMargins(6, 0, 0, 0);
+            _tagModeSaveButton.LayoutParameters = saveBarParams;
+            _tagModeSaveButton.Click += (s, e) => SaveTagCapture();
+            _tagModeCaptureBar.AddView(_tagModeSaveButton);
+
+            _tagModeCaptureBar.Visibility = ViewStates.Gone;
+            var captureBarParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            captureBarParams.Gravity = GravityFlags.Bottom;
+            rootFrame.AddView(_tagModeCaptureBar, captureBarParams);
+
             SetContentView(rootFrame);
 
             _rootScrollView.SetOnApplyWindowInsetsListener(new ViewInsetsListener());
             _tagModeFinishBar.SetOnApplyWindowInsetsListener(new BottomInsetListener(12));
+            _tagModeCaptureBar.SetOnApplyWindowInsetsListener(new BottomInsetListener(10));
 
            JumpToBox(_boxNamesAndIndexes.First().Key); //Contains DrawPageLayouts()
         }
@@ -3633,8 +3673,14 @@ namespace PenguinMonitor
                     _rootScrollView?.SetBackgroundColor(tagMode ? TAG_MODE_WASH : UIFactory.LIGHT_GRAY);
                     if (_tagModeBanner != null)
                         _tagModeBanner.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                    // Exactly one bottom bar at a time: Save/Cancel owns the thumb zone during a
+                    // capture, Finish owns it otherwise. Two stacked full-width buttons both
+                    // starting with a tick was asking to be mis-tapped in the field.
+                    bool barCapturing = tagMode && _tagCaptureActive;
                     if (_tagModeFinishBar != null)
-                        _tagModeFinishBar.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
+                        _tagModeFinishBar.Visibility = tagMode && !barCapturing ? ViewStates.Visible : ViewStates.Gone;
+                    if (_tagModeCaptureBar != null)
+                        _tagModeCaptureBar.Visibility = barCapturing ? ViewStates.Visible : ViewStates.Gone;
                     if (_tagModeBottomSpacer != null)
                         _tagModeBottomSpacer.Visibility = tagMode ? ViewStates.Visible : ViewStates.Gone;
                     // Settings can't be opened from inside the mode
@@ -3722,9 +3768,11 @@ namespace PenguinMonitor
                         // The box card never collapses — outside tag mode the content is always shown
                         if (_singleBoxDataContentLayout != null && !tagMode)
                             _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
-                        // Nav buttons are always visible
+                        // Nav buttons are always visible, except during a capture — they're
+                        // disabled then anyway, and hiding them keeps the steps up the screen.
                         if (_boxNavigationButtonsLayout != null)
-                            _boxNavigationButtonsLayout.Visibility = ViewStates.Visible;
+                            _boxNavigationButtonsLayout.Visibility =
+                                (tagMode && _tagCaptureActive) ? ViewStates.Gone : ViewStates.Visible;
                         if (_discardButton != null)
                             _discardButton.Visibility = !_isBoxLocked && !tagMode ? ViewStates.Visible : ViewStates.Gone;
                         // Watched toggle takes the X's slot while locked
@@ -4900,10 +4948,13 @@ namespace PenguinMonitor
             _tagModeStep1Text.SetPadding(0, 0, 0, 6);
             _tagModeCapturePanel.AddView(_tagModeStep1Text);
 
+            // Outlined, not filled: a secondary correction that still has to look tappable.
+            // Flat grey-on-white was too close to the card to read as a button at all.
             _tagModeMeasureAgainButton = _uiFactory.CreateStyledButton("Measure again", UIFactory.LIGHTER_GRAY);
-            _tagModeMeasureAgainButton.TextSize = 13;
-            _tagModeMeasureAgainButton.SetPadding(14, 12, 14, 12);
-            _tagModeMeasureAgainButton.SetTextColor(Color.Black);
+            _tagModeMeasureAgainButton.TextSize = 14;
+            _tagModeMeasureAgainButton.SetPadding(20, 16, 20, 16);
+            _tagModeMeasureAgainButton.SetTextColor(TAG_MODE_PURPLE);
+            _tagModeMeasureAgainButton.Background = _uiFactory.CreateCardBackground(borderWidth: 3, borderColour: TAG_MODE_PURPLE);
             var measureAgainParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             measureAgainParams.SetMargins(0, 0, 0, 14);
             _tagModeMeasureAgainButton.LayoutParameters = measureAgainParams;
@@ -4925,38 +4976,18 @@ namespace PenguinMonitor
             // Tag side-action sits inside step 2 rather than in the button stack — it's a
             // correction, not one of the two things you came here to do.
             _tagModeTagActionButton = _uiFactory.CreateStyledButton("Remove tag", UIFactory.LIGHTER_GRAY);
-            _tagModeTagActionButton.TextSize = 13;
-            _tagModeTagActionButton.SetPadding(14, 12, 14, 12);
+            _tagModeTagActionButton.TextSize = 14;
+            _tagModeTagActionButton.SetPadding(20, 16, 20, 16);
             _tagModeTagActionButton.SetTextColor(UIFactory.DANGER_RED);
+            _tagModeTagActionButton.Background = _uiFactory.CreateCardBackground(borderWidth: 3, borderColour: UIFactory.DANGER_RED);
             var tagActionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             tagActionParams.SetMargins(0, 0, 0, 14);
             _tagModeTagActionButton.LayoutParameters = tagActionParams;
             _tagModeTagActionButton.Click += (s, e) => OnTagCaptureTagAction();
             _tagModeCapturePanel.AddView(_tagModeTagActionButton);
 
-            // Commit and abandon, in that order: the primary action ends the guided steps.
-            _tagModeSaveButton = _uiFactory.CreateStyledButton("✓  Save", UIFactory.SUCCESS_GREEN);
-            _tagModeSaveButton.TextSize = 17;
-            _tagModeSaveButton.SetPadding(16, 28, 16, 28);
-            var saveBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            saveBtnParams.SetMargins(0, 6, 0, 4);
-            _tagModeSaveButton.LayoutParameters = saveBtnParams;
-            _tagModeSaveButton.Click += (s, e) => SaveTagCapture();
-            _tagModeCapturePanel.AddView(_tagModeSaveButton);
-
-            _tagModeCancelButton = _uiFactory.CreateStyledButton("Cancel", UIFactory.LIGHTER_GRAY);
-            _tagModeCancelButton.TextSize = 14;
-            _tagModeCancelButton.SetPadding(16, 18, 16, 18);
-            var cancelBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            cancelBtnParams.SetMargins(0, 0, 0, 0);
-            _tagModeCancelButton.LayoutParameters = cancelBtnParams;
-            _tagModeCancelButton.Click += (s, e) =>
-            {
-                EndTagCapture();
-                Toast.MakeText(this, "Cancelled — nothing changed", ToastLength.Short)?.Show();
-            };
-            _tagModeCapturePanel.AddView(_tagModeCancelButton);
-
+            // Save and Cancel deliberately do NOT live here — they're in the fixed bottom bar,
+            // so their position never shifts as the step text grows.
             _tagModeContentLayout.AddView(_tagModeCapturePanel);
 
             _singleBoxDataOuterLayout.AddView(_tagModeContentLayout);
@@ -7571,6 +7602,17 @@ namespace PenguinMonitor
             return _pendingTagId ?? existing?.TagNumber ?? "";
         }
 
+        // The step-2 side action changes both label and meaning (remove / undo / clear), so its
+        // outline colour follows the label — red only when it's actually destructive.
+        private void SetTagActionStyle(string label, Color colour)
+        {
+            if (_tagModeTagActionButton == null) return;
+            _tagModeTagActionButton.Text = label;
+            _tagModeTagActionButton.SetTextColor(colour);
+            _tagModeTagActionButton.Background = _uiFactory.CreateCardBackground(borderWidth: 3, borderColour: colour);
+            _tagModeTagActionButton.Visibility = ViewStates.Visible;
+        }
+
         // Redraws the guided steps. Called on every GPS fix, so it stays cheap.
         private void UpdateTagCaptureSteps()
         {
@@ -7640,27 +7682,21 @@ namespace PenguinMonitor
             {
                 _tagModeStep2Text.Text = $"② Tag — {existingTag} will be removed on save.";
                 _tagModeStep2Text.SetTextColor(UIFactory.DANGER_RED);
-                _tagModeTagActionButton.Text = "Undo removal";
-                _tagModeTagActionButton.SetTextColor(Color.Black);
-                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+                SetTagActionStyle("Undo removal", TAG_MODE_PURPLE);
             }
             else if (_pendingTagId != null)
             {
                 var from = _pendingTagFromBox != null ? $"\nTaken off Box {_pendingTagFromBox}." : "";
                 _tagModeStep2Text.Text = $"② Tag ✓ {_pendingTagId}{from}";
                 _tagModeStep2Text.SetTextColor(UIFactory.SUCCESS_GREEN);
-                _tagModeTagActionButton.Text = "Clear scanned tag";
-                _tagModeTagActionButton.SetTextColor(Color.Black);
-                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+                SetTagActionStyle("Clear scanned tag", TAG_MODE_PURPLE);
             }
             else if (!string.IsNullOrEmpty(existingTag))
             {
                 _tagModeStep2Text.Text = $"② Tag ✓ {existingTag} (already set)\n"
                     + "Scan a different tag to replace it.";
                 _tagModeStep2Text.SetTextColor(Color.Black);
-                _tagModeTagActionButton.Text = "Remove tag";
-                _tagModeTagActionButton.SetTextColor(UIFactory.DANGER_RED);
-                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+                SetTagActionStyle("Remove tag", UIFactory.DANGER_RED);
             }
             else
             {
