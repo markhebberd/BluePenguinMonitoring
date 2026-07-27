@@ -31,6 +31,30 @@ if [ -f "$REL/app/index.html" ] && ls "$REL"/app/api/*.php >/dev/null 2>&1; then
   ln -sfn /var/www/shared/secrets.php "$WW_ROOT/app/api/secrets.php"
   REL_ID=$(tr -d '\n' < "$WW_ROOT/app/.release" 2>/dev/null)
   echo "refresh-code: app code refreshed to ${REL_ID:-ok}"
+
+  # Install any of OUR scripts the release carries a newer copy of — the same thing the
+  # nightly does, so both paths leave the mirror in the same state. Without it, "Update live
+  # code" refreshes the app but silently leaves the scripts stale.
+  #
+  # Refresh in place only (the release also carries the VPS-side scripts, which have no
+  # business running here); never install one that fails to parse; and swap via a temp file
+  # and mv, because this script or the nightly may itself be running and bash reads a script
+  # as it executes. New copies take effect on the next invocation.
+  if [ -d "$REL/bin" ] && ls "$REL"/bin/*.sh >/dev/null 2>&1; then
+    UPD=""; BAD=""
+    for S in "$REL"/bin/*.sh; do
+      B=$(basename "$S")
+      [ -f "$WW_ROOT/bin/$B" ] || continue
+      if ! bash -n "$S" 2>>"$LOG"; then BAD="$BAD $B"; continue; fi
+      cmp -s "$S" "$WW_ROOT/bin/$B" && continue
+      if cp "$S" "$WW_ROOT/bin/.$B.new" && chmod 755 "$WW_ROOT/bin/.$B.new" \
+         && mv -f "$WW_ROOT/bin/.$B.new" "$WW_ROOT/bin/$B"; then UPD="$UPD $B"
+      else BAD="$BAD $B"; rm -f "$WW_ROOT/bin/.$B.new"; fi
+    done
+    [ -n "$UPD" ] && echo "refresh-code: scripts updated:$UPD (in effect next run)"
+    [ -n "$BAD" ] && echo "refresh-code: kept on-disk copy of:$BAD (syntax or write failed)"
+    [ -z "$UPD$BAD" ] && echo "refresh-code: scripts up to date"
+  fi
 else
   echo "refresh-code: release payload incomplete"; rm -f "$TGZ"; rm -rf "$REL"; exit 1
 fi
