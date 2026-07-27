@@ -4814,6 +4814,10 @@ namespace PenguinMonitor
             inputFieldsLayout.AddView(_chicksEditText[0]);
             inputFieldsLayout.AddView(_breedingChanceSpinner[0]);
             inputFieldsLayout.AddView(_gateStatusSpinner[0]);
+            // Nest-status and gate fill the row's height (set by the number fields) so they match
+            // Adults/Eggs/Chicks exactly and don't paint half-height before their content settles.
+            foreach (var sp in new[] { _breedingChanceSpinner[0], _gateStatusSpinner[0] })
+                if (sp?.LayoutParameters is LinearLayout.LayoutParams lp) { lp.Height = ViewGroup.LayoutParams.MatchParent; sp.LayoutParameters = lp; }
             _singleBoxDataContentLayout.AddView(inputFieldsLayout);
 
             var notesLabel = new TextView(this)
