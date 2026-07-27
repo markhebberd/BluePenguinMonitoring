@@ -923,7 +923,7 @@ namespace PenguinMonitor.Services
             public string? sex { get; set; }
         }
         /// <summary>A person who can be named as the day's observer or recorder. Active users only.
-        /// falcon_id is the bander/permit id; only users who have one may be picked as the chipper.
+        /// falcon_id is the chipper/permit id; only users who have one may be picked as the chipper.
         /// (Requires sync.php to include falcon_id in the users payload — else it's null for all.)</summary>
         public class SyncUser
         {

@@ -5957,7 +5957,7 @@ namespace PenguinMonitor
             // picks from), not free text — so a chip record links to the person, and a rename in the
             // web admin reaches every chip they made. ChipBy (the acronym) is gone from the UI.
             var chipUsers = DataStorageService.LoadUsers(this);
-            // Only a bander (a user with a falcon/permit id) may be recorded as the chipper; the
+            // Only a chipper (a user with a falcon/permit id) may be recorded as the chipper; the
             // assistant can be anyone. Needs sync.php to send falcon_id — until it does, this list
             // is empty and the chipper picker has only the blank option.
             var chipperUsers = chipUsers.Where(u => !string.IsNullOrWhiteSpace(u.falcon_id)).ToList();
@@ -6028,14 +6028,14 @@ namespace PenguinMonitor
             var chipperCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             chipperCol.AddView(createLabel("Chipper"));
             // Starts unset — the chipper is chosen explicitly, not assumed to be whoever is logged in.
-            // Only banders (users with a falcon id) appear here.
+            // Only chippers (users with a falcon id) appear here.
             var chipperSpinner = MakeChipPersonSpinner(chipperUsers, 0);
             chipperCol.AddView(chipperSpinner);
             if (chipperUsers.Count == 0)
             {
-                var noBanders = new TextView(this) { Text = "No banders synced", TextSize = 12 };
-                noBanders.SetTextColor(UIFactory.TEXT_SECONDARY);
-                chipperCol.AddView(noBanders);
+                var noChippers = new TextView(this) { Text = "No chippers synced", TextSize = 12 };
+                noChippers.SetTextColor(UIFactory.TEXT_SECONDARY);
+                chipperCol.AddView(noChippers);
             }
             card.AddView(chipperCol);
 
