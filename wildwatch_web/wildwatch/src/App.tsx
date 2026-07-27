@@ -479,9 +479,11 @@ const DateTooltipCtx = createContext<{ show: (date: string, e: React.MouseEvent)
  * rather than repeated on every box's row, which is what the old per-observation
  * monitor_filename did. Clearing the text deletes the note.
  */
-function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLength }: {
+function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLength, nextFieldRef }: {
   date: string; token?: string; canEdit?: boolean;
   saved: string; placeholder: string; addLabel: string; maxLength: number;
+  /** Enter commits and moves here, so the note flows into the people fields like Tab does. */
+  nextFieldRef?: React.MutableRefObject<HTMLSpanElement | null>;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(saved);
@@ -522,7 +524,7 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
       onChange={e => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Enter') { e.preventDefault(); commit(); nextFieldRef?.current?.focus(); }
         if (e.key === 'Escape') { e.preventDefault(); setText(saved); setEditing(false); }
       }} />
   );
@@ -532,16 +534,20 @@ function DayField({ date, token, canEdit, saved, placeholder, addLabel, maxLengt
  *  historical, and whoever did the work may since have left. Service accounts are excluded
  *  (getUsers drops them). Typing filters; Enter takes the top match; the blue bar shows which
  *  that is. Used for the day's observer/recorder and for a chip's chipper/assistant. */
-function UserPickerField({ userId, label, onSave, addLabel, title }: {
+function UserPickerField({ userId, label, onSave, addLabel, title, fieldRef, onAfterCommit }: {
   userId: number | null; label?: string; onSave: (id: number | null) => Promise<any>;
   addLabel?: string; title?: string;
+  /** Lets the previous field hand focus here. */
+  fieldRef?: React.MutableRefObject<HTMLSpanElement | null>;
+  /** Called the moment a person is chosen, to move focus on to the next field. */
+  onAfterCommit?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const closedRef = useRef<HTMLSpanElement>(null);
+  const closedRef = useRef<HTMLSpanElement | null>(null);
   // A commit hands focus back to the closed field so the next Tab moves on. That focus must
   // not spring the picker open again, or selecting someone would trap you in the same field.
   const skipFocusOpen = useRef(false);
@@ -561,8 +567,11 @@ function UserPickerField({ userId, label, onSave, addLabel, title }: {
   }, [open]);
 
   const commit = async (next: number | null) => {
-    wantRefocus.current = true;   // hand focus back so the next Tab moves to the next field
     setOpen(false); setQuery('');
+    // Chain on to the next field if there is one — that is what makes "brit ⏎ mar ⏎" work.
+    // Otherwise hand focus back to this field so the next Tab moves along. Done before the
+    // save is awaited, so typing the next name never waits on the network.
+    if (onAfterCommit) onAfterCommit(); else wantRefocus.current = true;
     if (next === userId) return;
     setSaving(true); setError(null);
     try { await onSave(next); } catch (e: any) { setError(e.message || 'Failed to save'); }
@@ -572,7 +581,7 @@ function UserPickerField({ userId, label, onSave, addLabel, title }: {
   // tabIndex puts the closed field in the tab order, so Tab out of the day note lands here and
   // opens it ready to type — and Tab again moves on to the next person field.
   if (!open) return (
-    <span ref={closedRef} tabIndex={0} role="button"
+    <span ref={el => { closedRef.current = el; if (fieldRef) fieldRef.current = el; }} tabIndex={0} role="button"
       className={`day-hdr-note day-note-editable${name ? '' : ' day-note-empty'}`}
       title={title}
       onClick={() => { setQuery(''); setOpen(true); }}
@@ -616,30 +625,42 @@ function UserPickerField({ userId, label, onSave, addLabel, title }: {
 }
 
 /** Observer or recorder for the day — the shared picker, wired to this day's note row. */
-function DayPersonField({ date, token, canEdit, field, userId, label }: {
+function DayPersonField({ date, token, canEdit, field, userId, label, fieldRef, onAfterCommit }: {
   date: string; token?: string; canEdit?: boolean;
   field: 'observer_id' | 'recorder_id'; userId: number | null; label: string;
+  fieldRef?: React.MutableRefObject<HTMLSpanElement | null>;
+  onAfterCommit?: () => void;
 }) {
   const name = getUserName(userId);
   if (!canEdit) return name ? <span className="day-hdr-note"><span className="day-hdr-people-label">{label}</span>{name}</span> : null;
   return <UserPickerField userId={userId} label={label} addLabel={`+ ${label}`}
     title={`Who was ${field === 'observer_id' ? 'observing' : 'recording'}`}
+    fieldRef={fieldRef} onAfterCommit={onAfterCommit}
     onSave={id => saveDayNote(token || '', date, { [field]: id })} />;
 }
 
 /** The day's record beside the stats line: what happened, and who was out. The two people are
- *  users, picked from the user table; the note is free text. */
+ *  users, picked from the user table; the note is free text.
+ *
+ *  The three are chained for the keyboard: Enter (or Tab) out of the note opens Observer, and
+ *  choosing an observer jumps straight to Recorder — so "brit ⏎ mar ⏎" fills both without
+ *  touching the mouse. */
 function DayNoteEditor({ date, token, canEdit }: { date: string; token?: string; canEdit?: boolean }) {
   const { observer_id, recorder_id } = getDayPeople(date);
   const note = getDayNote(date) || '';
+  const observerRef = useRef<HTMLSpanElement | null>(null);
+  const recorderRef = useRef<HTMLSpanElement | null>(null);
   const parts: React.ReactNode[] = [];
   if (canEdit || note) parts.push(
     <DayField key="note" date={date} token={token} canEdit={canEdit} saved={note}
-      placeholder="Monitor notes" addLabel="+ note" maxLength={255} />);
+      placeholder="Monitor notes" addLabel="+ note" maxLength={255} nextFieldRef={observerRef} />);
   if (canEdit || observer_id) parts.push(
-    <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id" userId={observer_id} label="Observer" />);
+    <DayPersonField key="obs" date={date} token={token} canEdit={canEdit} field="observer_id"
+      userId={observer_id} label="Observer" fieldRef={observerRef}
+      onAfterCommit={() => recorderRef.current?.focus()} />);
   if (canEdit || recorder_id) parts.push(
-    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id" userId={recorder_id} label="Recorder" />);
+    <DayPersonField key="rec" date={date} token={token} canEdit={canEdit} field="recorder_id"
+      userId={recorder_id} label="Recorder" fieldRef={recorderRef} />);
   return (<>{parts.map((el, i) => (
     <Fragment key={i}>{i > 0 && <span className="day-hdr-sep"> · </span>}{el}</Fragment>
   ))}</>);
