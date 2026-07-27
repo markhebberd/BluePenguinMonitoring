@@ -194,22 +194,29 @@ namespace PenguinMonitor
         // Which box the expanded previous-obs detail belongs to — auto-collapses on box change.
         private string _prevObsExpandedForBox = "";
         // --- Edit Box Tags mode ---------------------------------------------------------
-        // A capture session is the ONLY thing that can write a nest position. Merely opening
-        // a box in tag mode changes nothing: the user has to tap "Set nest position or tag",
-        // then explicitly Save. Cancel discards. There is no lock/unlock in this mode.
+        // Opening a box in tag mode changes nothing and starts nothing — no GPS, no listening.
+        // The user taps "Set up this box" to open a capture session, which walks two steps:
+        //   1. get a GPS fix taken AT the box    2. scan the box tag (optional)
+        // Both are held as pending state and written together by one Save. Cancel discards
+        // the lot. There is no lock/unlock in this mode.
         private const int LOCATION_PERMISSION_REQUEST = 3;
         private bool _tagCaptureActive;
         private string _tagCaptureBoxName = "";
+        private string? _pendingTagId;        // tag scanned this session, not yet written
+        private string? _pendingTagFromBox;   // box the pending tag has to be taken off first
+        private bool _pendingTagRemoval;      // clear this box's existing tag on save
         private LinearLayout? _tagModeContentLayout;
         private LinearLayout? _tagModeLastObsCard;   // last known contents: black = today, orange = older
         private TextView? _tagModeTagText;
         private TextView? _tagModePositionText;
-        private Button? _tagModeSetButton;           // "Set nest position or tag"
+        private Button? _tagModeSetButton;           // "Set up this box"
         private LinearLayout? _tagModeCapturePanel;  // live capture UI, shown only while capturing
-        private TextView? _tagModeGpsText;
+        private TextView? _tagModeCaptureTitle;
+        private TextView? _tagModeStep1Text;         // step 1 — GPS
+        private TextView? _tagModeStep2Text;         // step 2 — box tag
+        private Button? _tagModeTagActionButton;     // inline: clear a scanned tag / remove the stored one
         private Button? _tagModeSaveButton;
         private Button? _tagModeCancelButton;
-        private Button? _tagModeRemoveTagButton;
         private TextView? _tagModeBanner;            // full-width "BOX TAGS MODE" bar at the top
         private LinearLayout? _tagModeFinishBar;     // fixed bottom bar holding the finish button
         private View? _tagModeBottomSpacer;          // keeps scrolled content clear of the finish bar
@@ -570,7 +577,7 @@ namespace PenguinMonitor
             {
                 if (_bestTagCaptureLocation == null || location.Accuracy < _bestTagCaptureLocation.Accuracy)
                     _bestTagCaptureLocation = location;
-                RunOnUiThread(UpdateTagCaptureGpsText);
+                RunOnUiThread(UpdateTagCaptureSteps);
             }
         }
         public void OnStatusChanged(string? provider, Availability status, Bundle? extras) { } // required by ILocationListener
@@ -3692,8 +3699,7 @@ namespace PenguinMonitor
                             bool capturing = _tagCaptureActive && _tagCaptureBoxName == _currentBoxName;
                             _tagModeSetButton!.Visibility = capturing ? ViewStates.Gone : ViewStates.Visible;
                             _tagModeCapturePanel!.Visibility = capturing ? ViewStates.Visible : ViewStates.Gone;
-                            _tagModeRemoveTagButton!.Visibility = (capturing && hasTag) ? ViewStates.Visible : ViewStates.Gone;
-                            if (capturing) UpdateTagCaptureGpsText();
+                            if (capturing) UpdateTagCaptureSteps();
                         }
                     }
 
@@ -4851,42 +4857,71 @@ namespace PenguinMonitor
             _tagModePositionText.SetPadding(0, 2, 0, 10);
             _tagModeContentLayout.AddView(_tagModePositionText);
 
-            // The one and only way into editing. Nothing above this point can change data.
-            _tagModeSetButton = _uiFactory.CreateStyledButton("📍  Set nest position or tag", TAG_MODE_PURPLE);
-            _tagModeSetButton.TextSize = 16;
-            _tagModeSetButton.SetPadding(16, 26, 16, 26);
+            // The one and only way into editing. Nothing above this point can change data,
+            // and nothing above this point turns the GPS on.
+            _tagModeSetButton = _uiFactory.CreateStyledButton("📍  Set up this box", TAG_MODE_PURPLE);
+            _tagModeSetButton.TextSize = 17;
+            _tagModeSetButton.SetPadding(16, 28, 16, 28);
             var setBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             setBtnParams.SetMargins(0, 4, 0, 4);
             _tagModeSetButton.LayoutParameters = setBtnParams;
             _tagModeSetButton.Click += (s, e) => StartTagCapture();
             _tagModeContentLayout.AddView(_tagModeSetButton);
 
-            // Capture panel — live GPS plus the explicit Save / Cancel pair
+            // Capture panel — the guided two-step, then one Save that commits both steps
             _tagModeCapturePanel = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            _tagModeCapturePanel.SetPadding(14, 12, 14, 12);
+            _tagModeCapturePanel.SetPadding(14, 12, 14, 14);
             _tagModeCapturePanel.Background = _uiFactory.CreateCardBackground(borderWidth: 6, borderColour: TAG_MODE_PURPLE);
             var capturePanelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             capturePanelParams.SetMargins(0, 4, 0, 4);
             _tagModeCapturePanel.LayoutParameters = capturePanelParams;
             _tagModeCapturePanel.Visibility = ViewStates.Gone;
 
-            _tagModeGpsText = new TextView(this) { TextSize = 15 };
-            _tagModeGpsText.SetTextColor(Color.Black);
-            _tagModeGpsText.SetPadding(0, 0, 0, 10);
-            _tagModeCapturePanel.AddView(_tagModeGpsText);
+            _tagModeCaptureTitle = new TextView(this) { TextSize = 17 };
+            _tagModeCaptureTitle.SetTextColor(TAG_MODE_PURPLE);
+            _tagModeCaptureTitle.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            _tagModeCaptureTitle.SetPadding(0, 0, 0, 12);
+            _tagModeCapturePanel.AddView(_tagModeCaptureTitle);
 
-            _tagModeSaveButton = _uiFactory.CreateStyledButton("✓  Save position", UIFactory.SUCCESS_GREEN);
-            _tagModeSaveButton.TextSize = 16;
-            _tagModeSaveButton.SetPadding(16, 26, 16, 26);
+            // Step 1 — GPS. Starts only now, and only counts fixes taken from here on.
+            _tagModeStep1Text = new TextView(this) { TextSize = 15 };
+            _tagModeStep1Text.SetTextColor(Color.Black);
+            _tagModeStep1Text.SetPadding(0, 0, 0, 12);
+            _tagModeCapturePanel.AddView(_tagModeStep1Text);
+
+            // Step 2 — box tag, optional
+            _tagModeStep2Text = new TextView(this) { TextSize = 15 };
+            _tagModeStep2Text.SetTextColor(Color.Black);
+            _tagModeStep2Text.SetPadding(0, 0, 0, 6);
+            _tagModeCapturePanel.AddView(_tagModeStep2Text);
+
+            // Tag side-action sits inside step 2 rather than in the button stack — it's a
+            // correction, not one of the two things you came here to do.
+            _tagModeTagActionButton = _uiFactory.CreateStyledButton("Remove tag", UIFactory.LIGHTER_GRAY);
+            _tagModeTagActionButton.TextSize = 13;
+            _tagModeTagActionButton.SetPadding(14, 12, 14, 12);
+            _tagModeTagActionButton.SetTextColor(UIFactory.DANGER_RED);
+            var tagActionParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            tagActionParams.SetMargins(0, 0, 0, 14);
+            _tagModeTagActionButton.LayoutParameters = tagActionParams;
+            _tagModeTagActionButton.Click += (s, e) => OnTagCaptureTagAction();
+            _tagModeCapturePanel.AddView(_tagModeTagActionButton);
+
+            // Commit and abandon, in that order: the primary action ends the guided steps.
+            _tagModeSaveButton = _uiFactory.CreateStyledButton("✓  Save", UIFactory.SUCCESS_GREEN);
+            _tagModeSaveButton.TextSize = 17;
+            _tagModeSaveButton.SetPadding(16, 28, 16, 28);
             var saveBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            saveBtnParams.SetMargins(0, 4, 0, 4);
+            saveBtnParams.SetMargins(0, 6, 0, 4);
             _tagModeSaveButton.LayoutParameters = saveBtnParams;
-            _tagModeSaveButton.Click += (s, e) => SaveTagCaptureLocation();
+            _tagModeSaveButton.Click += (s, e) => SaveTagCapture();
             _tagModeCapturePanel.AddView(_tagModeSaveButton);
 
-            _tagModeCancelButton = _uiFactory.CreateStyledButton("Cancel — change nothing", UIFactory.LIGHTER_GRAY);
+            _tagModeCancelButton = _uiFactory.CreateStyledButton("Cancel", UIFactory.LIGHTER_GRAY);
+            _tagModeCancelButton.TextSize = 14;
+            _tagModeCancelButton.SetPadding(16, 18, 16, 18);
             var cancelBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            cancelBtnParams.SetMargins(0, 4, 0, 4);
+            cancelBtnParams.SetMargins(0, 0, 0, 0);
             _tagModeCancelButton.LayoutParameters = cancelBtnParams;
             _tagModeCancelButton.Click += (s, e) =>
             {
@@ -4894,35 +4929,6 @@ namespace PenguinMonitor
                 Toast.MakeText(this, "Cancelled — nothing changed", ToastLength.Short)?.Show();
             };
             _tagModeCapturePanel.AddView(_tagModeCancelButton);
-
-            // Removing a tag is destructive, so it only exists inside an open capture session
-            _tagModeRemoveTagButton = _uiFactory.CreateStyledButton("Remove tag from this box", UIFactory.DANGER_RED);
-            var removeTagParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            removeTagParams.SetMargins(0, 20, 0, 0);
-            _tagModeRemoveTagButton.LayoutParameters = removeTagParams;
-            _tagModeRemoveTagButton.Visibility = ViewStates.Gone;
-            _tagModeRemoveTagButton.Click += (s, e) =>
-            {
-                var hasTag = _boxTags.TryGetValue(_currentBoxName, out var tagInfo) && !string.IsNullOrEmpty(tagInfo.TagNumber);
-                if (!hasTag) return;
-                new AlertDialog.Builder(this)
-                    .SetTitle($"Remove tag from Box {_currentBoxName}?")
-                    .SetMessage($"Tag {tagInfo!.TagNumber} will no longer point at Box {_currentBoxName}, " +
-                                $"so scanning it won't find this box.\n\nThe stored position is kept.")
-                    .SetNegativeButton("Keep tag", (s2, e2) => { })
-                    .SetPositiveButton("Remove tag", (s2, e2) =>
-                    {
-                        var internalPath = this.FilesDir?.AbsolutePath;
-                        if (!string.IsNullOrEmpty(internalPath))
-                        {
-                            BoxTagService.ClearBoxTagNumber(_boxTags, _currentBoxName, internalPath);
-                            Toast.MakeText(this, $"🗑 Tag removed from Box {_currentBoxName}", ToastLength.Short)?.Show();
-                            DrawPageLayouts();
-                        }
-                    })
-                    .Show();
-            };
-            _tagModeCapturePanel.AddView(_tagModeRemoveTagButton);
 
             _tagModeContentLayout.AddView(_tagModeCapturePanel);
 
@@ -7455,8 +7461,8 @@ namespace PenguinMonitor
             return true;
         }
 
-        // Opens a capture session for the current box. Until the user taps Save nothing is
-        // written — this is the whole point of the mode's redesign.
+        // Opens a capture session for the current box: this is where the GPS is switched on and
+        // where scanning starts meaning something. Nothing is written until Save.
         private void StartTagCapture()
         {
             if (string.IsNullOrEmpty(_currentBoxName)) return;
@@ -7464,7 +7470,13 @@ namespace PenguinMonitor
 
             _tagCaptureActive = true;
             _tagCaptureBoxName = _currentBoxName;
-            _bestTagCaptureLocation = _currentLocation;
+            // Deliberately NOT seeded from _currentLocation: that fix was taken wherever the
+            // user last stood, and being the more accurate one it would beat every reading
+            // taken at this box and get saved as this box's position.
+            _bestTagCaptureLocation = null;
+            _pendingTagId = null;
+            _pendingTagFromBox = null;
+            _pendingTagRemoval = false;
             DrawPageLayouts();
         }
 
@@ -7473,74 +7485,195 @@ namespace PenguinMonitor
             _tagCaptureActive = false;
             _tagCaptureBoxName = "";
             _bestTagCaptureLocation = null;
+            _pendingTagId = null;
+            _pendingTagFromBox = null;
+            _pendingTagRemoval = false;
+            // The session may have started location updates that the scanner setting had off.
+            // Don't leave the GPS running against the user's setting once the session ends.
+            if (!_appSettings.IsBlueToothEnabled)
+            {
+                _locationManager?.RemoveUpdates(this);
+                _gpsAccuracy = -1;
+            }
             DrawPageLayouts();
         }
 
-        // Live readout during a capture: current best accuracy, and how far it sits from the
-        // stored position so an obviously-wrong fix is visible before it's committed.
-        private void UpdateTagCaptureGpsText()
+        // What the two steps currently hold. Save writes exactly this and nothing else.
+        private string CurrentCaptureTag(BoxTag? existing)
         {
-            if (_tagModeGpsText == null || _tagModeSaveButton == null) return;
+            if (_pendingTagRemoval) return "";
+            return _pendingTagId ?? existing?.TagNumber ?? "";
+        }
+
+        // Redraws the guided steps. Called on every GPS fix, so it stays cheap.
+        private void UpdateTagCaptureSteps()
+        {
+            if (_tagModeCaptureTitle == null || _tagModeStep1Text == null || _tagModeStep2Text == null
+                || _tagModeTagActionButton == null || _tagModeSaveButton == null) return;
             if (!_tagCaptureActive) return;
 
-            var loc = _bestTagCaptureLocation ?? _currentLocation;
             var box = _tagCaptureBoxName;
-            var header = $"Setting position for Box {box}\n\n";
+            _boxTags.TryGetValue(box, out var existing);
+            bool hasStoredPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
 
+            _tagModeCaptureTitle.Text = $"Setting up Box {box}";
+
+            // --- Step 1: GPS ---------------------------------------------------------------
+            var loc = _bestTagCaptureLocation;
             if (loc == null)
             {
-                _tagModeGpsText.Text = header + "Waiting for GPS…\nStand at the nest with the phone on the box.";
-                _tagModeGpsText.SetTextColor(UIFactory.DANGER_RED);
-                _tagModeSaveButton.Enabled = false;
-                _tagModeSaveButton.Alpha = 0.4f;
+                _tagModeStep1Text.Text = "① GPS — waiting for a fix…\n"
+                    + "Put the phone on the box and hold still.";
+                _tagModeStep1Text.SetTextColor(UIFactory.DANGER_RED);
+            }
+            else
+            {
+                bool good = loc.Accuracy <= 10;
+                var line = good
+                    ? $"① GPS ✓ ±{loc.Accuracy:F0} m — good enough to save."
+                    : $"① GPS ±{loc.Accuracy:F0} m — keep waiting, it's still settling.";
+                if (hasStoredPosition)
+                {
+                    var dist = new float[1];
+                    Location.DistanceBetween(existing!.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
+                    line += $"\n{dist[0]:F0} m from the position already stored.";
+                }
+                _tagModeStep1Text.Text = line;
+                _tagModeStep1Text.SetTextColor(good ? UIFactory.SUCCESS_GREEN : UIFactory.WARNING_YELLOW);
+            }
+
+            // --- Step 2: box tag -----------------------------------------------------------
+            var existingTag = existing?.TagNumber ?? "";
+            if (_pendingTagRemoval)
+            {
+                _tagModeStep2Text.Text = $"② Tag — {existingTag} will be removed on save.";
+                _tagModeStep2Text.SetTextColor(UIFactory.DANGER_RED);
+                _tagModeTagActionButton.Text = "Undo removal";
+                _tagModeTagActionButton.SetTextColor(Color.Black);
+                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+            }
+            else if (_pendingTagId != null)
+            {
+                var from = _pendingTagFromBox != null ? $"\nTaken off Box {_pendingTagFromBox}." : "";
+                _tagModeStep2Text.Text = $"② Tag ✓ {_pendingTagId}{from}";
+                _tagModeStep2Text.SetTextColor(UIFactory.SUCCESS_GREEN);
+                _tagModeTagActionButton.Text = "Clear scanned tag";
+                _tagModeTagActionButton.SetTextColor(Color.Black);
+                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+            }
+            else if (!string.IsNullOrEmpty(existingTag))
+            {
+                _tagModeStep2Text.Text = $"② Tag ✓ {existingTag} (already set)\n"
+                    + "Scan a different tag to replace it.";
+                _tagModeStep2Text.SetTextColor(Color.Black);
+                _tagModeTagActionButton.Text = "Remove tag";
+                _tagModeTagActionButton.SetTextColor(UIFactory.DANGER_RED);
+                _tagModeTagActionButton.Visibility = ViewStates.Visible;
+            }
+            else
+            {
+                _tagModeStep2Text.Text = _appSettings.IsBlueToothEnabled
+                    ? "② Tag — waiting for a scan…\nScan the tag on the box. Optional: you can save a position without one."
+                    : "② Tag — scanner is off.\nTurn on 'Connect scanner' in settings to assign a tag. You can still save a position.";
+                _tagModeStep2Text.SetTextColor(Color.DarkGray);
+                _tagModeTagActionButton.Visibility = ViewStates.Gone;
+            }
+
+            // --- Save --------------------------------------------------------------------
+            // Something to write = a fresh fix, or any tag change. Position-only sessions need
+            // a fix; tag-only sessions on a box that already has a position do not.
+            bool tagChanged = _pendingTagId != null || _pendingTagRemoval;
+            bool canSave = loc != null || tagChanged;
+            _tagModeSaveButton.Text = loc != null && tagChanged ? "✓  Save position and tag"
+                : tagChanged ? "✓  Save tag"
+                : "✓  Save position";
+            _tagModeSaveButton.Enabled = canSave;
+            _tagModeSaveButton.Alpha = canSave ? 1.0f : 0.4f;
+        }
+
+        // The inline step-2 action: clears a scanned tag, or stages/undoes removal of the stored one.
+        private void OnTagCaptureTagAction()
+        {
+            if (!_tagCaptureActive) return;
+
+            if (_pendingTagRemoval)
+            {
+                _pendingTagRemoval = false;
+                UpdateTagCaptureSteps();
+                return;
+            }
+            if (_pendingTagId != null)
+            {
+                _pendingTagId = null;
+                _pendingTagFromBox = null;
+                UpdateTagCaptureSteps();
                 return;
             }
 
-            var body = $"GPS ±{loc.Accuracy:F0} m — hold the phone on the box and wait for this to settle.";
-            if (_boxTags.TryGetValue(box, out var existing) && (existing.Latitude != 0 || existing.Longitude != 0))
-            {
-                var dist = new float[1];
-                Location.DistanceBetween(existing.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
-                body += $"\n\n{dist[0]:F0} m from the stored position.";
-            }
-            // Don't invite a scan the app can't receive — the scanner may well be switched off
-            body += _appSettings.IsBlueToothEnabled
-                ? "\n\nScan a box tag now to assign it to this box."
-                : "\n\nScanner is off — turn on 'Connect scanner' in settings to assign a tag.";
-
-            _tagModeGpsText.Text = header + body;
-            _tagModeGpsText.SetTextColor(loc.Accuracy <= 10 ? UIFactory.SUCCESS_GREEN : UIFactory.WARNING_YELLOW);
-            _tagModeSaveButton.Enabled = true;
-            _tagModeSaveButton.Alpha = 1.0f;
+            var box = _tagCaptureBoxName;
+            if (!_boxTags.TryGetValue(box, out var tagInfo) || string.IsNullOrEmpty(tagInfo.TagNumber)) return;
+            new AlertDialog.Builder(this)
+                .SetTitle($"Remove tag from Box {box}?")
+                .SetMessage($"Tag {tagInfo.TagNumber} will no longer point at Box {box}, so scanning it " +
+                            $"won't find this box.\n\nThe stored position is kept. Takes effect when you save.")
+                .SetNegativeButton("Keep tag", (s, e) => { })
+                .SetPositiveButton("Remove on save", (s, e) =>
+                {
+                    _pendingTagRemoval = true;
+                    UpdateTagCaptureSteps();
+                })
+                .Show();
         }
 
-        // Commits the best fix of the open capture session. Replacing an existing position
-        // always asks first, showing how far the new one has moved.
-        private void SaveTagCaptureLocation()
+        // Commits both steps in one go. A stored position is only replaced with an explicit yes,
+        // and answering "keep existing" still saves the tag change rather than throwing it away.
+        private void SaveTagCapture()
         {
-            var loc = _bestTagCaptureLocation ?? _currentLocation;
             var boxName = _tagCaptureBoxName;
-            if (loc == null || string.IsNullOrEmpty(boxName)) return;
+            if (string.IsNullOrEmpty(boxName)) return;
 
             var internalPath = this.FilesDir?.AbsolutePath;
             if (string.IsNullOrEmpty(internalPath)) return;
 
-            // Preserve the existing tag number if one is assigned; empty means location-only
+            var loc = _bestTagCaptureLocation;
             var existing = _boxTags.TryGetValue(boxName, out var bt) ? bt : null;
-            var existingTag = existing?.TagNumber ?? "";
+            bool hasStoredPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
 
-            void Save()
+            void Commit(bool writePosition)
             {
-                BoxTagService.AssignBoxTag(_boxTags, boxName, existingTag,
-                    loc.Latitude, loc.Longitude, loc.Accuracy, internalPath, _appSettings.ObserverId);
-                Toast.MakeText(this, $"📍 Position saved for Box {boxName} (±{loc.Accuracy:F0}m)", ToastLength.Short)?.Show();
+                var finalTag = CurrentCaptureTag(existing);
+                double lat = writePosition ? loc!.Latitude : existing?.Latitude ?? 0;
+                double lon = writePosition ? loc!.Longitude : existing?.Longitude ?? 0;
+                float acc = writePosition ? loc!.Accuracy : existing?.Accuracy ?? -1;
+
+                // Free the tag from its old box first so it's never on two boxes at once
+                if (_pendingTagFromBox != null)
+                    BoxTagService.ClearBoxTagNumber(_boxTags, _pendingTagFromBox, internalPath);
+
+                BoxTagService.AssignBoxTag(_boxTags, boxName, finalTag, lat, lon, acc,
+                    internalPath, _appSettings.ObserverId);
+
+                // AssignBoxTag with an empty tag is a location-only update server-side, so an
+                // actual removal has to go through the delete path to clear pit_id remotely.
+                if (_pendingTagRemoval)
+                    BoxTagService.ClearBoxTagNumber(_boxTags, boxName, internalPath);
+
+                var parts = new List<string>();
+                if (writePosition) parts.Add($"position ±{loc!.Accuracy:F0}m");
+                if (_pendingTagId != null) parts.Add("tag");
+                if (_pendingTagRemoval) parts.Add("tag removed");
+                Toast.MakeText(this, $"✓ Box {boxName} saved ({string.Join(", ", parts)})", ToastLength.Short)?.Show();
                 EndTagCapture();
             }
 
-            bool hasStoredLocation = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
-            if (!hasStoredLocation)
+            if (loc == null)
             {
-                Save();
+                Commit(writePosition: false);   // tag-only session
+                return;
+            }
+            if (!hasStoredPosition)
+            {
+                Commit(writePosition: true);    // nothing to overwrite
                 return;
             }
 
@@ -7553,8 +7686,8 @@ namespace PenguinMonitor
                             $"Stored: {existing.Latitude:F6}, {existing.Longitude:F6} ({oldAcc})\n" +
                             $"New: {loc.Latitude:F6}, {loc.Longitude:F6} (±{loc.Accuracy:F0}m)\n\n" +
                             $"The new position is {dist[0]:F0}m from the stored one.")
-                .SetNegativeButton("Keep existing", (s, e) => { })
-                .SetPositiveButton("Replace", (s, e) => Save())
+                .SetNegativeButton("Keep existing", (s, e) => Commit(writePosition: false))
+                .SetPositiveButton("Replace", (s, e) => Commit(writePosition: true))
                 .Show();
         }
 
@@ -7564,8 +7697,8 @@ namespace PenguinMonitor
             if (_tagCaptureActive)
             {
                 new AlertDialog.Builder(this)
-                    .SetTitle($"Still setting Box {_tagCaptureBoxName}")
-                    .SetMessage("The position you're capturing hasn't been saved yet.")
+                    .SetTitle($"Still setting up Box {_tagCaptureBoxName}")
+                    .SetMessage("Nothing from this box has been saved yet — the position and any scanned tag will be discarded.")
                     .SetNegativeButton("Keep editing", (s, e) => { })
                     .SetPositiveButton("Discard and finish", (s, e) => ExitBoxTagsMode())
                     .Show();
@@ -7580,6 +7713,9 @@ namespace PenguinMonitor
             _tagCaptureActive = false;
             _tagCaptureBoxName = "";
             _bestTagCaptureLocation = null;
+            _pendingTagId = null;
+            _pendingTagFromBox = null;
+            _pendingTagRemoval = false;
             _isBoxLocked = true;
             // A capture may have started location updates the scanner setting had switched off.
             // Put that back so the mode doesn't leave the GPS running against the user's wishes.
@@ -7714,13 +7850,10 @@ namespace PenguinMonitor
                 else
                 {
                     TriggerAlert();
-                    Toast.MakeText(this, "Unassigned tag — open the box it belongs to, then tap 'Set nest position or tag'", ToastLength.Long)?.Show();
+                    Toast.MakeText(this, "Unassigned tag — open the box it belongs to, then tap 'Set up this box'", ToastLength.Long)?.Show();
                 }
                 return;
             }
-
-            var internalPath = this.FilesDir?.AbsolutePath;
-            if (string.IsNullOrEmpty(internalPath)) return;
 
             if (assignedBoxId == _currentBoxName)
             {
@@ -7731,20 +7864,16 @@ namespace PenguinMonitor
             var boxName = _currentBoxName;
             _boxTags.TryGetValue(boxName, out var existing);
             var existingTag = existing?.TagNumber ?? "";
-            bool hasPosition = existing != null && (existing.Latitude != 0 || existing.Longitude != 0);
 
-            // A tag scan sets the tag. It only sets the position when the box has none yet —
-            // replacing a stored position stays behind the explicit Save position button.
-            void Assign()
+            // The scan fills in step 2; it doesn't write anything. Save commits both steps,
+            // so cancelling really does leave the box untouched.
+            void Stage()
             {
-                var loc = _bestTagCaptureLocation ?? _currentLocation;
-                double lat = hasPosition ? existing!.Latitude : loc?.Latitude ?? 0;
-                double lon = hasPosition ? existing!.Longitude : loc?.Longitude ?? 0;
-                float acc = hasPosition ? existing!.Accuracy : loc?.Accuracy ?? -1;
-                BoxTagService.AssignBoxTag(_boxTags, boxName, cleanTagId, lat, lon, acc,
-                    internalPath, _appSettings.ObserverId);
-                Toast.MakeText(this, $"📌 Tag assigned to Box {boxName}", ToastLength.Short)?.Show();
-                DrawPageLayouts();
+                _pendingTagId = cleanTagId;
+                _pendingTagFromBox = assignedBoxId;
+                _pendingTagRemoval = false;
+                Toast.MakeText(this, $"🏷 Tag ready — press Save to write it to Box {boxName}", ToastLength.Short)?.Show();
+                UpdateTagCaptureSteps();
             }
 
             void Proceed()
@@ -7758,12 +7887,7 @@ namespace PenguinMonitor
                         .SetMessage($"This tag is Box {assignedBoxId}'s.\n\nMove it to Box {boxName}? " +
                                     $"Box {assignedBoxId} will be left with no tag.")
                         .SetNegativeButton("Cancel", (s, e) => { })
-                        .SetPositiveButton($"Move to Box {boxName}", (s, e) =>
-                        {
-                            // Clear the tag from the old box (server included), keeping its location
-                            BoxTagService.ClearBoxTagNumber(_boxTags, assignedBoxId, internalPath);
-                            Assign();
-                        })
+                        .SetPositiveButton($"Move to Box {boxName}", (s, e) => Stage())
                         .Show();
                     return;
                 }
@@ -7777,13 +7901,13 @@ namespace PenguinMonitor
                         .SetMessage($"Box {boxName} currently has tag {existingTag}.\n\n" +
                                     $"Replace it with the tag you just scanned? Scanning {existingTag} will no longer find this box.")
                         .SetNegativeButton("Keep existing tag", (s, e) => { })
-                        .SetPositiveButton("Replace", (s, e) => Assign())
+                        .SetPositiveButton("Replace", (s, e) => Stage())
                         .Show();
                     return;
                 }
 
                 // Case 3: free tag onto an untagged box — nothing is lost, so no confirmation.
-                Assign();
+                Stage();
             }
 
             // A bird sitting in the nest reads just as easily as the box tag stuck to the lid.
@@ -8094,7 +8218,7 @@ namespace PenguinMonitor
                     if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
                     {
                         InitializeGPS();
-                        Toast.MakeText(this, "✅ Location granted — tap 'Set nest position or tag' again", ToastLength.Long)?.Show();
+                        Toast.MakeText(this, "✅ Location granted — tap 'Set up this box' again", ToastLength.Long)?.Show();
                     }
                     else
                     {
