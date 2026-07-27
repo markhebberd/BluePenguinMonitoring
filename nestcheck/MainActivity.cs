@@ -7417,27 +7417,40 @@ namespace PenguinMonitor
 
         // Location updates only run when the permission is granted and a provider is on. Without
         // this the capture panel would sit on "waiting for GPS" forever with no explanation.
+        //
+        // Three separate things can be off, and they need different fixes — sending someone to
+        // Android's location screen when the real problem is nestcheck's own "Connect scanner"
+        // checkbox just wastes their time in the field.
         private bool EnsureGpsReady()
         {
+            // Resolve the manager here rather than trusting _locationManager: it's only assigned
+            // by InitializeGPS(), which never runs while "Connect scanner" is unticked.
+            _locationManager ??= (LocationManager?)GetSystemService(LocationService);
+
+            // 1. Android permission
             if (CheckSelfPermission(Android.Manifest.Permission.AccessFineLocation) != Android.Content.PM.Permission.Granted)
             {
                 RequestPermissions(new[] { Android.Manifest.Permission.AccessFineLocation }, LOCATION_PERMISSION_REQUEST);
                 return false;
             }
+
+            // 2. Android location services
             bool providerOn = _locationManager?.IsProviderEnabled(LocationManager.GpsProvider) == true
                            || _locationManager?.IsProviderEnabled(LocationManager.NetworkProvider) == true;
             if (!providerOn)
             {
                 new AlertDialog.Builder(this)
-                    .SetTitle("Location is off")
-                    .SetMessage("Nest positions need GPS. Turn location on, then come back and try again.")
+                    .SetTitle("Phone location is off")
+                    .SetMessage("Nest positions need GPS. Turn location on in Android settings, then come back and try again.")
+                    .SetNegativeButton("Cancel", (s, e) => { })
                     .SetPositiveButton("Open location settings", (s, e) =>
                         StartActivity(new Android.Content.Intent(Android.Provider.Settings.ActionLocationSourceSettings)))
-                    .SetNegativeButton("Cancel", (s, e) => { })
                     .Show();
                 return false;
             }
-            // Re-arm updates in case they were never requested (permission granted after startup)
+
+            // 3. Nestcheck's own scanner/GPS toggle. Nothing to send them to Android for —
+            // capturing a position is reason enough to start listening, so just do it.
             InitializeGPS();
             return true;
         }
@@ -7490,7 +7503,10 @@ namespace PenguinMonitor
                 Location.DistanceBetween(existing.Latitude, existing.Longitude, loc.Latitude, loc.Longitude, dist);
                 body += $"\n\n{dist[0]:F0} m from the stored position.";
             }
-            body += "\n\nScan a box tag now to assign it to this box.";
+            // Don't invite a scan the app can't receive — the scanner may well be switched off
+            body += _appSettings.IsBlueToothEnabled
+                ? "\n\nScan a box tag now to assign it to this box."
+                : "\n\nScanner is off — turn on 'Connect scanner' in settings to assign a tag.";
 
             _tagModeGpsText.Text = header + body;
             _tagModeGpsText.SetTextColor(loc.Accuracy <= 10 ? UIFactory.SUCCESS_GREEN : UIFactory.WARNING_YELLOW);
@@ -7565,6 +7581,13 @@ namespace PenguinMonitor
             _tagCaptureBoxName = "";
             _bestTagCaptureLocation = null;
             _isBoxLocked = true;
+            // A capture may have started location updates the scanner setting had switched off.
+            // Put that back so the mode doesn't leave the GPS running against the user's wishes.
+            if (!_appSettings.IsBlueToothEnabled)
+            {
+                _locationManager?.RemoveUpdates(this);
+                _gpsAccuracy = -1;
+            }
             if (_expandSettingsButton != null) _expandSettingsButton.Visibility = ViewStates.Visible;
             selectedPage = UIFactory.selectedPage.BoxDataSingle;
             DrawPageLayouts();
