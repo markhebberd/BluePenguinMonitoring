@@ -105,9 +105,7 @@ $pdo = getDbConnection();
 // payload. Two minutes, and removed in the finally below however this ends.
 $who = $pdo->query("SELECT id FROM users WHERE role = 'admin' AND active = 1 AND deleted_at IS NULL ORDER BY id LIMIT 1")->fetchColumn();
 if (!$who) { fwrite(STDERR, "contract: no active admin to check as\n"); exit(1); }
-$token = 'contract' . bin2hex(random_bytes(16));
-$pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))")
-    ->execute([$token, $who]);
+$token = wwSessionCreateShortLived($pdo, (int)$who, 2);
 
 try {
     $sync = fetchJson("/api/sync.php?colony_id=$colonyId", $token);
@@ -129,7 +127,7 @@ try {
 
     foreach (fetchJson("/api/penguins.php", $token) as $i => $p) check("penguins[$i]", $p, $PENGUIN);
 } finally {
-    $pdo->prepare("DELETE FROM sessions WHERE token = ?")->execute([$token]);
+    wwSessionDelete($pdo, $token);
 }
 
 if ($breaches) {

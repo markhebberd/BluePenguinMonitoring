@@ -303,6 +303,21 @@ function wwSessionCreate($pdo, int $observerId): string {
     return $token;
 }
 
+/** A short-lived session for the deploy's payload contract check, which has to call the API as a
+ *  real user because permissions shape what comes back. Minutes, not days, and deleted by
+ *  wwSessionDelete as soon as the check is done. */
+function wwSessionCreateShortLived($pdo, int $observerId, int $minutes): string {
+    $token = 'contract' . bin2hex(random_bytes(24));
+    $pdo->prepare("INSERT INTO sessions (token, observer_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))")
+        ->execute([$token, $observerId, $minutes]);
+    return $token;
+}
+
+/** Drop one session by token. */
+function wwSessionDelete($pdo, string $token): void {
+    $pdo->prepare("DELETE FROM sessions WHERE token = ?")->execute([$token]);
+}
+
 /** Sliding session: extend a valid token to 30 days out, at most once per day. */
 function wwSessionTouch($pdo, string $token): void {
     $pdo->prepare("UPDATE sessions SET expires_at = NOW() + INTERVAL 30 DAY WHERE token = ? AND expires_at < NOW() + INTERVAL 29 DAY")
