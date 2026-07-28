@@ -113,7 +113,7 @@ header h1:hover { opacity:.8; }
   padding:6px 4px 3px; border-top:1px solid #eef1f4; margin-top:4px; }
 .uni-label:first-child { border-top:none; margin-top:0; }
 .uni-row { padding:3px 4px; }
-/* One result per line, even for the compact kinds (boxes, minis, dates). Three dates that all
+/* One result per line, even for the compact kinds (boxes, minis, dates): three dates that all
    match "12 jul" are three separate answers, and side by side they read as one. */
 .uni-chips { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
 .uni-item { display:inline-flex; align-items:center; border-radius:4px; }
@@ -122,11 +122,10 @@ header h1:hover { opacity:.8; }
 /* A note is why this row matched, so it sits beside the thing it belongs to and takes the rest. */
 .uni-noted { display:flex; align-items:center; gap:8px; }
 .uni-note { font-size:11px; color:#666; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* The box belongs to the observation beside it, not to the row above — sitting level with the
-   card's middle, it reads as that card's box rather than as a heading over everything below.
-   One grid over the whole list, each row a subgrid of it, so the box column is as wide as the
-   widest box on screen ("Box 7" and "Box 100") and every card starts at the same tab stop.
-   The plain two-column fallback keeps the pill on the left where subgrid isn't supported. */
+/* Box pill left of its card, level with the card's middle. One grid over the list with each
+   row a subgrid of it, so the box column is as wide as the widest box on screen ("Box 7" vs
+   "Box 100") and every card starts at the same tab stop. The plain two-column declaration is
+   the fallback where subgrid isn't supported. */
 .uni-obs-list { display:grid; grid-template-columns:max-content 1fr; }
 .uni-obs { display:grid; grid-template-columns:max-content 1fr; align-items:center; gap:8px; padding:3px 0; }
 @supports (grid-template-columns: subgrid) {
@@ -159,15 +158,16 @@ header h1:hover { opacity:.8; }
 .box-date { font-size:9px; color:#aaa; margin-top:1px; }
 
 /* Split view: grid sidebar + detail */
-/* No height here on purpose. This used to be calc(100vh - 88px) — the header plus the toolbar
-   — which stopped being true the moment anything else appeared between them and the split:
-   the calendar popped in, the page grew past the viewport, and you got a scroll inside a
-   scroll with the header pushed off the top. The app div is the viewport-height flex column
-   and the split takes whatever the rows above it leave, so nothing needs to know their sizes.
-   Desktop only: narrow screens stack and scroll as one page. */
+/* The app div is a viewport-height flex column; the split takes the space the rows above it
+   (header, toolbar, calendar) leave, so it needs no height of its own. Those rows keep their
+   natural height — only the split absorbs the difference. Desktop only: narrow screens stack
+   and scroll as one page. */
 .split-view { display:flex; flex:1 1 auto; align-items:stretch; min-height:0; overflow:hidden; }
 @media (min-width:701px) {
   .app:has(> .split-view) { height:100vh; display:flex; flex-direction:column; }
+  .app:has(> .split-view) > header,
+  .app:has(> .split-view) > .colony-toolbar,
+  .app:has(> .split-view) > .day-calendar { flex:none; }
 }
 .grid-sidebar { width:220px; flex-shrink:0; height:100%; display:flex; flex-direction:column; border-right:1px solid #ddd; background:#fff; }
 .grid-sidebar .box-grid { height:100%; min-height:0; display:flex; flex-direction:column; padding:8px; border-radius:0; box-shadow:none; }
@@ -604,7 +604,7 @@ h3.collapsible:hover { color:#1a5276; }
 .season-yr.clickable:hover { color:#1a5276; }
 .season-birdcount { font-size:11px; color:#98a4b0; margin-top:1px; }
 /* Every status is one word, so the pill sits on a single line in the narrow year column.
-   Nothing pins it there though — the wrap is left available in case a longer label lands. */
+   Wrapping stays available for a longer label. */
 .season-status { display:inline-flex; align-items:center; gap:4px; margin-top:7px; padding:2px 7px 2px 5px; border-radius:8px; font-size:10px; font-weight:600; line-height:1.3; max-width:100%; text-align:center; }
 .season-status .ss-dot { width:6px; height:6px; border-radius:50%; flex:none; }
 .st-bred { background:#eaf5ee; color:#1f6b41; } .st-bred .ss-dot { background:#2f8f5b; }
@@ -628,10 +628,9 @@ h3.collapsible:hover { color:#1a5276; }
 .clutch-box-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-bottom:6px; }
 .clutch-box-row .clutch-label { margin-bottom:0; }
 .clutch-body { display:flex; flex-wrap:wrap; align-items:center; gap:5px 4px; }
-/* Boxless on purpose: as a flex item of its own, a wrapped set of birds fills the row and
-   shoves the tick and window dates onto a line below. With display:contents the minis, eggs,
-   tick and dates are all items of .clutch-body, so the tick and dates ride the last line the
-   birds actually end on. Descendant rules (the 13px offspring lift) still match. */
+/* Boxless, so the minis, eggs, tick and dates are all items of .clutch-body's single wrapping
+   flow and the tick and dates ride the last line the birds end on. Descendant rules (the 13px
+   offspring lift) still match — display:contents drops the box, not the element. */
 .clutch-birds { display:contents; }
 /* Finished clutches: the window dates flow on the birds' row, pinned right, wrapping to
    their own line only when they don't fit. */

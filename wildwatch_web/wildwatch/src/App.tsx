@@ -6755,10 +6755,8 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
     const raf = requestAnimationFrame(() => {
       // Centre the active day's month, not the day itself — switching days within a
       // month then leaves the calendar still, instead of jerking to re-centre each day.
-      // Done by setting this strip's own scrollLeft rather than scrollIntoView: that walks
-      // every scrollable ancestor including the document, so a calendar opening below the
-      // fold (focusing the search from a box page) scrolled the header and toolbar off the
-      // top of the page. Only the horizontal position was ever wanted.
+      // Only this strip's own scrollLeft moves: scrollIntoView walks every scrollable
+      // ancestor including the document, pulling the header and toolbar off the top.
       const el = calRef.current;
       const target = el?.querySelector('.cal-month.current') || el?.querySelector('.cal-day.active');
       if (!el || !target) return;
@@ -10919,8 +10917,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Must stay above the `if (loading)` early return — a hook below it renders on some passes
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
-  // Nest-grid tiles straight from the cache, so their colours and counts land with the numbers
-  // rather than after the overview fetch. stats.box_info replaces it the moment it arrives.
+  // Nest-grid tiles straight from the cache, so their colours and counts land with the
+  // numbers. stats.box_info replaces it once the overview fetch answers.
   const localBoxInfo = useBoxInfo();
   // Header pin → admin/validation, in-app. AdminPanel reads its tab from the URL only at
   // mount, so an already-mounted panel needs this signal to switch tabs and scroll.
