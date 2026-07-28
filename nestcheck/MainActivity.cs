@@ -5577,7 +5577,9 @@ namespace PenguinMonitor
             _penguinSearchEditText = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapCharacters,
-                Hint = "Search penguin # or pit ID",
+                // Short hint: the field only ever holds a few characters, and the row has to
+                // fit the no-scan and failed-egg/chick buttons beside it.
+                Hint = "peng # / pit",
                 TextSize = 14
             };
             _penguinSearchEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
@@ -5621,6 +5623,62 @@ namespace PenguinMonitor
                 Toast.MakeText(this, "+1 Adult (no scan)", ToastLength.Short)?.Show();
             };
             searchRow.AddView(noScanBtn);
+
+            // Losses seen this visit — a label over two one-tap buttons, sized to share the row
+            // with the search field rather than taking a line of its own.
+            var lostCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            lostCol.SetGravity(GravityFlags.CenterHorizontal);
+            var lostColParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            lostColParams.SetMargins(8, 0, 0, 0);
+            lostColParams.Gravity = GravityFlags.CenterVertical;
+            lostCol.LayoutParameters = lostColParams;
+
+            var lostNow = _colonyState.GetTodayForBox(_currentBoxName);
+            var lostLabel = new TextView(this) { Text = "failed", TextSize = 9, Gravity = GravityFlags.Center };
+            lostLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
+            lostLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+            lostCol.AddView(lostLabel);
+
+            var lostRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            Button MakeLostButton(string text, string toast, Action<BoxObservation> bump)
+            {
+                var b = new Button(this) { Text = text, TextSize = 12 };
+                b.SetTextColor(Color.Black);
+                b.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                b.SetPadding(10, 6, 10, 6);
+                b.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                b.SetAllCaps(false);
+                var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                p.SetMargins(2, 0, 2, 0);
+                b.LayoutParameters = p;
+                b.Click += (s, e) =>
+                {
+                    // Same shape as the no-scan button: mutate the stored draft, then let
+                    // SaveCurrentBoxData fold in whatever is typed in the count fields.
+                    var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
+                    bump(boxData);
+                    boxData.WhenDataCollectedUtc = DateTime.UtcNow;
+                    boxData.ObserverName = _appSettings.ObserverName;
+                    boxData.IsDraft = true;
+                    _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+                    SaveCurrentBoxData();
+                    _dataChangedSinceUnlock = true;
+                    DrawPageLayouts();
+                    Toast.MakeText(this, toast, ToastLength.Short)?.Show();
+                };
+                return b;
+            }
+            // These stand apart from the live egg/chick totals on purpose: they record a loss the
+            // totals can't show, such as an egg that failed and was replaced the same day.
+            var eggsLost = lostNow?.FailedEggs ?? 0;
+            var chicksLost = lostNow?.DeadChicks ?? 0;
+            lostRow.AddView(MakeLostButton(eggsLost > 0 ? $"🥚✗ {eggsLost}" : "🥚✗", "+1 failed egg",
+                d => d.FailedEggs = (d.FailedEggs ?? 0) + 1));
+            lostRow.AddView(MakeLostButton(chicksLost > 0 ? $"🐣✗ {chicksLost}" : "🐣✗", "+1 dead chick",
+                d => d.DeadChicks = (d.DeadChicks ?? 0) + 1));
+            lostCol.AddView(lostRow);
+            searchRow.AddView(lostCol);
+
             searchContainer.AddView(searchRow);
 
             // Dropdown results container
@@ -5667,7 +5725,9 @@ namespace PenguinMonitor
                         imm?.HideSoftInputFromWindow(_penguinSearchEditText.WindowToken, 0);
                     }, textSize: 12);
                     resultView.SetPadding(12, 8, 12, 8);
-                    var resultParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                    // Wrap the badge rather than stretching it across the card — a peng badge is
+                    // a few characters wide, and full-width rows read as a list of empty bars.
+                    var resultParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
                     resultParams.SetMargins(0, 2, 0, 2);
                     resultView.LayoutParameters = resultParams;
 

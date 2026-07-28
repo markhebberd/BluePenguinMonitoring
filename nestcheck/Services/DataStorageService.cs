@@ -226,6 +226,7 @@ namespace PenguinMonitor.Services
                 var serverObs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
                     b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
                 serverObs.BoxName = p.BoxName;
+                serverObs.FailedEggs = b.failed_eggs; serverObs.DeadChicks = b.dead_chicks;
                 if (b.scans != null) foreach (var s in b.scans) serverObs.ScannedIds.Add(new ScanRecord { BirdId = s.pit_id ?? "" });
                 for (int ns = 0; ns < b.no_scan; ns++) serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                 // Only a server row for the same NZ day can be the twin of a pending box.
@@ -321,6 +322,8 @@ namespace PenguinMonitor.Services
                         breeding_status = pending.BreedingStatus,
                         gate_status = pending.GateStatus,
                         notes = pending.Notes,
+                        failed_eggs = pending.FailedEggs,
+                        dead_chicks = pending.DeadChicks,
                         scans = scans,
                     });
                 }
@@ -414,6 +417,7 @@ namespace PenguinMonitor.Services
                             var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
                                 b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
                             obs.BoxName = kvp.Key;
+                            obs.FailedEggs = b.failed_eggs; obs.DeadChicks = b.dead_chicks;
                             if (b.scans != null) foreach (var scan in b.scans)
                                 obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
                             for (int ns = 0; ns < b.no_scan; ns++)
@@ -439,6 +443,7 @@ namespace PenguinMonitor.Services
                             var b = kvp.Value;
                             var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
                             obs.BoxName = kvp.Key;
+                            obs.FailedEggs = b.failed_eggs; obs.DeadChicks = b.dead_chicks;
                             if (b.scans != null) foreach (var scan in b.scans) obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
                             for (int ns = 0; ns < b.no_scan; ns++)
                                 obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });
@@ -650,7 +655,7 @@ namespace PenguinMonitor.Services
                     observation_time_utc = ObsTimeUtc(pending),
                     adults = pending.Adults, eggs = pending.Eggs, chicks = pending.Chicks,
                     breeding_status = pending.BreedingStatus, gate_status = pending.GateStatus,
-                    notes = pending.Notes, scans = scans,
+                    notes = pending.Notes, failed_eggs = pending.FailedEggs, dead_chicks = pending.DeadChicks, scans = scans,
                 });
             }
 
@@ -717,7 +722,7 @@ namespace PenguinMonitor.Services
                     ["observation_time_utc"] = ObsTimeUtc(pending),
                     ["adults"] = pending.Adults, ["eggs"] = pending.Eggs, ["chicks"] = pending.Chicks,
                     ["breeding_status"] = pending.BreedingStatus, ["gate_status"] = pending.GateStatus,
-                    ["notes"] = pending.Notes, ["scans"] = scans,
+                    ["notes"] = pending.Notes, ["failed_eggs"] = pending.FailedEggs, ["dead_chicks"] = pending.DeadChicks, ["scans"] = scans,
                 };
                 if (pending.ConfirmedAgainstObsId.HasValue)
                     obsPayload["expected_observation_id"] = pending.ConfirmedAgainstObsId.Value;
@@ -873,6 +878,8 @@ namespace PenguinMonitor.Services
             public int eggs { get; set; }
             public int chicks { get; set; }
             public int no_scan { get; set; }
+            public int? failed_eggs { get; set; }
+            public int? dead_chicks { get; set; }
             public string? breeding_status { get; set; }
             public string? gate_status { get; set; }
             public string? notes { get; set; }
@@ -910,6 +917,8 @@ namespace PenguinMonitor.Services
             public int eggs { get; set; }
             public int chicks { get; set; }
             public int no_scan { get; set; }
+            public int? failed_eggs { get; set; }
+            public int? dead_chicks { get; set; }
             public string? breeding_status { get; set; }
             public string? gate_status { get; set; }
             public string? notes { get; set; }

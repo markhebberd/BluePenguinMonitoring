@@ -16,6 +16,12 @@ namespace PenguinMonitor.Models
         public int Adults { get; set; }
         public int Eggs { get; set; }
         public int Chicks { get; set; }
+        /// <summary>Eggs seen failed on this visit, and chicks seen dead — losses the live counts
+        /// can't show, e.g. an egg that failed and was replaced the same day. Null means nobody
+        /// recorded either way; 0 means checked and none lost. Matches observations.failed_eggs
+        /// and observations.dead_chicks on the server.</summary>
+        public int? FailedEggs { get; set; }
+        public int? DeadChicks { get; set; }
         public string? GateStatus { get; set; }
         public string Notes { get; set; } = "";
         public DateTime WhenDataCollectedUtc { get; set; }
