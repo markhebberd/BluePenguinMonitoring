@@ -15,7 +15,7 @@
  * so a name isn't repeated on every one of a colony's tens of thousands of rows.
  */
 
-const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.is_deleted, o.observer_id';
+const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.failed_eggs, o.dead_chicks, o.is_deleted, o.observer_id';
 const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted';
 const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, notes';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo';
