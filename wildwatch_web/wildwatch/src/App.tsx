@@ -2813,7 +2813,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
               {sightings.length > 0 && <tr><td className="muted">Last seen</td><td>
                 <DateLink date={sightings[0].date} onDayClick={onDayClick} />
                 <span className="muted"> at </span>
-                <a className="clickable" href={`/box/${sightings[0].box}`} onClick={e => navClick(e, () => onBoxClick(sightings[0].box))}>Box {sightings[0].box}</a>
+                <a className="bird-chip clickable" href={`/box/${sightings[0].box}`} onClick={e => navClick(e, () => onBoxClick(sightings[0].box))}>Box {sightings[0].box}</a>
               </td></tr>}
 
               {!fullView && <>
