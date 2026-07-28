@@ -568,9 +568,12 @@ h3.collapsible:hover { color:#1a5276; }
 /* The ▸ that opens the full record sits against the table's right edge, top-aligned so it
    stays put whether three rows are showing or thirty. */
 .bird-table-wrap { position:relative; padding-right:18px; }
-.detail-toggle { position:absolute; top:0; right:0; border:none; background:none; cursor:pointer;
-  color:#888; font-size:13px; line-height:1; padding:4px; }
-.detail-toggle:hover { color:#1a5276; }
+/* Reads as a button, not a stray caret: the full record is a real thing to open, and a bare
+   glyph in the corner doesn't say so. */
+.detail-toggle { position:absolute; top:0; right:0; cursor:pointer; display:inline-flex; align-items:center; gap:4px;
+  border:1px solid #d5dce3; background:#f7f9fb; border-radius:5px; color:#5f6c78;
+  font-size:11px; font-weight:600; line-height:1; padding:3px 8px; }
+.detail-toggle:hover { color:#1a5276; border-color:#b9c6d2; background:#eef3f8; }
 /* Chip box row: "Box 3        by: LJ" */
 .chip-by { margin-left:24px; }
 .chip-measure { display:inline-flex; align-items:baseline; gap:3px; }

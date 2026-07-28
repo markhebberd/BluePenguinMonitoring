@@ -2891,7 +2891,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   // A death is stamped at 2pm NZ (02:00 UTC) on the chosen date; clearing the field marks the bird alive.
                   : <EditableField value={p.death_date ? p.death_date.slice(0, 10) : ''} type="date"
                       onSave={(v: any) => savePenguin('death_date')(v ? `${v} 02:00:00` : null)} placeholder="-" canEdit={true} />}</td></tr>}
-                {(editing || !!p.notes) && <tr><td className="muted">Notes</td><td><EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={editing} /></td></tr>}
+                <tr><td className="muted">Notes</td><td><EditableField value={p.notes} onSave={savePenguin('notes')} placeholder="-" canEdit={editing} /></td></tr>
                 <BiometricsEditor pengNum={p.peng_num} biometrics={biometrics} deleted={data.biometrics_deleted || []} token={token} canEdit={!!canEdit} editing={editing} />
               </>}
             </tbody>
@@ -2899,7 +2899,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           {/* Hidden while editing — Edit already shows every field, and Cancel/Done is the way out. */}
           {!editing && <button className="detail-toggle" onClick={() => setShowDetails(v => !v)}
             title={showDetails ? 'Hide full record' : 'Show full record'}
-            aria-label={showDetails ? 'Hide full record' : 'Show full record'}>{showDetails ? '▾' : '▸'}</button>}
+            aria-label={showDetails ? 'Hide full record' : 'Show full record'}>{showDetails ? '▾' : '▸'} Details</button>}
         </div>
       </div>
 
