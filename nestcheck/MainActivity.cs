@@ -3514,6 +3514,11 @@ namespace PenguinMonitor
             _syncButton = _uiFactory.CreateStyledButton("Sync", UIFactory.PRIMARY_BLUE);
             _syncButton.Click += OnSyncClick;
 
+            // Escape hatch for a sync that won't go through: today's data as a file the observer
+            // can hand over by any means, so a day's work is never trapped on the phone.
+            var exportJsonButton = _uiFactory.CreateStyledButton("Json", UIFactory.PRIMARY_BLUE);
+            exportJsonButton.Click += (s, e) => ExportTodayJson();
+
             var actionRow = new PenguinMonitor.UI.FlowLayout(this);
             var actionDensity = Resources?.DisplayMetrics?.Density ?? 2;
             actionRow.HorizontalSpacing = (int)(6 * actionDensity);
@@ -3524,7 +3529,7 @@ namespace PenguinMonitor
 
             var density = Resources?.DisplayMetrics?.Density ?? 2;
             var gap = (int)(3 * density);
-            foreach (var btn in new[] { editBoxTagsButton, _syncButton, authButton as Button })
+            foreach (var btn in new[] { editBoxTagsButton, _syncButton, exportJsonButton, authButton as Button })
             {
                 if (btn == null) continue;
                 btn.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
@@ -3534,6 +3539,7 @@ namespace PenguinMonitor
             _syncButton.SetMinimumWidth((int)(100 * density));
             actionRow.AddView(editBoxTagsButton);
             actionRow.AddView(_syncButton);
+            actionRow.AddView(exportJsonButton);
             actionRow.AddView(authButton);
             _settingsCard.AddView(actionRow);
         }
@@ -8556,6 +8562,81 @@ namespace PenguinMonitor
             var inputMethodManager = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
             inputMethodManager?.ShowSoftInput(input, Android.Views.InputMethods.ShowFlags.Implicit);
         }
+        /// <summary>Writes today's colony state to Downloads and offers to share it. This is the
+        /// answer to "sync keeps failing and I'm about to lose a day's work": the file leaves the
+        /// phone by whatever route works, even with no working API.
+        ///
+        /// Saved through MediaStore on Android 10+, which both lands it in Downloads and hands
+        /// back a content:// URI that can go straight into a share. Below that it goes to the
+        /// public Downloads path, which is still readable but can't be shared without a
+        /// FileProvider — so those devices get the path and no share button.</summary>
+        private void ExportTodayJson()
+        {
+            try
+            {
+                var stamp = ToNzTime(DateTime.UtcNow).ToString("yyyy-MM-dd-HHmm");
+                var colony = string.IsNullOrWhiteSpace(CurrentColonyAcronym()) ? "colony" : CurrentColonyAcronym();
+                var fileName = $"nestcheck-{colony}-{stamp}.json";
+                var json = JsonConvert.SerializeObject(_colonyState, Formatting.Indented);
+
+                int boxes = _colonyState.TodayBoxes.Count;
+                int pending = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
+
+                if (OperatingSystem.IsAndroidVersionAtLeast(29))
+                {
+                    var values = new ContentValues();
+                    values.Put(Android.Provider.MediaStore.IMediaColumns.DisplayName, fileName);
+                    values.Put(Android.Provider.MediaStore.IMediaColumns.MimeType, "application/json");
+                    values.Put(Android.Provider.MediaStore.IMediaColumns.RelativePath, Android.OS.Environment.DirectoryDownloads);
+                    var uri = ContentResolver?.Insert(Android.Provider.MediaStore.Downloads.ExternalContentUri, values);
+                    if (uri == null) { Toast.MakeText(this, "Couldn't create the file", ToastLength.Long)?.Show(); return; }
+                    using (var os = ContentResolver!.OpenOutputStream(uri))
+                    {
+                        if (os == null) { Toast.MakeText(this, "Couldn't write the file", ToastLength.Long)?.Show(); return; }
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                        os.Write(bytes, 0, bytes.Length);
+                        os.Flush();
+                    }
+
+                    new AlertDialog.Builder(this)
+                        .SetTitle("Today's data exported")
+                        .SetMessage($"Downloads/{fileName}\n\n{boxes} box{(boxes == 1 ? "" : "es")} recorded today" +
+                                    (pending > 0 ? $", {pending} still waiting to upload." : "."))
+                        .SetNegativeButton("Done", (s, e) => { })
+                        .SetPositiveButton("Share", (s, e) =>
+                        {
+                            var send = new Android.Content.Intent(Android.Content.Intent.ActionSend);
+                            send.SetType("application/json");
+                            send.PutExtra(Android.Content.Intent.ExtraStream, uri);
+                            send.PutExtra(Android.Content.Intent.ExtraSubject, fileName);
+                            send.AddFlags(Android.Content.ActivityFlags.GrantReadUriPermission);
+                            StartActivity(Android.Content.Intent.CreateChooser(send, "Send today's data"));
+                        })
+                        .Show();
+                    return;
+                }
+
+                var downloadsPath = Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDownloads)?.AbsolutePath;
+                if (string.IsNullOrEmpty(downloadsPath))
+                {
+                    Toast.MakeText(this, "Downloads directory not accessible", ToastLength.Long)?.Show();
+                    return;
+                }
+                var path = System.IO.Path.Combine(downloadsPath, fileName);
+                File.WriteAllText(path, json);
+                new AlertDialog.Builder(this)
+                    .SetTitle("Today's data exported")
+                    .SetMessage($"Downloads/{fileName}\n\n{boxes} box{(boxes == 1 ? "" : "es")} recorded today" +
+                                (pending > 0 ? $", {pending} still waiting to upload." : "."))
+                    .SetPositiveButton("Done", (s, e) => { })
+                    .Show();
+            }
+            catch (Exception ex)
+            {
+                Toast.MakeText(this, $"Export failed: {ex.Message}", ToastLength.Long)?.Show();
+            }
+        }
+
         private void SaveDataWithFilename(string fileName, bool upload)
         {
             try
