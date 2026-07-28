@@ -5568,6 +5568,45 @@ namespace PenguinMonitor
                 }
             }
 
+            // One row per loss, listed under the birds — same removable shape as a no-scan, so a
+            // mistap is undone the same way everything else here is, and the count is visible as
+            // rows rather than as a number stuck on a button.
+            var lossNow = _colonyState.GetTodayForBox(_currentBoxName);
+            void AddLossRows(int count, string label, Action onRemove)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    var row = new LinearLayout(this);
+                    var rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                    rowParams.SetMargins(0, 2, 0, 2);
+                    row.LayoutParameters = rowParams;
+                    row.Background = _uiFactory.CreateRoundedBackground(BOX_MISMATCH_BG, 4);
+                    row.SetPadding(12, 8, 12, 8);
+                    row.SetGravity(GravityFlags.CenterVertical);
+
+                    var text = new TextView(this) { Text = label, TextSize = 14 };
+                    text.SetTextColor(Color.Black);
+                    text.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                    row.AddView(text);
+
+                    var del = new Button(this) { Text = "Delete", TextSize = 12 };
+                    del.SetTextColor(Color.White);
+                    del.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
+                    del.SetPadding(12, 8, 12, 8);
+                    del.Background = _uiFactory.CreateRoundedBackground(UIFactory.DANGER_RED, 8);
+                    del.SetAllCaps(false);
+                    var delParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+                    delParams.SetMargins(4, 0, 0, 0);
+                    del.LayoutParameters = delParams;
+                    del.Click += (s, e) => onRemove();
+                    row.AddView(del);
+
+                    _scannedIdsLayout[0].AddView(row);
+                }
+            }
+            AddLossRows(lossNow?.FailedEggs ?? 0, "🥚✗ Failed egg", () => BumpLoss(d => d.FailedEggs = Math.Max(0, (d.FailedEggs ?? 0) - 1), "Failed egg removed"));
+            AddLossRows(lossNow?.DeadChicks ?? 0, "🐣✗ Dead chick", () => BumpLoss(d => d.DeadChicks = Math.Max(0, (d.DeadChicks ?? 0) - 1), "Dead chick removed"));
+
             // Penguin search field with dropdown results (select to add a scan)
             var searchContainer = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             var searchContainerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -5597,11 +5636,11 @@ namespace PenguinMonitor
             _penguinSearchEditText.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
             searchRow.AddView(_penguinSearchEditText);
 
-            var noScanBtn = new Button(this) { Text = "No scan", TextSize = 12 };
+            var noScanBtn = new Button(this) { Text = "No scan", TextSize = 14 };
             noScanBtn.SetTextColor(Color.Black);
             noScanBtn.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            noScanBtn.SetPadding(12, 8, 12, 8);
-            noScanBtn.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+            noScanBtn.SetPadding(14, 14, 14, 14);
+            noScanBtn.Background = ButtonFace();
             noScanBtn.SetAllCaps(false);
             var noScanBtnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             noScanBtnParams.SetMargins(8, 0, 0, 0);
@@ -5633,49 +5672,31 @@ namespace PenguinMonitor
             lostColParams.Gravity = GravityFlags.CenterVertical;
             lostCol.LayoutParameters = lostColParams;
 
-            var lostNow = _colonyState.GetTodayForBox(_currentBoxName);
-            var lostLabel = new TextView(this) { Text = "failed", TextSize = 9, Gravity = GravityFlags.Center };
+            var lostLabel = new TextView(this) { Text = "failed", TextSize = 10, Gravity = GravityFlags.Center };
             lostLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
             lostLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
             lostCol.AddView(lostLabel);
 
             var lostRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+            // No count on the face — each loss is its own removable row above.
             Button MakeLostButton(string text, string toast, Action<BoxObservation> bump)
             {
-                var b = new Button(this) { Text = text, TextSize = 12 };
+                var b = new Button(this) { Text = text, TextSize = 17 };
                 b.SetTextColor(Color.Black);
                 b.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-                b.SetPadding(10, 6, 10, 6);
-                b.Background = _uiFactory.CreateRoundedBackground(UIFactory.LIGHTER_GRAY, 8);
+                b.SetPadding(16, 14, 16, 14);
+                b.Background = ButtonFace();
                 b.SetAllCaps(false);
                 var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-                p.SetMargins(2, 0, 2, 0);
+                p.SetMargins(3, 0, 3, 0);
                 b.LayoutParameters = p;
-                b.Click += (s, e) =>
-                {
-                    // Same shape as the no-scan button: mutate the stored draft, then let
-                    // SaveCurrentBoxData fold in whatever is typed in the count fields.
-                    var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
-                    bump(boxData);
-                    boxData.WhenDataCollectedUtc = DateTime.UtcNow;
-                    boxData.ObserverName = _appSettings.ObserverName;
-                    boxData.IsDraft = true;
-                    _colonyState.SaveBoxObservation(_currentBoxName, boxData);
-                    SaveCurrentBoxData();
-                    _dataChangedSinceUnlock = true;
-                    DrawPageLayouts();
-                    Toast.MakeText(this, toast, ToastLength.Short)?.Show();
-                };
+                b.Click += (s, e) => BumpLoss(bump, toast);
                 return b;
             }
             // These stand apart from the live egg/chick totals on purpose: they record a loss the
             // totals can't show, such as an egg that failed and was replaced the same day.
-            var eggsLost = lostNow?.FailedEggs ?? 0;
-            var chicksLost = lostNow?.DeadChicks ?? 0;
-            lostRow.AddView(MakeLostButton(eggsLost > 0 ? $"🥚✗ {eggsLost}" : "🥚✗", "+1 failed egg",
-                d => d.FailedEggs = (d.FailedEggs ?? 0) + 1));
-            lostRow.AddView(MakeLostButton(chicksLost > 0 ? $"🐣✗ {chicksLost}" : "🐣✗", "+1 dead chick",
-                d => d.DeadChicks = (d.DeadChicks ?? 0) + 1));
+            lostRow.AddView(MakeLostButton("🥚✗", "+1 failed egg", d => d.FailedEggs = (d.FailedEggs ?? 0) + 1));
+            lostRow.AddView(MakeLostButton("🐣✗", "+1 dead chick", d => d.DeadChicks = (d.DeadChicks ?? 0) + 1));
             lostCol.AddView(lostRow);
             searchRow.AddView(lostCol);
 
@@ -5738,6 +5759,34 @@ namespace PenguinMonitor
             _scannedIdsLayout[0].AddView(searchContainer);
 
         }
+        /// <summary>A raised, outlined face for the row's tap targets. A flat light-grey fill on a
+        /// light card read as a label rather than a button.</summary>
+        private Android.Graphics.Drawables.GradientDrawable ButtonFace()
+        {
+            var density = Resources?.DisplayMetrics?.Density ?? 2f;
+            var d = new Android.Graphics.Drawables.GradientDrawable();
+            d.SetColor(Color.White);
+            d.SetCornerRadius(8 * density);
+            d.SetStroke((int)(1.5f * density), UIFactory.TEXT_SECONDARY);
+            return d;
+        }
+
+        /// <summary>Applies a change to today's loss counts and persists it, mirroring the no-scan
+        /// button: mutate the stored draft, then let SaveCurrentBoxData fold in the typed counts.</summary>
+        private void BumpLoss(Action<BoxObservation> change, string toast)
+        {
+            var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
+            change(boxData);
+            boxData.WhenDataCollectedUtc = DateTime.UtcNow;
+            boxData.ObserverName = _appSettings.ObserverName;
+            boxData.IsDraft = true;
+            _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+            SaveCurrentBoxData();
+            _dataChangedSinceUnlock = true;
+            DrawPageLayouts();
+            Toast.MakeText(this, toast, ToastLength.Short)?.Show();
+        }
+
         private LinearLayout CreateScanRecordView(ScanRecord scan, int index)
         {
             var scanLayout = new LinearLayout(this);
