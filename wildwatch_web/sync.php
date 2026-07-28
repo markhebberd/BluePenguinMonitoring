@@ -151,7 +151,7 @@ function handleDownload($pdo, $colonyId, $observer) {
     if (!empty($obsIds)) {
         $ph = implode(',', array_fill(0, count($obsIds), '?'));
         $scanStmt = $pdo->prepare("SELECT ps.observation_id, ps.pit_id, ps.scan_time_utc,
-            pc.peng_num, p.sex, p.chick_size_code, p.chipped_as_adult
+            pc.peng_num, p.sex, p.chick_size_code, p.chipped_as_adult, p.alert
             FROM penguin_scans ps
             LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
             LEFT JOIN penguins p ON pc.peng_num = p.peng_num
@@ -310,7 +310,7 @@ function handleUpload($pdo, $colonyId, $observer) {
     $conflictDayNotes = dayNoteMap($pdo, $colonyId);
     $viewPrefix = getColonyPrefix($pdo, $colonyId);
     $fetchScansForObs = function($obsId) use ($pdo, $chipLookup, $viewPrefix) {
-        $s = $pdo->prepare("SELECT ps.pit_id, ps.scan_time_utc, pc.peng_num, p.sex, p.chick_size_code
+        $s = $pdo->prepare("SELECT ps.pit_id, ps.scan_time_utc, pc.peng_num, p.sex, p.chick_size_code, p.alert
             FROM penguin_scans ps LEFT JOIN penguin_chips pc ON ps.pit_id = pc.pit_id AND pc.is_active = 1
             LEFT JOIN penguins p ON pc.peng_num = p.peng_num WHERE ps.observation_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
         $s->execute([$obsId]);

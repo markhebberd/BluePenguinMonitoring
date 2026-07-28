@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS penguins (
     sex VARCHAR(10),
     death_date DATETIME NULL, -- 2pm NZ (02:00 UTC) on the death date; NULL = alive
     is_dead BOOLEAN GENERATED ALWAYS AS (death_date IS NOT NULL) STORED,
+    -- Scanning this bird in the field raises an alert, as an unsexed adult does. Set by hand.
+    alert TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

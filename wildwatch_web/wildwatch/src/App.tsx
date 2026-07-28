@@ -2754,6 +2754,15 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     if (reason === null) return;
     return updateRecord(token || '', 'penguins', p.peng_num, {[field]: val}, reason || undefined);
   };
+  // 0/1 in the column, Yes/No in the panel — savePenguin's prompt would read "alert from 0 to
+  // 1", so it asks in the same words the row uses.
+  const saveAlert = async (val: any) => {
+    const on = val === 'Yes' ? 1 : 0;
+    if ((p.alert ? 1 : 0) === on) return;
+    const reason = prompt(`Turn the scan alert ${on ? 'ON' : 'OFF'} for penguin #${p.peng_num}?\n\nReason (optional):`);
+    if (reason === null) return;
+    return updateRecord(token || '', 'penguins', p.peng_num, { alert: on }, reason || undefined);
+  };
   // Stored inverted (chipped_as_adult), so this can't go through savePenguin without the
   // audit prompt reading "chipped_as_adult from 0 to 1". Ask the question the panel asks.
   const saveChippedAsChick = async (val: any) => {
@@ -2854,6 +2863,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 <tr><td className="muted">Chipped as Chick</td><td>
                   <EditableField value={p.chipped_as_adult ? 'No' : 'Yes'} type="select" options={['Yes', 'No']}
                     onSave={saveChippedAsChick} canEdit={editing} /></td></tr>
+                {/* Field alert: scanning this bird raises one, the way an unsexed adult does. */}
+                <tr><td className="muted">Alert on scan</td><td>
+                  <EditableField value={p.alert ? 'Yes' : 'No'} type="select" options={['No', 'Yes']}
+                    onSave={saveAlert} canEdit={editing} /></td></tr>
                 <tr><td className="muted">Chick Size Code</td><td>
                   <EditableField value={p.chick_size_code} type="select" options={['', 'BC', 'LC', 'SC']}
                     onSave={savePenguin('chick_size_code')} placeholder="-" canEdit={editing} /></td></tr>
