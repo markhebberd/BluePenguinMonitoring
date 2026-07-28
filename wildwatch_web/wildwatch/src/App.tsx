@@ -2798,6 +2798,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   {(getUserName(activeChip.chipper_id) || activeChip.chip_by) &&
                     <span className="chip-by"><span className="muted">by:</span> {getUserName(activeChip.chipper_id) || activeChip.chip_by}</span>}
                 </td></tr>}
+                {/* A death is the headline fact about a bird — it shouldn't need the full view. */}
+                {!!p.death_date && <tr><td className="muted">Died</td><td>{String(p.death_date).slice(0, 10)}</td></tr>}
                 {!!p.notes && <tr><td className="muted">Notes</td><td>{p.notes}</td></tr>}
               </>}
 
