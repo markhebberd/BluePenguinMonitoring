@@ -11201,10 +11201,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             </div>
           )}
           <div className="mobile-search-group">
-            <label className="mobile-label">Penguin</label>"
-
+            <label className="mobile-label">Search</label>
             {unifiedSearch}
-
+          </div>
+          <div className="mobile-search-group">
+            <label className="mobile-label">Penguin</label>
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />
           </div>
           <div className="mobile-search-group">
@@ -11264,7 +11265,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showAllBirds && !showSettings) ? (
     <div className="app day-overlay">
       {siteHeader}
-      <div className="colony-toolbar">"
+      <div className="colony-toolbar">
 
         {unifiedSearch}
 
@@ -11393,7 +11394,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <div className="colony-toolbar">"
+        <div className="colony-toolbar">
 
           {unifiedSearch}
 
@@ -11425,7 +11426,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   return wrap(
     <div className="app">
       {siteHeader}
-      <div className="colony-toolbar">"
+      <div className="colony-toolbar">
 
         {unifiedSearch}
 
