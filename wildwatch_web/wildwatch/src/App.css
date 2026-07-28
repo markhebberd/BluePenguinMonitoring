@@ -1016,10 +1016,8 @@ select.ef-input.ef-placeholder { color:#888; }
 .remove-scan { background:none; border:none; color:#e53935; font-size:16px; cursor:pointer; padding:0 2px; line-height:1; }
 .remove-scan:hover { color:#b71c1c; }
 .add-scan-search { position:relative; }
-/* Shrink-wraps its rows: a penguin chip is short, so a fixed 200px dropdown was mostly
-   empty and pushed the edit row wide. max-width keeps a long name from escaping. */
-.add-scan-results { position:absolute; top:100%; left:0; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.15); z-index:10; width:max-content; min-width:100%; max-width:16em; max-height:200px; overflow-y:auto; }
-.add-scan-option { padding:4px 6px; font-size:13px; white-space:nowrap; }
+.add-scan-results { position:absolute; top:100%; left:0; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.15); z-index:10; min-width:200px; max-height:200px; overflow-y:auto; }
+.add-scan-option { padding:6px 10px; font-size:13px; }
 .add-scan-option.f { background:#FFE4E1; }
 .add-scan-option.m { background:#E6F3FF; }
 .add-scan-option.chick { background:#FFF9C4; }
@@ -1059,15 +1057,3 @@ select.ef-input.ef-placeholder { color:#888; }
 .sex-confirm-actions button:disabled { opacity:.55; cursor:default; }
 button.sex-confirm-later { background:transparent; color:#7d8a96; border:1px solid #cfd7de; }
 .sex-confirm-err { background:#fbeceb; border:1px solid #e6b8b3; color:#a3382f; border-radius:6px; padding:4px 8px; margin-top:6px; }
-
-/* Penguin # box only needs room for a few digits — it was 120px of mostly whitespace,
-   which is the width the failed-egg/chick cluster now uses. */
-.ef-input.ef-addpeng { width:5.5em; max-width:5.5em; }
-
-/* Losses cluster: label over a pair of one-tap buttons, sized to sit in the birds row
-   next to "No scan" rather than starting a new line. */
-.add-lost { display:inline-flex; flex-direction:column; align-items:center; gap:1px; line-height:1; }
-.add-lost-label { font-size:9px; text-transform:uppercase; letter-spacing:.05em; color:#7d8a96; font-weight:700; }
-.add-lost-btns { display:inline-flex; gap:2px; }
-.add-lost-btns button { background:#E0E0E0; color:#333; border:1px solid #999; border-radius:4px; padding:2px 5px; font-size:11px; cursor:pointer; white-space:nowrap; }
-.add-lost-btns button:hover { background:#d5d5d5; }
