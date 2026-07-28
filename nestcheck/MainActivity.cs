@@ -1382,7 +1382,7 @@ namespace PenguinMonitor
             UpdateStatusText("Syncing...");
             if (_syncButton != null)
             {
-                _syncButton.Text = "Force Sync";
+                _syncButton.Text = "Force Sync"; _refitSyncLabel?.Invoke();
                 _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
                 _syncButton.Enabled = false;
             }
@@ -1439,7 +1439,7 @@ namespace PenguinMonitor
                     _isDownloadingCsvData = false;
                     if (_syncButton != null)
                     {
-                        _syncButton.Text = "Force Sync";
+                        _syncButton.Text = "Force Sync"; _refitSyncLabel?.Invoke();
                         _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
                         _syncButton.Enabled = true;
                     }
@@ -3519,41 +3519,72 @@ namespace PenguinMonitor
             var exportJsonButton = _uiFactory.CreateStyledButton("Export todays json", UIFactory.PRIMARY_BLUE);
             exportJsonButton.Click += (s, e) => ExportTodayJson();
 
-            // Two rows of two, every button on an equal share of the width. Wrapping flow left
-            // ragged gaps and sized each button to its label, so the shortest ones were the
-            // hardest to hit; an even split also buys the room for labels that say what they do.
+            // One row of four when the short labels fit it, two rows of two when they don't —
+            // and in either case each button keeps the longest wording its own width allows.
+            // Buttons share the width equally rather than sizing to their label: wrapping flow
+            // left ragged gaps and made the shortest actions the hardest to hit.
             var density = Resources?.DisplayMetrics?.Density ?? 2;
+            var actionButtons = new (Button btn, string[] variants)[]
+            {
+                (editBoxTagsButton, new[] { "Edit box details", "Box detail", "Boxes" }),
+                (_syncButton,       new[] { "Force Sync", "Sync" }),
+                (exportJsonButton,  new[] { "Export todays json", "Export json", "Json" }),
+                (authButton as Button ?? new Button(this),
+                                    _appSettings?.IsAuthenticated == true
+                                        ? new[] { $"Logout {_appSettings.ObserverName}", "Logout" }
+                                        : new[] { "Login to Wildwatch", "Login" }),
+            };
+            foreach (var (btn, _) in actionButtons)
+            {
+                btn.SetPadding((int)(8 * density), (int)(10 * density), (int)(8 * density), (int)(10 * density));
+                btn.SetMinimumWidth(0);
+            }
+
+            // Estimated only — the card's exact inner width isn't known until layout. It decides
+            // one row versus two; the per-button fitter below then settles the wording against the
+            // real width, so an estimate that's slightly out costs a shorter label, not a clipped one.
+            var usableWidth = (Resources?.DisplayMetrics?.WidthPixels ?? (int)(360 * density)) - (int)(56 * density);
+            bool ShortestFitsAcross(int columns)
+            {
+                var per = usableWidth / (float)columns - 6 * density;
+                foreach (var (btn, variants) in actionButtons)
+                {
+                    var shortest = variants[variants.Length - 1];
+                    var need = (btn.Paint?.MeasureText(shortest) ?? 0) + btn.PaddingLeft + btn.PaddingRight;
+                    if (need > per) return false;
+                }
+                return true;
+            }
+            int columnCount = ShortestFitsAcross(4) ? 4 : 2;
+
             var actionRows = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             var actionRowsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
             actionRowsParams.SetMargins(0, 4, 0, 4);
             actionRows.LayoutParameters = actionRowsParams;
 
-            LinearLayout ActionRow(View left, View right)
+            LinearLayout currentRow = null!;
+            for (int i = 0; i < actionButtons.Length; i++)
             {
-                var row = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
-                var rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-                rowParams.SetMargins(0, 0, 0, (int)(6 * density));
-                row.LayoutParameters = rowParams;
-                foreach (var (v, first) in new[] { (left, true), (right, false) })
+                if (i % columnCount == 0)
                 {
-                    if (v is Button b)
-                    {
-                        b.SetPadding((int)(8 * density), (int)(10 * density), (int)(8 * density), (int)(10 * density));
-                        b.SetMinimumWidth(0);
-                        // Labels differ a lot in length; let the long ones shrink rather than clip
-                        b.SetAutoSizeTextTypeUniformWithConfiguration(9, 14, 1, (int)Android.Util.ComplexUnitType.Sp);
-                    }
-                    var p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-                    p.SetMargins(first ? 0 : (int)(3 * density), 0, first ? (int)(3 * density) : 0, 0);
-                    v.LayoutParameters = p;
-                    row.AddView(v);
+                    currentRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+                    var rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                    rowParams.SetMargins(0, 0, 0, (int)(6 * density));
+                    currentRow.LayoutParameters = rowParams;
+                    actionRows.AddView(currentRow);
                 }
-                return row;
+                var v = actionButtons[i].btn;
+                var p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                bool firstInRow = i % columnCount == 0;
+                p.SetMargins(firstInRow ? 0 : (int)(3 * density), 0, (int)(3 * density), 0);
+                v.LayoutParameters = p;
+                currentRow.AddView(v);
             }
-
-            actionRows.AddView(ActionRow(editBoxTagsButton, _syncButton));
-            actionRows.AddView(ActionRow(exportJsonButton, authButton));
             _settingsCard.AddView(actionRows);
+
+            // Longest first: each button keeps the most descriptive label its own width allows.
+            foreach (var (btn, variants) in actionButtons) FitLabel(btn, variants);
+            _refitSyncLabel = () => _syncButton.Post(() => FitLabelNow(_syncButton, "Force Sync", "Sync"));
         }
 
         private void OnScrollViewTouch(object? sender, View.TouchEventArgs e)
@@ -7525,6 +7556,38 @@ namespace PenguinMonitor
             DataStorageService.SaveColonyState(this, _colonyState);
             UpdateSyncButtonLabel();
 
+        }
+
+        /// <summary>Re-fits the sync button's label after its text is reset mid-run.</summary>
+        private Action? _refitSyncLabel;
+
+        /// <summary>Gives a button a set of labels, longest first, and keeps the longest one that
+        /// actually fits the width it ends up with. A single width breakpoint can only ever be
+        /// right for one handset; measuring the laid-out button covers every screen between the
+        /// narrowest phone and a tablet, and re-runs if the width changes (rotation, split screen).</summary>
+        private void FitLabelNow(Button button, params string[] variants)
+        {
+            var available = button.Width - button.PaddingLeft - button.PaddingRight;
+            if (available <= 0) return;
+            var pick = variants.FirstOrDefault(v => button.Paint?.MeasureText(v) <= available)
+                       ?? variants[variants.Length - 1];
+            if (button.Text != pick) button.Text = pick;
+        }
+
+        private void FitLabel(Button button, params string[] variants)
+        {
+            void Apply()
+            {
+                var available = button.Width - button.PaddingLeft - button.PaddingRight;
+                if (available <= 0) return;   // not laid out yet; the layout pass will call back
+                var pick = variants.FirstOrDefault(v => button.Paint?.MeasureText(v) <= available)
+                           ?? variants[variants.Length - 1];
+                // Guard the assignment: setting Text requests another layout, so writing the same
+                // string every pass would spin. Changed-only converges after one extra pass.
+                if (button.Text != pick) button.Text = pick;
+            }
+            button.LayoutChange += (s, e) => Apply();
+            button.Post(Apply);
         }
 
         private void UpdateSyncButtonLabel()
