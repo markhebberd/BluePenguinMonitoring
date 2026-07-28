@@ -1820,8 +1820,7 @@ export function parseSearchTerms(q: string): string[] {
 }
 
 export interface LocalSearchResults {
-  boxesExact: string[];      // the box you named — outranks everything
-  boxes: string[];           // boxes whose name merely starts with a term
+  boxes: string[];           // the box you named, exactly — a partial box name is noise
   pengs: any[];              // peng# hit — PenguinMini-shaped
   pits: any[];               // PIT-ID hit
   pengNotes: { peng: any; note: string }[];
@@ -1834,24 +1833,20 @@ export interface LocalSearchResults {
  * render each in its own way and keep them in precedence order. Dates aren't here: matching
  * human date input ("28 dec", "FM 3 24") belongs with the date search in the UI layer.
  *
- * Boxes come back in two groups because they sit on both sides of the precedence order: naming
- * a box outright wins, but a box merely *starting* with what you typed loses to an exact peng#
- * or a PIT-ID hit — "832" is a penguin far more often than it's the start of box 8320.
+ * Boxes match by exact name only. Matching a partial name buries the real answer — "832" is a
+ * penguin, not an invitation to list every box starting with 8.
  */
 export function searchLocal(query: string, limit = 8): LocalSearchResults {
-  const empty: LocalSearchResults = { boxesExact: [], boxes: [], pengs: [], pits: [], pengNotes: [], obsNotes: [], dateNotes: [] };
+  const empty: LocalSearchResults = { boxes: [], pengs: [], pits: [], pengNotes: [], obsNotes: [], dateNotes: [] };
   const c = mem;
   const terms = parseSearchTerms(query).map(t => t.toLowerCase()).filter(Boolean);
   if (!c || terms.length === 0) return empty;
   const hits = (v: any) => { const s = String(v ?? '').toLowerCase(); return !!s && terms.some(t => s.includes(t)); };
   const tail = (n: any) => String(n ?? '').replace(/^[A-Z]+/i, '').toLowerCase();
 
-  // Boxes: an exact name beats one that merely starts with the term ("8" shouldn't bury box 8).
-  const boxExact: string[] = [], boxPrefix: string[] = [];
+  const boxes: string[] = [];
   for (const loc of c.locations) {
-    const name = String(loc.location_name).toLowerCase();
-    if (terms.some(t => name === t)) boxExact.push(loc.location_name);
-    else if (terms.some(t => name.startsWith(t))) boxPrefix.push(loc.location_name);
+    if (terms.some(t => String(loc.location_name).toLowerCase() === t)) boxes.push(loc.location_name);
   }
   const byNum = (a: string, b: string) => {
     const na = parseInt(a), nb = parseInt(b);
@@ -1892,8 +1887,7 @@ export function searchLocal(query: string, limit = 8): LocalSearchResults {
   dateNotes.sort((a, b) => b.date.localeCompare(a.date));
 
   return {
-    boxesExact: boxExact.sort(byNum),
-    boxes: boxPrefix.sort(byNum).slice(0, limit),
+    boxes: boxes.sort(byNum),
     pengs: pengs.slice(0, limit),
     pits: pits.slice(0, limit),
     pengNotes: pengNotes.slice(0, limit),

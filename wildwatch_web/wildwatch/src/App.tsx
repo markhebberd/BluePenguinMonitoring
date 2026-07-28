@@ -3597,20 +3597,45 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   const local = useMemo(() => searchLocal(search), [search, dbVersion]);
   const dateHits = useMemo(() => matchDateQuery(dates, search, registeredFmDates).slice(0, 8), [dates, search, registeredFmDates]);
 
-  const count = local.boxesExact.length + local.boxes.length + local.pengs.length + dateHits.length
-    + local.pits.length + local.pengNotes.length + local.obsNotes.length + local.dateNotes.length;
-  const boxRow = (list: string[]) => (
+  // Every result clears the box on the way out, so the dropdown never sits over the thing it
+  // just navigated to.
+  const go = (fn: () => void) => () => { fn(); setSearch(''); setOpen(false); };
+
+  // Every result as one flat list in the order they're rendered, so the arrow keys can walk
+  // them without caring which group a result came from. Keys tie a list entry to its element.
+  const flat = useMemo(() => {
+    const out: { key: string; run: () => void }[] = [];
+    for (const b of local.boxes) out.push({ key: `bx:${b}`, run: () => onBoxClick(b) });
+    for (const p of local.pengs) out.push({ key: `pg:${p.peng_num}`, run: () => onBirdClick(p.peng_num) });
+    for (const p of local.pits) out.push({ key: `pt:${p.peng_num}`, run: () => onBirdClick(p.peng_num || p.pit_id) });
+    for (const d of dateHits) out.push({ key: `dt:${d}`, run: () => onDayClick(d) });
+    for (const { peng } of local.pengNotes) out.push({ key: `pn:${peng.peng_num}`, run: () => onBirdClick(peng.peng_num) });
+    for (const o of local.obsNotes) out.push({ key: `ob:${o.observation_id}`, run: () => onObsClick(o.box, o.observation_time_utc) });
+    for (const { date } of local.dateNotes) out.push({ key: `dn:${date}`, run: () => onDayClick(date) });
+    return out;
+  }, [local, dateHits, onBoxClick, onBirdClick, onDayClick, onObsClick]);
+
+  // -1 is "nothing stepped to yet", where Enter still takes the top result.
+  const [cursor, setCursor] = useState(-1);
+  useEffect(() => { setCursor(-1); }, [search]);
+  const focusKey = cursor >= 0 ? flat[cursor]?.key : null;
+  const cls = (key: string, base: string) => `${base}${focusKey === key ? ' uni-focused' : ''}`;
+  const listRef = useRef<HTMLDivElement>(null);
+  // Keep the stepped-to result on screen — the list is taller than the dropdown.
+  useEffect(() => {
+    if (!focusKey) return;
+    listRef.current?.querySelector(`[data-uni="${focusKey}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [focusKey]);
+
+  const count = flat.length;
+  const boxRow = (list: string[], prefix: string) => (
     <div className="uni-row uni-chips">
       {list.map(b => (
-        <a key={b} className="bird-chip clickable" href={`/box/${b}`}
+        <a key={b} data-uni={`${prefix}${b}`} className={cls(`${prefix}${b}`, 'bird-chip clickable')} href={`/box/${b}`}
           onClick={e => { e.preventDefault(); go(() => onBoxClick(b))(); }}>Box {b}</a>
       ))}
     </div>
   );
-
-  // Every result clears the box on the way out, so the dropdown never sits over the thing it
-  // just navigated to.
-  const go = (fn: () => void) => () => { fn(); setSearch(''); setOpen(false); };
 
   // The calendar tracks this field the way it tracks the date search: opening on focus, and
   // centred on the best date match once there is one.
@@ -3620,16 +3645,18 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { setSearch(''); setOpen(false); return; }
-    if (e.key !== 'Enter') return;
-    // Enter takes the top result in precedence order.
-    if (local.boxesExact[0]) go(() => onBoxClick(local.boxesExact[0]))();
-    else if (local.pengs[0]) go(() => onBirdClick(local.pengs[0].peng_num))();
-    else if (local.pits[0]) go(() => onBirdClick(local.pits[0].peng_num || local.pits[0].pit_id))();
-    else if (local.boxes[0]) go(() => onBoxClick(local.boxes[0]))();
-    else if (dateHits[0]) go(() => onDayClick(dateHits[0]))();
-    else if (local.pengNotes[0]) go(() => onBirdClick(local.pengNotes[0].peng.peng_num))();
-    else if (local.obsNotes[0]) go(() => onObsClick(local.obsNotes[0].box, local.obsNotes[0].observation_time_utc))();
-    else if (local.dateNotes[0]) go(() => onDayClick(local.dateNotes[0].date))();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (count === 0) return;
+      e.preventDefault();                    // don't drag the caret through the query
+      setOpen(true);
+      setCursor(c => {
+        const next = e.key === 'ArrowDown' ? c + 1 : c - 1;
+        return Math.max(-1, Math.min(count - 1, next));
+      });
+      return;
+    }
+    // Enter takes the stepped-to result, or the top one when nothing has been stepped to.
+    if (e.key === 'Enter') go(() => flat[cursor >= 0 ? cursor : 0]?.run())();
   };
 
   const label = (text: string) => <div className="uni-label">{text}</div>;
@@ -3647,37 +3674,45 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
         className="uni-search-input"
       />
       {open && count > 0 && (
-        <div className="uni-results">
-          {local.boxesExact.length > 0 && (<>
+        <div className="uni-results" ref={listRef}>
+          {local.boxes.length > 0 && (<>
             {label('Box')}
-            {boxRow(local.boxesExact)}
+            {boxRow(local.boxes, 'bx:')}
           </>)}
           {local.pengs.length > 0 && (<>
             {label('Penguin')}
             <div className="uni-row uni-chips">
-              {local.pengs.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num))} />)}
+              {local.pengs.map(p => (
+                <span key={p.peng_num} data-uni={`pg:${p.peng_num}`} className={cls(`pg:${p.peng_num}`, 'uni-item')}>
+                  <PenguinMini scan={p} onClick={go(() => onBirdClick(p.peng_num))} />
+                </span>
+              ))}
             </div>
           </>)}
           {local.pits.length > 0 && (<>
             {label('PIT ID')}
             <div className="uni-row uni-chips">
-              {local.pits.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />)}
+              {local.pits.map(p => (
+                <span key={p.peng_num} data-uni={`pt:${p.peng_num}`} className={cls(`pt:${p.peng_num}`, 'uni-item')}>
+                  <PenguinMini scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />
+                </span>
+              ))}
             </div>
-          </>)}
-          {local.boxes.length > 0 && (<>
-            {label('Box starts with')}
-            {boxRow(local.boxes)}
           </>)}
           {dateHits.length > 0 && (<>
             {label('Date')}
             <div className="uni-row uni-chips">
-              {dateHits.map(d => <DateLink key={d} date={d} onDayClick={go(() => onDayClick(d))} />)}
+              {dateHits.map(d => (
+                <span key={d} data-uni={`dt:${d}`} className={cls(`dt:${d}`, 'uni-item')}>
+                  <DateLink date={d} onDayClick={go(() => onDayClick(d))} />
+                </span>
+              ))}
             </div>
           </>)}
           {local.pengNotes.length > 0 && (<>
             {label('Penguin notes')}
             {local.pengNotes.map(({ peng, note }) => (
-              <div key={peng.peng_num} className="uni-row uni-noted">
+              <div key={peng.peng_num} data-uni={`pn:${peng.peng_num}`} className={cls(`pn:${peng.peng_num}`, 'uni-row uni-noted')}>
                 <PenguinMini scan={peng} onClick={go(() => onBirdClick(peng.peng_num))} />
                 <span className="uni-note">{note}</span>
               </div>
@@ -3686,7 +3721,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
           {local.obsNotes.length > 0 && (<>
             {label('Observation notes')}
             {local.obsNotes.map((o: any) => (
-              <div key={o.observation_id} className="uni-obs">
+              <div key={o.observation_id} data-uni={`ob:${o.observation_id}`} className={cls(`ob:${o.observation_id}`, 'uni-obs')}>
                 <a className="bird-chip clickable" href={`/box/${o.box}`}
                   onClick={e => { e.preventDefault(); go(() => onObsClick(o.box, o.observation_time_utc))(); }}>Box {o.box}</a>
                 <ObsCard obs={o}
@@ -3698,7 +3733,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
           {local.dateNotes.length > 0 && (<>
             {label('Day notes')}
             {local.dateNotes.map(({ date, note }) => (
-              <div key={date} className="uni-row uni-noted">
+              <div key={date} data-uni={`dn:${date}`} className={cls(`dn:${date}`, 'uni-row uni-noted')}>
                 <DateLink date={date} onDayClick={go(() => onDayClick(date))} />
                 <span className="uni-note">{note}</span>
               </div>
