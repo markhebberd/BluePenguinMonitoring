@@ -3077,7 +3077,7 @@ namespace PenguinMonitor
 
             // Enter Edit Box Tags mode. There's no matching exit button here — leaving is done
             // with the "Finish editing box tags" bar, and settings is locked out while in the mode.
-            Button editBoxTagsButton = _uiFactory.CreateStyledButton("Edit Box Tags", UIFactory.SUCCESS_GREEN);
+            Button editBoxTagsButton = _uiFactory.CreateStyledButton("Box detail", UIFactory.SUCCESS_GREEN);
             editBoxTagsButton.Click += (s, e) =>
             {
                 // Entering would force the box locked, dropping whatever is half-typed in it
@@ -8165,7 +8165,7 @@ namespace PenguinMonitor
                     }
                     else
                     {
-                        Toast.MakeText(this, $"Unassigned tag — enter Edit Box Tags mode to assign", ToastLength.Short)?.Show();
+                        Toast.MakeText(this, $"Unassigned tag — open Box detail in settings to assign it", ToastLength.Short)?.Show();
                     }
                 }
                 else
