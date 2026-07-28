@@ -520,7 +520,8 @@ namespace PenguinMonitor.Services
                             FullPitId = record.pit_id ?? "", ScannedId = eightDigitId, PengNum = record.peng_num ?? "",
                             LastKnownLifeStage = lifeStage, Sex = record.sex ?? "",
                             ChipDate = chipDate,
-                            ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? ""
+                            ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? "",
+                            SexGuessM = record.sex_guess_m ?? 0, SexGuessF = record.sex_guess_f ?? 0
                         };
                     }
                     File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),

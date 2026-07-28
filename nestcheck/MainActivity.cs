@@ -8375,8 +8375,43 @@ namespace PenguinMonitor
                     }
                     DrawPageLayouts();
                     Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
+                    MaybePromptSexConfirmation(cleanEid);
                 });
             }
+        }
+
+        /// <summary>Guesses agreeing on one side must total this before anyone is asked to sex the
+        /// bird for real — two "probably" readings, or four "maybe" ones.</summary>
+        private const int SexConfirmScore = 4;
+        // One ask per bird per session: the prompt interrupts scanning, and a second one for a
+        // bird already declined is just nagging.
+        private readonly HashSet<string> _sexPromptShown = new();
+
+        /// <summary>A scanned bird with no confirmed sex whose field guesses have piled up gets one
+        /// offer to settle it on the website, where the guesses and the edit both live.</summary>
+        private void MaybePromptSexConfirmation(string cleanEid)
+        {
+            if (_appSettings.EditBoxTagsMode || _isHistoricalView) return;
+            if (_remotePenguinData == null || !_remotePenguinData.TryGetValue(cleanEid.ToUpper(), out var pd)) return;
+            if (!string.IsNullOrEmpty(pd.Sex)) return;                       // already sexed — nothing to settle
+            if (pd.LastKnownLifeStage == LifeStage.Dead) return;
+            if (string.IsNullOrEmpty(pd.PengNum) || !_sexPromptShown.Add(pd.PengNum)) return;
+
+            bool mOver = pd.SexGuessM >= SexConfirmScore, fOver = pd.SexGuessF >= SexConfirmScore;
+            if (!mOver && !fOver) return;
+
+            var display = DisplayPengNum(pd.PengNum);
+            var message = mOver && fOver
+                ? $"Field guesses for #{display} disagree — {pd.SexGuessM} towards male, {pd.SexGuessF} towards female.\n\nSomeone needs to settle it."
+                : $"#{display} has enough field guesses to sex it: {(mOver ? pd.SexGuessM : pd.SexGuessF)} points towards {(mOver ? "male" : "female")}.\n\nConfirm it on wildwatch?";
+
+            TriggerAlert();
+            new AlertDialog.Builder(this)
+                .SetTitle("Sex this bird?")
+                .SetMessage(message)
+                .SetNegativeButton("Not now", (s, e) => { })
+                .SetPositiveButton("Open wildwatch", (s, e) => ShowBirdPanel(cleanEid, pd.PengNum))
+                .Show();
         }
         // A scanned unknown tag goes into the box before its new-bird form opens, so the
         // scan is visible immediately — this takes it back out when the form is cancelled.

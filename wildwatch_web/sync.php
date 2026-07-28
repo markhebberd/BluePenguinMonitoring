@@ -88,7 +88,7 @@ function handleDownload($pdo, $colonyId, $observer) {
         SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
             o.observation_time_utc, o.observer_id,
             ob.f_name AS observer_name,
-            o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
+            o.adults, o.eggs, o.chicks, o.no_scan, o.failed_eggs, o.dead_chicks, o.breeding_status, o.gate_status, o.notes
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
         LEFT JOIN users ob ON o.observer_id = ob.id
@@ -117,7 +117,7 @@ function handleDownload($pdo, $colonyId, $observer) {
             SELECT o.observation_id, o.location_id, ol.location_name AS box_name,
                 o.observation_time_utc, o.observer_id,
                 ob.f_name AS observer_name,
-                o.adults, o.eggs, o.chicks, o.no_scan, o.breeding_status, o.gate_status, o.notes
+                o.adults, o.eggs, o.chicks, o.no_scan, o.failed_eggs, o.dead_chicks, o.breeding_status, o.gate_status, o.notes
             FROM observations o
             JOIN observation_locations ol ON o.location_id = ol.location_id
             LEFT JOIN users ob ON o.observer_id = ob.id
@@ -186,6 +186,10 @@ function handleDownload($pdo, $colonyId, $observer) {
             'eggs' => (int)$obs['eggs'],
             'chicks' => (int)$obs['chicks'],
             'no_scan' => (int)($obs['no_scan'] ?? 0),
+            // Null means nobody recorded either way; 0 means checked and none lost. Casting a
+            // null to int here would turn "not recorded" into "checked, none" on every phone.
+            'failed_eggs' => $obs['failed_eggs'] === null ? null : (int)$obs['failed_eggs'],
+            'dead_chicks' => $obs['dead_chicks'] === null ? null : (int)$obs['dead_chicks'],
             'breeding_status' => $obs['breeding_status'],
             'gate_status' => $obs['gate_status'],
             'notes' => $obs['notes'],
@@ -206,6 +210,10 @@ function handleDownload($pdo, $colonyId, $observer) {
             'eggs' => (int)$obs['eggs'],
             'chicks' => (int)$obs['chicks'],
             'no_scan' => (int)($obs['no_scan'] ?? 0),
+            // Null means nobody recorded either way; 0 means checked and none lost. Casting a
+            // null to int here would turn "not recorded" into "checked, none" on every phone.
+            'failed_eggs' => $obs['failed_eggs'] === null ? null : (int)$obs['failed_eggs'],
+            'dead_chicks' => $obs['dead_chicks'] === null ? null : (int)$obs['dead_chicks'],
             'breeding_status' => $obs['breeding_status'],
             'gate_status' => $obs['gate_status'],
             'notes' => $obs['notes'],
@@ -373,6 +381,13 @@ function handleUpload($pdo, $colonyId, $observer) {
                 'breeding_status' => $obs['breeding_status'] ?? null, 'gate_status' => $obs['gate_status'] ?? null,
                 'notes' => $obs['notes'] ?? '', 'no_scan' => $noScanCount,
             ];
+            // Only overwrite when the phone actually sent the key — an older build that doesn't
+            // know these fields must not blank what someone entered on the website.
+            foreach (['failed_eggs', 'dead_chicks'] as $lossField) {
+                if (array_key_exists($lossField, $obs)) {
+                    $obsRow[$lossField] = $obs[$lossField] === null ? null : (int)$obs[$lossField];
+                }
+            }
             // The day the phone's label describes — collected here, written once after the loop.
             $labelDates[nzDateOf($obsTime)] = true;
 

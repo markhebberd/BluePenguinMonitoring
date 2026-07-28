@@ -117,6 +117,16 @@ $sql = "SELECT
              JOIN penguin_scans ps3 ON ps2.observation_id = ps3.observation_id AND ps2.pit_id != ps3.pit_id
              JOIN penguin_chips pc3 ON ps3.pit_id = pc3.pit_id
              WHERE pc2.peng_num = p.peng_num) as partner_count,
+            -- Weighted field-sex evidence: a 'probably' (or a legacy hard M/F) counts 2, a
+            -- 'maybe' 1, 'unsure' nothing. NestCheck prompts for a real sexing at 4 on one side.
+            (SELECT COALESCE(SUM(CASE WHEN UPPER(bm.observed_sex) IN ('PM','M') THEN 2
+                                      WHEN UPPER(bm.observed_sex) = 'MM' THEN 1 ELSE 0 END), 0)
+             FROM penguin_biometric_data bm
+             WHERE bm.peng_num = p.peng_num AND (bm.is_deleted = FALSE OR bm.is_deleted IS NULL)) as sex_guess_m,
+            (SELECT COALESCE(SUM(CASE WHEN UPPER(bf.observed_sex) IN ('PF','F') THEN 2
+                                      WHEN UPPER(bf.observed_sex) = 'MF' THEN 1 ELSE 0 END), 0)
+             FROM penguin_biometric_data bf
+             WHERE bf.peng_num = p.peng_num AND (bf.is_deleted = FALSE OR bf.is_deleted IS NULL)) as sex_guess_f,
             (SELECT MAX(o2.chicks)
              FROM penguin_scans ps4
              JOIN penguin_chips pc4 ON ps4.pit_id = pc4.pit_id
