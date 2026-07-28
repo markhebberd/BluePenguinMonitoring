@@ -432,14 +432,16 @@ function penguinSexIcon(sex: string|null|undefined, chipDate?: string|null, chip
 }
 
 /** Field-observation sex + confidence, stored on biometrics.observed_sex as PM/MM/U/MF/PF.
- *  `short` = compact form for mini views (pM/mM/U/mF/pF); otherwise full words.
+ *  `short` = compact form for mini views (cM/mM/U/mF/cF); otherwise full words.
+ *  Wording matches nestcheck's picker — the same code must not read as a different degree
+ *  of certainty depending on which screen you're looking at.
  *  Legacy M/F values (and anything unrecognised) fall back gracefully. */
 const OBSERVED_SEX: Record<string, { short: string; full: string }> = {
-  PM: { short: 'pM', full: 'Probably male' },
-  MM: { short: 'mM', full: 'Maybe male' },
+  PM: { short: 'cM', full: 'Confident M' },
+  MM: { short: 'mM', full: 'Maybe M' },
   U:  { short: 'U',  full: 'Unsure' },
-  MF: { short: 'mF', full: 'Maybe female' },
-  PF: { short: 'pF', full: 'Probably female' },
+  MF: { short: 'mF', full: 'Maybe F' },
+  PF: { short: 'cF', full: 'Confident F' },
   M:  { short: 'M',  full: 'Male' },    // legacy
   F:  { short: 'F',  full: 'Female' },  // legacy
 };
@@ -7981,11 +7983,11 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
               <div className="app-field"><label>Sex</label>
                 <select value={observedSex} onChange={e => setObservedSex(e.target.value)}>
                   <option value="">Not recorded</option>
-                  <option value="PM">Probably male</option>
-                  <option value="MM">Maybe male</option>
+                  <option value="PM">Confident M</option>
+                  <option value="MM">Maybe M</option>
                   <option value="U">Unsure</option>
-                  <option value="MF">Maybe female</option>
-                  <option value="PF">Probably female</option>
+                  <option value="MF">Maybe F</option>
+                  <option value="PF">Confident F</option>
                 </select></div>
             ) : (
               <div className="app-field"><label>Chick size</label>

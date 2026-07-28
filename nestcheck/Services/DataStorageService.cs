@@ -167,6 +167,10 @@ namespace PenguinMonitor.Services
             public List<SyncConflict>? Conflicts { get; set; }
         }
 
+        // The colony every crud.php write belongs to. Bare peng_nums are resolved against it
+        // server-side, so leaving it off silently files another colony's bird under Tarakohe's.
+        private static int ColonyIdOf(AppSettings s) => s.SelectedColonyId > 0 ? s.SelectedColonyId : 1;
+
         // Observation time for upload. If the observation has no valid timestamp
         // (e.g. a chick added with no scan to seed one), default to now.
         private static string ObsTimeUtc(BoxObservation o)
@@ -393,7 +397,7 @@ namespace PenguinMonitor.Services
                 }
 
                 // Step 1b: Upload any pending biometric edits (independent of pending observations)
-                await UploadPendingBiometrics(colonyState, token, result);
+                await UploadPendingBiometrics(colonyState, token, result, ColonyIdOf(appSettings));
 
                 // Step 1c: watched flags are kept locally and pushed here (offline-safe queue)
                 var localBoxNotes = LoadBoxNotesFromDisk(context);
@@ -549,7 +553,7 @@ namespace PenguinMonitor.Services
                 {
                     var nzTodayStr = MainActivity.NzToday.ToString("yyyy-MM-dd");
                     var req = new HttpRequestMessage(HttpMethod.Get,
-                        $"{WILDWATCH_API_URL}?action=list&table=penguin_biometric_data&observation_date={nzTodayStr}");
+                        $"{WILDWATCH_API_URL}?action=list&table=penguin_biometric_data&observation_date={nzTodayStr}&colony_id={ColonyIdOf(appSettings)}");
                     req.Headers.Add("Authorization", $"Bearer {token}");
                     var resp = await _httpClient.SendAsync(req);
                     if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
@@ -864,7 +868,7 @@ namespace PenguinMonitor.Services
         }
 
         /// <summary>Upload all pending biometric edits via crud.php (create or update). Mutates colonyState.</summary>
-        private async Task UploadPendingBiometrics(ColonyState colonyState, string token, SyncResult result)
+        private async Task UploadPendingBiometrics(ColonyState colonyState, string token, SyncResult result, int colonyId)
         {
             foreach (var bio in colonyState.TodayBiometrics.Values.Where(b => b.IsPendingUpload).ToList())
             {
@@ -883,12 +887,13 @@ namespace PenguinMonitor.Services
                     // the flags below) so unticking it clears the flag on the next upload.
                     fields["is_moulting"] = bio.ConditionMoulting;
                     if (bio.ConditionTicks) fields["condition_ticks"] = true;
-                    if (bio.ConditionDead) fields["condition_dead"] = true;
                     if (!string.IsNullOrEmpty(bio.Notes)) fields["notes"] = bio.Notes;
+                    // Dead is not a biometric column — the flag was retired in favour of a death
+                    // date on the bird itself, and is written separately below.
 
                     var url = bio.BiometricId.HasValue
-                        ? $"{WILDWATCH_API_URL}?action=update&table=penguin_biometric_data&id={bio.BiometricId.Value}"
-                        : $"{WILDWATCH_API_URL}?action=create&table=penguin_biometric_data";
+                        ? $"{WILDWATCH_API_URL}?action=update&table=penguin_biometric_data&id={bio.BiometricId.Value}&colony_id={colonyId}"
+                        : $"{WILDWATCH_API_URL}?action=create&table=penguin_biometric_data&colony_id={colonyId}";
                     var req = new HttpRequestMessage(HttpMethod.Post, url);
                     req.Headers.Add("Authorization", $"Bearer {token}");
                     req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
@@ -907,6 +912,18 @@ namespace PenguinMonitor.Services
                         bio.BiometricId = ExtractBiometricId(await resp.Content.ReadAsStringAsync());
                     bio.IsPendingUpload = false;
                     result.BiometricsUploaded++;
+
+                    if (bio.ConditionDead)
+                    {
+                        var deathError = await MarkPenguinDead(bio.PengNum, bio.ObservationDate, token, colonyId);
+                        if (deathError != null)
+                        {
+                            // The biometric itself is saved; only the death date didn't land. Count
+                            // it so the sync reads as partial rather than reporting a clean run.
+                            result.BiometricUploadErrors++;
+                            result.BiometricErrors.Add($"#{bio.PengNum} death date: {deathError}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -916,13 +933,51 @@ namespace PenguinMonitor.Services
             }
         }
 
+        /// <summary>Record a bird as dead on the date it was found. Death lives on the penguin, not on
+        /// the visit: penguins.death_date, stamped 02:00 UTC — 2pm NZ, wildwatch's convention, so a
+        /// same-day morning scan still reads as before the death. A bird that already has a death
+        /// date keeps it; the first record of a death is the one that counts, and a later visit to
+        /// the same carcass must not move the date. Returns null on success, else why it failed.</summary>
+        private async Task<string?> MarkPenguinDead(string pengNum, string observationDate, string token, int colonyId)
+        {
+            if (string.IsNullOrEmpty(pengNum)) return "no penguin number";
+
+            var getReq = new HttpRequestMessage(HttpMethod.Get,
+                $"{WILDWATCH_API_URL}?action=get&table=penguins&id={Uri.EscapeDataString(pengNum)}&colony_id={colonyId}");
+            getReq.Headers.Add("Authorization", $"Bearer {token}");
+            var getResp = await _httpClient.SendAsync(getReq);
+            var getBody = await getResp.Content.ReadAsStringAsync();
+            if (!getResp.IsSuccessStatusCode) return ServerMessage(getBody, (int)getResp.StatusCode);
+            try
+            {
+                var row = JsonConvert.DeserializeObject<Dictionary<string, object>>(getBody);
+                if (row != null && row.TryGetValue("death_date", out var dd)
+                    && dd != null && !string.IsNullOrWhiteSpace(dd.ToString()))
+                    return null;   // already recorded dead — leave the original date alone
+            }
+            catch { }
+
+            var fields = new Dictionary<string, object>
+            {
+                ["death_date"] = $"{observationDate} 02:00:00",
+                ["_reason"] = "Recorded dead in nestcheck",
+            };
+            var req = new HttpRequestMessage(HttpMethod.Post,
+                $"{WILDWATCH_API_URL}?action=update&table=penguins&id={Uri.EscapeDataString(pengNum)}&colony_id={colonyId}");
+            req.Headers.Add("Authorization", $"Bearer {token}");
+            req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
+            var resp = await _httpClient.SendAsync(req);
+            return resp.IsSuccessStatusCode ? null
+                : ServerMessage(await resp.Content.ReadAsStringAsync(), (int)resp.StatusCode);
+        }
+
         /// <summary>Upload only pending biometrics (used for prompt background flush after a save).</summary>
         internal async Task<SyncResult> UploadPendingBiometricsOnly(ColonyState colonyState, AppSettings appSettings)
         {
             var result = new SyncResult();
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
-            await UploadPendingBiometrics(colonyState, token, result);
+            await UploadPendingBiometrics(colonyState, token, result, ColonyIdOf(appSettings));
             return result;
         }
 
