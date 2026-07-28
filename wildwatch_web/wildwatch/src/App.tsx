@@ -3573,6 +3573,16 @@ function matchDateQuery(dates: string[], search: string, registeredFmDates: Map<
     }).slice(0, 12);
 }
 
+/** Bring the page back to the top so a focused field (and its results) is on screen. Walks the
+ *  scrollable ancestors too — the day view is a fixed overlay that scrolls itself, and the
+ *  window scroll never reaches it. */
+function scrollToTop(el: HTMLElement | null) {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  for (let n = el?.parentElement; n; n = n.parentElement) {
+    if (n.scrollTop > 0 && n.scrollHeight > n.clientHeight) n.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
 /**
  * One box searching everything the cache holds, in precedence order:
  * box > peng# > date > PIT ID > penguin notes > observation notes > day notes.
@@ -3671,7 +3681,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
         placeholder="Search"
         value={search}
         onChange={e => { setSearch(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={e => { setOpen(true); scrollToTop(e.currentTarget); }}
         onBlur={() => setTimeout(() => setOpen(false), 300)}
         onKeyDown={handleKey}
         className="uni-search-input"
