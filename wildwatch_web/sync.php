@@ -79,6 +79,16 @@ function nzDateOf(string $utc): string {
     return (new DateTime($utc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Pacific/Auckland'))->format('Y-m-d');
 }
 
+/**
+ * The day an observation belongs to, bucketed the way the queries bucket it: a fixed +12, which
+ * is what DATE(CONVERT_TZ(observation_time_utc,'+00:00','+12:00')) does and what the phone does.
+ * Pacific/Auckland is +13 in daylight time, so using it to look up a +12-bucketed row put a round
+ * made just after midnight on the wrong day — and a duplicate observation with it.
+ */
+function nzObsDay(string $utc): string {
+    return gmdate('Y-m-d', strtotime($utc . ' UTC') + 12 * 3600);
+}
+
 function handleDownload($pdo, $colonyId, $observer) {
     // Latest observation per box, plus second-most-recent for boxes where latest is today
     $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
@@ -274,7 +284,10 @@ function handleUpload($pdo, $colonyId, $observer) {
         return;
     }
 
-    $forceReplace = ($_GET['action'] === 'confirm');
+    // Whole-request intent: 'confirm' means the person already agreed to replace what's there.
+    // Per-observation it is decided again below — one box earning a replace must never hand that
+    // permission to the boxes after it in the same payload.
+    $replaceAll = ($_GET['action'] === 'confirm');
     $dailyLabel = $input['daily_label'] ?? '';
     $dailyObserverId = (int)($input['daily_observer_id'] ?? 0) ?: null;
     $dailyScribeId = (int)($input['daily_scribe_id'] ?? 0) ?: null;
@@ -325,8 +338,14 @@ function handleUpload($pdo, $colonyId, $observer) {
             }
 
             $obsTime = normalizeDateTime($obs['observation_time_utc'] ?? null, date('Y-m-d H:i:s'));
+            // The day this observation was MADE, which is not necessarily today: a phone out of
+            // signal for three days uploads three days of rounds at once. Matching those against
+            // today's rows let an old round duplicate its own day, and let "Replace" overwrite
+            // today's observation with three-day-old counts.
+            $obsNzDate = nzObsDay($obsTime);
+            $forceReplace = $replaceAll;   // this observation's own decision, reset every time
 
-            // Check if this box already has today's observation on the server
+            // Check if this box already has an observation for that day on the server
             if (!$forceReplace) {
                 $existingStmt = $pdo->prepare("SELECT o.observation_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.no_scan,
                     o.breeding_status, o.gate_status, o.notes, ob.f_name AS observer_name
@@ -334,7 +353,7 @@ function handleUpload($pdo, $colonyId, $observer) {
                     WHERE o.location_id = ? AND o.is_deleted = FALSE
                     AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?
                     ORDER BY o.observation_time_utc DESC LIMIT 1");
-                $existingStmt->execute([$locationId, $nzToday]);
+                $existingStmt->execute([$locationId, $obsNzDate]);
                 $existing = $existingStmt->fetch();
 
                 if ($existing) {
@@ -400,7 +419,7 @@ function handleUpload($pdo, $colonyId, $observer) {
                     WHERE location_id = ? AND is_deleted = FALSE
                     AND DATE(CONVERT_TZ(observation_time_utc, '+00:00', '+12:00')) = ?
                     ORDER BY observation_time_utc DESC LIMIT 1");
-                $existingStmt->execute([$locationId, $nzToday]);
+                $existingStmt->execute([$locationId, $obsNzDate]);   // the incoming day, not today
                 $existingId = $existingStmt->fetchColumn() ?: null;
             }
 
@@ -460,7 +479,12 @@ function handleUpload($pdo, $colonyId, $observer) {
             }
             $scanTotal = count($seenPits);
 
-            $created[] = ['box_name' => $boxName, 'observation_id' => (int)$observationId, 'scans' => $scanTotal,
+            // nz_date names WHICH day landed. With several days uploaded at once the box name alone
+            // doesn't say which queued round this reply is for, so the phone can't tell which one
+            // to clear — and clearing the wrong one leaves a round to upload twice. Sent in the
+            // phone's own day convention (real NZ time), not the +12 the row lookup above needs.
+            $created[] = ['box_name' => $boxName, 'nz_date' => nzDateOf($obsTime),
+                          'observation_id' => (int)$observationId, 'scans' => $scanTotal,
                           'scans_added' => $scansCreated, 'scans_removed' => $scansRemoved];
         }
 

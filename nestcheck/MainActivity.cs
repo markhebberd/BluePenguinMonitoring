@@ -1682,7 +1682,7 @@ namespace PenguinMonitor
             foreach (var c in conflicts)
             {
                 var boxName = c.box_name ?? "";
-                var localPending = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                var localPending = DataStorageService.PendingForConflict(_colonyState, c);
                 if (c.server != null && localPending != null && ObsContentEqual(c.server, localPending))
                 {
                     AdoptServerObs(boxName, c.server);
@@ -1724,15 +1724,17 @@ namespace PenguinMonitor
                         serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                 }
 
-                var local = _colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                var local = DataStorageService.PendingForConflict(_colonyState, conflict);
                 if (serverObs == null || local == null) { ShowNext(idx + 1); return; }
+                var conflictNzDate = DataStorageService.ConflictNzDate(conflict);
 
                 ShowComparisonDialog($"Confirm edit: Box {boxName}", serverObs, local,
                     onReplace: () =>
                     {
                         _ = Task.Run(async () =>
                         {
-                            await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings, new List<string> { boxName });
+                            await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings,
+                                new List<(string, string?)> { (boxName, conflictNzDate) });
                             new Handler(Looper.MainLooper).Post(() =>
                             {
                                 DataStorageService.SaveColonyState(this, _colonyState);
@@ -1744,7 +1746,9 @@ namespace PenguinMonitor
                     },
                     onDiscard: () =>
                     {
-                        _colonyState.PendingObservations.RemoveAll(p => p.BoxName == boxName && p.IsPendingUpload);
+                        // Only the round this conflict is about. A box can have other days queued
+                        // behind it after a spell offline, and those weren't offered up for discard.
+                        _colonyState.PendingObservations.Remove(local);
                         if (server != null)
                         {
                             var restored = BoxObservation.FromServerData(
@@ -1760,7 +1764,12 @@ namespace PenguinMonitor
                             for (int ns = 0; ns < server.no_scan; ns++)
                                 restored.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                             restored.IsPendingUpload = false;
-                            _colonyState.TodayBoxes[boxName] = restored;
+                            // Today's board only takes today's data — an older day's row belongs
+                            // in the previous-visit card, not in the box you're standing at.
+                            if (ToNzTime(restored.WhenDataCollectedUtc).Date == NzToday)
+                                _colonyState.TodayBoxes[boxName] = restored;
+                            else
+                                _colonyState.PreviousBoxes[boxName] = restored;
                         }
                         DataStorageService.SaveColonyState(this, _colonyState);
                         UpdateSyncButtonLabel();
@@ -4686,7 +4695,8 @@ namespace PenguinMonitor
                 {
                     _ = Task.Run(async () =>
                     {
-                        var n = await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings, new List<string> { stuckBox });
+                        var n = await _dataStorageService.UploadConfirmedEdits(_colonyState, _appSettings,
+                            new List<(string, string?)> { (stuckBox, ToNzTime(stuckObs.WhenDataCollectedUtc).ToString("yyyy-MM-dd")) });
                         new Handler(Looper.MainLooper).Post(() =>
                         {
                             DataStorageService.SaveColonyState(this, _colonyState);
@@ -5525,6 +5535,9 @@ namespace PenguinMonitor
                         _boxNotes[_currentBoxName] = new BoxNoteData { BoxName = _currentBoxName };
                     }
                     _boxNotes[_currentBoxName].PersistentNotes = newNotes;
+                    // Queued until the server takes it. Out of signal the save just fails, and the
+                    // next sync used to pull the server's older text back over the top of it.
+                    _boxNotes[_currentBoxName].NotesPendingUpload = true;
                     int locationId = _boxNotes[_currentBoxName].LocationId;
 
                     // Save to API in background
@@ -5533,12 +5546,14 @@ namespace PenguinMonitor
                         _ = Task.Run(async () =>
                         {
                             bool success = await _dataStorageService.UpdateBoxNotesAsync(locationId, newNotes, _appSettings.AuthToken);
+                            if (success)
+                            {
+                                _boxNotes[_currentBoxName].NotesPendingUpload = false;
+                                _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
+                            }
                             new Handler(Looper.MainLooper).Post(() =>
                             {
-                                if (success)
-                                    Toast.MakeText(this, "Notes saved", ToastLength.Short)?.Show();
-                                else
-                                    Toast.MakeText(this, "Failed to save notes to server", ToastLength.Short)?.Show();
+                                Toast.MakeText(this, success ? "Notes saved" : "Notes saved — will sync", ToastLength.Short)?.Show();
                                 DrawPageLayouts();
                             });
                         });
@@ -6285,7 +6300,7 @@ namespace PenguinMonitor
             // opens instantly and works offline. Any unsynced edit is already in this cache.
             BiometricRecord? existing = null;
             if (!string.IsNullOrEmpty(pengNum))
-                _colonyState.TodayBiometrics.TryGetValue(pengNum, out existing);
+                existing = _colonyState.GetBiometric(pengNum, NzNow.ToString("yyyy-MM-dd"));
             ShowBiometricFormUI(birdId, pd, pengNum, existing);
         }
 

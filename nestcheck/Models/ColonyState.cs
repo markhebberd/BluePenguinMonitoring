@@ -4,6 +4,16 @@ using System.Linq;
 
 namespace PenguinMonitor.Models
 {
+    /// <summary>A day's note waiting for a connection, kept whole so it can be written to the day
+    /// it belongs to rather than the day it finally uploads on.</summary>
+    public class PendingDayNote
+    {
+        public string NzDate { get; set; } = "";
+        public string Note { get; set; } = "";
+        public int ObserverId { get; set; }
+        public int ScribeId { get; set; }
+    }
+
     public class ColonyState
     {
         public DateTime LastSyncedUtc { get; set; }
@@ -20,6 +30,11 @@ namespace PenguinMonitor.Models
         /// on every sync until it does. Without this the note stays on the phone: an observation
         /// upload only fills a day that has none, so a corrected label never reaches the day view.</summary>
         public bool DailyLabelPendingUpload { get; set; }
+
+        /// <summary>Day notes from earlier days that still haven't reached the server. Rollover
+        /// clears the live label at midnight, and a note set out of signal the day before would
+        /// have gone with it — these are held here and retried on every sync instead.</summary>
+        public List<PendingDayNote> PendingDayNotes { get; set; } = new();
 
         /// <summary>
         /// Pending observations not yet uploaded to server.
@@ -82,9 +97,17 @@ namespace PenguinMonitor.Models
                 TodayBoxes.Remove(key);
             }
 
-            // Clear daily label (and who was out) if it was set on a previous day
+            // Clear daily label (and who was out) if it was set on a previous day. If it never
+            // reached the server, park it first — yesterday's note is still yesterday's record,
+            // and midnight isn't a reason to throw it away.
             if (!string.IsNullOrEmpty(DailyLabelDate) && DailyLabelDate != nzTodayStr)
             {
+                if (DailyLabelPendingUpload && !string.IsNullOrWhiteSpace(DailyLabel)
+                    && !PendingDayNotes.Any(n => n.NzDate == DailyLabelDate))
+                    PendingDayNotes.Add(new PendingDayNote {
+                        NzDate = DailyLabelDate, Note = DailyLabel,
+                        ObserverId = DailyObserverId, ScribeId = DailyScribeId });
+                DailyLabelPendingUpload = false;
                 DailyLabel = "";
                 DailyLabelDate = "";
                 DailyObserverId = 0;
@@ -100,13 +123,37 @@ namespace PenguinMonitor.Models
                 TodayBiometrics.Remove(key);
         }
 
+        /// <summary>Key for a bird's record on one day. peng_num alone is unique per bird, but a
+        /// bird can be measured on more than one day with the earlier day still unsent — after a
+        /// spell offline — and keying on the bird alone had the second measurement quietly replace
+        /// the first, which was then never uploaded.</summary>
+        public static string BiometricKey(string pengNum, string observationDate) => $"{pengNum}|{observationDate}";
+
         /// <summary>
-        /// Store a biometric record for today, keyed by peng_num, replacing any existing one.
+        /// Store a biometric record for a bird on its observation date, replacing any existing one.
         /// </summary>
         public void SaveBiometric(BiometricRecord record)
         {
             if (string.IsNullOrEmpty(record.PengNum)) return;
-            TodayBiometrics[record.PengNum] = record;
+            TodayBiometrics[BiometricKey(record.PengNum, record.ObservationDate)] = record;
+        }
+
+        /// <summary>The record held for a bird on a given day, if any.</summary>
+        public BiometricRecord? GetBiometric(string pengNum, string observationDate) =>
+            TodayBiometrics.TryGetValue(BiometricKey(pengNum, observationDate), out var r) ? r : null;
+
+        /// <summary>Re-key records saved by an older build, which used the bare peng_num. Runs on
+        /// load, so a queued record written before the change still uploads and still opens.</summary>
+        public void MigrateBiometricKeys()
+        {
+            foreach (var old in TodayBiometrics.Where(kv => !kv.Key.Contains('|')).ToList())
+            {
+                TodayBiometrics.Remove(old.Key);
+                var date = string.IsNullOrEmpty(old.Value.ObservationDate)
+                    ? MainActivity.NzToday.ToString("yyyy-MM-dd") : old.Value.ObservationDate;
+                if (string.IsNullOrEmpty(old.Value.PengNum)) old.Value.PengNum = old.Key;
+                TodayBiometrics[BiometricKey(old.Value.PengNum, date)] = old.Value;
+            }
         }
 
         public BoxObservation? GetTodayForBox(string boxName)

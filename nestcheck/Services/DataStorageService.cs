@@ -171,6 +171,41 @@ namespace PenguinMonitor.Services
             public List<SyncConflict>? Conflicts { get; set; }
         }
 
+        /// <summary>The queued observation a server reply is about. Several days can be queued for
+        /// one box after a spell out of signal, so the day the server names picks the right one;
+        /// clearing another day's round would leave it to upload a second time. Falls back to the
+        /// box's oldest queued round when the server didn't say (older server).</summary>
+        private static BoxObservation? MatchPending(ColonyState colonyState, string boxName, string? nzDate)
+        {
+            var forBox = colonyState.PendingObservations
+                .Where(p => p.BoxName == boxName && p.IsPendingUpload)
+                .OrderBy(p => p.WhenDataCollectedUtc);
+            if (!string.IsNullOrEmpty(nzDate) && DateTime.TryParse(nzDate, out var d))
+            {
+                var exact = forBox.FirstOrDefault(p => MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == d.Date);
+                if (exact != null) return exact;
+            }
+            return forBox.FirstOrDefault();
+        }
+
+        private static string? CreatedNzDate(Dictionary<string, object> created) =>
+            created.TryGetValue("nz_date", out var v) ? v?.ToString() : null;
+
+        /// <summary>The NZ day a conflict's rejected observation was made on — read from the copy of
+        /// it the server echoed back, so the right queued round is the one shown and replaced.</summary>
+        internal static string? ConflictNzDate(SyncConflict conflict)
+        {
+            if (conflict.incoming == null) return null;
+            if (!conflict.incoming.TryGetValue("observation_time_utc", out var t) || t == null) return null;
+            return DateTime.TryParse(t.ToString(), null,
+                       System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var utc)
+                ? MainActivity.ToNzTime(utc).ToString("yyyy-MM-dd") : null;
+        }
+
+        /// <summary>The queued round a conflict is about, picked by box and day.</summary>
+        internal static BoxObservation? PendingForConflict(ColonyState colonyState, SyncConflict conflict) =>
+            MatchPending(colonyState, conflict.box_name ?? "", ConflictNzDate(conflict));
+
         /// <summary>Does this box hold local work for that day that the server hasn't got? Either
         /// queued for upload, or a draft the box hasn't been locked on yet. Both must survive a
         /// download: a draft is invisible once the server's copy takes its place in TodayBoxes, and
@@ -368,8 +403,7 @@ namespace PenguinMonitor.Services
                             var boxName = c["box_name"]?.ToString();
                             if (boxName != null)
                             {
-                                // Remove the matching pending observation
-                                var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                                var match = MatchPending(colonyState, boxName, CreatedNzDate(c));
                                 if (match != null)
                                     colonyState.PendingObservations.Remove(match);
                             }
@@ -465,12 +499,21 @@ namespace PenguinMonitor.Services
                         foreach (var loc in serverState.locations)
                         {
                             var bn = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1 };
-                            // A locally-toggled watched flag that hasn't reached the server yet
-                            // survives the refresh instead of being clobbered by the server value.
-                            if (localBoxNotes.TryGetValue(bn.BoxName, out var prior) && prior.WatchedPendingUpload)
+                            // A local edit that hasn't reached the server yet survives the refresh
+                            // instead of being clobbered by the server value — for the watched flag
+                            // and for the note itself, which was previously overwritten in silence.
+                            if (localBoxNotes.TryGetValue(bn.BoxName, out var prior))
                             {
-                                bn.Watched = prior.Watched;
-                                bn.WatchedPendingUpload = true;
+                                if (prior.WatchedPendingUpload)
+                                {
+                                    bn.Watched = prior.Watched;
+                                    bn.WatchedPendingUpload = true;
+                                }
+                                if (prior.NotesPendingUpload)
+                                {
+                                    bn.PersistentNotes = prior.PersistentNotes;
+                                    bn.NotesPendingUpload = true;
+                                }
                             }
                             boxNotes[bn.BoxName] = bn;
                         }
@@ -561,24 +604,27 @@ namespace PenguinMonitor.Services
                     {
                         var pengNum = row.TryGetValue("peng_num", out var pn) ? pn?.ToString() : null;
                         if (string.IsNullOrEmpty(pengNum)) continue;
+                        var key = ColonyState.BiometricKey(pengNum, nzTodayStr);
                         // A row flagged deleted is not a record. The server filters these out now;
                         // this is the second lock on the door, since the cost of missing one is a
                         // deleted record reappearing on a phone as though it were still true.
                         if (row.TryGetValue("is_deleted", out var del) && del != null
                             && (del.ToString() == "1" || string.Equals(del.ToString(), "true", StringComparison.OrdinalIgnoreCase)))
                             continue;
-                        onServer.Add(pengNum);
+                        onServer.Add(key);
                         // Never clobber a local unsynced edit
-                        if (colonyState.TodayBiometrics.TryGetValue(pengNum, out var local) && local.IsPendingUpload)
+                        if (colonyState.TodayBiometrics.TryGetValue(key, out var local) && local.IsPendingUpload)
                             continue;
-                        colonyState.TodayBiometrics[pengNum] = BiometricRecordFromRow(row, nzTodayStr);
+                        colonyState.TodayBiometrics[key] = BiometricRecordFromRow(row, nzTodayStr);
                         merged++;
                     }
-                    // Today's set is the server's to define: a cached record the server no longer
-                    // has was deleted there, so drop it. Anything still queued for upload stays —
-                    // it isn't missing from the server, it just hasn't arrived yet.
+                    // Today's set is the server's to define: a cached record for today that the
+                    // server no longer has was deleted there, so drop it. Anything queued for
+                    // upload stays — it isn't missing from the server, it just hasn't arrived —
+                    // and so does an earlier day's record, which this fetch never asked about.
                     foreach (var gone in colonyState.TodayBiometrics
-                                 .Where(kv => !onServer.Contains(kv.Key) && !kv.Value.IsPendingUpload)
+                                 .Where(kv => kv.Value.ObservationDate == nzTodayStr
+                                           && !onServer.Contains(kv.Key) && !kv.Value.IsPendingUpload)
                                  .Select(kv => kv.Key).ToList())
                         colonyState.TodayBiometrics.Remove(gone);
                     result.BiometricCount = merged;
@@ -654,15 +700,18 @@ namespace PenguinMonitor.Services
         /// <summary>
         /// Upload confirmed edits after user approval.
         /// </summary>
-        internal async Task<int> UploadConfirmedEdits(ColonyState colonyState, AppSettings appSettings, List<string> confirmedBoxNames)
+        internal async Task<int> UploadConfirmedEdits(ColonyState colonyState, AppSettings appSettings,
+            List<(string boxName, string? nzDate)> confirmedBoxes)
         {
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) return 0;
 
             var uploads = new List<object>();
-            foreach (var boxName in confirmedBoxNames)
+            foreach (var (boxName, nzDate) in confirmedBoxes)
             {
-                var pending = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                // The day that was confirmed, not just the box: a replace aimed at one round must
+                // not send a different day's round in its place.
+                var pending = MatchPending(colonyState, boxName, nzDate);
                 if (pending == null) continue;
 
                 var scans = new List<object>();
@@ -709,7 +758,7 @@ namespace PenguinMonitor.Services
                     var boxName = c["box_name"]?.ToString();
                     if (boxName != null)
                     {
-                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                        var match = MatchPending(colonyState, boxName, CreatedNzDate(c));
                         if (match != null)
                         {
                             colonyState.PendingObservations.Remove(match);
@@ -794,7 +843,7 @@ namespace PenguinMonitor.Services
                     var boxName = c["box_name"]?.ToString();
                     if (boxName != null)
                     {
-                        var match = colonyState.PendingObservations.FirstOrDefault(p => p.BoxName == boxName && p.IsPendingUpload);
+                        var match = MatchPending(colonyState, boxName, CreatedNzDate(c));
                         if (match != null)
                         {
                             colonyState.PendingObservations.Remove(match);
@@ -1139,7 +1188,7 @@ namespace PenguinMonitor.Services
             }
 
             var state = Read(path);
-            if (state != null) return state;
+            if (state != null) { state.MigrateBiometricKeys(); return state; }
 
             // The live file is unreadable. Fall back to the previous copy rather than opening on an
             // empty colony, and keep the bad one — an unsent observation is recoverable from a file
@@ -1149,6 +1198,7 @@ namespace PenguinMonitor.Services
             {
                 try { if (File.Exists(path)) File.Copy(path, path + ".corrupt", true); } catch { }
                 System.Diagnostics.Debug.WriteLine("LoadColonyState: recovered from .bak");
+                fallback.MigrateBiometricKeys();
                 return fallback;
             }
             return new ColonyState();
@@ -1348,8 +1398,8 @@ namespace PenguinMonitor.Services
         }
 
         /// <summary>
-        /// Push locally-toggled watched flags to the server. Watched is kept locally and
-        /// synced — a failed push just stays pending for the next sync (offline-safe).
+        /// Push local box edits — the watched flag and the persistent note — to the server. Both are
+        /// kept locally and synced; a failed push just stays pending for the next sync (offline-safe).
         /// </summary>
         internal async Task UploadPendingWatchedFlags(Android.Content.Context context, AppSettings appSettings, Dictionary<string, BoxNoteData>? boxNotes = null)
         {
@@ -1358,18 +1408,26 @@ namespace PenguinMonitor.Services
             var notes = boxNotes ?? LoadBoxNotesFromDisk(context);
             var colonyId = appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1;
             bool changed = false;
-            foreach (var n in notes.Values.Where(n => n.WatchedPendingUpload && n.LocationId > 0).ToList())
+            foreach (var n in notes.Values.Where(n => (n.WatchedPendingUpload || n.NotesPendingUpload) && n.LocationId > 0).ToList())
             {
                 try
                 {
+                    // One update carries whichever of the two is outstanding; a field that isn't
+                    // pending is left out so it can't overwrite a change made on the website.
+                    var fields = new Dictionary<string, object>();
+                    if (n.WatchedPendingUpload) fields["watched"] = n.Watched ? 1 : 0;
+                    if (n.NotesPendingUpload) fields["persistent_notes"] = n.PersistentNotes ?? "";
                     var req = new HttpRequestMessage(HttpMethod.Post,
                         $"{WILDWATCH_BASE_URL}/crud.php?action=update&table=observation_locations&id={n.LocationId}&colony_id={colonyId}");
                     req.Headers.Add("Authorization", $"Bearer {token}");
-                    req.Content = new StringContent(
-                        JsonConvert.SerializeObject(new Dictionary<string, object> { ["watched"] = n.Watched ? 1 : 0 }),
-                        Encoding.UTF8, "application/json");
+                    req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
                     var resp = await _httpClient.SendAsync(req);
-                    if (resp.IsSuccessStatusCode) { n.WatchedPendingUpload = false; changed = true; }
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        n.WatchedPendingUpload = false;
+                        n.NotesPendingUpload = false;
+                        changed = true;
+                    }
                 }
                 catch { /* stays pending */ }
             }
@@ -1450,17 +1508,38 @@ namespace PenguinMonitor.Services
         /// only fills a day with no note, so a correction to an existing one would never arrive.</summary>
         private async Task FlushPendingDayNote(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings)
         {
-            if (!colonyState.DailyLabelPendingUpload) return;
-            if (string.IsNullOrEmpty(colonyState.DailyLabelDate)) { colonyState.DailyLabelPendingUpload = false; return; }
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) return;
-            var ok = await SaveDayNoteAsync(ColonyIdOf(appSettings), colonyState.DailyLabelDate, colonyState.DailyLabel,
-                token, colonyState.DailyObserverId, colonyState.DailyScribeId);
-            if (ok)
+            int colonyId = ColonyIdOf(appSettings);
+            bool changed = false;
+
+            // Earlier days first — each goes to the date it was written on, not today.
+            foreach (var note in colonyState.PendingDayNotes.ToList())
             {
-                colonyState.DailyLabelPendingUpload = false;
-                SaveColonyState(context, colonyState);
+                if (string.IsNullOrEmpty(note.NzDate)) { colonyState.PendingDayNotes.Remove(note); changed = true; continue; }
+                if (await SaveDayNoteAsync(colonyId, note.NzDate, note.Note, token, note.ObserverId, note.ScribeId))
+                {
+                    colonyState.PendingDayNotes.Remove(note);
+                    changed = true;
+                }
             }
+
+            if (colonyState.DailyLabelPendingUpload)
+            {
+                if (string.IsNullOrEmpty(colonyState.DailyLabelDate))
+                {
+                    colonyState.DailyLabelPendingUpload = false;
+                    changed = true;
+                }
+                else if (await SaveDayNoteAsync(colonyId, colonyState.DailyLabelDate, colonyState.DailyLabel,
+                             token, colonyState.DailyObserverId, colonyState.DailyScribeId))
+                {
+                    colonyState.DailyLabelPendingUpload = false;
+                    changed = true;
+                }
+            }
+
+            if (changed) SaveColonyState(context, colonyState);
         }
 
         internal async Task<bool> UpdateBoxNotesAsync(int locationId, string notes, string token)
