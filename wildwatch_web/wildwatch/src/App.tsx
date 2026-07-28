@@ -9890,14 +9890,17 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <IntegrityCheck rows={iScanBeforeChip} errorType="scan_before_chip" title="Scan before chip date"
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
-        <IntegrityCheck rows={iVerify.rejected} errorType="verify_rejected" title="Breeding data rejected by a human"
-          desc="Clutches where a reviewer recorded that the detected pair or offspring is wrong. The detection still stands on the box page — these are the windows a person has said not to trust."
-          empty="No rejected verifications"
-          columns={[{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Rejected' }, { key: 'by', label: 'Reviewed by' }, { key: 'note', label: 'Note' }]} />
-        <IntegrityCheck rows={iVerify.drifted} errorType="verify_drift" title="Accepted breeding data the algorithm has moved away from"
-          desc="A reviewer accepted the detection, and it has since changed — a different pair or offspring, or no window starting at that observation at all. The stored truth no longer describes what the algorithm produces."
-          empty="No drifted verifications"
-          columns={[{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Changed' }, { key: 'why', label: 'What happened' }, { key: 'by', label: 'Accepted by' }]} />
+        <IntegrityCheck title="Breeding verifications vs the algorithm"
+          views={[
+            { label: 'Rejected', rows: iVerify.rejected, errorType: 'verify_rejected',
+              desc: 'Clutches where a reviewer recorded that the detected pair or offspring is wrong, and the detection still stands on the box page — the windows a person has said not to trust. A rejection the algorithm has since come round to isn\u2019t listed: those agree.',
+              empty: 'No standing rejections',
+              columns: [{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Rejected' }, { key: 'by', label: 'Reviewed by' }, { key: 'note', label: 'Note' }] },
+            { label: 'Accepted, since changed', rows: iVerify.drifted, errorType: 'verify_drift',
+              desc: 'A reviewer accepted the detection and it has since changed \u2014 a different pair or offspring, or no window starting at that observation at all. The stored truth no longer describes what the algorithm produces.',
+              empty: 'No drifted verifications',
+              columns: [{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Changed' }, { key: 'why', label: 'What happened' }, { key: 'by', label: 'Accepted by' }] },
+          ]} />
         <IntegrityCheck rows={iDeadScanned} errorType="dead_scanned" title="Dead birds still scanned"
           desc="Birds scanned after their recorded death date — the death date or the scan is wrong." empty="No dead birds scanned after death"
           columns={[{ key: 'death_date', label: 'Died' }, { key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
@@ -10711,39 +10714,54 @@ function RemovePenguin({ token }: { token: string }) {
 }
 
 // Presentational integrity check: renders rows (computed locally) — 5 by default + "show all".
-function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
-  title: string; desc?: string; rows: any[]; empty?: string;
-  columns: { key: string; label: string; render?: (v: any, row: any) => React.ReactNode }[];
+type CheckColumn = { key: string; label: string; render?: (v: any, row: any) => React.ReactNode };
+
+/** Two findings that belong to one subject but need separate tables can pass `views` instead of
+ *  rows/columns: the card then carries a toggle and shows one view at a time. */
+type CheckView = { label: string; rows: any[]; desc?: string; empty?: string; errorType?: string; columns: CheckColumn[] };
+
+function IntegrityCheck({ title, desc, rows, empty, columns, errorType, views }: {
+  title: string; desc?: string; rows?: any[]; empty?: string;
+  columns?: CheckColumn[];
   errorType?: string;   // when set, rows can be marked "valid" (reviewed & dismissed)
+  views?: CheckView[];
 }) {
+  const [view, setView] = useState(0);
   const [showAll, setShowAll] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const { active, dismissed } = errorType ? splitDismissed(errorType, rows) : { active: rows, dismissed: [] as any[] };
+  const shownView: CheckView | undefined = views?.[Math.min(view, views.length - 1)];
+  const vRows = shownView?.rows ?? rows ?? [];
+  const vColumns = shownView?.columns ?? columns ?? [];
+  const vEmpty = shownView?.empty ?? empty;
+  const vDesc = shownView?.desc ?? desc;
+  const vErrorType = shownView?.errorType ?? errorType;
+  const { active, dismissed } = vErrorType ? splitDismissed(vErrorType, vRows) : { active: vRows, dismissed: [] as any[] };
+  const liveCount = (v: CheckView) => (v.errorType ? splitDismissed(v.errorType, v.rows).active.length : v.rows.length);
   const shown = showAll ? active : active.slice(0, 5);
 
   const slug = checkSlug(title);
 
   const doDismiss = async (row: any) => {
-    if (!errorType) return;
+    if (!vErrorType) return;
     const reason = window.prompt(`Mark this "${title}" item as reviewed & valid?\n\nOptional note (why it's fine):`, '');
     if (reason === null) return; // cancelled
     setBusy(true);
-    try { await dismissError(errorType, row, reason.trim()); }
+    try { await dismissError(vErrorType!, row, reason.trim()); }
     catch (e: any) { alert(e?.message || 'Could not dismiss'); }
     finally { setBusy(false); }
   };
   const doRestore = async (row: any) => {
-    if (!errorType) return;
+    if (!vErrorType) return;
     setBusy(true);
-    try { await undismissError(errorType, row); }
+    try { await undismissError(vErrorType, row); }
     catch (e: any) { alert(e?.message || 'Could not restore'); }
     finally { setBusy(false); }
   };
   // Cells are real anchors so middle-click / ctrl-click / "open in new tab" work. The <a>
   // fills the cell, so a click anywhere in the row still navigates as it did before.
   const navigate = useContext(CheckNavContext);
-  const cell = (c: typeof columns[number], row: any) => {
+  const cell = (c: CheckColumn, row: any) => {
     const content = c.render ? c.render(row[c.key], row) : row[c.key];
     return row._href
       ? <a href={row._href} className="cell-link" title="Go to the observation"
@@ -10754,16 +10772,26 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
   return (
     <div id={slug} className="report-card" style={{ scrollMarginTop: 70 }}>
       <PinnableTitle title={title} count={active.length} />
-      {desc && <p className="muted">{desc}</p>}
-      {active.length === 0 ? <span style={{ color: '#4CAF50', fontSize: 13 }}>{empty || 'None found'}</span> : (<>
+      {views && views.length > 1 && (
+        <div className="check-toggle">
+          {views.map((v, i) => (
+            <button key={v.label} className={v === shownView ? 'active' : ''}
+              onClick={() => { setView(i); setShowAll(false); setShowDismissed(false); }}>
+              {v.label} <span className="ct-count">{liveCount(v)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {vDesc && <p className="muted">{vDesc}</p>}
+      {active.length === 0 ? <span style={{ color: '#4CAF50', fontSize: 13 }}>{vEmpty || 'None found'}</span> : (<>
         <p style={{ color: '#F44336', fontWeight: 600, fontSize: 13, margin: '4px 0' }}>{active.length} found{active.length > 5 && !showAll ? ' (showing 5)' : ''}</p>
         <div className="table-scroll">
         <table className="guess-rank-table zebra">
-          <thead><tr>{columns.map(c => <th key={c.key}>{c.label}</th>)}{errorType && <th></th>}</tr></thead>
+          <thead><tr>{vColumns.map(c => <th key={c.key}>{c.label}</th>)}{vErrorType && <th></th>}</tr></thead>
           <tbody>{shown.map((row: any, i: number) => (
             <tr key={i}>
-              {columns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
-              {errorType && <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
+              {vColumns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
+              {vErrorType && <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                 <button className="edit-btn" disabled={busy} onClick={() => doDismiss(row)} title="Reviewed — mark valid and hide from this list">✓ Valid</button>
               </td>}
             </tr>
@@ -10772,16 +10800,16 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType }: {
         </div>
         {active.length > 5 && <button className="edit-btn" style={{ marginTop: 6 }} onClick={() => setShowAll(s => !s)}>{showAll ? 'Show fewer' : `Show all (${active.length})`}</button>}
       </>)}
-      {errorType && dismissed.length > 0 && (
+      {vErrorType && dismissed.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <button className="edit-btn" onClick={() => setShowDismissed(s => !s)}>{showDismissed ? 'Hide' : 'Show'} {dismissed.length} dismissed</button>
           {showDismissed && (
             <div className="table-scroll" style={{ opacity: 0.65 }}>
             <table className="guess-rank-table zebra">
-              <thead><tr>{columns.map(c => <th key={c.key}>{c.label}</th>)}<th>Reviewed by</th><th></th></tr></thead>
+              <thead><tr>{vColumns.map(c => <th key={c.key}>{c.label}</th>)}<th>Reviewed by</th><th></th></tr></thead>
               <tbody>{dismissed.map((row: any, i: number) => (
                 <tr key={i}>
-                  {columns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
+                  {vColumns.map(c => <td key={c.key}>{cell(c, row)}</td>)}
                   <td style={{ fontSize: 11, color: '#666' }} title={row._dismissal?.dismissed_at || ''}>
                     {row._dismissal?.dismissed_by_name || '—'}{row._dismissal?.reason ? `: ${row._dismissal.reason}` : ''}
                   </td>
