@@ -1006,6 +1006,49 @@ namespace PenguinMonitor
             return $"{(int)ago.TotalDays}d ago";
         }
 
+        // Counting the queue touches a file, and the status line redraws on every scan and redraw,
+        // so the answer is held for a few seconds. It only has to be current enough to read.
+        private int _unsentCache;
+        private DateTime _unsentCacheAtUtc;
+
+        /// <summary>Everything on this phone the server hasn't got: boxes, bird details, birds
+        /// chipped out of signal, box notes, watched flags and day notes. One number, because the
+        /// question someone actually has before walking away from a colony is "is it all in?".</summary>
+        private int UnsentTotal()
+        {
+            if ((DateTime.UtcNow - _unsentCacheAtUtc).TotalSeconds < 3) return _unsentCache;
+            int n = 0;
+            try
+            {
+                n += _colonyState.PendingUploadCount;
+                n += _colonyState.PendingBiometricCount;
+                n += _colonyState.PendingDayNotes.Count + (_colonyState.DailyLabelPendingUpload ? 1 : 0);
+                n += _boxNotes.Values.Count(b => b.NotesPendingUpload || b.WatchedPendingUpload);
+                n += _dataStorageService.LoadQueuedChips(this).Count;
+            }
+            catch { }
+            _unsentCache = n;
+            _unsentCacheAtUtc = DateTime.UtcNow;
+            return n;
+        }
+
+        /// <summary>The button's label, longest first — FitLabel picks the most descriptive one the
+        /// button's own width allows. It reads as the state it's in: what is waiting, or how long
+        /// ago everything went in. "Sync" alone told you nothing you didn't already know.</summary>
+        private string[] SyncButtonVariants()
+        {
+            if (_isDownloadingCsvData) return new[] { "Syncing…", "Sync…" };
+            if (!_appSettings.IsAuthenticated) return new[] { "Log in to sync", "Log in", "Sync" };
+
+            int unsent = UnsentTotal();
+            if (unsent > 0) return new[] { $"Send {unsent} unsent", $"Send {unsent}", $"{unsent}↑" };
+
+            var lastFull = _colonyState?.LastSyncedUtc ?? DateTime.MinValue;
+            var mostRecent = _lastSyncCheckUtc > lastFull ? _lastSyncCheckUtc : lastFull;
+            if (mostRecent == DateTime.MinValue || mostRecent == default) return new[] { "Sync now", "Sync" };
+            return new[] { $"All in · {FormatSyncAgo(mostRecent)}", $"In · {FormatSyncAgo(mostRecent)}", "Sync" };
+        }
+
         private void UpdateStatusText(string? bluetoothStatus = null)
         {
             // BT status
@@ -1057,6 +1100,17 @@ namespace PenguinMonitor
                         _statusText.SetTextColor(UIFactory.WARNING_YELLOW);
                     else
                         _statusText.SetTextColor(Color.Black);
+                }
+
+                // The button carries the same truth as the status line, in the place someone is
+                // already looking before they press it — and turns amber while work is unsent, so
+                // "is it all in?" is answerable across the shed.
+                if (_syncButton != null && !_isDownloadingCsvData)
+                {
+                    var variants = SyncButtonVariants();
+                    FitLabelNow(_syncButton, variants);
+                    _syncButton.Background = _uiFactory.CreateRoundedBackground(
+                        UnsentTotal() > 0 ? UIFactory.WARNING_YELLOW : UIFactory.PRIMARY_BLUE, 8);
                 }
             });
         }
@@ -1398,7 +1452,7 @@ namespace PenguinMonitor
             UpdateStatusText("Syncing...");
             if (_syncButton != null)
             {
-                _syncButton.Text = "Force Sync"; _refitSyncLabel?.Invoke();
+                _refitSyncLabel?.Invoke();
                 _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
                 _syncButton.Enabled = false;
             }
@@ -1455,7 +1509,7 @@ namespace PenguinMonitor
                     _isDownloadingCsvData = false;
                     if (_syncButton != null)
                     {
-                        _syncButton.Text = "Force Sync"; _refitSyncLabel?.Invoke();
+                        _refitSyncLabel?.Invoke();
                         _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
                         _syncButton.Enabled = true;
                     }
@@ -3653,7 +3707,29 @@ namespace PenguinMonitor
 
             // Longest first: each button keeps the most descriptive label its own width allows.
             foreach (var (btn, variants) in actionButtons) FitLabel(btn, variants);
-            _refitSyncLabel = () => _syncButton.Post(() => FitLabelNow(_syncButton, "Force Sync", "Sync"));
+            _refitSyncLabel = () => _syncButton.Post(() => FitLabelNow(_syncButton, SyncButtonVariants()));
+
+            // "Force Sync" is gone because there is nothing left to force: the download is the whole
+            // field set every time, so a forced sync and an ordinary one do the same work. What's
+            // left is the cache itself going wrong — a shape change, or a file that won't read.
+            // Long-press throws it away and pulls again. Unsent work is untouched: it lives in the
+            // upload queue, not the cache.
+            _syncButton.LongClick += (s, e) =>
+            {
+                new AlertDialog.Builder(this)
+                    .SetTitle("Refetch everything?")
+                    .SetMessage("Throws away the downloaded copy of the colony and pulls it again.\n\n"
+                              + "Anything waiting to upload is kept. Only worth doing if the boxes on screen look wrong.")
+                    .SetNegativeButton("Cancel", (s2, e2) => { })
+                    .SetPositiveButton("Refetch", (s2, e2) =>
+                    {
+                        var db = SnapshotSyncService.Load(this);
+                        db.Reset();
+                        SnapshotSyncService.Save(this, db);
+                        StartSync(silent: false);
+                    })
+                    .Show();
+            };
         }
 
         private void OnScrollViewTouch(object? sender, View.TouchEventArgs e)
