@@ -11159,6 +11159,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const currentSection = showAdmin ? 'admin' : showReports ? 'reports' : 'colony';
 
+  // The single-purpose Penguin/Box/Date searches are superseded by the unified box and now
+  // show for one account only, as a fallback while it settles in. A display choice, not a
+  // permission: everything they reach is reachable from the unified search.
+  const legacySearches = (localStorage.getItem('ww_email') || '').toLowerCase() === 'bdot@snotch.com';
+
   // One element, dropped into each toolbar. Defined here so it sits after the navigation
   // helpers it closes over and before the toolbars that use it. Every destination clears the
   // day overlay first — a result found from inside it should land on the thing, not behind it.
@@ -11246,17 +11251,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             <label className="mobile-label">Search</label>
             {unifiedSearch}
           </div>
-          <div className="mobile-search-group">
-            <label className="mobile-label">Penguin</label>
-            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />
-          </div>
-          <div className="mobile-search-group">
-            <label className="mobile-label">Box</label>
-            <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
-          </div>
+          {legacySearches && (<>
+            <div className="mobile-search-group">
+              <label className="mobile-label">Penguin</label>
+              <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />
+            </div>
+            <div className="mobile-search-group">
+              <label className="mobile-label">Box</label>
+              <input className="mobile-input" type="text" placeholder="Box number" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; closeMenu(); } } }} />
+            </div>
+          </>)}
           <div className="mobile-search-group">
             <label className="mobile-label">Date</label>
-            <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+            {/* The recent-dates strip below isn't a search, so it stays for everyone. */}
+            {legacySearches && <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />}
             {(() => {
               const dates = (stats?.observation_dates || []).slice(0, 20).reverse();
               if (!dates.length) return null;
@@ -11311,9 +11319,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
         {unifiedSearch}
 
-        <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
-        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-        <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        {legacySearches && (<>
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        </>)}
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
       </div>
@@ -11440,9 +11450,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
           {unifiedSearch}
 
-          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+          {legacySearches && (<>
+            <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+            <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+            <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+          </>)}
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         </div>
@@ -11472,9 +11484,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
         {unifiedSearch}
 
-        <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
-        <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-        <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        {legacySearches && (<>
+          <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
+          <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
+          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+        </>)}
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
