@@ -118,8 +118,11 @@ header h1:hover { opacity:.8; }
 /* A note is why this row matched, so it sits beside the thing it belongs to and takes the rest. */
 .uni-noted { display:flex; align-items:center; gap:8px; }
 .uni-note { font-size:11px; color:#666; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.uni-obs { padding:3px 0; }
-.uni-obs .bird-chip { margin-bottom:3px; display:inline-block; }
+/* The box belongs to the observation beside it, not to the row above — sitting level with the
+   card's middle, it reads as that card's box rather than as a heading over everything below. */
+.uni-obs { display:flex; align-items:center; gap:8px; padding:3px 0; }
+.uni-obs > .bird-chip { flex:none; }
+.uni-obs > .obs-card { flex:1; min-width:0; margin-bottom:0; }
 .date-search { position:relative; }
 .date-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:100px; }
 .date-search-input:focus { border-color:#2196F3; }
