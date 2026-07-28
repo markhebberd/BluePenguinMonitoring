@@ -9890,7 +9890,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <IntegrityCheck rows={iScanBeforeChip} errorType="scan_before_chip" title="Scan before chip date"
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
-        <IntegrityCheck title="Breeding verifications vs the algorithm"
+        <IntegrityCheck title="Breeding verifications"
           views={[
             { label: 'Rejected', rows: iVerify.rejected, errorType: 'verify_rejected',
               desc: 'Clutches where a reviewer recorded that the detected pair or offspring is wrong, and the detection still stands on the box page — the windows a person has said not to trust. A rejection the algorithm has since come round to isn\u2019t listed: those agree.',
@@ -10771,7 +10771,9 @@ function IntegrityCheck({ title, desc, rows, empty, columns, errorType, views }:
 
   return (
     <div id={slug} className="report-card" style={{ scrollMarginTop: 70 }}>
-      <PinnableTitle title={title} count={active.length} />
+      {/* The pinned badge counts every view, not just the one on screen — a card showing
+          "Rejected" must still report a finding sitting behind the other tab. */}
+      <PinnableTitle title={title} count={views ? views.reduce((n, v) => n + liveCount(v), 0) : active.length} />
       {views && views.length > 1 && (
         <div className="check-toggle">
           {views.map((v, i) => (
