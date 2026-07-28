@@ -165,6 +165,7 @@ function handleDownload($pdo, $colonyId, $observer) {
                 'sex' => $scan['sex'],
                 'chick_size_code' => $scan['chick_size_code'],
                 'chipped_as_adult' => $scan['chipped_as_adult'],
+                'alert' => (int)($scan['alert'] ?? 0),
             ];
         }
     }

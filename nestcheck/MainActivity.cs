@@ -8568,6 +8568,11 @@ namespace PenguinMonitor
                     }
                     string birdIcon = isReturning ? "🔄🐧" : "🐧";
                     string toastMessage = $"{birdIcon} Bird {displayId} added to Box {_currentBoxName}";
+                    // One shout per scan, whatever earns it. A bird that is both flagged on the
+                    // website and unsexed is still one bird in your hand, and buzzing twice for it
+                    // teaches people to ignore the buzz.
+                    bool alerted = false;
+                    void RaiseAlert() { if (!alerted) { triggerAlertAsync(); alerted = true; } }
                     if (_remotePenguinData != null && _remotePenguinData.TryGetValue(cleanEid.ToUpper(), out var penguin))
                     {
                         if (penguin.LastKnownLifeStage == LifeStage.Chick)
@@ -8586,7 +8591,7 @@ namespace PenguinMonitor
                             bool unsexed = !penguin.Sex.Equals("f", StringComparison.OrdinalIgnoreCase) && !penguin.Sex.Equals("m", StringComparison.OrdinalIgnoreCase);
                             if (unsexed)
                             {
-                                triggerAlertAsync();
+                                RaiseAlert();
                                 toastMessage += penguin.LastKnownLifeStage == LifeStage.Returnee ? $" unsexed returnee" : $" unsexed";
                             }
                             else
@@ -8595,19 +8600,28 @@ namespace PenguinMonitor
                         else
                         {
                             toastMessage += ", Not adult or chick.";
-                            triggerAlertAsync();
+                            RaiseAlert();
+                        }
+
+                        // Flagged on the website, whatever its life stage or sex. Said last so it's
+                        // the end of the message, and shown for longer — it's the reason someone
+                        // put the flag there.
+                        if (penguin.HasAlert)
+                        {
+                            RaiseAlert();
+                            toastMessage += " ⚠️ ALERT — check this bird on wildwatch";
                         }
                     }
                     else
                     {
                         toastMessage += ", Unknown scan ID!";
-                        triggerAlertAsync();
+                        RaiseAlert();
                         var boxAtScan = _currentBoxName;
                         ShowNewBirdDialog(displayId, cleanEid,
                             scanCleanup: (boxAtScan, false));
                     }
                     DrawPageLayouts();
-                    Toast.MakeText(this, toastMessage, ToastLength.Short)?.Show();
+                    Toast.MakeText(this, toastMessage, alerted ? ToastLength.Long : ToastLength.Short)?.Show();
                     MaybePromptSexConfirmation(cleanEid);
                 });
             }

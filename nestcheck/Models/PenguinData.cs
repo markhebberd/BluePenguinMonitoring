@@ -21,5 +21,8 @@ namespace PenguinMonitor.Models
         /// Once one side reaches SexConfirmScore the bird is worth sexing for real.</summary>
         public int SexGuessM { get; set; }
         public int SexGuessF { get; set; }
+        /// <summary>Flagged on the website as a bird to shout about when it turns up in a box.
+        /// Raises the same alert an unsexed adult does — once per scan, not once per reason.</summary>
+        public bool HasAlert { get; set; }
     }
 }

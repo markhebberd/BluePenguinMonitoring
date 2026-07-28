@@ -13,5 +13,8 @@ namespace PenguinMonitor.Models
         // older server, which simply means no prompt rather than a broken parse.
         public int? sex_guess_m { get; set; }
         public int? sex_guess_f { get; set; }
+        /// <summary>penguins.alert — someone on the website flagged this bird as one to raise a
+        /// shout for when it's scanned. Null on an older server, which reads as no flag.</summary>
+        public int? alert { get; set; }
     }
 }
