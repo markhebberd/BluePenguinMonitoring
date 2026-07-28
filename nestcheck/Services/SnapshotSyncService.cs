@@ -299,8 +299,12 @@ namespace PenguinMonitor.Services
             // leave the phone with it. Merging would leave it behind as a ghost visit.
             if (payload.Value<string>("scope") == "field")
             {
-                r.Deleted += 0;   // counted as replaced, not deleted — see ApplyResult.Deleted
+                // Every table in this payload arrives whole, so every one of them is rebuilt from
+                // it. Merging instead would leave a row the server no longer has sitting on the
+                // phone for good: penguins, chips, locations and day notes carry no deleted flag,
+                // so absence from the payload is the only way a deletion can be expressed at all.
                 db.Observations.Clear(); db.Scans.Clear(); db.Biometrics.Clear();
+                db.Penguins.Clear(); db.Chips.Clear(); db.Locations.Clear(); db.DayNotes.Clear();
             }
             r.Observations = Merge<LocalDb.ObsRow, int>(payload, "observations", db.Observations,
                 row => row.observation_id, row => row.is_deleted != 0, r);
