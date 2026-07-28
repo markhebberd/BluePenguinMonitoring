@@ -3642,8 +3642,10 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   const boxRow = (list: string[], prefix: string) => (
     <div className="uni-row uni-chips">
       {list.map(b => (
-        <a key={b} data-uni={`${prefix}${b}`} className={cls(`${prefix}${b}`, 'bird-chip clickable')} href={`/box/${b}`}
-          onClick={e => { e.preventDefault(); go(() => onBoxClick(b))(); }}>Box {b}</a>
+        <span key={b} data-uni={`${prefix}${b}`} className={cls(`${prefix}${b}`, 'uni-item')}>
+          <a className="bird-chip clickable" href={`/box/${b}`}
+            onClick={e => { e.preventDefault(); go(() => onBoxClick(b))(); }}>Box {b}</a>
+        </span>
       ))}
     </div>
   );
