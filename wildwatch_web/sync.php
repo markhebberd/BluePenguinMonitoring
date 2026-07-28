@@ -209,12 +209,20 @@ function handleDownload($pdo, $colonyId, $observer) {
     }
     foreach ($previousObs as $obs) {
         $boxName = $obs['box_name'];
-        $note = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
+        // The day's entry is a record (note + who was out); the note is the string field of it.
+        // Emitting the whole record here made day_note/monitor_filename an object, and the phone
+        // types monitor_filename as a string — the parse threw and the entire box download failed.
+        $day = $dayNotes[nzDateOf($obs['observation_time_utc'])] ?? null;
+        $note = $day['note'] ?? null;
         $previous[$boxName] = [
             'observation_id' => (int)$obs['observation_id'],
             'location_id' => (int)$obs['location_id'],
             'observation_time_utc' => $obs['observation_time_utc'],
             'day_note' => $note,
+            'day_observer' => $day['observer'] ?? null,
+            'day_scribe' => $day['scribe'] ?? null,
+            'day_observer_id' => $day['observer_id'] ?? null,
+            'day_scribe_id' => $day['scribe_id'] ?? null,
             'monitor_filename' => $note,
             'observer_name' => $obs['observer_name'],
             'adults' => (int)$obs['adults'],
