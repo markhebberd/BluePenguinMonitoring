@@ -3574,9 +3574,8 @@ function matchDateQuery(dates: string[], search: string, registeredFmDates: Map<
 }
 
 /**
- * One box searching everything the cache holds, in precedence order: an exact box > exact
- * peng# > PIT ID > a box starting with the term > date > penguin notes > observation notes >
- * day notes.
+ * One box searching everything the cache holds, in precedence order:
+ * box > peng# > date > PIT ID > penguin notes > observation notes > day notes.
  *
  * Each kind renders as the thing it will take you to — a box pill, a PenguinMini, a date link,
  * a whole ObsCard — rather than as a line of text describing it. Query syntax comes from
@@ -3607,8 +3606,8 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
     const out: { key: string; run: () => void }[] = [];
     for (const b of local.boxes) out.push({ key: `bx:${b}`, run: () => onBoxClick(b) });
     for (const p of local.pengs) out.push({ key: `pg:${p.peng_num}`, run: () => onBirdClick(p.peng_num) });
-    for (const p of local.pits) out.push({ key: `pt:${p.peng_num}`, run: () => onBirdClick(p.peng_num || p.pit_id) });
     for (const d of dateHits) out.push({ key: `dt:${d}`, run: () => onDayClick(d) });
+    for (const p of local.pits) out.push({ key: `pt:${p.peng_num}`, run: () => onBirdClick(p.peng_num || p.pit_id) });
     for (const { peng } of local.pengNotes) out.push({ key: `pn:${peng.peng_num}`, run: () => onBirdClick(peng.peng_num) });
     for (const o of local.obsNotes) out.push({ key: `ob:${o.observation_id}`, run: () => onObsClick(o.box, o.observation_time_utc) });
     for (const { date } of local.dateNotes) out.push({ key: `dn:${date}`, run: () => onDayClick(date) });
@@ -3689,22 +3688,22 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
               ))}
             </div>
           </>)}
-          {local.pits.length > 0 && (<>
-            {label('PIT ID')}
-            <div className="uni-row uni-chips">
-              {local.pits.map(p => (
-                <span key={p.peng_num} data-uni={`pt:${p.peng_num}`} className={cls(`pt:${p.peng_num}`, 'uni-item')}>
-                  <PenguinMini scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />
-                </span>
-              ))}
-            </div>
-          </>)}
           {dateHits.length > 0 && (<>
             {label('Date')}
             <div className="uni-row uni-chips">
               {dateHits.map(d => (
                 <span key={d} data-uni={`dt:${d}`} className={cls(`dt:${d}`, 'uni-item')}>
                   <DateLink date={d} onDayClick={go(() => onDayClick(d))} />
+                </span>
+              ))}
+            </div>
+          </>)}
+          {local.pits.length > 0 && (<>
+            {label('PIT ID')}
+            <div className="uni-row uni-chips">
+              {local.pits.map(p => (
+                <span key={p.peng_num} data-uni={`pt:${p.peng_num}`} className={cls(`pt:${p.peng_num}`, 'uni-item')}>
+                  <PenguinMini scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />
                 </span>
               ))}
             </div>
