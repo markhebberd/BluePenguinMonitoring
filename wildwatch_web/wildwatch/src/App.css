@@ -51,7 +51,7 @@ header h1:hover { opacity:.8; }
 
 /* Colony toolbar (search + stats below header) */
 .colony-toolbar { display:flex; align-items:center; gap:10px; padding:8px 20px; background:#fff; border-bottom:1px solid #e8ecef; position:sticky; top:44px; z-index:400; }
-.colony-toolbar .uni-search-input { font-size:13px; padding:5px 8px; width:140px; }
+.colony-toolbar .uni-search-input { font-size:13px; padding:5px 8px; width:210px; }
 .colony-toolbar .penguin-search-input { font-size:13px; padding:5px 6px; width:96px; }
 .colony-toolbar .box-search-input { width:60px; font-size:13px; padding:5px 10px; }
 .colony-toolbar .date-search-input { width:90px; font-size:13px; padding:5px 10px; }
@@ -104,7 +104,7 @@ header h1:hover { opacity:.8; }
 /* Unified search: one field over boxes, penguins, dates and every kind of note. The dropdown
    is wider than the other two because its rows carry whole ObsCards, not one-line labels. */
 .uni-search { position:relative; }
-.uni-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:130px; }
+.uni-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:195px; }
 .uni-search-input:focus { border-color:#2196F3; }
 .uni-results { position:absolute; left:0; top:100%; z-index:600; background:#fff; border:1px solid #ddd;
   border-radius:0 0 8px 8px; margin-top:-2px; width:460px; max-width:90vw; max-height:70vh; overflow-y:auto;
