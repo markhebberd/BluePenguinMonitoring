@@ -436,6 +436,10 @@ h3.collapsible:hover { color:#1a5276; }
    minis cell gets squeezed and a single chip wraps its own text. */
 .report-card.wide .guess-rank-table td, .report-card.wide .guess-rank-table th { white-space:nowrap; width:1%; }
 .report-card.wide .guess-rank-table td.notes-cell, .report-card.wide .guess-rank-table th.notes-cell { white-space:normal; width:auto; }
+/* A newly chipped bird and the button that puts it on the observation, kept together so the
+   + never drifts from the mini it belongs to. */
+.new-chip-add { display:inline-flex; align-items:center; gap:3px; }
+.new-chip-add .edit-btn { padding:0 6px; font-size:13px; line-height:1.5; }
 .minis-cell .scans { flex-wrap:nowrap; margin-top:0; }
 .guess-rank-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
 .guess-rank-table th { text-align:left; color:#888; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #e8ecef; padding:4px 8px; }

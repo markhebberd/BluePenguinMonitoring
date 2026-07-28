@@ -1380,10 +1380,22 @@ export function computeMissingNoScans(): { total: number; rows: any[] } {
           chip_date: ch?.chip_date, chick_size_code: p?.chick_size_code, hasReturned: p?.hasReturned || false };
       })
       .filter((s: any) => s.peng_num);
+    // Birds chipped in THIS box on THIS day that aren't on the observation. A chipping is a
+    // bird in the hand, so it belongs on the visit's record — but nothing links the two, and a
+    // chick chipped at the nest is the usual thing missing from a short count.
+    const nz = utcToNzDate(o.observation_time_utc);
+    const onObs = new Set((c.scansByObs.get(o.observation_id) || []).filter((s: any) => !s.scan_deleted).map((s: any) => s.pit_id));
+    const newChips = c.chips
+      .filter((ch: any) => ch.location_id === o.location_id && String(ch.chip_date || '').slice(0, 10) === nz && !onObs.has(ch.pit_id))
+      .map((ch: any) => {
+        const p = c.pengByNum.get(ch.peng_num);
+        return { peng_num: ch.peng_num, pit_id: ch.pit_id, sex: p?.sex, chipped_as_adult: p?.chipped_as_adult,
+          chip_date: ch.chip_date, chick_size_code: p?.chick_size_code, hasReturned: p?.hasReturned || false };
+      });
     // `missing` is negative when more adults are accounted for than were recorded — those
     // rows are a different error, and adding a no-scan would make them worse.
-    rows.push({ box, date: utcToNzDate(o.observation_time_utc), time: o.observation_time_utc, adults, adultScans, noScan,
-      obsId: o.observation_id, notes: o.notes || '', missing: adults - adultScans - noScan, scans });
+    rows.push({ box, date: nz, time: o.observation_time_utc, adults, adultScans, noScan,
+      obsId: o.observation_id, notes: o.notes || '', missing: adults - adultScans - noScan, scans, newChips });
   }
   rows.sort((a, b) => b.time.localeCompare(a.time));
   return { total: rows.length, rows };

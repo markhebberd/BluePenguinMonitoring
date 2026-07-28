@@ -5149,6 +5149,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
   const { total, rows } = useMissingNoScans();
   const [mode, setMode] = useState<'top' | 'day' | 'all'>('top');
   const [busyObs, setBusyObs] = useState<number | null>(null);
+  const [busyPit, setBusyPit] = useState<string | null>(null);
   const recentDay = rows[0]?.date;
   const shown = mode === 'all' ? rows
     : mode === 'day' ? rows.filter((r: any) => r.date === recentDay)
@@ -5167,6 +5168,21 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
       setBusyObs(null);
     }
   };
+  // A bird chipped in this box on this day, put on the observation it belongs to. The scan is
+  // the same record a reader would have written, so it resolves the short count outright when
+  // the bird is an adult.
+  const addScan = async (r: any, bird: any) => {
+    setBusyPit(bird.pit_id);
+    try {
+      const res = await createRecord(token, 'penguin_scans', { observation_id: r.obsId, pit_id: bird.pit_id },
+        `Added chipping from the "${TITLE}" report`);
+      if (res && res.success === false) alert(res.error || 'Could not add the scan');
+    } catch (e: any) {
+      alert(e?.message || 'Could not add the scan');
+    } finally {
+      setBusyPit(null);
+    }
+  };
   return (
     <div className="report-card wide" id={checkSlug(TITLE)} style={{ scrollMarginTop: 70 }}>
       <PinnableTitle title={TITLE} count={total} />
@@ -5179,7 +5195,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
         </div>
         <div className="table-scroll">
         <table className="guess-rank-table zebra">
-          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th className="notes-cell">Notes</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Box</th><th>Adults</th><th>In box</th><th>Chipped here that day</th><th className="notes-cell">Notes</th><th></th></tr></thead>
           <tbody>
             {shown.map((r: any, i: number) => {
               const href = hrefFor(r.box, r.time);
@@ -5212,6 +5228,25 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                       ))}
                       {r.scans.length === 0 && r.noScan === 0 && <span className="muted">none</span>}
                     </span>
+                  </td>
+                  {/* Chipped in this box on this day but not on the observation — one click puts
+                      each on it. Not wrapped in link(): the minis and buttons handle their own clicks. */}
+                  <td className="minis-cell">
+                    {r.newChips.length === 0 ? <span className="muted">—</span> : (
+                      <span className="scans">
+                        {r.newChips.map((b: any) => (
+                          <span key={b.pit_id} className="new-chip-add">
+                            <PenguinMini scan={b} observationDate={r.time}
+                              onClick={() => _adminOpenBird?.(String(b.peng_num))} />
+                            <button className="edit-btn" disabled={busyPit === b.pit_id}
+                              onClick={() => addScan(r, b)}
+                              title={`Add #${b.peng_num} to this observation`}>
+                              {busyPit === b.pit_id ? '…' : '+'}
+                            </button>
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </td>
                   <td className="muted notes-cell" title={r.notes || undefined}>{r.notes}</td>
                   <td>
