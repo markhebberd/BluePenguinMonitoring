@@ -7,7 +7,7 @@ const STATUS_COLORS: Record<string,string> = {
   MOULT:'#42A5F5', ABN:'#F44336', DCM:'#BCAAA4', '':'#F5F5F5',
 };
 
-interface BoxInfo { s: string; a: number; e: number; c: number; }
+interface BoxInfo { s: string; a: number; e: number; c: number; m?: number }
 
 // Status colour at 60% strength, pre-blended over white into a solid colour so only the
 // fill lightens — text, icons and borders keep full strength (an alpha background can
@@ -61,7 +61,9 @@ export function BoxGrid({ boxTags, selectedBox, onBoxSelect, boxInfo, scrollToBo
         {sorted.map(boxId => {
           const info = boxInfo?.[boxId];
           const status = info?.s || '';
-          const bg = STATUS_COLORS[status] || STATUS_COLORS[''];
+          // A moulting bird outranks the nest status for colour: it's the thing about the box
+          // right now, and it lasts only until an observation without one.
+          const bg = info?.m ? STATUS_COLORS.MOULT : (STATUS_COLORS[status] || STATUS_COLORS['']);
           const adults = info?.a || 0;
           const eggs = info?.e || 0;
           const chicks = info?.c || 0;

@@ -11250,8 +11250,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
   // Nest-grid tiles straight from the cache, so their colours and counts land with the
-  // numbers. stats.box_info replaces it once the overview fetch answers.
+  // numbers. stats.box_info replaces it once the overview fetch answers — except for the
+  // moulting flag, which only the cache knows (it comes from the biometrics, not the
+  // overview query), so it's laid back over the server's answer.
   const localBoxInfo = useBoxInfo();
+  const gridBoxInfo = useMemo(() => {
+    const server = stats?.box_info;
+    if (!server) return localBoxInfo;
+    const merged: Record<string, any> = { ...server };
+    for (const [box, info] of Object.entries(localBoxInfo)) {
+      if (info.m) merged[box] = { ...(merged[box] || info), m: 1 };
+    }
+    return merged;
+  }, [stats, localBoxInfo]);
   // Header pin → admin/validation, in-app. AdminPanel reads its tab from the URL only at
   // mount, so an already-mounted panel needs this signal to switch tabs and scroll.
   const [checkTarget, setCheckTarget] = useState<{ slug: string; nonce: number } | null>(null);
@@ -11904,7 +11915,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className={selectedBox ? 'split-view' : ''}>
         {/* Box grid - always visible */}
         <div className={selectedBox ? 'grid-sidebar' : 'grid-section'}>
-          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={stats?.box_info || localBoxInfo} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
+          <BoxGrid boxTags={boxTags} selectedBox={selectedBox} onBoxSelect={openBox} boxInfo={gridBoxInfo} scrollToBox={scrollToBox} boxNames={queryAllLocations().map((l: any) => l.location_name)} />
         </div>
 
         {/* Box detail */}

@@ -1831,10 +1831,17 @@ export function queryAllLocations(): any[] {
  * come from the newest live observation, but a newest observation with no breeding_status
  * falls back to the most recent one that has a status, rather than showing none.
  */
-export function computeBoxInfo(): Record<string, { s: string; a: number; e: number; c: number }> {
+export function computeBoxInfo(): Record<string, { s: string; a: number; e: number; c: number; m?: number }> {
   const cache = mem;
   if (!cache) return {};
-  const out: Record<string, { s: string; a: number; e: number; c: number }> = {};
+  const out: Record<string, { s: string; a: number; e: number; c: number; m?: number }> = {};
+  // Observations carrying a bird recorded as moulting. A moult is a state of the box's current
+  // occupant rather than of the nest, so it colours the tile only while it is the latest thing
+  // known — the next observation without one clears it.
+  const moulting = new Set<number>();
+  for (const b of cache.biometrics) {
+    if (!b.is_deleted && Number(b.is_moulting) === 1 && b.observation_id != null) moulting.add(b.observation_id);
+  }
   for (const loc of cache.locations) {
     const obs = (cache.obsByLocation.get(loc.location_id) || [])
       .filter((o: any) => !o.is_deleted)
@@ -1846,6 +1853,7 @@ export function computeBoxInfo(): Record<string, { s: string; a: number; e: numb
       a: latest.adults || 0,
       e: latest.eggs || 0,
       c: latest.chicks || 0,
+      m: moulting.has(latest.observation_id) ? 1 : 0,
     };
   }
   return out;
