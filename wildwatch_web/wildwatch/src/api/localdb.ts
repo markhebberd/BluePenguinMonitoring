@@ -1844,9 +1844,11 @@ export function searchLocal(query: string, limit = 8): LocalSearchResults {
   const hits = (v: any) => { const s = String(v ?? '').toLowerCase(); return !!s && terms.some(t => s.includes(t)); };
   const tail = (n: any) => String(n ?? '').replace(/^[A-Z]+/i, '').toLowerCase();
 
+  // "box 2" names box 2 as surely as "2" does, so the word is stripped before matching.
+  const boxTerms = terms.map(t => t.replace(/^box[\s#]*/, '')).filter(Boolean);
   const boxes: string[] = [];
   for (const loc of c.locations) {
-    if (terms.some(t => String(loc.location_name).toLowerCase() === t)) boxes.push(loc.location_name);
+    if (boxTerms.some(t => String(loc.location_name).toLowerCase() === t)) boxes.push(loc.location_name);
   }
   const byNum = (a: string, b: string) => {
     const na = parseInt(a), nb = parseInt(b);

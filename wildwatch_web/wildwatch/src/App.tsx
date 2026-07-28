@@ -3305,6 +3305,72 @@ function computeClutchVerify(fam: BoxFamily, verification: any | null): ClutchVe
   return { verification: v, adultsVerdict, adultsMatch, chicksVerdict, chicksMatch, offspringVerifiable, tick };
 }
 
+/**
+ * Clutches where a human verdict and the current detection disagree, split by what the
+ * disagreement means. A rejection is a standing statement that the detection is wrong there.
+ * Drift is the opposite problem: an acceptance recorded against a detection the algorithm has
+ * since moved away from, so the stored truth describes a window that no longer exists in that
+ * shape — including the case where no window starts at that observation any more.
+ *
+ * Recomputed from the cache the same way the box view does it, so a row here is exactly a red
+ * tick on that box's breeding history.
+ */
+function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
+  const rejected: any[] = [], drifted: any[] = [];
+  const named = (v: any) => v.adults_reviewed_by_name || v.chicks_reviewed_by_name || '';
+  for (const loc of queryAllLocations()) {
+    const box = String(loc.location_name);
+    const detail = queryBoxDetailSync(box);
+    const vers: any[] = detail?.verifications || [];
+    if (!vers.length) continue;
+    const anchored = new Set<number>();
+    for (const season of computeBoxFamilies(detail.observations, detail.all_penguins)) {
+      for (const fam of season.families as any[]) {
+        const anchor = fam.clutch.startObsId;
+        const v = anchor != null ? vers.find((x: any) => x.observation_id === anchor) : null;
+        if (!v) continue;
+        anchored.add(anchor);
+        const state = computeClutchVerify(fam, v);
+        const time = fam.clutch.startObsTime;
+        const base = {
+          box, season: seasonRange(String(season.label)),
+          obs_date: time ? toNzDateStr(time) : '',
+          by: named(v),
+          _href: time ? `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}` : undefined,
+        };
+        const refused = [
+          state.adultsVerdict === 'rejected' ? 'pair' : null,
+          state.chicksVerdict === 'rejected' ? 'offspring' : null,
+        ].filter(Boolean);
+        if (refused.length) {
+          rejected.push({ ...base, what: refused.join(' + '),
+            note: [v.adults_note, v.chicks_note].filter(Boolean).join(' · ') });
+          continue;
+        }
+        const moved = [
+          state.adultsVerdict === 'accepted' && !state.adultsMatch ? 'pair' : null,
+          state.chicksVerdict === 'accepted' && !state.chicksMatch ? 'offspring' : null,
+        ].filter(Boolean);
+        if (moved.length) drifted.push({ ...base, what: moved.join(' + '), why: 'detection changed since it was accepted' });
+      }
+    }
+    for (const v of vers) {
+      if (anchored.has(v.observation_id)) continue;
+      const obs = (detail.observations || []).find((o: any) => o.observation_id === v.observation_id);
+      const time = obs?.observation_time_utc;
+      drifted.push({
+        box,
+        season: time ? seasonRange(getSeasonLabel(new Date(time))) : '',
+        obs_date: time ? toNzDateStr(time) : '',
+        what: 'whole window', why: 'no breeding window starts here any more', by: named(v),
+        _href: time ? `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}` : undefined,
+      });
+    }
+  }
+  const bySeason = (a: any, b: any) => String(b.obs_date).localeCompare(String(a.obs_date));
+  return { rejected: rejected.sort(bySeason), drifted: drifted.sort(bySeason) };
+}
+
 /** Tick beside a breeding-window card. Editors always click (to review); viewers click only when
  *  there's a recorded verdict to view. */
 function BreedingVerifyTick({ state, canEdit, onOpen }: { state: ClutchVerify; canEdit: boolean; onOpen: (e: React.MouseEvent) => void }) {
@@ -8738,6 +8804,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   // Data-integrity checks — computed locally from the colony cache (instant).
   const iBirdTwoBoxes = useBirdTwoBoxes();
   const iScanBeforeChip = useScanBeforeChip();
+  const iVerify = useMemo(() => computeVerifyConflicts(), [dbVersion]);
   const iDeadScanned = useDeadScanned();
   const iImprobable = useImprobableCounts();
   const iFuture = useFutureObservations();
@@ -9812,6 +9879,14 @@ function AdminPanel({ token, observationDates, checkTarget }: {
         <IntegrityCheck rows={iScanBeforeChip} errorType="scan_before_chip" title="Scan before chip date"
           desc="A scan dated before the bird's chip was fitted — impossible." empty="No pre-chip scans"
           columns={[{ key: 'obs_date', label: 'Scan date', render: dayCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'box_name', label: 'Box', render: boxCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }]} />
+        <IntegrityCheck rows={iVerify.rejected} errorType="verify_rejected" title="Breeding data rejected by a human"
+          desc="Clutches where a reviewer recorded that the detected pair or offspring is wrong. The detection still stands on the box page — these are the windows a person has said not to trust."
+          empty="No rejected verifications"
+          columns={[{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Rejected' }, { key: 'by', label: 'Reviewed by' }, { key: 'note', label: 'Note' }]} />
+        <IntegrityCheck rows={iVerify.drifted} errorType="verify_drift" title="Accepted breeding data the algorithm has moved away from"
+          desc="A reviewer accepted the detection, and it has since changed — a different pair or offspring, or no window starting at that observation at all. The stored truth no longer describes what the algorithm produces."
+          empty="No drifted verifications"
+          columns={[{ key: 'obs_date', label: 'Window start', render: dayCell }, { key: 'box', label: 'Box', render: boxCell }, { key: 'season', label: 'Season' }, { key: 'what', label: 'Changed' }, { key: 'why', label: 'What happened' }, { key: 'by', label: 'Accepted by' }]} />
         <IntegrityCheck rows={iDeadScanned} errorType="dead_scanned" title="Dead birds still scanned"
           desc="Birds scanned after their recorded death date — the death date or the scan is wrong." empty="No dead birds scanned after death"
           columns={[{ key: 'death_date', label: 'Died' }, { key: 'last_scan', label: 'Last scan', render: dayCell }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'scan_count', label: 'Scans' }]} />
