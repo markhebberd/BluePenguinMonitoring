@@ -325,6 +325,35 @@ async function putAll(db: IDBDatabase, storeName: StoreNames, rows: any[]): Prom
   });
 }
 
+/**
+ * put(), but keeping any field the incoming row doesn't carry.
+ *
+ * An incremental sync sends whole rows and IndexedDB's put replaces the record, so a column
+ * absent from that query is deleted from the cache — and since an incremental only re-sends
+ * rows whose updated_at moved, it stays deleted. Merging turns that failure from "the field is
+ * gone" into "the field is stale", which the next full sync fixes. The server-side check
+ * (scripts/check-snapshot-columns.sh) is what stops the omission happening; this is the net
+ * under it.
+ */
+async function mergeAll(db: IDBDatabase, storeName: StoreNames, rows: any[], keyPath: string): Promise<void> {
+  if (rows.length === 0) return;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    for (const row of rows) {
+      const key = row[keyPath];
+      if (key === undefined || key === null) { store.put(row); continue; }
+      const req = store.get(key);
+      req.onsuccess = () => {
+        const existing = req.result;
+        store.put(existing && typeof existing === 'object' ? { ...existing, ...row } : row);
+      };
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 async function getAll(db: IDBDatabase, storeName: StoreNames): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
@@ -464,12 +493,12 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
     // observer leaves the cache.
     await clearStores(db, ['verifications', 'day_notes', 'observers']);
     await Promise.all([
-      putAll(db, 'observations', observations),
-      putAll(db, 'scans', activeScans),
-      putAll(db, 'penguins', data.penguins),
-      putAll(db, 'chips', data.chips),
-      putAll(db, 'locations', data.locations),
-      putAll(db, 'biometrics', data.biometrics),
+      mergeAll(db, 'observations', observations, 'observation_id'),
+      mergeAll(db, 'scans', activeScans, 'scan_id'),
+      mergeAll(db, 'penguins', data.penguins, 'peng_num'),
+      mergeAll(db, 'chips', data.chips, 'pit_id'),
+      mergeAll(db, 'locations', data.locations, 'location_id'),
+      mergeAll(db, 'biometrics', data.biometrics, 'biometric_id'),
       putAll(db, 'verifications', data.verifications || []),
       putAll(db, 'day_notes', data.day_notes || []),
       putAll(db, 'observers', data.observers || []),

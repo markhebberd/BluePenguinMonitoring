@@ -92,7 +92,7 @@ if ($since) {
     $obs->execute([$colonyId, $ts]);
 
     // Scans: belonging to changed observations, or deleted since last sync
-    $scans = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted
+    $scans = $pdo->prepare("SELECT " . SNAP_COLS_SCAN . "
         FROM penguin_scans ps
         JOIN observations o ON ps.observation_id = o.observation_id
         JOIN observation_locations ol ON o.location_id = ol.location_id

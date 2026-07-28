@@ -14,6 +14,7 @@ on:
       - 'wildwatch_web/**'
       - 'scripts/check-no-raw-writes.sh'
       - 'scripts/check-algorithm-doc.mjs'
+      - 'scripts/check-snapshot-columns.sh'
       - '.github/workflows/deploy-wildwatch.yml'
   workflow_dispatch:
 
@@ -35,6 +36,11 @@ jobs:
       # being re-read — the explanation can't quietly become fiction.
       - name: Breeding-algorithm explanation still matches the code
         run: node scripts/check-algorithm-doc.mjs
+      # The full and incremental snapshots must return the same columns. A column in one and
+      # not the other doesn't just go missing from a payload — the client PUTs rows over the
+      # cache, so it is deleted from every client and never re-sent.
+      - name: Snapshot queries share one column list
+        run: scripts/check-snapshot-columns.sh
 
   deploy:
     needs: check
