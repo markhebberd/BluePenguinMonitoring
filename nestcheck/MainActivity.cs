@@ -3536,8 +3536,18 @@ namespace PenguinMonitor
             };
             foreach (var (btn, _) in actionButtons)
             {
-                btn.SetPadding((int)(8 * density), (int)(10 * density), (int)(8 * density), (int)(10 * density));
+                btn.SetPadding((int)(8 * density), (int)(6 * density), (int)(8 * density), (int)(6 * density));
                 btn.SetMinimumWidth(0);
+                // One line only. A Button left to wrap turns a label too wide for its column into
+                // two or three stacked lines, and the whole row grows to match. The fitter picks a
+                // label that fits, so nothing is cut off by holding it to one line.
+                btn.SetMaxLines(1);
+                // The theme gives every Button a 48dp minHeight and font padding on top of
+                // whatever padding is set, which is what made these so tall. Cleared, then held
+                // to 40dp so they stay a reasonable target for a cold thumb.
+                btn.SetMinHeight(0);
+                btn.SetMinimumHeight((int)(40 * density));
+                btn.SetIncludeFontPadding(false);
             }
 
             // Estimated only — the card's exact inner width isn't known until layout. It decides
