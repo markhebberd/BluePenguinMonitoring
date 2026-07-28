@@ -197,7 +197,10 @@ namespace PenguinMonitor.Services
             bool IsNoScan(string? id) => (id ?? "").StartsWith("NOSCAN", StringComparison.OrdinalIgnoreCase);
             int noScan = o.ScannedIds.Count(s => IsNoScan(s.BirdId));
             var pits = o.ScannedIds.Where(s => !IsNoScan(s.BirdId)).Select(s => PitFull(s.BirdId)).OrderBy(x => x, StringComparer.Ordinal);
-            return $"{o.Adults}|{o.Eggs}|{o.Chicks}|{N(o.BreedingStatus).ToUpperInvariant()}|{N(o.GateStatus).ToUpperInvariant()}|{N(o.Notes)}|{noScan}|{string.Join(",", pits)}";
+            // Losses count as content: without them an edit that only recorded a failed egg looked
+            // identical to the server row, so the reconcile adopted the server copy and the loss was
+            // never uploaded. Null and 0 compare equal — "not recorded" and "none" are the same box.
+            return $"{o.Adults}|{o.Eggs}|{o.Chicks}|{N(o.BreedingStatus).ToUpperInvariant()}|{N(o.GateStatus).ToUpperInvariant()}|{N(o.Notes)}|{noScan}|{string.Join(",", pits)}|{o.FailedEggs ?? 0}|{o.DeadChicks ?? 0}";
         }
 
         // Download-first reconcile: before uploading, pull current server state and drop any
@@ -228,9 +231,9 @@ namespace PenguinMonitor.Services
             {
                 if (!serverState.boxes.TryGetValue(p.BoxName!, out var b)) continue;
                 var serverObs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
-                    b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                    b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
+                    b.observer_name, b.failed_eggs, b.dead_chicks);
                 serverObs.BoxName = p.BoxName;
-                serverObs.FailedEggs = b.failed_eggs; serverObs.DeadChicks = b.dead_chicks;
                 if (b.scans != null) foreach (var s in b.scans) serverObs.ScannedIds.Add(new ScanRecord { BirdId = s.pit_id ?? "" });
                 for (int ns = 0; ns < b.no_scan; ns++) serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                 // Only a server row for the same NZ day can be the twin of a pending box.
@@ -425,9 +428,9 @@ namespace PenguinMonitor.Services
                         {
                             var b = kvp.Value;
                             var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
-                                b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                                b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
+                                b.observer_name, b.failed_eggs, b.dead_chicks);
                             obs.BoxName = kvp.Key;
-                            obs.FailedEggs = b.failed_eggs; obs.DeadChicks = b.dead_chicks;
                             if (b.scans != null) foreach (var scan in b.scans)
                                 obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
                             for (int ns = 0; ns < b.no_scan; ns++)
@@ -451,9 +454,8 @@ namespace PenguinMonitor.Services
                         foreach (var kvp in serverState.previous)
                         {
                             var b = kvp.Value;
-                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name);
+                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name, b.failed_eggs, b.dead_chicks);
                             obs.BoxName = kvp.Key;
-                            obs.FailedEggs = b.failed_eggs; obs.DeadChicks = b.dead_chicks;
                             if (b.scans != null) foreach (var scan in b.scans) obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
                             for (int ns = 0; ns < b.no_scan; ns++)
                                 obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });

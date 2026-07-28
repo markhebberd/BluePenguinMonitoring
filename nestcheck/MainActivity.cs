@@ -1358,6 +1358,20 @@ namespace PenguinMonitor
             var gateUpCount = todayBoxes.Values.Count(box => box.GateStatus == "Gate up");
             var regateCount = todayBoxes.Values.Count(box => box.GateStatus == "Regate");
             var adultMismatch = totalAdults - totalNoScans - totalScannedBirds;
+            var totalFailedEggs = todayBoxes.Values.Sum(box => box.FailedEggs ?? 0);
+            var totalDeadChicks = todayBoxes.Values.Sum(box => box.DeadChicks ?? 0);
+
+            // New eggs are counted box by box against that box's own last visit, then added up.
+            // A colony-wide "today minus last time" would net one box's new egg off against
+            // another's loss and report nothing laid on a day two clutches started.
+            // Historical view has no matching previous set, so it stays a plain total.
+            int newEggs = 0;
+            if (!_isHistoricalView)
+                foreach (var kv in todayBoxes)
+                {
+                    int was = _colonyState.PreviousBoxes.TryGetValue(kv.Key, out var prev) ? prev.Eggs : 0;
+                    newEggs += Math.Max(0, kv.Value.Eggs - was);
+                }
 
             var pending = _colonyState.PendingUploadCount;
 
@@ -1365,8 +1379,10 @@ namespace PenguinMonitor
                          (pending > 0 ? $"⏳ {pending} boxes pending upload\n" : "") +
                          $"🐧 {totalScannedBirds} bird scans" + (totalNoScans > 0 ? $" + {totalNoScans} no-scan" : "") + "\n" +
                          $"👥 {totalAdults} adults\n" +
-                         $"🥚 {totalEggs} eggs\n" +
+                         $"🥚 {totalEggs} eggs" + (newEggs > 0 ? $" - {newEggs} new" : "") + "\n" +
                          $"🐣 {totalChicks} chicks\n" +
+                         (totalFailedEggs > 0 ? $"🥚✗ {totalFailedEggs} failed egg{(totalFailedEggs != 1 ? "s" : "")}\n" : "") +
+                         (totalDeadChicks > 0 ? $"🐣✗ {totalDeadChicks} dead chick{(totalDeadChicks != 1 ? "s" : "")}\n" : "") +
                          $"🚪 Gate: {gateUpCount} up, {regateCount} regate";
             return summary;
         }
@@ -1602,7 +1618,8 @@ namespace PenguinMonitor
         {
             var s = BoxObservation.FromServerData(server.observation_id, 0, server.observation_time_utc ?? "",
                 server.adults, server.eggs, server.chicks, server.breeding_status, server.gate_status,
-                server.notes ?? "", server.monitor_filename, server.observer_name);
+                server.notes ?? "", server.monitor_filename, server.observer_name,
+                server.failed_eggs, server.dead_chicks);
             if (server.scans != null)
                 foreach (var sc in server.scans) s.ScannedIds.Add(new ScanRecord { BirdId = sc.pit_id ?? "" });
             for (int ns = 0; ns < server.no_scan; ns++) s.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
@@ -1619,7 +1636,7 @@ namespace PenguinMonitor
                 server.observation_id, 0, server.observation_time_utc ?? "",
                 server.adults, server.eggs, server.chicks,
                 server.breeding_status, server.gate_status, server.notes ?? "",
-                server.monitor_filename, server.observer_name);
+                server.monitor_filename, server.observer_name, server.failed_eggs, server.dead_chicks);
             restored.BoxName = boxName;
             if (server.scans != null)
                 foreach (var scan in server.scans)
@@ -1694,7 +1711,7 @@ namespace PenguinMonitor
                         server.observation_id, 0, server.observation_time_utc ?? "",
                         server.adults, server.eggs, server.chicks,
                         server.breeding_status, server.gate_status, server.notes ?? "", server.monitor_filename,
-                        server.observer_name);
+                        server.observer_name, server.failed_eggs, server.dead_chicks);
                     serverObs.BoxName = boxName;
                     if (server.scans != null)
                         foreach (var scan in server.scans)
@@ -1730,7 +1747,8 @@ namespace PenguinMonitor
                                 server.observation_id, 0, server.observation_time_utc ?? "",
                                 server.adults, server.eggs, server.chicks,
                                 server.breeding_status, server.gate_status,
-                                server.notes ?? "", server.monitor_filename, server.observer_name);
+                                server.notes ?? "", server.monitor_filename, server.observer_name,
+                                server.failed_eggs, server.dead_chicks);
                             restored.BoxName = boxName;
                             if (server.scans != null)
                                 foreach (var scan in server.scans)
@@ -2670,9 +2688,13 @@ namespace PenguinMonitor
 
             var summary = new TextView(this)
             {
+                // Losses recorded on this visit sit with the live counts, so a box whose eggs
+                // dropped explains itself on the overview instead of only in the box.
                 Text = $"{string.Concat(Enumerable.Repeat("🐧", thisBoxData.Adults))}" +
                     $"{string.Concat(Enumerable.Repeat("🥚", thisBoxData.Eggs))}" +
-                    $"{string.Concat(Enumerable.Repeat("🐣", thisBoxData.Chicks))}",
+                    $"{string.Concat(Enumerable.Repeat("🐣", thisBoxData.Chicks))}" +
+                    $"{string.Concat(Enumerable.Repeat("🥚✗", thisBoxData.FailedEggs ?? 0))}" +
+                    $"{string.Concat(Enumerable.Repeat("🐣✗", thisBoxData.DeadChicks ?? 0))}",
                 Gravity = GravityFlags.Center,
                 TextSize = 14
             };
@@ -4512,6 +4534,9 @@ namespace PenguinMonitor
                 $"{string.Concat(Enumerable.Repeat("🐧", obs.Adults))}" +
                 $"{string.Concat(Enumerable.Repeat("🥚", obs.Eggs))}" +
                 $"{string.Concat(Enumerable.Repeat("🐣", obs.Chicks))}" +
+                // Collapsed, the losses are the only sign a visit that recorded one did anything
+                $"{string.Concat(Enumerable.Repeat("🥚✗", obs.FailedEggs ?? 0))}" +
+                $"{string.Concat(Enumerable.Repeat("🐣✗", obs.DeadChicks ?? 0))}" +
                 status;
         }
 
@@ -5365,9 +5390,16 @@ namespace PenguinMonitor
                 WhenDataCollectedUtc = DateTime.UtcNow,
                 ObserverName = _appSettings.ObserverName,
             };
-            // Copy scans from current box data
+            // Copy scans and recorded losses from current box data — the loss buttons write straight
+            // to the stored observation, so without this the comparison card shows the edit as
+            // having no losses and "Replace" looks like it would drop them.
             var existing = _colonyState.GetTodayForBox(_currentBoxName);
-            if (existing != null) obs.ScannedIds = existing.ScannedIds;
+            if (existing != null)
+            {
+                obs.ScannedIds = existing.ScannedIds;
+                obs.FailedEggs = existing.FailedEggs;
+                obs.DeadChicks = existing.DeadChicks;
+            }
             return obs;
         }
 
@@ -6228,11 +6260,11 @@ namespace PenguinMonitor
         private static readonly (string code, string label)[] ObservedSexOptions = new[]
         {
             ("", ""),   // unset — blank, so an empty field reads as "not recorded"
-            ("PM", "Probably male"),
-            ("MM", "Maybe male"),
+            ("PM", "Confident M"),
+            ("MM", "Maybe M"),
             ("U", "Unsure"),
-            ("MF", "Maybe female"),
-            ("PF", "Probably female"),
+            ("MF", "Maybe F"),
+            ("PF", "Confident F"),
         };
 
         private void ShowBiometricForm(string birdId, PenguinData? pd, string pengNum)

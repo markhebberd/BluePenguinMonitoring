@@ -54,10 +54,14 @@ namespace PenguinMonitor.Models
         /// <summary>
         /// Create a BoxObservation from server sync data.
         /// </summary>
+        /// <remarks>failedEggs/deadChicks are part of the observation, not an afterthought: a caller
+        /// that forgets them shows a box whose counts dropped for no stated reason, and drops the
+        /// losses from any copy it adopts. They're parameters so no call site can leave them out
+        /// silently.</remarks>
         public static BoxObservation FromServerData(int observationId, int locationId,
             string observationTimeUtc, int adults, int eggs, int chicks,
             string? breedingStatus, string? gateStatus, string notes, string? monitorFilename,
-            string? observerName = null)
+            string? observerName = null, int? failedEggs = null, int? deadChicks = null)
         {
             DateTime.TryParse(observationTimeUtc, null, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsedTime);
             return new BoxObservation
@@ -68,6 +72,8 @@ namespace PenguinMonitor.Models
                 Adults = adults,
                 Eggs = eggs,
                 Chicks = chicks,
+                FailedEggs = failedEggs,
+                DeadChicks = deadChicks,
                 BreedingStatus = breedingStatus,
                 GateStatus = gateStatus,
                 Notes = notes ?? "",
