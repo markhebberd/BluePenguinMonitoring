@@ -8388,6 +8388,7 @@ function DocsPage() {
       <h1 className="docs-title">Documentation</h1>
       <SiteNavigationDoc />
       <section className="doc-section">
+        <h2>Breeding detection</h2>
         <Suspense fallback={<p className="muted">Loading…</p>}>
           <AlgorithmDoc seasonStartMonth={SEASON_START_MONTH} seasonStartDay={SEASON_START_DAY} />
         </Suspense>
