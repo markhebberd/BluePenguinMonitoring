@@ -123,10 +123,17 @@ header h1:hover { opacity:.8; }
 .uni-noted { display:flex; align-items:center; gap:8px; }
 .uni-note { font-size:11px; color:#666; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* The box belongs to the observation beside it, not to the row above — sitting level with the
-   card's middle, it reads as that card's box rather than as a heading over everything below. */
-.uni-obs { display:flex; align-items:center; gap:8px; padding:3px 0; }
-.uni-obs > .bird-chip { flex:none; }
-.uni-obs > .obs-card { flex:1; min-width:0; margin-bottom:0; }
+   card's middle, it reads as that card's box rather than as a heading over everything below.
+   One grid over the whole list, each row a subgrid of it, so the box column is as wide as the
+   widest box on screen ("Box 7" and "Box 100") and every card starts at the same tab stop.
+   The plain two-column fallback keeps the pill on the left where subgrid isn't supported. */
+.uni-obs-list { display:grid; grid-template-columns:max-content 1fr; }
+.uni-obs { display:grid; grid-template-columns:max-content 1fr; align-items:center; gap:8px; padding:3px 0; }
+@supports (grid-template-columns: subgrid) {
+  .uni-obs { grid-column:1 / -1; grid-template-columns:subgrid; }
+}
+.uni-obs > .bird-chip { justify-self:start; }
+.uni-obs > .obs-card { min-width:0; margin-bottom:0; }
 .date-search { position:relative; }
 .date-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:100px; }
 .date-search-input:focus { border-color:#2196F3; }

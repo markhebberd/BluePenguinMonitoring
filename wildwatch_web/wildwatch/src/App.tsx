@@ -3719,6 +3719,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
           </>)}
           {local.obsNotes.length > 0 && (<>
             {label('Observation notes')}
+            <div className="uni-obs-list">
             {local.obsNotes.map((o: any) => (
               <div key={o.observation_id} data-uni={`ob:${o.observation_id}`} className={cls(`ob:${o.observation_id}`, 'uni-obs')}>
                 <a className="bird-chip clickable" href={`/box/${o.box}`}
@@ -3728,6 +3729,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
                   onDayClick={(day: string) => go(() => onDayClick(day))()} />
               </div>
             ))}
+            </div>
           </>)}
           {local.dateNotes.length > 0 && (<>
             {label('Day notes')}
