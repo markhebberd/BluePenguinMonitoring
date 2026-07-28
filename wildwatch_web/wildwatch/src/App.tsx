@@ -2129,6 +2129,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         </>
       ) : (
         <>
+        <div className="obs-edit-fields">
         <div className="obs-edit-birds">
           {[...draftScans].sort(scanSortMFC).map(s => (
             <span key={scanKey(s)} className="scan-removable">
@@ -2166,6 +2167,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN','IGN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Nest status" />
           <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />
+        </div>
         </div>
         </>
       )}
