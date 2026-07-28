@@ -109,8 +109,12 @@ namespace PenguinMonitor.Services
             var result = new ApplyResult { Incremental = !string.IsNullOrEmpty(db.Watermark) };
             try
             {
-                var url = $"{WILDWATCH_SNAPSHOT_URL}?colony_id={colonyId}"
-                        + (result.Incremental ? $"&since={Uri.EscapeDataString(db.Watermark)}" : "");
+                // scope=field: today's observations plus each nest's most recent other visit —
+                // what the app has screens for. The colony's full history is ~45k observations and
+                // 870KB; this is ~300 rows. Small enough to take whole every sync, which is also
+                // what makes it exact: an insert, an edit and a delete are all just "what the set
+                // contains now", with no tombstone to carry and no way to drift out of step.
+                var url = $"{WILDWATCH_SNAPSHOT_URL}?colony_id={colonyId}&scope=field";
                 var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.Add("Authorization", $"Bearer {token}");
                 var resp = await http.SendAsync(req);
@@ -290,6 +294,14 @@ namespace PenguinMonitor.Services
         /// with no tombstone of its own.</summary>
         private static void Apply(LocalDb db, JObject payload, ApplyResult r)
         {
+            // A scoped payload IS the set, so the stores are rebuilt from it rather than merged
+            // into: a row that has left the scope — deleted, or no longer a nest's latest — has to
+            // leave the phone with it. Merging would leave it behind as a ghost visit.
+            if (payload.Value<string>("scope") == "field")
+            {
+                r.Deleted += 0;   // counted as replaced, not deleted — see ApplyResult.Deleted
+                db.Observations.Clear(); db.Scans.Clear(); db.Biometrics.Clear();
+            }
             r.Observations = Merge<LocalDb.ObsRow, int>(payload, "observations", db.Observations,
                 row => row.observation_id, row => row.is_deleted != 0, r);
             r.Scans = Merge<LocalDb.ScanRow, int>(payload, "scans", db.Scans,

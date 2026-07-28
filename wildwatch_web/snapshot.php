@@ -41,6 +41,42 @@ $colonyId = (int)($_GET['colony_id'] ?? 1);
 requireColonyAccess($pdo, $observer, $colonyId);
 $since = $_GET['since'] ?? null;
 
+// Nestcheck asks for scope=field. It is a field app: it shows the box in front of you today and
+// what was in it last time, so it needs today's observations plus each nest's most recent OTHER
+// visit — around three hundred rows, against the colony's ~45k of history, which it has no screen
+// for and no reason to carry. The website's cache omits the parameter and still gets everything.
+$fieldScope = ($_GET['scope'] ?? '') === 'field';
+
+/**
+ * The field set: every observation from today, plus the newest earlier one per box. Returned as
+ * ids, so both the full and the incremental branch can restrict to exactly the same rows.
+ *
+ * A quiet box last looked at eight months ago still has to show its previous visit, which is why
+ * this is a per-box tail rather than a date window — a window would leave those boxes blank.
+ */
+function wwFieldScopeIds($pdo, $colonyId): array {
+    $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
+    $ids = [];
+    $today = $pdo->prepare("SELECT o.observation_id FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        AND DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) = ?");
+    $today->execute([$colonyId, $nzToday]);
+    foreach ($today->fetchAll(PDO::FETCH_COLUMN) as $id) $ids[] = (int)$id;
+
+    $prev = $pdo->prepare("SELECT o.observation_id FROM observations o
+        JOIN observation_locations ol ON o.location_id = ol.location_id
+        WHERE ol.colony_id = ? AND o.is_deleted = FALSE
+        AND o.observation_id = (SELECT o2.observation_id FROM observations o2
+            WHERE o2.location_id = o.location_id AND o2.is_deleted = FALSE
+              AND DATE(CONVERT_TZ(o2.observation_time_utc, '+00:00', '+12:00')) < ?
+            ORDER BY o2.observation_time_utc DESC LIMIT 1)");
+    $prev->execute([$colonyId, $nzToday]);
+    foreach ($prev->fetchAll(PDO::FETCH_COLUMN) as $id) $ids[] = (int)$id;
+
+    return array_values(array_unique($ids));
+}
+
 // Per-colony Full Monitor exclusion list — sent on every snapshot (full + incremental)
 // so an admin edit propagates to clients on their next poll without a full re-sync.
 $fmStmt = $pdo->prepare("SELECT fm_excluded_boxes FROM colonies WHERE colony_id = ?");
@@ -92,6 +128,59 @@ function getTotalCounts($pdo, $colonyId) {
         'locations' => $c("SELECT COUNT(*) FROM observation_locations WHERE colony_id = ?", [$colonyId]),
         'biometrics' => $c("SELECT COUNT(*) FROM penguin_biometric_data"),
     ];
+}
+
+if ($fieldScope) {
+    // The field set is small enough to send whole every time, and sending it whole is what makes
+    // it correct: an insert, an edit and a delete are all just "what the set contains now", with
+    // no tombstone to carry and no way for the phone to drift out of step. The big tables still
+    // come with it — birds and chips are what the scanner reads, and they are ~2k rows.
+    $ids = wwFieldScopeIds($pdo, $colonyId);
+    $ph = $ids ? implode(',', array_fill(0, count($ids), '?')) : 'NULL';
+
+    $obs = $pdo->prepare("SELECT " . SNAP_COLS_OBS . " FROM observations o WHERE o.observation_id IN ($ph)");
+    $obs->execute($ids);
+    $scans = $pdo->prepare("SELECT " . SNAP_COLS_SCAN . " FROM penguin_scans ps
+        WHERE ps.observation_id IN ($ph) AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
+    $scans->execute($ids);
+
+    // Bird details for the visits on screen, plus anything recorded today — the detail form opens
+    // on today's record, and the previous visit's readings are what it is compared against.
+    $nzToday = (new DateTime('now', new DateTimeZone('Pacific/Auckland')))->format('Y-m-d');
+    $bio = $pdo->prepare("SELECT " . SNAP_COLS_BIO . " FROM penguin_biometric_data
+        WHERE (is_deleted = FALSE OR is_deleted IS NULL)
+          AND (observation_date = ? OR observation_id IN ($ph))");
+    $bio->execute(array_merge([$nzToday], $ids));
+
+    $penguins = $pdo->query("SELECT " . SNAP_COLS_PENG . " FROM penguins");
+    $chips = $pdo->query("SELECT " . SNAP_COLS_CHIP . " FROM penguin_chips");
+    $locations = $pdo->prepare("SELECT " . SNAP_COLS_LOC . " FROM observation_locations WHERE colony_id = ?");
+    $locations->execute([$colonyId]);
+
+    $viewPrefix = getColonyPrefix($pdo, $colonyId);
+    $pengRows = $penguins->fetchAll(); stripPengPrefix($pengRows, $viewPrefix);
+    $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
+    $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
+
+    echo json_encode(array_merge([
+        'incremental' => false,
+        'scope' => 'field',
+        'me' => wwSnapshotMe($observer),
+        'snapshot_time' => $pdo->query("SELECT GREATEST(
+            COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
+            COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
+            COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
+            COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
+        ) as wm")->fetch()['wm'],
+        'observations' => $obs->fetchAll(),
+        'scans' => $scans->fetchAll(),
+        'penguins' => $pengRows,
+        'chips' => $chipRows,
+        'locations' => $locations->fetchAll(),
+        'biometrics' => $bioRows,
+        'fm_excluded_boxes' => $fmExcludedBoxes,
+    ], getDayNotes($pdo, $colonyId), getObservers($pdo)));
+    exit;
 }
 
 if ($since) {
