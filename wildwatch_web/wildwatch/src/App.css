@@ -51,6 +51,7 @@ header h1:hover { opacity:.8; }
 
 /* Colony toolbar (search + stats below header) */
 .colony-toolbar { display:flex; align-items:center; gap:10px; padding:8px 20px; background:#fff; border-bottom:1px solid #e8ecef; position:sticky; top:44px; z-index:400; }
+.colony-toolbar .uni-search-input { font-size:13px; padding:5px 8px; width:140px; }
 .colony-toolbar .penguin-search-input { font-size:13px; padding:5px 6px; width:96px; }
 .colony-toolbar .box-search-input { width:60px; font-size:13px; padding:5px 10px; }
 .colony-toolbar .date-search-input { width:90px; font-size:13px; padding:5px 10px; }
@@ -100,6 +101,25 @@ header h1:hover { opacity:.8; }
 .pr-stat { color:#888; }
 
 /* Date search */
+/* Unified search: one field over boxes, penguins, dates and every kind of note. The dropdown
+   is wider than the other two because its rows carry whole ObsCards, not one-line labels. */
+.uni-search { position:relative; }
+.uni-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:130px; }
+.uni-search-input:focus { border-color:#2196F3; }
+.uni-results { position:absolute; left:0; top:100%; z-index:600; background:#fff; border:1px solid #ddd;
+  border-radius:0 0 8px 8px; margin-top:-2px; width:460px; max-width:90vw; max-height:70vh; overflow-y:auto;
+  box-shadow:0 4px 12px rgba(0,0,0,.12); padding:6px; }
+.uni-label { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; font-weight:600;
+  padding:6px 4px 3px; border-top:1px solid #eef1f4; margin-top:4px; }
+.uni-label:first-child { border-top:none; margin-top:0; }
+.uni-row { padding:3px 4px; }
+/* Result kinds that are just a run of chips (boxes, minis, dates) share one wrapping row. */
+.uni-chips { display:flex; flex-wrap:wrap; align-items:center; gap:5px 6px; }
+/* A note is why this row matched, so it sits beside the thing it belongs to and takes the rest. */
+.uni-noted { display:flex; align-items:center; gap:8px; }
+.uni-note { font-size:11px; color:#666; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.uni-obs { padding:3px 0; }
+.uni-obs .bird-chip { margin-bottom:3px; display:inline-block; }
 .date-search { position:relative; }
 .date-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:100px; }
 .date-search-input:focus { border-color:#2196F3; }
@@ -889,6 +909,9 @@ button.verify-danger { background:#c0453a; }
   .mobile-panel .penguin-search-input { width:100% !important; font-size:14px !important; padding:8px 10px !important; }
   .mobile-input { width:100%; font-size:14px; padding:8px 10px; border:2px solid #ddd; border-radius:8px; outline:none; }
   .mobile-input:focus { border-color:#2196F3; }
+  .mobile-panel .uni-search { width:100%; }
+  .mobile-panel .uni-search-input { width:100% !important; font-size:14px !important; padding:8px 10px !important; }
+  .mobile-panel .uni-results { width:100%; }
   .mobile-panel .date-search { width:100%; }
   .mobile-panel .date-search-input { width:100% !important; font-size:14px !important; padding:8px 10px !important; }
   .mobile-nav-user { border-top:1px solid #eee; padding-top:12px; }

@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
 import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -3443,12 +3443,9 @@ function parseDateInput(input: string): string | null {
   return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 }
 
-function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string) => void }) {
-  const [search, setSearch] = useState('');
-  const [open, setOpen] = useState(false);
-  const { registeredFmDates } = useContext(DateTooltipCtx);
-
-  const filtered = useMemo(() => {
+/** Dates matching a human date query ("28 dec", "5/9", "FM 3 24"), newest first. Shared by the
+ *  date search and the unified search so both read the same input the same way. */
+function matchDateQuery(dates: string[], search: string, registeredFmDates: Map<string, { season: number; number: number; partial: boolean }>): string[] {
     if (!search.trim()) return [];
 
     // FM query against the book lookup tables: "FM3" / "FM 3" lists every season's Full
@@ -3574,7 +3571,142 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
       }
       return b.localeCompare(a);
     }).slice(0, 12);
-  }, [dates, search, registeredFmDates]);
+}
+
+/**
+ * One box searching everything the cache holds, in precedence order: an exact box > exact
+ * peng# > PIT ID > a box starting with the term > date > penguin notes > observation notes >
+ * day notes.
+ *
+ * Each kind renders as the thing it will take you to — a box pill, a PenguinMini, a date link,
+ * a whole ObsCard — rather than as a line of text describing it. Query syntax comes from
+ * parseSearchTerms: `a|b` matches either, and "quotes" keep spaces and commas ("BS, MV").
+ */
+function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick, onFocusChange }: {
+  dates: string[];
+  onBoxClick: (box: string) => void;
+  onBirdClick: (tag: string) => void;
+  onDayClick: (day: string) => void;
+  onObsClick: (box: string, time: string) => void;
+  onFocusChange?: (focused: boolean, centerDate: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const { registeredFmDates } = useContext(DateTooltipCtx);
+  const dbVersion = useDbVersion();
+  const local = useMemo(() => searchLocal(search), [search, dbVersion]);
+  const dateHits = useMemo(() => matchDateQuery(dates, search, registeredFmDates).slice(0, 8), [dates, search, registeredFmDates]);
+
+  const count = local.boxesExact.length + local.boxes.length + local.pengs.length + dateHits.length
+    + local.pits.length + local.pengNotes.length + local.obsNotes.length + local.dateNotes.length;
+  const boxRow = (list: string[]) => (
+    <div className="uni-row uni-chips">
+      {list.map(b => (
+        <a key={b} className="bird-chip clickable" href={`/box/${b}`}
+          onClick={e => { e.preventDefault(); go(() => onBoxClick(b))(); }}>Box {b}</a>
+      ))}
+    </div>
+  );
+
+  // Every result clears the box on the way out, so the dropdown never sits over the thing it
+  // just navigated to.
+  const go = (fn: () => void) => () => { fn(); setSearch(''); setOpen(false); };
+
+  // The calendar tracks this field the way it tracks the date search: opening on focus, and
+  // centred on the best date match once there is one.
+  const sorted = useMemo(() => [...dates].sort(), [dates]);
+  const centerDate = dateHits[0] || sorted[sorted.length - 1] || '';
+  useEffect(() => { onFocusChange?.(open, centerDate); }, [open, centerDate]);
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { setSearch(''); setOpen(false); return; }
+    if (e.key !== 'Enter') return;
+    // Enter takes the top result in precedence order.
+    if (local.boxesExact[0]) go(() => onBoxClick(local.boxesExact[0]))();
+    else if (local.pengs[0]) go(() => onBirdClick(local.pengs[0].peng_num))();
+    else if (local.pits[0]) go(() => onBirdClick(local.pits[0].peng_num || local.pits[0].pit_id))();
+    else if (local.boxes[0]) go(() => onBoxClick(local.boxes[0]))();
+    else if (dateHits[0]) go(() => onDayClick(dateHits[0]))();
+    else if (local.pengNotes[0]) go(() => onBirdClick(local.pengNotes[0].peng.peng_num))();
+    else if (local.obsNotes[0]) go(() => onObsClick(local.obsNotes[0].box, local.obsNotes[0].observation_time_utc))();
+    else if (local.dateNotes[0]) go(() => onDayClick(local.dateNotes[0].date))();
+  };
+
+  const label = (text: string) => <div className="uni-label">{text}</div>;
+
+  return (
+    <div className="uni-search">
+      <input
+        type="text"
+        placeholder="Search"
+        value={search}
+        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 300)}
+        onKeyDown={handleKey}
+        className="uni-search-input"
+      />
+      {open && count > 0 && (
+        <div className="uni-results">
+          {local.boxesExact.length > 0 && boxRow(local.boxesExact)}
+          {local.pengs.length > 0 && (
+            <div className="uni-row uni-chips">
+              {local.pengs.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num))} />)}
+            </div>
+          )}
+          {local.pits.length > 0 && (<>
+            {label('PIT ID')}
+            <div className="uni-row uni-chips">
+              {local.pits.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />)}
+            </div>
+          </>)}
+          {local.boxes.length > 0 && boxRow(local.boxes)}
+          {dateHits.length > 0 && (
+            <div className="uni-row uni-chips">
+              {dateHits.map(d => <DateLink key={d} date={d} onDayClick={go(() => onDayClick(d))} />)}
+            </div>
+          )}
+          {local.pengNotes.length > 0 && (<>
+            {label('Penguin notes')}
+            {local.pengNotes.map(({ peng, note }) => (
+              <div key={peng.peng_num} className="uni-row uni-noted">
+                <PenguinMini scan={peng} onClick={go(() => onBirdClick(peng.peng_num))} />
+                <span className="uni-note">{note}</span>
+              </div>
+            ))}
+          </>)}
+          {local.obsNotes.length > 0 && (<>
+            {label('Observation notes')}
+            {local.obsNotes.map((o: any) => (
+              <div key={o.observation_id} className="uni-obs">
+                <a className="bird-chip clickable" href={`/box/${o.box}`}
+                  onClick={e => { e.preventDefault(); go(() => onObsClick(o.box, o.observation_time_utc))(); }}>Box {o.box}</a>
+                <ObsCard obs={o}
+                  onBirdClick={(tag: string) => go(() => onBirdClick(tag))()}
+                  onDayClick={(day: string) => go(() => onDayClick(day))()} />
+              </div>
+            ))}
+          </>)}
+          {local.dateNotes.length > 0 && (<>
+            {label('Day notes')}
+            {local.dateNotes.map(({ date, note }) => (
+              <div key={date} className="uni-row uni-noted">
+                <DateLink date={date} onDayClick={go(() => onDayClick(date))} />
+                <span className="uni-note">{note}</span>
+              </div>
+            ))}
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const { registeredFmDates } = useContext(DateTooltipCtx);
+  const filtered = useMemo(() => matchDateQuery(dates, search, registeredFmDates), [dates, search, registeredFmDates]);
 
   const go = (day: string) => {
     onDayClick(day);
@@ -10985,6 +11117,18 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const currentSection = showAdmin ? 'admin' : showReports ? 'reports' : 'colony';
 
+  // One element, dropped into each toolbar. Defined here so it sits after the navigation
+  // helpers it closes over and before the toolbars that use it. Every destination clears the
+  // day overlay first — a result found from inside it should land on the thing, not behind it.
+  const unifiedSearch = (
+    <UnifiedSearch dates={dayDates}
+      onBoxClick={(b) => { setSelectedDay(null); openBox(b); }}
+      onBirdClick={(t) => { setSelectedDay(null); openBird(t); }}
+      onDayClick={goToDay}
+      onObsClick={(b, t) => { setSelectedDay(null); goToBoxFromBird(b, t); }}
+      onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+  );
+
   const siteNav = (
     <nav className="site-nav">
       <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => goTo('colony'))}>Colony</a>
@@ -11057,7 +11201,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
             </div>
           )}
           <div className="mobile-search-group">
-            <label className="mobile-label">Penguin</label>
+            <label className="mobile-label">Penguin</label>"
+
+            {unifiedSearch}
+
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => { openBird(num); closeMenu(); }} />
           </div>
           <div className="mobile-search-group">
@@ -11117,7 +11264,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showAllBirds && !showSettings) ? (
     <div className="app day-overlay">
       {siteHeader}
-      <div className="colony-toolbar">
+      <div className="colony-toolbar">"
+
+        {unifiedSearch}
+
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
         <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
@@ -11243,7 +11393,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
-        <div className="colony-toolbar">
+        <div className="colony-toolbar">"
+
+          {unifiedSearch}
+
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
@@ -11272,7 +11425,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   return wrap(
     <div className="app">
       {siteHeader}
-      <div className="colony-toolbar">
+      <div className="colony-toolbar">"
+
+        {unifiedSearch}
+
         <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
         <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
         <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />

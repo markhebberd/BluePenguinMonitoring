@@ -1795,6 +1795,113 @@ export function computeBoxInfo(): Record<string, { s: string; a: number; e: numb
   return out;
 }
 
+/**
+ * Split a search query into alternatives on top-level `|`.
+ *
+ * A "quoted" alternative keeps its whitespace and punctuation ("BS, MV" matches that exact
+ * run of characters); a bare one is trimmed. Both then match as a case-insensitive substring,
+ * so quoting is what lets a term contain spaces, commas or a literal `|`.
+ */
+export function parseSearchTerms(q: string): string[] {
+  const out: string[] = [];
+  let buf = '', inQuote = false, quoted = false;
+  const push = () => {
+    const t = quoted ? buf : buf.trim();
+    if (t.trim()) out.push(t);
+    buf = ''; quoted = false;
+  };
+  for (const ch of q) {
+    if (ch === '"') { inQuote = !inQuote; if (!inQuote) quoted = true; continue; }
+    if (ch === '|' && !inQuote) { push(); continue; }
+    buf += ch;
+  }
+  push();
+  return out;
+}
+
+export interface LocalSearchResults {
+  boxesExact: string[];      // the box you named — outranks everything
+  boxes: string[];           // boxes whose name merely starts with a term
+  pengs: any[];              // peng# hit — PenguinMini-shaped
+  pits: any[];               // PIT-ID hit
+  pengNotes: { peng: any; note: string }[];
+  obsNotes: any[];           // ObsCard-shaped, plus `box`
+  dateNotes: { date: string; note: string }[];
+}
+
+/**
+ * Everything the unified search can find in the local cache, grouped by kind so the caller can
+ * render each in its own way and keep them in precedence order. Dates aren't here: matching
+ * human date input ("28 dec", "FM 3 24") belongs with the date search in the UI layer.
+ *
+ * Boxes come back in two groups because they sit on both sides of the precedence order: naming
+ * a box outright wins, but a box merely *starting* with what you typed loses to an exact peng#
+ * or a PIT-ID hit — "832" is a penguin far more often than it's the start of box 8320.
+ */
+export function searchLocal(query: string, limit = 8): LocalSearchResults {
+  const empty: LocalSearchResults = { boxesExact: [], boxes: [], pengs: [], pits: [], pengNotes: [], obsNotes: [], dateNotes: [] };
+  const c = mem;
+  const terms = parseSearchTerms(query).map(t => t.toLowerCase()).filter(Boolean);
+  if (!c || terms.length === 0) return empty;
+  const hits = (v: any) => { const s = String(v ?? '').toLowerCase(); return !!s && terms.some(t => s.includes(t)); };
+  const tail = (n: any) => String(n ?? '').replace(/^[A-Z]+/i, '').toLowerCase();
+
+  // Boxes: an exact name beats one that merely starts with the term ("8" shouldn't bury box 8).
+  const boxExact: string[] = [], boxPrefix: string[] = [];
+  for (const loc of c.locations) {
+    const name = String(loc.location_name).toLowerCase();
+    if (terms.some(t => name === t)) boxExact.push(loc.location_name);
+    else if (terms.some(t => name.startsWith(t))) boxPrefix.push(loc.location_name);
+  }
+  const byNum = (a: string, b: string) => {
+    const na = parseInt(a), nb = parseInt(b);
+    return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+  };
+
+  const mini = (p: any) => {
+    const chips = c.chipsByPeng.get(p.peng_num) || [];
+    const active = chips.find((ch: any) => ch.is_active == 1) || chips[0];
+    return {
+      peng_num: p.peng_num, sex: p.sex, life_stage: p.life_stage, chipped_as_adult: p.chipped_as_adult,
+      chick_size_code: p.chick_size_code, hasReturned: p.hasReturned || false,
+      pit_id: active?.pit_id || null, chip_date: active?.chip_date || null, notes: p.notes || null,
+    };
+  };
+
+  const pengs: any[] = [], pits: any[] = [], pengNotes: { peng: any; note: string }[] = [];
+  for (const p of c.penguins) {
+    // A bird already shown as a peng# hit isn't repeated further down the list.
+    if (terms.some(t => tail(p.peng_num) === t || String(p.peng_num).toLowerCase() === t)) { pengs.push(mini(p)); continue; }
+    const chips = c.chipsByPeng.get(p.peng_num) || [];
+    if (chips.some((ch: any) => hits(ch.pit_id))) { pits.push(mini(p)); continue; }
+    if (hits(p.notes)) pengNotes.push({ peng: mini(p), note: p.notes });
+  }
+
+  const obsNotes = c.observations
+    .filter((o: any) => !o.is_deleted && hits(o.notes))
+    .sort((a: any, b: any) => String(b.observation_time_utc).localeCompare(String(a.observation_time_utc)))
+    .slice(0, limit)
+    .map((o: any) => ({
+      ...o,
+      box: c.locById.get(o.location_id)?.location_name || '?',
+      scans: (c.scansByObs.get(o.observation_id) || []).map((s: any) => enrichScan(s, c)),
+    }));
+
+  const dateNotes: { date: string; note: string }[] = [];
+  for (const [date, note] of c.noteByDate) if (hits(note)) dateNotes.push({ date, note });
+  dateNotes.sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    boxesExact: boxExact.sort(byNum),
+    boxes: boxPrefix.sort(byNum).slice(0, limit),
+    pengs: pengs.slice(0, limit),
+    pits: pits.slice(0, limit),
+    pengNotes: pengNotes.slice(0, limit),
+    obsNotes,
+    dateNotes: dateNotes.slice(0, limit),
+  };
+}
+
 /** Locations excluded from Full Monitor detection for the active colony. */
 export function getFmExcluded(): Set<string> {
   return mem?.fmExcluded || new Set(DEFAULT_FM_EXCLUDED);
