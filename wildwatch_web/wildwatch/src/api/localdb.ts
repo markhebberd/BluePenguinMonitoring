@@ -1036,6 +1036,9 @@ export function computeAllPenguinsRows(): any[] {
  *
  * Derived from computeAllPenguinsRows, which reads both values off the biometric dated the same
  * day as the bird's first chip, so this reflects the data as it stands rather than any import.
+ *
+ * Every colony, deliberately: penguins, chips and biometrics ride the snapshot un-scoped, and a
+ * missing chip-day measurement is a gap in the bird's record wherever it was caught.
  */
 export function computeMissingChipMeasures(): any[] {
   return computeAllPenguinsRows()
