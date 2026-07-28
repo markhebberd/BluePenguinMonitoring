@@ -62,7 +62,9 @@ namespace PenguinMonitor
         private readonly List<ScanRecord> _heldScans = new();
         private AlertDialog? _heldScansDialog;
         // Set when the user scans another box's tag before locking the current box.
-        // Penguin scans are recorded into _heldScans and replayed into this box once the current box is locked.
+        // Short-lived bridge for KNOWN birds only: scans made after the next box tag but before the
+        // previous box was locked are held here and replayed into the right box on lock. A new/unknown
+        // tag is never held — it's diverted straight to the chipping workflow (DivertNewBirdFromHeldQueue).
         private string? _pendingBoxTagNavigation;
         // Once a pending navigation exists, scanning a different box tag freezes the recording:
         // the destination is fixed (first tag wins) and no further scans are queued.
@@ -782,6 +784,8 @@ namespace PenguinMonitor
                     Toast.MakeText(this, $"⚠️ Scan ignored — lock Box {_currentBoxName} first", ToastLength.Short)?.Show();
                     return;
                 }
+                // A new bird is never held — divert it straight to the chipping workflow.
+                if (DivertNewBirdFromHeldQueue(cleanEid)) return;
                 if (!_heldScans.Any(s => s.BirdId == cleanEid))
                 {
                     _heldScans.Add(new ScanRecord
@@ -799,6 +803,8 @@ namespace PenguinMonitor
 
             if (_isBoxLocked)
             {
+                // A new bird is never held — divert it straight to the chipping workflow.
+                if (DivertNewBirdFromHeldQueue(cleanEid)) return;
                 // Penguin chip scanned while locked — hold it, don't add to any box
                 if (_heldScans.Any(s => s.BirdId == cleanEid))
                 {
@@ -835,6 +841,24 @@ namespace PenguinMonitor
             DrawPageLayouts();
         }
 
+        // A valid pit the colony data doesn't recognise is a NEW bird: it belongs in the chipping
+        // workflow, not the short-lived held-scan queue (which only carries KNOWN birds to replay
+        // into the right box when the previous nest wasn't locked yet). Holding a new bird meant it
+        // rode into the flush as an unknown scan and, past the first, was silently dropped at sync.
+        // Divert it straight to the new-bird dialog and return true; false = a known bird to hold.
+        // When colony data isn't loaded we can't classify, so treat it as known and hold as before.
+        private bool DivertNewBirdFromHeldQueue(string cleanEid)
+        {
+            if (_remotePenguinData == null) return false;
+            var key = cleanEid.ToUpper();
+            var shortKey = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8).ToUpper() : key;
+            if (_remotePenguinData.ContainsKey(key) || _remotePenguinData.ContainsKey(shortKey)) return false;
+            var shortId = cleanEid.Length >= 8 ? cleanEid.Substring(cleanEid.Length - 8) : cleanEid;
+            TriggerAlert();                          // buzz — the scribe needs to notice a new bird
+            ShowNewBirdDialog(shortId, cleanEid);    // never held — chip it now
+            return true;
+        }
+
         private void FlushHeldScansToCurrentBox()
         {
             if (_heldScans.Count == 0) return;
@@ -868,18 +892,9 @@ namespace PenguinMonitor
                 SaveToAppDataDir();
             }
 
-            // Collect unknown scans for new bird dialog
-            var unknownScans = new List<(string displayId, string fullId)>();
-            foreach (var scan in _heldScans)
-            {
-                var key = scan.BirdId.ToUpper();
-                var shortKey = scan.BirdId.Length >= 8 ? scan.BirdId.Substring(scan.BirdId.Length - 8).ToUpper() : key;
-                bool known = _remotePenguinData != null &&
-                    (_remotePenguinData.ContainsKey(key) || _remotePenguinData.ContainsKey(shortKey));
-                if (!known)
-                    unknownScans.Add((shortKey, scan.BirdId));
-            }
-
+            // Held scans are KNOWN birds only — a new/unknown tag is diverted to the chipping
+            // workflow at scan time and never held — so the flush just replays them. No unknown-scan
+            // handling here: the old code processed only the first unknown and dropped the rest.
             Toast.MakeText(this, $"📥 {added} scan{(added != 1 ? "s" : "")} added to Box {_currentBoxName}", ToastLength.Short)?.Show();
             _heldScans.Clear();
             _heldScansDialog?.Dismiss();
@@ -888,19 +903,6 @@ namespace PenguinMonitor
             _dataChangedSinceUnlock = true;
             DrawPageLayouts();
             ScrollToTop();
-
-            // Show new bird dialog for unknown scans (deferred to avoid dialog collision)
-            if (unknownScans.Count > 0)
-            {
-                var boxAtFlush = _currentBoxName;
-                new Handler(Looper.MainLooper).PostDelayed(() =>
-                {
-                    // The flush above counted this unknown bird as an adult — cancelling
-                    // the form takes both the tag and that count back out.
-                    ShowNewBirdDialog(unknownScans[0].displayId, unknownScans[0].fullId,
-                        scanCleanup: (boxAtFlush, true));
-                }, 500);
-            }
         }
 
         private void ShowHeldScansDialog()
@@ -6620,6 +6622,19 @@ namespace PenguinMonitor
                 lbl.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                 return lbl;
             }
+
+            // Impossible to miss for the scribe: the scanner hit a tag the colony has never seen.
+            // Confirming here starts a chipping record, so make "this is a new/unknown bird" shout.
+            var newBirdBanner = new TextView(this) { Text = "🆕 UNKNOWN TAG — NEW BIRD", TextSize = 22 };
+            newBirdBanner.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Bold);
+            newBirdBanner.SetTextColor(Color.White);
+            newBirdBanner.SetBackgroundColor(UIFactory.DANGER_RED);
+            newBirdBanner.Gravity = GravityFlags.Center;
+            newBirdBanner.SetPadding(16, 14, 16, 14);
+            var bannerLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            bannerLp.SetMargins(0, 0, 0, 12);
+            newBirdBanner.LayoutParameters = bannerLp;
+            card.AddView(newBirdBanner);
 
             // PIT ID (read-only)
             var pitInfo = new TextView(this) { Text = $"PIT ID: {fullPitId}", TextSize = 13 };
