@@ -148,6 +148,10 @@ namespace PenguinMonitor.Services
             public int BoxCount { get; set; }
             public int Uploaded { get; set; }
             public int UploadErrors { get; set; }
+            /// <summary>What the server refused, box by box. An observation whose scan was rejected
+            /// still lands, so the box stops being pending — a bare count here is a bird's scan
+            /// disappearing with nobody told which bird, or which box.</summary>
+            public List<string> UploadErrorDetails { get; set; } = new List<string>();
             public int Reconciled { get; set; } // pending boxes matched to identical server data before upload
             public int BiometricCount { get; set; }
             public int BiometricsUploaded { get; set; }
@@ -166,6 +170,15 @@ namespace PenguinMonitor.Services
             /// </summary>
             public List<SyncConflict>? Conflicts { get; set; }
         }
+
+        /// <summary>Does this box hold local work for that day that the server hasn't got? Either
+        /// queued for upload, or a draft the box hasn't been locked on yet. Both must survive a
+        /// download: a draft is invisible once the server's copy takes its place in TodayBoxes, and
+        /// since drafts are never uploaded, overwriting one silently threw the edit away.</summary>
+        private static bool HasUnsentLocalEdit(ColonyState colonyState, string boxName, DateTime nzDate) =>
+            colonyState.PendingObservations.Any(p => p.BoxName == boxName
+                && (p.IsPendingUpload || p.IsDraft)
+                && MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzDate);
 
         // The colony every crud.php write belongs to. Bare peng_nums are resolved against it
         // server-side, so leaving it off silently files another colony's bird under Tarakohe's.
@@ -308,45 +321,23 @@ namespace PenguinMonitor.Services
                 // asked to replace identical data.
                 result.Reconciled = await ReconcilePendingBeforeUpload(colonyState, appSettings, token);
 
+                // Step 0b: birds chipped while offline go up BEFORE the observations that scanned
+                // them. The server resolves each scan against the chips it knows: a pit_id it has
+                // never seen is dropped from the observation with an error, and since the
+                // observation itself lands, the box stops being pending and that scan is gone for
+                // good. Creating the bird first is what makes its scan resolvable.
+                var chipWarnings = await FlushQueuedChips(context, appSettings);
+                if (chipWarnings.Count > 0) result.ChipWarnings = chipWarnings;
+
                 // Step 1: Upload ALL pending observations — server detects conflicts
-                var pendingBoxes = new List<object>();
-                foreach (var pending in colonyState.PendingObservations)
-                {
-                    if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
-                    var scans = new List<object>();
-                    foreach (var scan in pending.ScannedIds)
-                    {
-                        scans.Add(new {
-                            pit_id = scan.BirdId,
-                            scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                            latitude = scan.Latitude,
-                            longitude = scan.Longitude,
-                            accuracy = scan.Accuracy,
-                        });
-                    }
-                    pendingBoxes.Add(new {
-                        box_name = pending.BoxName,
-                        observation_time_utc = ObsTimeUtc(pending),
-                        adults = pending.Adults,
-                        eggs = pending.Eggs,
-                        chicks = pending.Chicks,
-                        breeding_status = pending.BreedingStatus,
-                        gate_status = pending.GateStatus,
-                        notes = pending.Notes,
-                        failed_eggs = pending.FailedEggs,
-                        dead_chicks = pending.DeadChicks,
-                        scans = scans,
-                    });
-                }
+                var pendingBoxes = colonyState.PendingObservations
+                    .Where(p => p.IsPendingUpload && !string.IsNullOrEmpty(p.BoxName))
+                    .Select(p => (object)BuildObservationPayload(p))
+                    .ToList();
 
                 if (pendingBoxes.Count > 0)
                 {
-                    var uploadBody = JsonConvert.SerializeObject(new {
-                        daily_label = colonyState.DailyLabel,
-                        daily_observer_id = colonyState.DailyObserverId,
-                        daily_scribe_id = colonyState.DailyScribeId,
-                        observations = pendingBoxes,
-                    });
+                    var uploadBody = JsonConvert.SerializeObject(BuildUploadBody(colonyState, pendingBoxes));
                     var uploadRequest = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
                     uploadRequest.Headers.Add("Authorization", $"Bearer {token}");
                     uploadRequest.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
@@ -388,6 +379,7 @@ namespace PenguinMonitor.Services
                     {
                         var errors = JsonConvert.DeserializeObject<List<object>>(uploadResult["errors"].ToString());
                         result.UploadErrors = errors?.Count ?? 0;
+                        result.UploadErrorDetails.AddRange(DescribeUploadErrors(uploadResult["errors"]));
                     }
                     // Server-detected conflicts (box already has today's data)
                     if (uploadResult != null && uploadResult.ContainsKey("conflicts"))
@@ -403,10 +395,10 @@ namespace PenguinMonitor.Services
                 var localBoxNotes = LoadBoxNotesFromDisk(context);
                 await UploadPendingWatchedFlags(context, appSettings, localBoxNotes);
 
-                // Step 1d: birds chipped while offline — created before the download so the
-                // penguins fetch below returns them with their real numbers
-                var chipWarnings = await FlushQueuedChips(context, appSettings);
-                if (chipWarnings.Count > 0) result.ChipWarnings = chipWarnings;
+                // Step 1d: the day's note, if a change to it never reached the server (set while
+                // offline, or refused). Riding along on an observation upload isn't enough — that
+                // only fills a day with no note, so a corrected label would never land.
+                await FlushPendingDayNote(context, colonyState, appSettings);
 
                 // Step 2: Fetch + process in parallel — each task reports its own progress
                 var nzToday = MainActivity.NzToday;
@@ -443,15 +435,16 @@ namespace PenguinMonitor.Services
                             var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
                             if (obsNzDate == nzToday)
                             {
-                                bool hasPending = colonyState.PendingObservations.Any(p => p.BoxName == kvp.Key && p.IsPendingUpload && MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzToday);
-                                if (!hasPending) { obs.IsPendingUpload = false; colonyState.TodayBoxes[kvp.Key] = obs; }
+                                if (!HasUnsentLocalEdit(colonyState, kvp.Key, nzToday))
+                                { obs.IsPendingUpload = false; colonyState.TodayBoxes[kvp.Key] = obs; }
                             }
                             else colonyState.PreviousBoxes[kvp.Key] = obs;
                         }
                         result.BoxCount = serverState.boxes.Count;
 
                         var serverTodayBoxNames = new HashSet<string>(serverState.boxes.Where(kvp => { var d = DateTime.TryParse(kvp.Value.observation_time_utc, out var dt) ? dt : DateTime.MinValue; return MainActivity.ToNzTime(d).Date == nzToday; }).Select(kvp => kvp.Key));
-                        foreach (var key in colonyState.TodayBoxes.Keys.Where(k => !serverTodayBoxNames.Contains(k) && !colonyState.PendingObservations.Any(p => p.BoxName == k && p.IsPendingUpload)).ToList())
+                        foreach (var key in colonyState.TodayBoxes.Keys
+                                     .Where(k => !serverTodayBoxNames.Contains(k) && !HasUnsentLocalEdit(colonyState, k, nzToday)).ToList())
                             colonyState.TodayBoxes.Remove(key);
                     }
                     if (serverState?.previous != null)
@@ -818,6 +811,7 @@ namespace PenguinMonitor.Services
             {
                 var errors = JsonConvert.DeserializeObject<List<object>>(uploadResult["errors"].ToString());
                 result.UploadErrors = errors?.Count ?? 0;
+                result.UploadErrorDetails.AddRange(DescribeUploadErrors(uploadResult["errors"]));
             }
             if (uploadResult != null && uploadResult.ContainsKey("conflicts"))
                 result.Conflicts = JsonConvert.DeserializeObject<List<SyncConflict>>(uploadResult["conflicts"].ToString());
@@ -848,6 +842,25 @@ namespace PenguinMonitor.Services
                 BiometricId = I("biometric_id"),
                 IsPendingUpload = false,
             };
+        }
+
+        /// <summary>Read sync.php's per-observation "errors" into lines a person can act on —
+        /// "Box 12: Unknown pit_id: …" — rather than the count that hid them.</summary>
+        private static List<string> DescribeUploadErrors(object? errorsNode)
+        {
+            var lines = new List<string>();
+            try
+            {
+                var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(errorsNode?.ToString() ?? "[]");
+                foreach (var r in rows ?? new())
+                {
+                    var box = r.TryGetValue("box", out var b) ? b?.ToString() : null;
+                    var why = r.TryGetValue("error", out var e) ? e?.ToString() : null;
+                    lines.Add(string.IsNullOrEmpty(box) ? (why ?? "rejected") : $"Box {box}: {why ?? "rejected"}");
+                }
+            }
+            catch { }
+            return lines;
         }
 
         /// <summary>The server's own words for a failed request: its "error" field where the body is
@@ -1096,6 +1109,9 @@ namespace PenguinMonitor.Services
                 var path = Path.Combine(context.FilesDir.AbsolutePath, COLONY_STATE_FILENAME);
                 var tempPath = path + ".tmp";
                 File.WriteAllText(tempPath, json);
+                // Keep the copy we're about to replace. This file is the only home of a day's
+                // unsent work, and starting from an empty state loses a round nobody can redo.
+                try { if (File.Exists(path)) File.Copy(path, path + ".bak", true); } catch { }
                 File.Move(tempPath, path, true);
             }
             catch (Exception ex)
@@ -1106,20 +1122,34 @@ namespace PenguinMonitor.Services
 
         public static ColonyState LoadColonyState(Android.Content.Context context)
         {
-            try
+            var dir = context.FilesDir?.AbsolutePath;
+            var path = Path.Combine(dir ?? "", COLONY_STATE_FILENAME);
+            ColonyState? Read(string p)
             {
-                var path = Path.Combine(context.FilesDir?.AbsolutePath, COLONY_STATE_FILENAME);
-                if (File.Exists(path))
+                try
                 {
-                    var json = File.ReadAllText(path);
-                    var state = JsonConvert.DeserializeObject<ColonyState>(json);
-                    if (state != null) return state;
+                    if (!File.Exists(p)) return null;
+                    return JsonConvert.DeserializeObject<ColonyState>(File.ReadAllText(p));
                 }
-
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"LoadColonyState {p}: {ex.Message}");
+                    return null;
+                }
             }
-            catch (Exception ex)
+
+            var state = Read(path);
+            if (state != null) return state;
+
+            // The live file is unreadable. Fall back to the previous copy rather than opening on an
+            // empty colony, and keep the bad one — an unsent observation is recoverable from a file
+            // on disk, never from a state we deleted.
+            var fallback = Read(path + ".bak");
+            if (fallback != null)
             {
-                System.Diagnostics.Debug.WriteLine($"LoadColonyState failed: {ex.Message}");
+                try { if (File.Exists(path)) File.Copy(path, path + ".corrupt", true); } catch { }
+                System.Diagnostics.Debug.WriteLine("LoadColonyState: recovered from .bak");
+                return fallback;
             }
             return new ColonyState();
         }
@@ -1412,6 +1442,24 @@ namespace PenguinMonitor.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to save day note: {ex.Message}");
                 return false;
+            }
+        }
+
+        /// <summary>Retry a day note whose server save didn't land (set while offline, or refused).
+        /// The label is otherwise local-only: it rides along on an observation upload, but that
+        /// only fills a day with no note, so a correction to an existing one would never arrive.</summary>
+        private async Task FlushPendingDayNote(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings)
+        {
+            if (!colonyState.DailyLabelPendingUpload) return;
+            if (string.IsNullOrEmpty(colonyState.DailyLabelDate)) { colonyState.DailyLabelPendingUpload = false; return; }
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return;
+            var ok = await SaveDayNoteAsync(ColonyIdOf(appSettings), colonyState.DailyLabelDate, colonyState.DailyLabel,
+                token, colonyState.DailyObserverId, colonyState.DailyScribeId);
+            if (ok)
+            {
+                colonyState.DailyLabelPendingUpload = false;
+                SaveColonyState(context, colonyState);
             }
         }
 

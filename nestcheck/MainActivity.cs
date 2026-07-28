@@ -1498,7 +1498,11 @@ namespace PenguinMonitor
                                 var details = new List<string>(progressMessages);
                                 if (!string.IsNullOrEmpty(result.Error)) details.Add($"Error: {result.Error}");
                                 if (result.TagSyncResult?.Error != null) details.Add($"Tags: {result.TagSyncResult.Error}");
-                                if (result.UploadErrors > 0) details.Add($"Upload errors: {result.UploadErrors}");
+                                if (result.UploadErrors > 0)
+                                {
+                                    details.Add($"Upload errors: {result.UploadErrors}");
+                                    details.AddRange(result.UploadErrorDetails.Take(5));
+                                }
                                 if (result.BiometricUploadErrors > 0)
                                 {
                                     details.Add($"Bird details not uploaded: {result.BiometricUploadErrors}");
@@ -3084,6 +3088,9 @@ namespace PenguinMonitor
                 _colonyState.DailyObserverId = newObserverId;
                 _colonyState.DailyScribeId = newScribeId;
                 _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
+                // Queued until the server confirms it, so a label set out of signal isn't left
+                // behind on the phone — every sync retries it.
+                _colonyState.DailyLabelPendingUpload = true;
                 DataStorageService.SaveColonyState(this, _colonyState);
 
                 if (_appSettings.IsAuthenticated)
@@ -3094,8 +3101,13 @@ namespace PenguinMonitor
                     _ = Task.Run(async () =>
                     {
                         bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newScribeId);
+                        if (ok)
+                        {
+                            _colonyState.DailyLabelPendingUpload = false;
+                            DataStorageService.SaveColonyState(this, _colonyState);
+                        }
                         new Handler(Looper.MainLooper).Post(() =>
-                            Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — server save failed", ToastLength.Short)?.Show());
+                            Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — will sync", ToastLength.Short)?.Show());
                     });
                 }
                 else
@@ -7660,7 +7672,13 @@ namespace PenguinMonitor
             {
                 try
                 {
+                    // Birds chipped offline must exist server-side before the observation that
+                    // scanned them goes up, or the server drops the scan as an unknown pit_id and
+                    // the box stops being pending with the bird missing from it.
+                    var chipWarnings = await _dataStorageService.FlushQueuedChips(this, _appSettings);
                     var result = await _dataStorageService.UploadPendingOnly(_colonyState, _appSettings);
+                    if (chipWarnings.Count > 0)
+                        (result.ChipWarnings ??= new List<string>()).AddRange(chipWarnings);
                     if (result.Uploaded > 0)
                         DataStorageService.SaveColonyState(this, _colonyState);
                     RunOnUiThread(() =>
@@ -7672,6 +7690,17 @@ namespace PenguinMonitor
                             DrawPageLayouts();
                         }
                         UpdateSyncButtonLabel();
+                        // A rejected scan or a refused queued bird is data that didn't land. The
+                        // box is no longer pending, so nothing else will mention it — say it here,
+                        // as something that has to be dismissed rather than a toast that passes.
+                        var lost = new List<string>(result.UploadErrorDetails);
+                        if (result.ChipWarnings != null) lost.AddRange(result.ChipWarnings);
+                        if (lost.Count > 0)
+                            new AlertDialog.Builder(this)
+                                .SetTitle("Not everything uploaded")
+                                .SetMessage(string.Join("\n\n", lost))
+                                .SetPositiveButton("OK", (s2, e2) => { })
+                                .Show();
                         if (result.Conflicts != null && result.Conflicts.Count > 0)
                             ShowConflictDialog(result.Conflicts);
                         else if (!string.IsNullOrEmpty(result.Error))

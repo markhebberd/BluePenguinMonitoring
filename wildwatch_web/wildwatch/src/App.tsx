@@ -2594,7 +2594,6 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   return (<>
     <tr><td className="muted">Biometrics</td><td className="clickable" onClick={() => setShowBio(!showBio)}>{summary || <span className="muted">-</span>} <span className="muted small">{biometrics.length} records {showBio ? '▲' : '▼'}</span></td></tr>
     {showBio && <>
-      {biometrics.map((b, i) => record(b, i, false))}
       {editing && !adding && <tr><td></td><td><button className="edit-btn" onClick={() => setAdding(true)}>+ Add biometric</button></td></tr>}
       {editing && adding && <>
         <tr><td className="muted" colSpan={2} style={{ fontWeight: 600, paddingTop: 6, fontSize: 11 }}>New biometric</td></tr>
@@ -2605,6 +2604,7 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
         <tr><td className="muted">Note</td><td><input type="text" value={form.notes} onChange={e => setF('notes', e.target.value)} placeholder="-" /></td></tr>
         <tr><td></td><td><button className="edit-btn done-btn" disabled={busy} onClick={submitAdd}>{busy ? 'Saving…' : 'Save'}</button> <button className="edit-btn" onClick={() => { setAdding(false); setForm(emptyForm); }}>Cancel</button></td></tr>
       </>}
+      {biometrics.map((b, i) => record(b, i, false))}
       {deleted.length > 0 && <tr><td></td><td className="clickable muted small" onClick={() => setShowRemoved(!showRemoved)}>{deleted.length} removed {showRemoved ? '▲' : '▼'}</td></tr>}
       {showRemoved && deleted.map((b, i) => record(b, i, true))}
     </>}

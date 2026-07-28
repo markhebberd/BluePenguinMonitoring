@@ -16,6 +16,11 @@ namespace PenguinMonitor.Models
         public int DailyObserverId { get; set; }
         public int DailyScribeId { get; set; }
 
+        /// <summary>The label was set but its server save didn't land — offline, or refused. Retried
+        /// on every sync until it does. Without this the note stays on the phone: an observation
+        /// upload only fills a day that has none, so a corrected label never reaches the day view.</summary>
+        public bool DailyLabelPendingUpload { get; set; }
+
         /// <summary>
         /// Pending observations not yet uploaded to server.
         /// Can have multiple per box (across different days while offline).
