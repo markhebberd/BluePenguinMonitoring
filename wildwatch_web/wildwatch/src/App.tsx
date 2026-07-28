@@ -1,4 +1,4 @@
-import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
@@ -3587,7 +3587,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   onBirdClick: (tag: string) => void;
   onDayClick: (day: string) => void;
   onObsClick: (box: string, time: string) => void;
-  onFocusChange?: (focused: boolean, centerDate: string) => void;
+  onFocusChange?: (focused: boolean, centerDate: string, id: string) => void;
 }) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -3637,10 +3637,14 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   );
 
   // The calendar tracks this field the way it tracks the date search: opening on focus, and
-  // centred on the best date match once there is one.
+  // centred on the best date match once there is one. The id matters because several searches
+  // are mounted at once (a toolbar's and the mobile menu's) — without it, a hidden one
+  // reporting "not focused" would close the calendar the visible one just opened.
+  const uid = useId();
   const sorted = useMemo(() => [...dates].sort(), [dates]);
   const centerDate = dateHits[0] || sorted[sorted.length - 1] || '';
-  useEffect(() => { onFocusChange?.(open, centerDate); }, [open, centerDate]);
+  useEffect(() => { onFocusChange?.(open, centerDate, uid); }, [open, centerDate]);
+  useEffect(() => () => { onFocusChange?.(false, '', uid); }, []);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { setSearch(''); setOpen(false); return; }
@@ -3746,7 +3750,8 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   );
 }
 
-function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string) => void }) {
+function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onDayClick: (day: string) => void; onFocusChange?: (focused: boolean, centerDate: string, id: string) => void }) {
+  const uid = useId();
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const { registeredFmDates } = useContext(DateTooltipCtx);
@@ -3775,9 +3780,8 @@ function DateSearch({ dates, onDayClick, onFocusChange }: { dates: string[]; onD
   const sorted = useMemo(() => [...dates].sort(), [dates]);
   const centerDate = filtered.length > 0 ? filtered[0] : sorted[sorted.length - 1] || '';
 
-  useEffect(() => {
-    onFocusChange?.(open, centerDate);
-  }, [open, centerDate]);
+  useEffect(() => { onFocusChange?.(open, centerDate, uid); }, [open, centerDate]);
+  useEffect(() => () => { onFocusChange?.(false, '', uid); }, []);
 
   return (
     <div className="date-search">
@@ -10781,8 +10785,20 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [showReports, setShowReports] = useState(initial.reports || false);
   const [showAllBirds, setShowAllBirds] = useState(initial.birds || false);
   const [showSettings, setShowSettings] = useState(false);
-  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  // Which searches currently hold the calendar open, by instance id. A plain boolean can't
+  // work: several searches are mounted at once and each reports its own focus.
+  const [dateFocusIds, setDateFocusIds] = useState<Set<string>>(new Set());
+  const datePickerVisible = dateFocusIds.size > 0;
   const [datePickerCenter, setDatePickerCenter] = useState('');
+  const onSearchFocus = useCallback((focused: boolean, center: string, id: string) => {
+    setDateFocusIds(prev => {
+      if (focused === prev.has(id)) return prev;   // unchanged — same Set, so no re-render
+      const next = new Set(prev);
+      if (focused) next.add(id); else next.delete(id);
+      return next;
+    });
+    if (focused && center) setDatePickerCenter(center);
+  }, []);
   const [selectedDay, setSelectedDay] = useState<string|null>(initial.day || null);
   const [scrollToBox, setScrollToBox] = useState<string|null>(null);
   const [previousBox, setPreviousBox] = useState<string|null>(null);
@@ -11183,7 +11199,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       onBirdClick={(t) => { setSelectedDay(null); openBird(t); }}
       onDayClick={goToDay}
       onObsClick={(b, t) => { setSelectedDay(null); goToBoxFromBird(b, t); }}
-      onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+      onFocusChange={onSearchFocus} />
   );
 
   const siteNav = (
@@ -11274,7 +11290,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <div className="mobile-search-group">
             <label className="mobile-label">Date</label>
             {/* The recent-dates strip below isn't a search, so it stays for everyone. */}
-            {legacySearches && <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />}
+            {legacySearches && <DateSearch dates={stats?.observation_dates || []} onDayClick={(d) => { goToDay(d); closeMenu(); }} onFocusChange={onSearchFocus} />}
             {(() => {
               const dates = (stats?.observation_dates || []).slice(0, 20).reverse();
               if (!dates.length) return null;
@@ -11332,7 +11348,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-          <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+          <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={onSearchFocus} />
         </>)}
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
@@ -11463,7 +11479,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           {legacySearches && (<>
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
             <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-            <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+            <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={onSearchFocus} />
           </>)}
           {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
@@ -11497,7 +11513,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
-          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={(f, d) => { setDatePickerVisible(f); setDatePickerCenter(d); }} />
+          <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={onSearchFocus} />
         </>)}
         {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
         <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
