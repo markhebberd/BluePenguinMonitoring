@@ -443,199 +443,74 @@ namespace PenguinMonitor.Services
                 bool authFailed = false;
 
                 // Boxes: fetch, parse, update colony state
+                // One incremental feed replaces the three fetches that used to be here (boxes,
+                // penguins, today's biometrics). Those pulled a fixed slice of the colony every
+                // time, which is why an edit or a delete outside that slice never reached the
+                // phone. This pulls what changed since the last watermark and applies it — see
+                // SYNC-INCREMENTAL.md.
                 Task boxesTask = WithRetry(async () =>
                 {
-                    var req = new HttpRequestMessage(HttpMethod.Get, $"{WILDWATCH_SYNC_URL}?colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
-                    req.Headers.Add("Authorization", $"Bearer {token}");
-                    var resp = await _httpClient.SendAsync(req);
-                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
-                    resp.EnsureSuccessStatusCode();
-                    var json = await resp.Content.ReadAsStringAsync();
-                    if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{"))
-                        throw new Exception(ServerMessage(json, (int)resp.StatusCode));
-                    var serverState = LenientParse<SyncResponse>(json, "boxes", result.PayloadWarnings);
-
-                    colonyState.PreviousBoxes.Clear();
-                    if (serverState?.boxes != null)
+                    var db = SnapshotSyncService.Load(context);
+                    var applied = await SnapshotSyncService.SyncAsync(_httpClient, context, db, token, ColonyIdOf(appSettings));
+                    if (!applied.Ok)
                     {
-                        foreach (var kvp in serverState.boxes)
-                        {
-                            var b = kvp.Value;
-                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc,
-                                b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename,
-                                b.observer_name, b.failed_eggs, b.dead_chicks);
-                            obs.BoxName = kvp.Key;
-                            if (b.scans != null) foreach (var scan in b.scans)
-                                obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
-                            for (int ns = 0; ns < b.no_scan; ns++)
-                                obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });
-
-                            var obsNzDate = MainActivity.ToNzTime(obs.WhenDataCollectedUtc).Date;
-                            if (obsNzDate == nzToday)
-                            {
-                                if (!HasUnsentLocalEdit(colonyState, kvp.Key, nzToday))
-                                { obs.IsPendingUpload = false; colonyState.TodayBoxes[kvp.Key] = obs; }
-                            }
-                            else colonyState.PreviousBoxes[kvp.Key] = obs;
-                        }
-                        result.BoxCount = serverState.boxes.Count;
-
-                        var serverTodayBoxNames = new HashSet<string>(serverState.boxes.Where(kvp => { var d = DateTime.TryParse(kvp.Value.observation_time_utc, out var dt) ? dt : DateTime.MinValue; return MainActivity.ToNzTime(d).Date == nzToday; }).Select(kvp => kvp.Key));
-                        foreach (var key in colonyState.TodayBoxes.Keys
-                                     .Where(k => !serverTodayBoxNames.Contains(k) && !HasUnsentLocalEdit(colonyState, k, nzToday)).ToList())
-                            colonyState.TodayBoxes.Remove(key);
+                        if (applied.Error?.Contains("401") == true) { authFailed = true; return 0; }
+                        throw new Exception(applied.Error);
                     }
-                    if (serverState?.previous != null)
-                        foreach (var kvp in serverState.previous)
-                        {
-                            var b = kvp.Value;
-                            var obs = BoxObservation.FromServerData(b.observation_id, b.location_id, b.observation_time_utc, b.adults, b.eggs, b.chicks, b.breeding_status, b.gate_status, b.notes ?? "", b.monitor_filename, b.observer_name, b.failed_eggs, b.dead_chicks);
-                            obs.BoxName = kvp.Key;
-                            if (b.scans != null) foreach (var scan in b.scans) obs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "", Timestamp = DateTime.TryParse(scan.scan_time_utc, out var st) ? st : DateTime.UtcNow });
-                            for (int ns = 0; ns < b.no_scan; ns++)
-                                obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}", Timestamp = obs.WhenDataCollectedUtc });
-                            colonyState.PreviousBoxes[kvp.Key] = obs;
-                        }
-                    colonyState.LastSyncedUtc = DateTime.UtcNow;
-                    if (serverState?.locations != null)
+                    foreach (var w in applied.PayloadWarnings) result.PayloadWarnings.Add(w);
+
+                    // Views the screens read, rebuilt from the rows — one copy of the truth.
+                    SnapshotSyncService.DeriveViews(db, colonyState, nzToday, MainActivity.ToNzTime,
+                        (cs, box, day) => HasUnsentLocalEdit(cs, box, day));
+
+                    var birds = SnapshotSyncService.DeriveBirds(db);
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
+                        JsonConvert.SerializeObject(birds, Formatting.Indented));
+                    result.BirdCount = birds.Count;
+
+                    // Box notes: server text, with a locally-edited note or watched flag that hasn't
+                    // been accepted yet left standing.
+                    var boxNotes = new Dictionary<string, BoxNoteData>();
+                    foreach (var loc in db.Locations.Values)
                     {
-                        var boxNotes = new Dictionary<string, BoxNoteData>();
-                        foreach (var loc in serverState.locations)
+                        var bn = new BoxNoteData {
+                            LocationId = loc.location_id, BoxName = loc.location_name ?? "",
+                            PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1,
+                        };
+                        if (localBoxNotes.TryGetValue(bn.BoxName, out var prior))
                         {
-                            var bn = new BoxNoteData { LocationId = loc.location_id, BoxName = loc.location_name ?? "", PersistentNotes = loc.persistent_notes ?? "", Watched = loc.watched == 1 };
-                            // A local edit that hasn't reached the server yet survives the refresh
-                            // instead of being clobbered by the server value — for the watched flag
-                            // and for the note itself, which was previously overwritten in silence.
-                            if (localBoxNotes.TryGetValue(bn.BoxName, out var prior))
-                            {
-                                if (prior.WatchedPendingUpload)
-                                {
-                                    bn.Watched = prior.Watched;
-                                    bn.WatchedPendingUpload = true;
-                                }
-                                if (prior.NotesPendingUpload)
-                                {
-                                    bn.PersistentNotes = prior.PersistentNotes;
-                                    bn.NotesPendingUpload = true;
-                                }
-                            }
-                            boxNotes[bn.BoxName] = bn;
+                            if (prior.WatchedPendingUpload) { bn.Watched = prior.Watched; bn.WatchedPendingUpload = true; }
+                            if (prior.NotesPendingUpload) { bn.PersistentNotes = prior.PersistentNotes; bn.NotesPendingUpload = true; }
                         }
-                        File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME), JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
+                        boxNotes[bn.BoxName] = bn;
                     }
-                    // Keep the signing acronym current: an admin assigning one should reach the
-                    // phone on the next sync, not the next login.
-                    if (serverState?.observer != null &&
-                        (appSettings.ObserverChipAcronym != (serverState.observer.chip_acronym ?? "")
-                         || appSettings.ObserverFalconId != (serverState.observer.falcon_id ?? "")))
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, BOX_NOTES_FILENAME),
+                        JsonConvert.SerializeObject(boxNotes, Formatting.Indented));
+
+                    // People for the day pickers, and this user as the server sees them.
+                    var users = db.Observers.Select(kv => new SyncUser { id = kv.Key, name = kv.Value }).ToList();
+                    if (applied.Users != null && applied.Users.Count > 0) users = applied.Users;
+                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
+                        JsonConvert.SerializeObject(users, Formatting.Indented));
+                    if (applied.Me != null &&
+                        (appSettings.ObserverChipAcronym != (applied.Me.chip_acronym ?? "")
+                         || appSettings.ObserverFalconId != (applied.Me.falcon_id ?? "")))
                     {
-                        appSettings.ObserverChipAcronym = serverState.observer.chip_acronym ?? "";
-                        appSettings.ObserverFalconId = serverState.observer.falcon_id ?? "";
+                        appSettings.ObserverChipAcronym = applied.Me.chip_acronym ?? "";
+                        appSettings.ObserverFalconId = applied.Me.falcon_id ?? "";
                         saveApplicationSettings(appSettings);
                     }
-                    // Who can be named as today's observer/scribe. Cached so the pickers still
-                    // work in the field with no signal — a colony's people rarely change mid-round.
-                    if (serverState?.users != null)
-                        File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
-                            JsonConvert.SerializeObject(serverState.users, Formatting.Indented));
-                    // Surface how many people the server returned so an empty picker can be diagnosed
-                    // in the field: -1 = the response had no users field at all, 0 = empty list.
-                    int peopleCount = serverState?.users?.Count ?? -1;
-                    onLineProgress?.Invoke(0, $"{result.BoxCount} boxes, {peopleCount} people ✓");
+
+                    colonyState.LastSyncedUtc = DateTime.UtcNow;
+                    result.BoxCount = colonyState.TodayBoxes.Count;
+                    result.BiometricCount = colonyState.TodayBiometrics.Count;
+                    onLineProgress?.Invoke(0, $"{applied} \u2713");
+                    onLineProgress?.Invoke(1, $"{result.BirdCount} penguin records \u2713");
                     return result.BoxCount;
-                }, "Boxes", s => onLineProgress?.Invoke(0, s), isCancelled);
+                }, "Sync", s => onLineProgress?.Invoke(0, s), isCancelled);
 
-                // Penguins: fetch, parse, save
-                Task birdsTask = WithRetry(async () =>
-                {
-                    var req = new HttpRequestMessage(HttpMethod.Get, WILDWATCH_PENGUINS_URL);
-                    req.Headers.Add("Authorization", $"Bearer {token}");
-                    var resp = await _httpClient.SendAsync(req);
-                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
-                    resp.EnsureSuccessStatusCode();
-                    var birdsJson = await resp.Content.ReadAsStringAsync();
-                    if (string.IsNullOrEmpty(birdsJson) || !birdsJson.TrimStart().StartsWith("["))
-                        throw new Exception($"Penguins API: expected JSON array");
-                    var penguinRecords = LenientParse<List<WildWatchPenguin>>(birdsJson, "penguins", result.PayloadWarnings)
-                                         ?? new List<WildWatchPenguin>();
-                    var remotePenguinData = new Dictionary<string, PenguinData>();
-                    foreach (var record in penguinRecords)
-                    {
-                        if (string.IsNullOrEmpty(record.pit_id) || record.pit_id.Length < 8) continue;
-                        var cleanId = new string(record.pit_id.Where(char.IsLetterOrDigit).ToArray());
-                        var eightDigitId = cleanId.Length >= 8 ? cleanId.Substring(cleanId.Length - 8).ToUpper() : cleanId.ToUpper();
-                        if (eightDigitId.Length != 8) continue;
-                        // life_stage column dropped — derive Adult/Chick/Returnee; is_dead is the only stored flag.
-                        var chipDate = DateTime.TryParse(record.chip_date, out DateTime cd) ? cd : DateTime.MinValue;
-                        LifeStage lifeStage;
-                        if (record.is_dead == 1) lifeStage = LifeStage.Dead;
-                        else if (record.chipped_as_adult == 1) lifeStage = LifeStage.Adult;
-                        else if (chipDate > DateTime.MinValue && DateTime.UtcNow > chipDate.AddMonths(3)) lifeStage = LifeStage.Returnee; // chipped as chick, now back as an adult
-                        else lifeStage = LifeStage.Chick;
-                        remotePenguinData[cleanId.ToUpper()] = new PenguinData
-                        {
-                            FullPitId = record.pit_id ?? "", ScannedId = eightDigitId, PengNum = record.peng_num ?? "",
-                            LastKnownLifeStage = lifeStage, Sex = record.sex ?? "",
-                            ChipDate = chipDate,
-                            ChipAs = record.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = record.chick_size_code ?? "",
-                            SexGuessM = record.sex_guess_m ?? 0, SexGuessF = record.sex_guess_f ?? 0,
-                            HasAlert = record.alert == 1
-                        };
-                    }
-                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
-                        JsonConvert.SerializeObject(remotePenguinData, Formatting.Indented));
-                    result.BirdCount = remotePenguinData.Count;
-                    onLineProgress?.Invoke(1, $"{result.BirdCount} penguin records ✓");
-                    return result.BirdCount;
-                }, "Penguins", s => onLineProgress?.Invoke(1, s), isCancelled);
-
-                // Biometrics: fetch today's records so the detail form opens instantly/offline.
-                // Non-critical — failures don't fail the sync.
-                Task bioTask = WithRetry(async () =>
-                {
-                    var nzTodayStr = MainActivity.NzToday.ToString("yyyy-MM-dd");
-                    var req = new HttpRequestMessage(HttpMethod.Get,
-                        $"{WILDWATCH_API_URL}?action=list&table=penguin_biometric_data&observation_date={nzTodayStr}&colony_id={ColonyIdOf(appSettings)}");
-                    req.Headers.Add("Authorization", $"Bearer {token}");
-                    var resp = await _httpClient.SendAsync(req);
-                    if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
-                    resp.EnsureSuccessStatusCode();
-                    var bioJson = await resp.Content.ReadAsStringAsync();
-                    if (string.IsNullOrEmpty(bioJson) || !bioJson.TrimStart().StartsWith("["))
-                        throw new Exception("Biometrics API: expected JSON array");
-                    var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(bioJson) ?? new();
-                    int merged = 0;
-                    var onServer = new HashSet<string>();
-                    foreach (var row in rows)
-                    {
-                        var pengNum = row.TryGetValue("peng_num", out var pn) ? pn?.ToString() : null;
-                        if (string.IsNullOrEmpty(pengNum)) continue;
-                        var key = ColonyState.BiometricKey(pengNum, nzTodayStr);
-                        // A row flagged deleted is not a record. The server filters these out now;
-                        // this is the second lock on the door, since the cost of missing one is a
-                        // deleted record reappearing on a phone as though it were still true.
-                        if (row.TryGetValue("is_deleted", out var del) && del != null
-                            && (del.ToString() == "1" || string.Equals(del.ToString(), "true", StringComparison.OrdinalIgnoreCase)))
-                            continue;
-                        onServer.Add(key);
-                        // Never clobber a local unsynced edit
-                        if (colonyState.TodayBiometrics.TryGetValue(key, out var local) && local.IsPendingUpload)
-                            continue;
-                        colonyState.TodayBiometrics[key] = BiometricRecordFromRow(row, nzTodayStr);
-                        merged++;
-                    }
-                    // Today's set is the server's to define: a cached record for today that the
-                    // server no longer has was deleted there, so drop it. Anything queued for
-                    // upload stays — it isn't missing from the server, it just hasn't arrived —
-                    // and so does an earlier day's record, which this fetch never asked about.
-                    foreach (var gone in colonyState.TodayBiometrics
-                                 .Where(kv => kv.Value.ObservationDate == nzTodayStr
-                                           && !onServer.Contains(kv.Key) && !kv.Value.IsPendingUpload)
-                                 .Select(kv => kv.Key).ToList())
-                        colonyState.TodayBiometrics.Remove(gone);
-                    result.BiometricCount = merged;
-                    return merged;
-                }, "Biometrics", null, isCancelled);
+                Task birdsTask = Task.CompletedTask;
+                Task bioTask = Task.CompletedTask;
 
                 // Breeding dates: fetch per-box current-clutch predictions from wildwatch
                 // (which now owns the estimator). Non-critical — failures don't fail the sync.

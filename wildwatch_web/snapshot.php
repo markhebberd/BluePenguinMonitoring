@@ -22,6 +22,18 @@ header('Cache-Control: no-cache');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
+/** Who is asking, as the phone needs to see itself: nestcheck keeps the signing acronym and permit
+ *  id it stamps chippings with in step with the server, and this is the only place the caller is
+ *  identified. Name only — no email, no hash. */
+function wwSnapshotMe($observer): array {
+    return [
+        'observer_id' => (int)($observer['observer_id'] ?? $observer['id'] ?? 0),
+        'name' => $observer['observer_name'] ?? $observer['f_name'] ?? null,
+        'chip_acronym' => $observer['chip_acronym'] ?? null,
+        'falcon_id' => $observer['falcon_id'] ?? null,
+    ];
+}
+
 $observer = requireAuth();
 
 $pdo = getDbConnection();
@@ -144,6 +156,7 @@ if ($since) {
     $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
     echo json_encode(array_merge([
         'incremental' => true,
+        'me' => wwSnapshotMe($observer),
         'since' => $ts,
         'snapshot_time' => $snapshotTime,
         'observations' => $obsRows,
@@ -206,6 +219,7 @@ $chipRows = $chips->fetchAll(); stripPengPrefix($chipRows, $viewPrefix);
 $bioRows = $bio->fetchAll(); stripPengPrefix($bioRows, $viewPrefix);
 $json = json_encode(array_merge([
     'incremental' => false,
+    'me' => wwSnapshotMe($observer),
     'snapshot_time' => $fullWm,
     'query_ms' => $elapsed,
     'observations' => $observations,

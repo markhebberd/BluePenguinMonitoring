@@ -93,6 +93,9 @@ function fetchJson(string $path, string $token): array {
     curl_close($ch);
     if ($body === false) { fwrite(STDERR, "contract: $path request failed: $err\n"); exit(1); }
     if ($status !== 200) { fwrite(STDERR, "contract: $path returned $status\n"); exit(1); }
+    // snapshot.php gzips the full payload itself, with Content-Encoding: identity so nothing
+    // unpacks it on the way. Clients have to know; so does this check.
+    if (substr($body, 0, 2) === "\x1f\x8b") $body = gzdecode($body);
     $decoded = json_decode($body, true);
     if ($decoded === null) { fwrite(STDERR, "contract: $path is not JSON: " . substr($body, 0, 200) . "\n"); exit(1); }
     return $decoded;
@@ -126,6 +129,40 @@ try {
     if ($prevCount === 0) echo "contract: note — no previous-visit boxes in this payload to check\n";
 
     foreach (fetchJson("/api/penguins.php", $token) as $i => $p) check("penguins[$i]", $p, $PENGUIN);
+
+    // The incremental feed nestcheck now downloads from (LocalDb / SnapshotSyncService). Checked
+    // on the full payload, which is what a phone with no watermark asks for, and where every table
+    // is populated — an incremental one can legitimately be empty and prove nothing.
+    $snap = fetchJson("/api/snapshot.php?colony_id=$colonyId", $token);
+    $SNAP = [
+        'observations' => ['observation_id' => 'int', 'location_id' => 'int', 'observation_time_utc' => 'string?',
+                           'adults' => 'int', 'eggs' => 'int', 'chicks' => 'int', 'no_scan' => 'int',
+                           'failed_eggs' => 'int?', 'dead_chicks' => 'int?', 'breeding_status' => 'string?',
+                           'gate_status' => 'string?', 'notes' => 'string?', 'observer_id' => 'int?', 'is_deleted' => 'int'],
+        'scans'        => ['scan_id' => 'int', 'observation_id' => 'int', 'pit_id' => 'string?', 'scan_deleted' => 'int?'],
+        'penguins'     => ['peng_num' => 'string', 'chipped_as_adult' => 'int?', 'sex' => 'string?', 'is_dead' => 'int?',
+                           'death_date' => 'string?', 'chick_size_code' => 'string?', 'alert' => 'int?', 'notes' => 'string?'],
+        'chips'        => ['pit_id' => 'string', 'peng_num' => 'string?', 'chip_date' => 'string?', 'is_active' => 'int?', 'chip_box' => 'string?'],
+        'locations'    => ['location_id' => 'int', 'location_name' => 'string?', 'persistent_notes' => 'string?', 'watched' => 'int'],
+        'biometrics'   => ['biometric_id' => 'int', 'peng_num' => 'string?', 'observation_date' => 'string?',
+                           'weight' => 'string?', 'flipper_length' => 'string?', 'observed_sex' => 'string?',
+                           'is_moulting' => 'int?', 'condition_ticks' => 'int?', 'notes' => 'string?', 'is_deleted' => 'int'],
+        'day_notes'    => ['note_date' => 'string', 'note' => 'string?', 'observer_id' => 'int?', 'scribe_id' => 'int?'],
+        // chip_acronym and falcon_id decide who may be named as a chipper on the phone; without
+        // them the picker is empty, which is a silent failure rather than a loud one.
+        'observers'    => ['observer_id' => 'int', 'observer_name' => 'string?', 'surname' => 'string?',
+                           'chip_acronym' => 'string?', 'falcon_id' => 'string?'],
+    ];
+    foreach ($SNAP as $group => $contract) {
+        $rows = $snap[$group] ?? null;
+        if (!is_array($rows) || !$rows) { $breaches[] = "snapshot.$group: missing or empty"; continue; }
+        // Braces, or "$group[$i]" reads as an offset INTO $group rather than a name with an index.
+        foreach ($rows as $i => $row) check("snapshot.{$group}[{$i}]", $row, $contract);
+    }
+    check('snapshot.me', $snap['me'] ?? [], ['observer_id' => 'int', 'name' => 'string?', 'chip_acronym' => 'string?', 'falcon_id' => 'string?']);
+    // No watermark means the phone can't record where it got to, so it would either replay
+    // everything forever or lose whatever arrived in between.
+    if (empty($snap['snapshot_time'])) $breaches[] = 'snapshot.snapshot_time: missing';
 } finally {
     wwSessionDelete($pdo, $token);
 }

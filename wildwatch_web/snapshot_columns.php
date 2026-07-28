@@ -46,5 +46,7 @@ function getObservers($pdo) {
     // people pickers, while still resolving their id if an old row happens to reference one.
     // Soft-deleted users are returned FLAGGED, not omitted: the client hides them from pickers
     // but still needs their name for the history that points at them.
-    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active, role, (deleted_at IS NOT NULL) AS deleted FROM users ORDER BY f_name, surname")->fetchAll()];
+    // chip_acronym and falcon_id ride along for nestcheck: it picks who chipped a bird from this
+    // list, and only someone with a permit id may be picked, so the flag has to travel with the name.
+    return ['observers' => $pdo->query("SELECT id AS observer_id, f_name AS observer_name, surname, active, role, chip_acronym, falcon_id, (deleted_at IS NOT NULL) AS deleted FROM users ORDER BY f_name, surname")->fetchAll()];
 }

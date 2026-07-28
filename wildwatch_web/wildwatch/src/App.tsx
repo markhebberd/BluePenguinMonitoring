@@ -5207,13 +5207,114 @@ function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: num
         body: JSON.stringify(body),
       });
       const json = await r.json();
-      if (json.error) setError(json.error); else setResult(json);
+      if (json.error) { setError(json.error); return; }
+      const extraResult = await sendExtras();
+      setResult({ ...json, ...extraResult });
       triggerSync();
     } catch (e: any) { setError(e?.message || 'Import failed'); }
     finally { setBusy(false); }
   };
 
+  const list = (k: string) => (Array.isArray(body?.[k]) ? body[k] : []);
   const obsCount = Array.isArray(body?.observations) ? body.observations.length : 0;
+  // Only what the phone says hasn't reached wildwatch — the file carries everything it holds,
+  // and re-importing the rest would duplicate records the server already has.
+  const unsentBio = list('biometrics').filter((b: any) => b.unsent !== false);
+  const extras = [
+    [unsentBio.length, 'bird detail'], [list('queued_birds').length, 'new bird'],
+    [list('day_notes').length, 'day note'], [list('box_notes').length, 'box note'],
+  ].filter(([n]) => (n as number) > 0).map(([n, label]) => `${n} ${label}${n === 1 ? '' : 's'}`).join(', ');
+
+  /**
+   * The sections sync.php's upload doesn't know about, applied through the same audited crud
+   * endpoints the equivalent screens use — a queued bird takes the add-penguin path (penguin,
+   * chip, chip-day biometric), a day note takes the day-note endpoint, and so on. One at a
+   * time, collecting failures rather than stopping: a bad row shouldn't strand the rest, and
+   * what the phone is holding is the least recoverable data there is.
+   */
+  const sendExtras = async () => {
+    const done: string[] = [], failed: string[] = [];
+    const count = (n: number, what: string) => { if (n) done.push(`${n} ${what}${n === 1 ? '' : 's'}`); };
+
+    let birds = 0;
+    for (const q of list('queued_birds')) {
+      try {
+        let pengNum = q.rechip_peng_num || null;
+        if (!pengNum) {
+          const r = await createRecord(token, 'penguins', {
+            chipped_as_adult: Number(q.chipped_as_adult) ? 1 : 0,
+            chick_size_code: q.chick_size_code || null,
+          }, 'Imported from a nestcheck file');
+          if (!r?.success) throw new Error(r?.error || 'penguin create failed');
+          pengNum = r.peng_num;
+        }
+        const loc = queryAllLocations().find((l: any) => String(l.location_name) === String(q.chip_box));
+        const chip = await createRecord(token, 'penguin_chips', {
+          pit_id: q.pit_id, peng_num: pengNum, chip_date: q.chip_date, chip_box: q.chip_box,
+          location_id: loc?.location_id ?? null, chip_by: q.chipper || null,
+          chipper_id: q.chipper_id || null, assistant_id: q.assistant_id || null, is_active: 1,
+        }, 'Imported from a nestcheck file');
+        if (!chip?.success) throw new Error(chip?.error || 'chip create failed');
+        if (q.weight || q.flipper_length || q.observed_sex || q.notes) {
+          await createRecord(token, 'penguin_biometric_data', {
+            peng_num: pengNum, observation_date: q.chip_date,
+            weight: q.weight ?? null, flipper_length: q.flipper_length ?? null,
+            observed_sex: q.observed_sex || null, notes: q.notes || null,
+          });
+        }
+        birds++;
+      } catch (e: any) { failed.push(`bird ${q.pit_id}: ${e?.message || e}`); }
+    }
+    count(birds, 'new bird');
+
+    let bios = 0;
+    for (const b of unsentBio) {
+      try {
+        await createRecord(token, 'penguin_biometric_data', {
+          peng_num: b.peng_num, observation_date: b.observation_date,
+          weight: b.weight ?? null, flipper_length: b.flipper_length ?? null,
+          observed_sex: b.observed_sex || null, notes: b.notes || null,
+          is_moulting: b.is_moulting ? 1 : 0, condition_ticks: b.condition_ticks ? 1 : 0,
+        });
+        bios++;
+      } catch (e: any) { failed.push(`biometric ${b.peng_num}: ${e?.message || e}`); }
+    }
+    count(bios, 'bird detail');
+
+    let notes = 0, keptNotes = 0;
+    for (const n of list('day_notes')) {
+      try {
+        // A note already in wildwatch may have been corrected since; the phone's copy fills a
+        // blank day rather than overwriting, the same rule its own sync follows.
+        if (n.note && getDayNote(n.nz_date)) { keptNotes++; continue; }
+        await saveDayNote(token, n.nz_date, {
+          note: n.note || '', observer_id: n.observer_id || null, scribe_id: n.scribe_id || null,
+        });
+        notes++;
+      } catch (e: any) { failed.push(`day note ${n.nz_date}: ${e?.message || e}`); }
+    }
+    count(notes, 'day note');
+    if (keptNotes) done.push(`${keptNotes} day note${keptNotes === 1 ? '' : 's'} left as they are`);
+
+    let boxes = 0;
+    for (const bn of list('box_notes')) {
+      try {
+        const loc = queryAllLocations().find((l: any) =>
+          (bn.location_id && l.location_id === bn.location_id) || String(l.location_name) === String(bn.box_name));
+        if (!loc) throw new Error('unknown box');
+        const fields: Record<string, any> = {};
+        if (bn.persistent_notes) fields.persistent_notes = bn.persistent_notes;
+        if (bn.watched_unsent) fields.watched = bn.watched ? 1 : 0;
+        if (Object.keys(fields).length === 0) continue;
+        await updateRecord(token, 'observation_locations', loc.location_id, fields, 'Imported from a nestcheck file');
+        boxes++;
+      } catch (e: any) { failed.push(`box ${bn.box_name}: ${e?.message || e}`); }
+    }
+    count(boxes, 'box note');
+
+    triggerSync();
+    return { done, failed };
+  };
   return (
     <div className="admin-section">
       <h3>Import nestcheck day file</h3>
@@ -5228,14 +5329,23 @@ function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: num
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
         <input type="file" accept=".json,application/json" onChange={e => read(e.target.files?.[0])} />
         {body && <span className="muted" style={{ fontSize: 12 }}>
-          {file}: {obsCount} observation{obsCount === 1 ? '' : 's'}{body.daily_label ? ` · "${body.daily_label}"` : ''}
+          {file}: {obsCount} observation{obsCount === 1 ? '' : 's'}{extras ? `, ${extras}` : ''}
+          {body.daily_label ? ` · "${body.daily_label}"` : ''}
+          {body.app_version ? ` · nestcheck ${body.app_version}` : ''}
         </span>}
         {body && <button className="edit-btn" disabled={busy} onClick={() => send('upload')}>{busy ? 'Importing…' : 'Import'}</button>}
       </div>
       {error && <p style={{ color: '#F44336', fontSize: 13 }}>{error}</p>}
       {result && (
         <div style={{ fontSize: 13 }}>
-          <p style={{ color: '#4CAF50', margin: '4px 0' }}>{(result.created || []).length} observation(s) written.</p>
+          <p style={{ color: '#4CAF50', margin: '4px 0' }}>
+            {(result.created || []).length} observation(s) written{(result.done || []).length > 0 ? `, plus ${result.done.join(', ')}` : ''}.
+          </p>
+          {(result.failed || []).length > 0 && (
+            <details open><summary style={{ color: '#F44336' }}>{result.failed.length} could not be applied</summary>
+              <ul className="muted">{result.failed.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>
+            </details>
+          )}
           {(result.errors || []).length > 0 && (
             <details open><summary style={{ color: '#e65100' }}>{result.errors.length} skipped</summary>
               <ul className="muted">{result.errors.map((x: any, i: number) => <li key={i}>{typeof x === 'string' ? x : JSON.stringify(x)}</li>)}</ul>
