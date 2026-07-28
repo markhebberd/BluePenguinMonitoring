@@ -1835,13 +1835,28 @@ export function computeBoxInfo(): Record<string, { s: string; a: number; e: numb
   const cache = mem;
   if (!cache) return {};
   const out: Record<string, { s: string; a: number; e: number; c: number; m?: number }> = {};
-  // Observations carrying a bird recorded as moulting. A moult is a state of the box's current
-  // occupant rather than of the nest, so it colours the tile only while it is the latest thing
-  // known — the next observation without one clears it.
-  const moulting = new Set<number>();
+  // Moulting birds, indexed both ways a biometric can be tied to a visit: nestcheck records
+  // one against the observation, while wildwatch's per-bird form knows only the penguin and
+  // the date. Matching on either is what makes the tile work whoever entered it.
+  const moultObs = new Set<number>();
+  const moultBirdDay = new Set<string>();
   for (const b of cache.biometrics) {
-    if (!b.is_deleted && Number(b.is_moulting) === 1 && b.observation_id != null) moulting.add(b.observation_id);
+    if (b.is_deleted || Number(b.is_moulting) !== 1) continue;
+    if (b.observation_id != null) moultObs.add(b.observation_id);
+    const day = String(b.observation_date || '').slice(0, 10);
+    if (b.peng_num && day) moultBirdDay.add(`${b.peng_num}|${day}`);
   }
+  // A moult is a state of the box's current occupant rather than of the nest, so it colours the
+  // tile only while it is the latest thing known — the next observation without one clears it.
+  const isMoulting = (o: any) => {
+    if (moultObs.has(o.observation_id)) return true;
+    if (moultBirdDay.size === 0) return false;
+    const day = utcToNzDate(o.observation_time_utc);
+    return (cache.scansByObs.get(o.observation_id) || []).some((sc: any) => {
+      const chip = cache.chipByPit.get(sc.pit_id);
+      return !!chip && moultBirdDay.has(`${chip.peng_num}|${day}`);
+    });
+  };
   for (const loc of cache.locations) {
     const obs = (cache.obsByLocation.get(loc.location_id) || [])
       .filter((o: any) => !o.is_deleted)
@@ -1853,7 +1868,7 @@ export function computeBoxInfo(): Record<string, { s: string; a: number; e: numb
       a: latest.adults || 0,
       e: latest.eggs || 0,
       c: latest.chicks || 0,
-      m: moulting.has(latest.observation_id) ? 1 : 0,
+      m: isMoulting(latest) ? 1 : 0,
     };
   }
   return out;
