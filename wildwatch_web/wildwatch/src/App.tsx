@@ -11078,6 +11078,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    // "/" jumps to the unified search. Whichever one is on screen: the toolbars and the mobile
+    // menu each mount their own, and the offscreen ones have no offsetParent.
+    if (e.key === '/') {
+      const box = Array.from(document.querySelectorAll<HTMLInputElement>('.uni-search-input'))
+        .find(i => i.offsetParent !== null);
+      if (box) { e.preventDefault(); box.focus(); box.select(); }
+      return;
+    }
     // Day view: left/right step to the previous/next date that has an observation.
     if (selectedDay) {
       const ds = [...(stats?.observation_dates || [])].sort();
