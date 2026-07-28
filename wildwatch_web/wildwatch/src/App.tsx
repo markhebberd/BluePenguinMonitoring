@@ -3648,24 +3648,32 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
       />
       {open && count > 0 && (
         <div className="uni-results">
-          {local.boxesExact.length > 0 && boxRow(local.boxesExact)}
-          {local.pengs.length > 0 && (
+          {local.boxesExact.length > 0 && (<>
+            {label('Box')}
+            {boxRow(local.boxesExact)}
+          </>)}
+          {local.pengs.length > 0 && (<>
+            {label('Penguin')}
             <div className="uni-row uni-chips">
               {local.pengs.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num))} />)}
             </div>
-          )}
+          </>)}
           {local.pits.length > 0 && (<>
             {label('PIT ID')}
             <div className="uni-row uni-chips">
               {local.pits.map(p => <PenguinMini key={p.peng_num} scan={p} onClick={go(() => onBirdClick(p.peng_num || p.pit_id))} />)}
             </div>
           </>)}
-          {local.boxes.length > 0 && boxRow(local.boxes)}
-          {dateHits.length > 0 && (
+          {local.boxes.length > 0 && (<>
+            {label('Box starts with')}
+            {boxRow(local.boxes)}
+          </>)}
+          {dateHits.length > 0 && (<>
+            {label('Date')}
             <div className="uni-row uni-chips">
               {dateHits.map(d => <DateLink key={d} date={d} onDayClick={go(() => onDayClick(d))} />)}
             </div>
-          )}
+          </>)}
           {local.pengNotes.length > 0 && (<>
             {label('Penguin notes')}
             {local.pengNotes.map(({ peng, note }) => (
