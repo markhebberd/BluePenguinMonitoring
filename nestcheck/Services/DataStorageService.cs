@@ -152,6 +152,9 @@ namespace PenguinMonitor.Services
             public int BiometricCount { get; set; }
             public int BiometricsUploaded { get; set; }
             public int BiometricUploadErrors { get; set; }
+            /// <summary>Why each biometric upload failed, in the server's words. A failed biometric
+            /// stays queued, so the sync is not a clean one and must not report itself as such.</summary>
+            public List<string> BiometricErrors { get; set; } = new List<string>();
             public string? Error { get; set; }
             /// <summary>Non-fatal notes from the offline-chip flush (e.g. a bird the server
             /// rejected). Kept out of Error so the sync still counts as successful — a queued-chip
@@ -215,6 +218,7 @@ namespace PenguinMonitor.Services
             var resp = await _httpClient.SendAsync(req);
             if (!resp.IsSuccessStatusCode) return 0;
             var json = await resp.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{")) return 0;
             var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
             if (serverState?.boxes == null) return 0;
 
@@ -349,6 +353,10 @@ namespace PenguinMonitor.Services
                     }
 
                     var uploadJson = await uploadResponse.Content.ReadAsStringAsync();
+                    // A gateway error page or an empty body here used to surface as a raw JSON
+                    // parser message with nothing to act on; name the responder instead.
+                    if (string.IsNullOrWhiteSpace(uploadJson) || !uploadJson.TrimStart().StartsWith("{"))
+                        throw new Exception($"Upload: {ServerMessage(uploadJson, (int)uploadResponse.StatusCode)}");
                     var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(uploadJson);
 
                     if (uploadResult != null && uploadResult.ContainsKey("created"))
@@ -406,6 +414,8 @@ namespace PenguinMonitor.Services
                     if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) { authFailed = true; return 0; }
                     resp.EnsureSuccessStatusCode();
                     var json = await resp.Content.ReadAsStringAsync();
+                    if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{"))
+                        throw new Exception(ServerMessage(json, (int)resp.StatusCode));
                     var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
 
                     colonyState.PreviousBoxes.Clear();
@@ -671,6 +681,9 @@ namespace PenguinMonitor.Services
 
             var response = await _httpClient.SendAsync(request);
             var json = await response.Content.ReadAsStringAsync();
+            // Nothing usable came back (gateway page, empty body): report none uploaded rather than
+            // throwing — this runs inside a dialog flow whose continuation must still fire.
+            if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{")) return 0;
             var uploadResult = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
 
             int uploaded = 0;
@@ -806,13 +819,33 @@ namespace PenguinMonitor.Services
                 Weight = S("weight"),
                 FlipperLength = S("flipper_length"),
                 ObservedSex = S("observed_sex"),
-                ConditionMoulting = B("condition_moulting"),
+                // Wildwatch's column is is_moulting — not the condition_* family the other flags use.
+                ConditionMoulting = B("is_moulting"),
                 ConditionTicks = B("condition_ticks"),
                 ConditionDead = B("condition_dead"),
                 Notes = S("notes"),
                 BiometricId = I("biometric_id"),
                 IsPendingUpload = false,
             };
+        }
+
+        /// <summary>The server's own words for a failed request: its "error" field where the body is
+        /// JSON, otherwise the status and a short snippet of whatever came back instead.</summary>
+        private static string ServerMessage(string? body, int statusCode)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(body) && body.TrimStart().StartsWith("{"))
+                {
+                    var obj = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
+                    if (obj != null && obj.TryGetValue("error", out var e) && e != null)
+                        return e.ToString() ?? $"HTTP {statusCode}";
+                }
+            }
+            catch { }
+            var snippet = (body ?? "").Trim();
+            if (snippet.Length > 120) snippet = snippet.Substring(0, 120) + "…";
+            return string.IsNullOrEmpty(snippet) ? $"HTTP {statusCode}" : $"HTTP {statusCode}: {snippet}";
         }
 
         private static int? ExtractBiometricId(string createResponseJson)
@@ -843,7 +876,10 @@ namespace PenguinMonitor.Services
                     if (!string.IsNullOrEmpty(bio.Weight)) fields["weight"] = bio.Weight;
                     if (!string.IsNullOrEmpty(bio.FlipperLength)) fields["flipper_length"] = bio.FlipperLength;
                     if (!string.IsNullOrEmpty(bio.ObservedSex)) fields["observed_sex"] = bio.ObservedSex;
-                    if (bio.ConditionMoulting) fields["condition_moulting"] = true;
+                    // The server's column is is_moulting; a payload naming it condition_moulting was
+                    // rejected outright, so every moulting bird stayed queued. Always sent (unlike
+                    // the flags below) so unticking it clears the flag on the next upload.
+                    fields["is_moulting"] = bio.ConditionMoulting;
                     if (bio.ConditionTicks) fields["condition_ticks"] = true;
                     if (bio.ConditionDead) fields["condition_dead"] = true;
                     if (!string.IsNullOrEmpty(bio.Notes)) fields["notes"] = bio.Notes;
@@ -855,7 +891,14 @@ namespace PenguinMonitor.Services
                     req.Headers.Add("Authorization", $"Bearer {token}");
                     req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
                     var resp = await _httpClient.SendAsync(req);
-                    if (!resp.IsSuccessStatusCode) { result.BiometricUploadErrors++; continue; }
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        // Keep what the server said: a rejected field silently re-queues the bird
+                        // every sync, and without the reason there's nothing to go on in the field.
+                        result.BiometricUploadErrors++;
+                        result.BiometricErrors.Add($"#{bio.PengNum}: {ServerMessage(await resp.Content.ReadAsStringAsync(), (int)resp.StatusCode)}");
+                        continue;
+                    }
 
                     // Capture the new id on create so a later edit updates instead of duplicating
                     if (!bio.BiometricId.HasValue)
@@ -863,7 +906,11 @@ namespace PenguinMonitor.Services
                     bio.IsPendingUpload = false;
                     result.BiometricsUploaded++;
                 }
-                catch { result.BiometricUploadErrors++; }
+                catch (Exception ex)
+                {
+                    result.BiometricUploadErrors++;
+                    result.BiometricErrors.Add($"#{bio.PengNum}: {ex.Message}");
+                }
             }
         }
 

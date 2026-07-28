@@ -664,10 +664,30 @@ function stripRetiredColumns($table, $input) {
     return $input;
 }
 
+/**
+ * Accept a field under the name an older client knows it by. Nestcheck ships the moulting flag
+ * as condition_moulting (the name its other condition flags use); the column here has always
+ * been is_moulting, so those writes failed outright and the bird stayed queued on the phone.
+ * Aliasing it server-side means installed apps recover on their next sync, without a release.
+ */
+function renameLegacyColumns($table, $input) {
+    $aliases = [
+        'penguin_biometric_data' => ['condition_moulting' => 'is_moulting'],
+    ];
+    if (!isset($aliases[$table]) || !is_array($input)) return $input;
+    foreach ($aliases[$table] as $old => $new) {
+        if (array_key_exists($old, $input)) {
+            if (!array_key_exists($new, $input)) $input[$new] = $input[$old];
+            unset($input[$old]);
+        }
+    }
+    return $input;
+}
+
 function handleCreate($pdo, $table, $pk, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
-    $input = stripRetiredColumns($table, $input);
+    $input = renameLegacyColumns($table, stripRetiredColumns($table, $input));
     // Must come off before $input is used as the column list, or _reason becomes a column.
     $reason = $input['_reason'] ?? null;
     unset($input['_reason']);
@@ -742,7 +762,7 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
     }
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
-    $input = stripRetiredColumns($table, $input);
+    $input = renameLegacyColumns($table, stripRetiredColumns($table, $input));
 
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $old = $stmt->fetch();

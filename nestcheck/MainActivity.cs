@@ -1469,7 +1469,10 @@ namespace PenguinMonitor
                         }
                         else
                         {
-                            bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null || result.UploadErrors > 0;
+                            // A biometric that didn't upload is still queued — that's a partial sync,
+                            // not a clean one, and saying "Synced" over it loses the bird's record.
+                            bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null
+                                || result.UploadErrors > 0 || result.BiometricUploadErrors > 0;
                             // Chip warnings aren't failures — the sync worked, but a queued bird
                             // needs a human look (rejected, or parked on a different number).
                             bool hasChipWarnings = result.ChipWarnings?.Count > 0;
@@ -1480,6 +1483,11 @@ namespace PenguinMonitor
                                 if (!string.IsNullOrEmpty(result.Error)) details.Add($"Error: {result.Error}");
                                 if (result.TagSyncResult?.Error != null) details.Add($"Tags: {result.TagSyncResult.Error}");
                                 if (result.UploadErrors > 0) details.Add($"Upload errors: {result.UploadErrors}");
+                                if (result.BiometricUploadErrors > 0)
+                                {
+                                    details.Add($"Bird details not uploaded: {result.BiometricUploadErrors}");
+                                    details.AddRange(result.BiometricErrors.Take(3));
+                                }
                                 if (hasChipWarnings) details.AddRange(result.ChipWarnings!);
                                 syncDialog.SetMessage(string.Join("\n", details));
                             }
@@ -6371,8 +6379,14 @@ namespace PenguinMonitor
                 {
                     try
                     {
-                        await _dataStorageService.UploadPendingBiometricsOnly(_colonyState, _appSettings);
+                        var flush = await _dataStorageService.UploadPendingBiometricsOnly(_colonyState, _appSettings);
                         DataStorageService.SaveColonyState(this, _colonyState);
+                        // Say so if the server refused it — the record is still queued, and the
+                        // "will sync" toast above would otherwise be the last word on it.
+                        if (flush.BiometricUploadErrors > 0 && !flush.AuthFailed)
+                            RunOnUiThread(() => Toast.MakeText(this,
+                                $"Not saved to wildwatch — {flush.BiometricErrors.FirstOrDefault() ?? "upload rejected"}",
+                                ToastLength.Long)?.Show());
                     }
                     catch { }
                 });
