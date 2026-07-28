@@ -38,7 +38,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 5; // v5: observers store
-const CACHE_VERSION = 21; // Bump to force all clients to full re-sync (v21: penguins carry the alert flag)
+const CACHE_VERSION = 22; // Bump to force all clients to full re-sync (v22: repair penguin rows an incremental sync stripped the alert flag from)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics',
   'verifications', 'day_notes', 'observers', 'meta'] as const;
 // Stores from earlier DB versions that no longer exist; dropped on upgrade.
