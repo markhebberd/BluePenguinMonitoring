@@ -1984,12 +1984,19 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   };
   const cancelEdit = () => { setEditing(false); setDraft(null); setDraftScans([]); setBirdSearch(''); };
 
-  const filteredAdd = birdSearch.length > 0 && allPenguins
-    ? allPenguins.filter((p: any) =>
-        (p.peng_num === birdSearch || (p.pit_id && p.pit_id.includes(birdSearch)))
-        && !draftScans.some(s => s.pit_id === p.pit_id)
-      ).slice(0, 8)
-    : [];
+  // The peng# you typed comes first, then chip numbers containing it — "12" is #12 (or PT12),
+  // not the four PIT IDs with 12 somewhere in them. Matching ignores the colony prefix, so it
+  // works whether the number is held prefixed or bare.
+  const filteredAdd = (() => {
+    const q = birdSearch.trim().toUpperCase();
+    if (!q || !allPenguins) return [];
+    const bare = (n: any) => String(n ?? '').toUpperCase().replace(/^[A-Z]+/, '');
+    const free = (p: any) => !draftScans.some(s => s.pit_id === p.pit_id);
+    const isNum = (p: any) => p.peng_num && (String(p.peng_num).toUpperCase() === q || bare(p.peng_num) === bare(q));
+    const byNum = allPenguins.filter((p: any) => isNum(p) && free(p));
+    const byPit = allPenguins.filter((p: any) => !isNum(p) && p.pit_id && p.pit_id.toUpperCase().includes(q) && free(p));
+    return [...byNum, ...byPit].slice(0, 8);
+  })();
 
   // Adding/removing a penguin bumps the matching count in the draft (chick if chipped as
   // a chick < 3 months before this obs, else adult); it's all committed together on Done.
