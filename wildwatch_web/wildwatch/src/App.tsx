@@ -3791,7 +3791,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
         type="text"
         placeholder="Search"
         value={search}
-        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+        onChange={e => { setSearch(e.target.value.replace(/^\/+/, '')); setOpen(true); }}
         onFocus={e => { setOpen(true); scrollToTop(e.currentTarget); }}
         onBlur={() => setTimeout(() => setOpen(false), 300)}
         onKeyDown={handleKey}
@@ -3835,10 +3835,11 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
           </>)}
           {local.pengNotes.length > 0 && (<>
             {label('Penguin notes')}
-            {local.pengNotes.map(({ peng, note }) => (
+            {local.pengNotes.map(({ peng, note, from }) => (
               <div key={peng.peng_num} data-uni={`pn:${peng.peng_num}`} className={cls(`pn:${peng.peng_num}`, 'uni-row uni-noted')}>
                 <PenguinMini scan={peng} onClick={go(() => onBirdClick(peng.peng_num))} />
                 <span className="uni-note">{note}</span>
+                {from && <span className="uni-note-src">{from}</span>}
               </div>
             ))}
           </>)}
@@ -11332,17 +11333,24 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }, [boxTags]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
     const t = e.target as HTMLElement | null;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-    // "/" jumps to the unified search. Whichever one is on screen: the toolbars and the mobile
-    // menu each mount their own, and the offscreen ones have no offsetParent.
+    const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    // "/" jumps to the unified search — including when the search already has focus, where it
+    // is swallowed rather than typed, so leaning on the key never leaves slashes to delete.
+    // getClientRects, not offsetParent: the toolbars and the mobile menu each mount a search,
+    // and inside the day overlay (position:fixed) every one of them has a null offsetParent.
     if (e.key === '/') {
-      const box = Array.from(document.querySelectorAll<HTMLInputElement>('.uni-search-input'))
-        .find(i => i.offsetParent !== null);
-      if (box) { e.preventDefault(); box.focus(); box.select(); }
-      return;
+      const inSearch = !!t?.classList?.contains('uni-search-input');
+      if (!typing || inSearch) {
+        const box = Array.from(document.querySelectorAll<HTMLInputElement>('.uni-search-input'))
+          .find(i => i.getClientRects().length > 0);
+        e.preventDefault();
+        if (box) { box.focus(); box.select(); }
+        return;
+      }
     }
+    // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
+    if (typing) return;
     // Day view: left/right step to the previous/next date that has an observation.
     if (selectedDay) {
       const ds = [...(stats?.observation_dates || [])].sort();

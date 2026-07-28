@@ -123,6 +123,8 @@ header h1:hover { opacity:.8; }
 /* A note is why this row matched, so it sits beside the thing it belongs to and takes the rest. */
 .uni-noted { display:flex; align-items:center; gap:8px; }
 .uni-note { font-size:11px; color:#666; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Where a note match came from, when it isn't the bird's own note. */
+.uni-note-src { font-size:10px; color:#98a4b0; white-space:nowrap; flex:none; }
 /* Box pill left of its card, level with the card's middle. One grid over the list with each
    row a subgrid of it, so the box column is as wide as the widest box on screen ("Box 7" vs
    "Box 100") and every card starts at the same tab stop. The plain two-column declaration is

@@ -1879,7 +1879,7 @@ export interface LocalSearchResults {
   boxes: string[];           // the box you named, exactly — a partial box name is noise
   pengs: any[];              // peng# hit — PenguinMini-shaped
   pits: any[];               // PIT-ID hit
-  pengNotes: { peng: any; note: string }[];
+  pengNotes: { peng: any; note: string; from?: string }[];
   obsNotes: any[];           // ObsCard-shaped, plus `box`
   dateNotes: { date: string; note: string }[];
 }
@@ -1921,13 +1921,17 @@ export function searchLocal(query: string, limit = 8): LocalSearchResults {
     };
   };
 
-  const pengs: any[] = [], pits: any[] = [], pengNotes: { peng: any; note: string }[] = [];
+  const pengs: any[] = [], pits: any[] = [], pengNotes: { peng: any; note: string; from?: string }[] = [];
   for (const p of c.penguins) {
     // A bird already shown as a peng# hit isn't repeated further down the list.
     if (terms.some(t => tail(p.peng_num) === t || String(p.peng_num).toLowerCase() === t)) { pengs.push(mini(p)); continue; }
     const chips = c.chipsByPeng.get(p.peng_num) || [];
     if (chips.some((ch: any) => hits(ch.pit_id))) { pits.push(mini(p)); continue; }
-    if (hits(p.notes)) pengNotes.push({ peng: mini(p), note: p.notes });
+    if (hits(p.notes)) { pengNotes.push({ peng: mini(p), note: p.notes }); continue; }
+    // A measurement's note is about the bird as much as the bird's own note is — "heavy tick
+    // burden" is written on the biometric, and searching for it should still find the penguin.
+    const bio = (c.bioByPeng.get(p.peng_num) || []).find((b: any) => !b.is_deleted && hits(b.notes));
+    if (bio) pengNotes.push({ peng: mini(p), note: bio.notes, from: `biometric ${String(bio.observation_date || '').slice(0, 10)}` });
   }
 
   const obsNotes = c.observations
