@@ -3536,7 +3536,9 @@ namespace PenguinMonitor
                 var p = new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
                 btn.LayoutParameters = p;
             }
-            _syncButton.SetMinimumWidth((int)(100 * density));
+            // No width floor: the label is always the four letters "Sync", and the 100dp minimum
+            // padded it out far enough to wrap the action row onto a second line.
+            _syncButton.SetMinimumWidth(0);
             actionRow.AddView(editBoxTagsButton);
             actionRow.AddView(_syncButton);
             actionRow.AddView(exportJsonButton);
