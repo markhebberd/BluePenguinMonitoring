@@ -381,9 +381,11 @@ h3.collapsible:hover { color:#1a5276; }
 
 /* Reports */
 .docs-page { max-width:1080px; margin:0 auto; padding:24px 20px 44px; }
-.docs-title { font-size:22px; color:#1a5276; font-weight:700; margin:0 0 16px; }
+.docs-title { font-size:26px; color:#1a5276; font-weight:700; margin:0 0 16px; }
 .doc-section { background:#fff; border:1px solid #e8ecef; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
-.doc-section h2 { font-size:16px; color:#1a5276; font-weight:600; margin:0 0 8px; }
+/* Above the 17px h3 the algorithm doc uses inside this section, so a section title never
+   reads as smaller than the headings it contains. */
+.doc-section h2 { font-size:20px; color:#1a5276; font-weight:700; margin:0 0 10px; }
 .doc-keys { border-collapse:collapse; margin:10px 0 12px; }
 .doc-keys td { padding:3px 14px 3px 0; font-size:13px; vertical-align:top; }
 .doc-keys kbd { display:inline-block; min-width:44px; text-align:center; font-family:monospace; font-size:12px;
