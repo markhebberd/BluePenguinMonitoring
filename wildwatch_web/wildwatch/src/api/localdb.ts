@@ -1826,8 +1826,6 @@ export interface LocalSearchResults {
   pengNotes: { peng: any; note: string }[];
   obsNotes: any[];           // ObsCard-shaped, plus `box`
   dateNotes: { date: string; note: string }[];
-  /** Hits past the cap, per group — a truncated list must say so rather than look complete. */
-  more: { pengs: number; pits: number; pengNotes: number; obsNotes: number; dateNotes: number };
 }
 
 /**
@@ -1838,9 +1836,8 @@ export interface LocalSearchResults {
  * Boxes match by exact name only. Matching a partial name buries the real answer — "832" is a
  * penguin, not an invitation to list every box starting with 8.
  */
-export function searchLocal(query: string, limit = 30, obsLimit = 12): LocalSearchResults {
-  const empty: LocalSearchResults = { boxes: [], pengs: [], pits: [], pengNotes: [], obsNotes: [], dateNotes: [],
-    more: { pengs: 0, pits: 0, pengNotes: 0, obsNotes: 0, dateNotes: 0 } };
+export function searchLocal(query: string, limit = 8): LocalSearchResults {
+  const empty: LocalSearchResults = { boxes: [], pengs: [], pits: [], pengNotes: [], obsNotes: [], dateNotes: [] };
   const c = mem;
   const terms = parseSearchTerms(query).map(t => t.toLowerCase()).filter(Boolean);
   if (!c || terms.length === 0) return empty;
@@ -1875,35 +1872,27 @@ export function searchLocal(query: string, limit = 30, obsLimit = 12): LocalSear
     if (hits(p.notes)) pengNotes.push({ peng: mini(p), note: p.notes });
   }
 
-  const obsHits = c.observations
+  const obsNotes = c.observations
     .filter((o: any) => !o.is_deleted && hits(o.notes))
-    .sort((a: any, b: any) => String(b.observation_time_utc).localeCompare(String(a.observation_time_utc)));
-  // Each of these is a whole rendered card, so they get a tighter cap than the one-line kinds.
-  const obsNotes = obsHits.slice(0, obsLimit).map((o: any) => ({
-    ...o,
-    box: c.locById.get(o.location_id)?.location_name || '?',
-    scans: (c.scansByObs.get(o.observation_id) || []).map((s: any) => enrichScan(s, c)),
-  }));
+    .sort((a: any, b: any) => String(b.observation_time_utc).localeCompare(String(a.observation_time_utc)))
+    .slice(0, limit)
+    .map((o: any) => ({
+      ...o,
+      box: c.locById.get(o.location_id)?.location_name || '?',
+      scans: (c.scansByObs.get(o.observation_id) || []).map((s: any) => enrichScan(s, c)),
+    }));
 
   const dateNotes: { date: string; note: string }[] = [];
   for (const [date, note] of c.noteByDate) if (hits(note)) dateNotes.push({ date, note });
   dateNotes.sort((a, b) => b.date.localeCompare(a.date));
 
-  const over = (n: number, cap: number) => Math.max(0, n - cap);
   return {
-    boxes: boxes.sort(byNum),   // an exact box name can only match a handful, so never capped
+    boxes: boxes.sort(byNum),
     pengs: pengs.slice(0, limit),
     pits: pits.slice(0, limit),
     pengNotes: pengNotes.slice(0, limit),
     obsNotes,
     dateNotes: dateNotes.slice(0, limit),
-    more: {
-      pengs: over(pengs.length, limit),
-      pits: over(pits.length, limit),
-      pengNotes: over(pengNotes.length, limit),
-      obsNotes: over(obsHits.length, obsLimit),
-      dateNotes: over(dateNotes.length, limit),
-    },
   };
 }
 

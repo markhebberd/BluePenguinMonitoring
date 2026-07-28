@@ -3594,7 +3594,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   const { registeredFmDates } = useContext(DateTooltipCtx);
   const dbVersion = useDbVersion();
   const local = useMemo(() => searchLocal(search), [search, dbVersion]);
-  const dateHits = useMemo(() => matchDateQuery(dates, search, registeredFmDates), [dates, search, registeredFmDates]);
+  const dateHits = useMemo(() => matchDateQuery(dates, search, registeredFmDates).slice(0, 8), [dates, search, registeredFmDates]);
 
   // Every result clears the box on the way out, so the dropdown never sits over the thing it
   // just navigated to.
@@ -3659,8 +3659,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
   };
 
   const label = (text: string) => <div className="uni-label">{text}</div>;
-  // A capped group must say it was capped, or eight of forty reads as all of them.
-  const more = (n: number) => n > 0 ? <div className="uni-more">+{n} more</div> : null;
 
   return (
     <div className="uni-search">
@@ -3689,7 +3687,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
                 </span>
               ))}
             </div>
-            {more(local.more.pengs)}
           </>)}
           {dateHits.length > 0 && (<>
             {label('Date')}
@@ -3710,7 +3707,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
                 </span>
               ))}
             </div>
-            {more(local.more.pits)}
           </>)}
           {local.pengNotes.length > 0 && (<>
             {label('Penguin notes')}
@@ -3720,7 +3716,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
                 <span className="uni-note">{note}</span>
               </div>
             ))}
-            {more(local.more.pengNotes)}
           </>)}
           {local.obsNotes.length > 0 && (<>
             {label('Observation notes')}
@@ -3735,7 +3730,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
               </div>
             ))}
             </div>
-            {more(local.more.obsNotes)}
           </>)}
           {local.dateNotes.length > 0 && (<>
             {label('Day notes')}
@@ -3745,7 +3739,6 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
                 <span className="uni-note">{note}</span>
               </div>
             ))}
-            {more(local.more.dateNotes)}
           </>)}
         </div>
       )}
