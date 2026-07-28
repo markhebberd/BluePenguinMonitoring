@@ -5,6 +5,10 @@
 # Canonical copy. The live script lives at /var/www/wildwatch/deploy.sh on the VPS
 # (invoked via the CI forced-command SSH key). Keep the two in sync when editing.
 set -euo pipefail
+# Read the whole script before running any of it. Step 1 pulls, which overwrites this very file
+# — the live deploy.sh is a symlink into the repo — and bash otherwise carries on reading the new
+# bytes from its old offset, running whatever happens to be there. The braces make that safe.
+{
 BASE=/var/www/wildwatch
 REPO="$BASE/repo"
 APP="$REPO/wildwatch_web"
@@ -45,8 +49,22 @@ if [ "$spa" != "200" ] || [ "$api" != "401" ]; then
   exit 1
 fi
 
+# Status codes don't catch a 200 the phone can't parse: nestcheck deserialises into typed classes,
+# so a field of the wrong JSON type kills its whole download while the server sees nothing wrong.
+# Assert the payload shape against what the app declares, and roll back if it drifted.
+if ! contract=$(sudo -u wildwatch php "$REL/penguin-api/contract_check.php" 2>&1); then
+  [ -n "$PREV" ] && ln -sfn "$PREV" "$BASE/current"
+  sudo systemctl reload php8.4-fpm
+  echo "$contract" >&2
+  echo "CONTRACT FAILED — rolled back to $PREV" >&2
+  exit 1
+fi
+echo "$contract"
+
 echo "[5/5] prune old releases (keep 5)"
 # penguin-api/*.php in each release are chowned to the wildwatch pool user, so the
 # deploy user needs sudo to remove old releases.
 ls -1dt "$BASE"/releases/*/ | tail -n +6 | xargs -r sudo rm -rf
 echo "OK: deployed $TS @ $REV (spa=$spa api=$api)"
+exit 0
+}

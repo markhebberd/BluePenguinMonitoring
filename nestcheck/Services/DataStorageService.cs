@@ -159,6 +159,10 @@ namespace PenguinMonitor.Services
             /// <summary>Why each biometric upload failed, in the server's words. A failed biometric
             /// stays queued, so the sync is not a clean one and must not report itself as such.</summary>
             public List<string> BiometricErrors { get; set; } = new List<string>();
+            /// <summary>Fields the server sent that this build couldn't read, by path. The data that
+            /// did parse is kept — this says what was dropped, so a payload change shows up as a
+            /// named gap instead of a download that mysteriously fails.</summary>
+            public HashSet<string> PayloadWarnings { get; set; } = new HashSet<string>();
             public string? Error { get; set; }
             /// <summary>Non-fatal notes from the offline-chip flush (e.g. a bird the server
             /// rejected). Kept out of Error so the sync still counts as successful — a queued-chip
@@ -274,7 +278,7 @@ namespace PenguinMonitor.Services
             if (!resp.IsSuccessStatusCode) return 0;
             var json = await resp.Content.ReadAsStringAsync();
             if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{")) return 0;
-            var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
+            var serverState = LenientParse<SyncResponse>(json, "reconcile", new HashSet<string>());
             if (serverState?.boxes == null) return 0;
 
             var nzToday = MainActivity.NzToday;
@@ -449,7 +453,7 @@ namespace PenguinMonitor.Services
                     var json = await resp.Content.ReadAsStringAsync();
                     if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{"))
                         throw new Exception(ServerMessage(json, (int)resp.StatusCode));
-                    var serverState = JsonConvert.DeserializeObject<SyncResponse>(json);
+                    var serverState = LenientParse<SyncResponse>(json, "boxes", result.PayloadWarnings);
 
                     colonyState.PreviousBoxes.Clear();
                     if (serverState?.boxes != null)
@@ -552,7 +556,8 @@ namespace PenguinMonitor.Services
                     var birdsJson = await resp.Content.ReadAsStringAsync();
                     if (string.IsNullOrEmpty(birdsJson) || !birdsJson.TrimStart().StartsWith("["))
                         throw new Exception($"Penguins API: expected JSON array");
-                    var penguinRecords = JsonConvert.DeserializeObject<List<WildWatchPenguin>>(birdsJson);
+                    var penguinRecords = LenientParse<List<WildWatchPenguin>>(birdsJson, "penguins", result.PayloadWarnings)
+                                         ?? new List<WildWatchPenguin>();
                     var remotePenguinData = new Dictionary<string, PenguinData>();
                     foreach (var record in penguinRecords)
                     {
@@ -892,6 +897,121 @@ namespace PenguinMonitor.Services
                 BiometricId = I("biometric_id"),
                 IsPendingUpload = false,
             };
+        }
+
+        // Where a field arrives as a type the model doesn't expect. Recorded per parse so a payload
+        // change is reported rather than absorbed; the containing record still loads.
+        private sealed class SkippedField
+        {
+            public string Path = "";
+            public string Got = "";
+            public override string ToString() => $"{Path} ({Got})";
+        }
+
+        /// <summary>Takes any JSON token where a string is expected, and consumes it whole.
+        ///
+        /// Consuming it is the point. Newtonsoft's Error event can swallow a type mismatch, but the
+        /// reader is left standing in the middle of the value it choked on, and the whole enclosing
+        /// object is abandoned — the payload comes back empty instead of throwing, which is worse.
+        /// A converter reads the token to its end, so parsing carries on with the next field.
+        ///
+        /// An object gets its "note"/"name"/"value" read out where it has one, since a field being
+        /// promoted from a string to a record around that string is how this keeps happening.</summary>
+        private sealed class TolerantStringConverter : JsonConverter<string?>
+        {
+            private readonly ICollection<SkippedField> _skipped;
+            public TolerantStringConverter(ICollection<SkippedField> skipped) { _skipped = skipped; }
+            public override bool CanWrite => false;
+            public override void WriteJson(JsonWriter writer, string? value, JsonSerializer serializer) => throw new NotSupportedException();
+            public override string? ReadJson(JsonReader reader, Type objectType, string? existing, bool hasExisting, JsonSerializer serializer)
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonToken.Null:
+                        return null;
+                    case JsonToken.String:
+                        return reader.Value?.ToString();
+                    case JsonToken.StartObject:
+                    case JsonToken.StartArray:
+                    {
+                        var path = reader.Path;
+                        var token = Newtonsoft.Json.Linq.JToken.ReadFrom(reader);
+                        string? salvaged = null;
+                        if (token is Newtonsoft.Json.Linq.JObject obj)
+                            foreach (var name in new[] { "note", "name", "value", "text" })
+                                if (obj[name] is Newtonsoft.Json.Linq.JValue v && v.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                                { salvaged = (string?)v; break; }
+                        _skipped.Add(new SkippedField { Path = path, Got = salvaged == null ? token.Type.ToString() : $"{token.Type}, read its text" });
+                        return salvaged;
+                    }
+                    default:
+                        return reader.Value?.ToString();   // number, bool, date — the app wants text
+                }
+            }
+        }
+
+        /// <summary>The same for whole numbers: a null or a surprise shape leaves the field at its
+        /// default rather than taking the record down with it.</summary>
+        private sealed class TolerantIntConverter : JsonConverter
+        {
+            private readonly ICollection<SkippedField> _skipped;
+            public TolerantIntConverter(ICollection<SkippedField> skipped) { _skipped = skipped; }
+            public override bool CanConvert(Type t) => t == typeof(int) || t == typeof(int?);
+            public override bool CanWrite => false;
+            public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer) => throw new NotSupportedException();
+            public override object? ReadJson(JsonReader reader, Type objectType, object? existing, JsonSerializer serializer)
+            {
+                bool nullable = objectType == typeof(int?);
+                switch (reader.TokenType)
+                {
+                    case JsonToken.Null:
+                        return nullable ? (int?)null : 0;
+                    case JsonToken.Integer:
+                        return Convert.ToInt32(reader.Value);
+                    case JsonToken.Float:
+                        return (int)Convert.ToDouble(reader.Value);
+                    case JsonToken.String:
+                        return int.TryParse(reader.Value?.ToString(), out var n) ? n : (nullable ? (int?)null : 0);
+                    case JsonToken.Boolean:
+                        return Convert.ToBoolean(reader.Value) ? 1 : 0;
+                    default:
+                    {
+                        var path = reader.Path;
+                        var token = Newtonsoft.Json.Linq.JToken.ReadFrom(reader);
+                        _skipped.Add(new SkippedField { Path = path, Got = token.Type.ToString() });
+                        return nullable ? (int?)null : 0;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Parse a server payload without letting one unexpected field cost the whole thing.
+        ///
+        /// Strict deserialisation is all-or-nothing: one field arriving as the wrong JSON type threw,
+        /// and the entire box download failed — 153 boxes lost to one bad string, retried for thirty
+        /// seconds, and reported as a partial sync with no clue which field. A field the phone can't
+        /// read should cost that field, not the round. What was skipped is collected so this is
+        /// visible rather than silent — the sync names it, and the paths go to the log.</summary>
+        private static T? LenientParse<T>(string json, string label, ICollection<string> problems)
+        {
+            var skipped = new List<SkippedField>();
+            var settings = new JsonSerializerSettings();
+            settings.Converters.Add(new TolerantStringConverter(skipped));
+            settings.Converters.Add(new TolerantIntConverter(skipped));
+            // Last resort for a shape the converters don't cover (an object where a list belongs).
+            // It abandons the rest of that record, so it must stay the exception, not the mechanism.
+            settings.Error = (sender, args) =>
+            {
+                skipped.Add(new SkippedField { Path = args.ErrorContext.Path, Got = "unreadable" });
+                args.ErrorContext.Handled = true;
+            };
+            var parsed = JsonConvert.DeserializeObject<T>(json, settings);
+            foreach (var s in skipped)
+            {
+                problems.Add($"{label}: {s}");
+                System.Diagnostics.Debug.WriteLine($"LenientParse {label} skipped {s}");
+            }
+            return parsed;
         }
 
         /// <summary>Read sync.php's per-observation "errors" into lines a person can act on —

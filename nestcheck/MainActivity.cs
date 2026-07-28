@@ -1488,7 +1488,8 @@ namespace PenguinMonitor
                             // A biometric that didn't upload is still queued — that's a partial sync,
                             // not a clean one, and saying "Synced" over it loses the bird's record.
                             bool hasErrors = !string.IsNullOrEmpty(result.Error) || result.TagSyncResult?.Error != null
-                                || result.UploadErrors > 0 || result.BiometricUploadErrors > 0;
+                                || result.UploadErrors > 0 || result.BiometricUploadErrors > 0
+                                || result.PayloadWarnings.Count > 0;
                             // Chip warnings aren't failures — the sync worked, but a queued bird
                             // needs a human look (rejected, or parked on a different number).
                             bool hasChipWarnings = result.ChipWarnings?.Count > 0;
@@ -1507,6 +1508,13 @@ namespace PenguinMonitor
                                 {
                                     details.Add($"Bird details not uploaded: {result.BiometricUploadErrors}");
                                     details.AddRange(result.BiometricErrors.Take(3));
+                                }
+                                // The rest of the payload still loaded — say what didn't, so a server
+                                // change reads as a named gap rather than data quietly going missing.
+                                if (result.PayloadWarnings.Count > 0)
+                                {
+                                    details.Add($"Server sent {result.PayloadWarnings.Count} field(s) this app couldn't read:");
+                                    details.AddRange(result.PayloadWarnings.Take(3));
                                 }
                                 if (hasChipWarnings) details.AddRange(result.ChipWarnings!);
                                 syncDialog.SetMessage(string.Join("\n", details));
