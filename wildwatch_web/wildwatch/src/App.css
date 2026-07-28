@@ -159,7 +159,16 @@ header h1:hover { opacity:.8; }
 .box-date { font-size:9px; color:#aaa; margin-top:1px; }
 
 /* Split view: grid sidebar + detail */
-.split-view { display:flex; flex:1; align-items:stretch; height:calc(100vh - 88px); overflow:hidden; }
+/* No height here on purpose. This used to be calc(100vh - 88px) — the header plus the toolbar
+   — which stopped being true the moment anything else appeared between them and the split:
+   the calendar popped in, the page grew past the viewport, and you got a scroll inside a
+   scroll with the header pushed off the top. The app div is the viewport-height flex column
+   and the split takes whatever the rows above it leave, so nothing needs to know their sizes.
+   Desktop only: narrow screens stack and scroll as one page. */
+.split-view { display:flex; flex:1 1 auto; align-items:stretch; min-height:0; overflow:hidden; }
+@media (min-width:701px) {
+  .app:has(> .split-view) { height:100vh; display:flex; flex-direction:column; }
+}
 .grid-sidebar { width:220px; flex-shrink:0; height:100%; display:flex; flex-direction:column; border-right:1px solid #ddd; background:#fff; }
 .grid-sidebar .box-grid { height:100%; min-height:0; display:flex; flex-direction:column; padding:8px; border-radius:0; box-shadow:none; }
 .grid-sidebar .grid { grid-template-columns:repeat(3,1fr); gap:3px; flex:1; min-height:0; overflow-y:auto; align-content:start; }
