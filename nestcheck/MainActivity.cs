@@ -4118,6 +4118,13 @@ namespace PenguinMonitor
             int wasTotal = prev.Eggs + prev.Chicks;
             if (nowTotal >= wasTotal) return null;
 
+            // Losses recorded on this visit are the explanation for the drop. Once they account
+            // for it there is nothing to chase, and warning anyway would train people to ignore
+            // the warning. A partial account still warns, for the part that isn't explained.
+            int drop = wasTotal - nowTotal;
+            int explained = (today.FailedEggs ?? 0) + (today.DeadChicks ?? 0);
+            if (explained >= drop) return null;
+
             // Past the chip window's close, fledging accounts for it
             if (_remoteBreedingDates != null
                 && _remoteBreedingDates.TryGetValue(boxName, out var dates)
@@ -4134,7 +4141,9 @@ namespace PenguinMonitor
                   }.Where(s => s != null));
 
             var when = ToNzTime(prev.WhenDataCollectedUtc).ToString("d MMM");
-            return $"offspring down {wasTotal} → {nowTotal} ({Describe(prev.Eggs, prev.Chicks)} on {when}, now {Describe(today.Eggs, today.Chicks)})";
+            // Name what has been accounted for, so the number left to explain is the number shown
+            var accounted = explained > 0 ? $"; {explained} recorded as failed, {drop - explained} unexplained" : "";
+            return $"offspring down {wasTotal} → {nowTotal} ({Describe(prev.Eggs, prev.Chicks)} on {when}, now {Describe(today.Eggs, today.Chicks)}{accounted})";
         }
 
         private (string label, string sex, bool isChick, PenguinData? pd) LookupPenguinLabel(string birdId)
