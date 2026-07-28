@@ -11392,10 +11392,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const currentSection = showAdmin ? 'admin' : showDocs ? 'docs' : showReports ? 'reports' : 'colony';
 
-  // The single-purpose Penguin/Box/Date searches are superseded by the unified box and now
-  // show for one account only, as a fallback while it settles in. A display choice, not a
-  // permission: everything they reach is reachable from the unified search.
-  const legacySearches = (localStorage.getItem('ww_email') || '').toLowerCase() === 'bdot@snotch.com';
+  // The single-purpose Penguin/Box/Date searches are superseded by the unified box, and one
+  // account is trialling life without them — everyone else keeps them alongside. A display
+  // choice, not a permission: everything they reach is reachable from the unified search.
+  const legacySearches = (localStorage.getItem('ww_email') || '').toLowerCase() !== 'mark@wildwatch.co.nz';
 
   // One element, dropped into each toolbar. Defined here so it sits after the navigation
   // helpers it closes over and before the toolbars that use it. Every destination clears the
