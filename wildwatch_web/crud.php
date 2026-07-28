@@ -606,10 +606,18 @@ function authenticate($pdo) {
     return null;
 }
 
+/** Tables where a delete is a flag, not a removal. Their rows must not come back from a list. */
+const WW_SOFT_DELETE_TABLES = ['observations', 'penguin_scans', 'penguin_biometric_data'];
+
 function handleList($pdo, $table) {
     $where = []; $params = [];
+    // A soft-deleted row is deleted as far as every caller is concerned. Without this the phone
+    // re-downloads one on its next sync and shows a record the web already deleted — worse after
+    // a cache clear, which is exactly when someone is trying to make a stale record go away.
+    if (in_array($table, WW_SOFT_DELETE_TABLES) && ($_GET['include_deleted'] ?? '') !== '1')
+        $where[] = "(is_deleted = FALSE OR is_deleted IS NULL)";
     foreach ($_GET as $k => $v) {
-        if (in_array($k, ['action','table','colony_id'])) continue;
+        if (in_array($k, ['action','table','colony_id','include_deleted'])) continue;
         // nz_date=YYYY-MM-DD on observations: rows whose NZ day (fixed +12,
         // matching the app's toNzDateStr bucketing) is that date.
         if ($k === 'nz_date' && $table === 'observations') {

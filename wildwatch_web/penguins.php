@@ -116,7 +116,9 @@ $sql = "SELECT
              JOIN penguin_chips pc2 ON ps2.pit_id = pc2.pit_id
              JOIN penguin_scans ps3 ON ps2.observation_id = ps3.observation_id AND ps2.pit_id != ps3.pit_id
              JOIN penguin_chips pc3 ON ps3.pit_id = pc3.pit_id
-             WHERE pc2.peng_num = p.peng_num) as partner_count,
+             WHERE pc2.peng_num = p.peng_num
+               AND (ps2.is_deleted = FALSE OR ps2.is_deleted IS NULL)
+               AND (ps3.is_deleted = FALSE OR ps3.is_deleted IS NULL)) as partner_count,
             -- Weighted field-sex evidence: a 'probably' (or a legacy hard M/F) counts 2, a
             -- 'maybe' 1, 'unsure' nothing. NestCheck prompts for a real sexing at 4 on one side.
             (SELECT COALESCE(SUM(CASE WHEN UPPER(bm.observed_sex) IN ('PM','M') THEN 2
@@ -131,11 +133,13 @@ $sql = "SELECT
              FROM penguin_scans ps4
              JOIN penguin_chips pc4 ON ps4.pit_id = pc4.pit_id
              JOIN observations o2 ON ps4.observation_id = o2.observation_id
-             WHERE pc4.peng_num = p.peng_num AND o2.chicks > 0 AND o2.is_deleted = FALSE) as max_chicks
+             WHERE pc4.peng_num = p.peng_num AND o2.chicks > 0 AND o2.is_deleted = FALSE
+               AND (ps4.is_deleted = FALSE OR ps4.is_deleted IS NULL)) as max_chicks
         FROM penguins p
         LEFT JOIN penguin_chips pc_active ON pc_active.peng_num = p.peng_num AND pc_active.is_active = 1
         LEFT JOIN penguin_chips pc_any ON pc_any.peng_num = p.peng_num
-        LEFT JOIN penguin_scans ps ON ps.pit_id = pc_any.pit_id
+        -- Deleted scans are not sightings: they must not feed scan counts, boxes seen or last seen.
+        LEFT JOIN penguin_scans ps ON ps.pit_id = pc_any.pit_id AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
         LEFT JOIN observations o ON ps.observation_id = o.observation_id AND o.is_deleted = FALSE
         LEFT JOIN observation_locations ol ON o.location_id = ol.location_id
         GROUP BY p.peng_num

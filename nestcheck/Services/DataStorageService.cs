@@ -563,16 +563,31 @@ namespace PenguinMonitor.Services
                         throw new Exception("Biometrics API: expected JSON array");
                     var rows = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(bioJson) ?? new();
                     int merged = 0;
+                    var onServer = new HashSet<string>();
                     foreach (var row in rows)
                     {
                         var pengNum = row.TryGetValue("peng_num", out var pn) ? pn?.ToString() : null;
                         if (string.IsNullOrEmpty(pengNum)) continue;
+                        // A row flagged deleted is not a record. The server filters these out now;
+                        // this is the second lock on the door, since the cost of missing one is a
+                        // deleted record reappearing on a phone as though it were still true.
+                        if (row.TryGetValue("is_deleted", out var del) && del != null
+                            && (del.ToString() == "1" || string.Equals(del.ToString(), "true", StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                        onServer.Add(pengNum);
                         // Never clobber a local unsynced edit
                         if (colonyState.TodayBiometrics.TryGetValue(pengNum, out var local) && local.IsPendingUpload)
                             continue;
                         colonyState.TodayBiometrics[pengNum] = BiometricRecordFromRow(row, nzTodayStr);
                         merged++;
                     }
+                    // Today's set is the server's to define: a cached record the server no longer
+                    // has was deleted there, so drop it. Anything still queued for upload stays —
+                    // it isn't missing from the server, it just hasn't arrived yet.
+                    foreach (var gone in colonyState.TodayBiometrics
+                                 .Where(kv => !onServer.Contains(kv.Key) && !kv.Value.IsPendingUpload)
+                                 .Select(kv => kv.Key).ToList())
+                        colonyState.TodayBiometrics.Remove(gone);
                     result.BiometricCount = merged;
                     return merged;
                 }, "Biometrics", null, isCancelled);
