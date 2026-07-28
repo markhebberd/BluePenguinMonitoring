@@ -1029,6 +1029,29 @@ export function computeAllPenguinsRows(): any[] {
  *  sign the BC/LC codes were swapped or mis-entered. Both metrics ride along so the check's
  *  weight/flipper toggle filters without recomputing. First BC and first LC per clutch (a box is
  *  rarely re-chipped the same day); a clutch missing either code is skipped. */
+/**
+ * Chipped birds with no weight and/or no flipper length recorded on their chip date. Chipping is
+ * the one moment every bird is in the hand, so a gap here is a measurement that will never be
+ * taken — unlike a later visit, there is no second chance at it.
+ *
+ * Derived from computeAllPenguinsRows, which reads both values off the biometric dated the same
+ * day as the bird's first chip, so this reflects the data as it stands rather than any import.
+ */
+export function computeMissingChipMeasures(): any[] {
+  return computeAllPenguinsRows()
+    .filter(r => r.first_chip_date && (r.chip_weight == null || r.chip_flipper == null))
+    .map(r => ({
+      peng_num: r.peng_num,
+      chip_date: String(r.first_chip_date).slice(0, 10),
+      chip_box: r.first_chip_box ?? null,
+      chip_by: r.first_chip_by ?? null,
+      chip_weight: r.chip_weight ?? null,
+      chip_flipper: r.chip_flipper ?? null,
+      missing: [r.chip_weight == null ? 'weight' : null, r.chip_flipper == null ? 'flipper' : null].filter(Boolean).join(' + '),
+    }))
+    .sort((a, b) => b.chip_date.localeCompare(a.chip_date));
+}
+
 export function computeChickSizeMismatch(): any[] {
   const nests = new Map<string, { bc?: any; lc?: any }>();
   for (const r of computeAllPenguinsRows()) {

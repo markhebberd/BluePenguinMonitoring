@@ -2,7 +2,7 @@ import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
-import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
+import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch, useMissingChipMeasures } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
 import { ColonyMap } from './components/ColonyMap';
@@ -8988,6 +8988,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
   const iBirdTwoBoxes = useBirdTwoBoxes();
   const iScanBeforeChip = useScanBeforeChip();
   const iVerify = useMemo(() => computeVerifyConflicts(), [dbVersion]);
+  const iMissingChipMeasures = useMissingChipMeasures();
   const iDeadScanned = useDeadScanned();
   const iImprobable = useImprobableCounts();
   const iFuture = useFutureObservations();
@@ -10110,14 +10111,15 @@ function AdminPanel({ token, observationDates, checkTarget }: {
             { key: 'lc_f', label: 'LC flip (mm)', render: (v: any, r: any) => v == null ? '—' : (r.fInv ? redNum(v) : v) },
           ]} />
 
+        <IntegrityCheck rows={iMissingChipMeasures} errorType="missing_chip_measures" title="Missing chip measurements"
+          desc="Chipped birds with no weight and/or no flipper length on their chip date. Chipping is the one time every bird is in the hand, so a gap here is a measurement that can never be taken later. Live from the cache — a value entered on the bird clears its row."
+          empty="Every chipped bird has both measurements"
+          columns={[{ key: 'chip_date', label: 'Chip date' }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_box', label: 'Box', render: boxCell }, { key: 'chip_by', label: 'By' }, { key: 'missing', label: 'Missing' }, { key: 'chip_weight', label: 'Weight (g)', render: (v: any) => v ?? '—' }, { key: 'chip_flipper', label: 'Flipper (mm)', render: (v: any) => v ?? '—' }]} />
         <h3 style={{ marginTop: 28 }}>Flipper-length import (6 Jul 2026)</h3>
         <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
-          Flipper lengths from the chip spreadsheet were added to each bird's chip-day biometric (999 imported;
-          680 chip-day biometrics created where none existed). These two lists record the birds that need a human eye.
+          One-off record from that import: the spreadsheet's chip weight disagreed with what was already stored, so
+          the flipper length was added and the existing weight kept. Not recomputable — the sheet isn't in the app.
         </p>
-        <IntegrityCheck rows={FLIPPER_IMPORT_MISSING} title="Missing flipper length"
-          desc="Birds in the chip spreadsheet with no flipper measurement recorded — there was nothing to import." empty="None"
-          columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'chip_weight', label: 'Chip weight (g)' }]} />
         <IntegrityCheck rows={FLIPPER_IMPORT_WEIGHT_DIFFS} title="Chip-weight discrepancies"
           desc="The spreadsheet's chip weight disagreed with the weight already stored on the chip-day biometric. The existing database weight was kept and the flipper length was still added — worth reconciling by hand." empty="None"
           columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'sheet_weight', label: 'Sheet (g)' }, { key: 'db_weight', label: 'Kept in DB (g)' }, { key: 'flipper', label: 'Flipper added (mm)' }]} />
@@ -11085,10 +11087,6 @@ const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: num
 // One-off record of exceptions from the 6 Jul 2026 flipper-length import (chip spreadsheet).
 // The source sheet isn't in the app and the weight comparison can't be recomputed live, so the
 // birds needing manual attention are recorded here rather than derived from the cache.
-const FLIPPER_IMPORT_MISSING = [
-  { peng_num: 'PT372', chip_date: '2022-10-13', chip_weight: 1190 },
-  { peng_num: 'PT937', chip_date: '2025-10-28', chip_weight: 970 },
-];
 const FLIPPER_IMPORT_WEIGHT_DIFFS = [
   { peng_num: 'PT215', chip_date: '2021-09-21', sheet_weight: 890, db_weight: 910, flipper: 115 },
   { peng_num: 'PT214', chip_date: '2021-09-21', sheet_weight: 910, db_weight: 890, flipper: 112 },
