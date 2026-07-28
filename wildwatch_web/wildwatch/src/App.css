@@ -380,6 +380,14 @@ h3.collapsible:hover { color:#1a5276; }
 .date-link .fm-tag { font-size:.85em; font-weight:600; opacity:.85; }
 
 /* Reports */
+.docs-page { max-width:1080px; margin:0 auto; padding:24px 20px 44px; }
+.docs-title { font-size:22px; color:#1a5276; font-weight:700; margin:0 0 16px; }
+.doc-section { background:#fff; border:1px solid #e8ecef; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+.doc-section h2 { font-size:16px; color:#1a5276; font-weight:600; margin:0 0 8px; }
+.doc-keys { border-collapse:collapse; margin:10px 0 12px; }
+.doc-keys td { padding:3px 14px 3px 0; font-size:13px; vertical-align:top; }
+.doc-keys kbd { display:inline-block; min-width:44px; text-align:center; font-family:monospace; font-size:12px;
+  background:#f0f3f6; border:1px solid #d5dce3; border-bottom-width:2px; border-radius:4px; padding:2px 6px; }
 .reports-page { max-width:1080px; margin:0 auto; padding:24px 20px 44px; }
 .reports-title { font-size:1.45rem; font-weight:700; color:#1a5276; margin:0 0 16px; }
 .report-card { background:#fff; border-radius:12px; padding:20px 22px; box-shadow:0 1px 3px rgba(0,0,0,.06), 0 1px 10px rgba(0,0,0,.04); border:1px solid #eef1f4; margin-bottom:18px; }

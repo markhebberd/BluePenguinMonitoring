@@ -7251,7 +7251,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   );
 }
 
-function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; birds?: boolean; day?: string; obs?: string } {
+function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boolean; reports?: boolean; docs?: boolean; birds?: boolean; day?: string; obs?: string } {
   // Query-param form (current): box and bird are independent so a bird panel can
   // stay open across box changes and survive refresh/back — e.g. /?box=12&bird=PM1234.
   // obs (observation time) is a click-only anchor that deep-links to one observation.
@@ -7265,6 +7265,7 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
       enter: q.has('enter'),
       admin: q.has('admin'),
       reports: q.has('reports'),
+      docs: q.has('docs'),
       birds: q.has('birds'),
     };
   }
@@ -7273,7 +7274,7 @@ function parseUrl(): { box?: string; bird?: string; enter?: boolean; admin?: boo
   const boxMatch = path.match(/^\/box\/(.+)/);
   const birdMatch = path.match(/^\/bird\/(.+)/);
   const dayMatch = path.match(/^\/day\/(.+)/);
-  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', birds: path === '/birds', day: dayMatch?.[1] };
+  return { box: boxMatch?.[1], bird: birdMatch?.[1], enter: path === '/enter', admin: path === '/admin', reports: path === '/reports', docs: path === '/docs', birds: path === '/birds', day: dayMatch?.[1] };
 }
 
 /**
@@ -8349,6 +8350,52 @@ function SeasonBreedingReport() {
 
 /** Reports page body: the report cards grouped into tabs (mirrors AdminPanel's tab bar).
  *  The active tab is persisted to the URL's ?tab= param, just like the admin page. */
+/** Keys the app answers to. Kept next to the algorithm explanation because both are things
+ *  a monitor reads rather than operates. */
+function ShortcutsDoc() {
+  const rows: [string, string][] = [
+    ['/', 'Jump to the search box'],
+    ['↓ ↑', 'Move through the search results'],
+    ['Enter', 'Open the highlighted result (or the top one)'],
+    ['Esc', 'Clear the search — or close the box or day you are in'],
+    ['> and <', 'Next / previous box (same keys as . and ,)'],
+    ['→ ←', 'Next / previous penguin, with a penguin panel open'],
+  ];
+  return (
+    <section className="doc-section">
+      <h2>Keyboard shortcuts</h2>
+      <p className="muted">Shortcuts are ignored while you are typing in a field, so a "/" or a comma in a note is just text.</p>
+      <table className="doc-keys">
+        <tbody>
+          {rows.map(([key, what]) => (
+            <tr key={key}><td><kbd>{key}</kbd></td><td>{what}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted">
+        The search covers boxes, penguin numbers, chip numbers, dates, and the text of penguin,
+        observation and day notes. <code>"gate open"</code> matches that exact wording;
+        <code> bs|mv</code> matches either.
+      </p>
+      <p className="muted">In the day view the arrow keys step between dates instead of penguins.</p>
+    </section>
+  );
+}
+
+function DocsPage() {
+  return (
+    <div className="docs-page">
+      <h1 className="docs-title">Documentation</h1>
+      <ShortcutsDoc />
+      <section className="doc-section">
+        <Suspense fallback={<p className="muted">Loading…</p>}>
+          <AlgorithmDoc seasonStartMonth={SEASON_START_MONTH} seasonStartDay={SEASON_START_DAY} />
+        </Suspense>
+      </section>
+    </div>
+  );
+}
+
 function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void }) {
   const REPORT_TABS = ['colony', 'breeding', 'population', 'social', 'quality'] as const;
   type ReportTab = typeof REPORT_TABS[number];
@@ -8566,7 +8613,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
-  const ADMIN_TABS = ['io', 'validation', 'algorithm', 'users', 'database', 'system', 'mirror'] as const;
+  const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system', 'mirror'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
   // "Mirror" tab is only meaningful on the backup mirror (set by the /me response). Its
   // status view + action buttons all 404 on production.
@@ -9075,7 +9122,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['algorithm', 'Algorithm'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
+        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -9809,16 +9856,6 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           desc="The spreadsheet's chip weight disagreed with the weight already stored on the chip-day biometric. The existing database weight was kept and the flipper length was still added — worth reconciling by hand." empty="None"
           columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'sheet_weight', label: 'Sheet (g)' }, { key: 'db_weight', label: 'Kept in DB (g)' }, { key: 'flipper', label: 'Flipper added (mm)' }]} />
       </div>
-
-      {/* Mounted only when open — the explanation is a code-split chunk nobody needs
-          until they ask for it. Nothing here holds state, so unmounting costs nothing. */}
-      {adminTab === 'algorithm' && (
-        <div className="admin-section">
-          <Suspense fallback={<p className="muted">Loading…</p>}>
-            <AlgorithmDoc seasonStartMonth={SEASON_START_MONTH} seasonStartDay={SEASON_START_DAY} />
-          </Suspense>
-        </div>
-      )}
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <BackupsPanel token={token} />
@@ -10802,6 +10839,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [showEntry, setShowEntry] = useState(initial.enter || false);
   const [showAdmin, setShowAdmin] = useState(initial.admin || false);
   const [showReports, setShowReports] = useState(initial.reports || false);
+  const [showDocs, setShowDocs] = useState(initial.docs || false);
   const [showAllBirds, setShowAllBirds] = useState(initial.birds || false);
   const [showSettings, setShowSettings] = useState(false);
   // Which searches currently hold the calendar open, by instance id. A plain boolean can't
@@ -10832,6 +10870,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     let path = '/';
     if (showAdmin) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?admin=1' + (t ? `&tab=${t}` : ''); }
     else if (showReports) { const t = new URLSearchParams(window.location.search).get('tab'); path = '/?reports=1' + (t ? `&tab=${t}` : ''); }
+    else if (showDocs) path = '/?docs=1';
     else if (showEntry) path = '/?enter=1';
     else if (showAllBirds) path = '/?birds=1';
     else if (selectedDay) path = `/?day=${encodeURIComponent(selectedDay)}${dayBox ? `&box=${encodeURIComponent(dayBox)}` : ''}`;
@@ -10847,12 +10886,12 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (window.location.pathname + window.location.search !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, showAllBirds, selectedDay, obsAnchor, dayBox]);
+  }, [selectedBox, selectedBird, showEntry, showAdmin, showReports, showDocs, showAllBirds, selectedDay, obsAnchor, dayBox]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onPopState = () => {
-      const { box, bird, obs, enter, admin: adm, reports, birds, day } = parseUrl();
+      const { box, bird, obs, enter, admin: adm, reports, docs, birds, day } = parseUrl();
       // Back/forward lands on a fresh view — drop cross-view scroll targets. The obs anchor
       // is restored below; the box-load effect re-scrolls to it once the box data is ready.
       setHighlightObs(null); setScrollToObs(null); setDayBox(day && box ? box : null);
@@ -10862,6 +10901,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       setShowEntry(enter || false);
       setShowAdmin(adm || false);
       setShowReports(reports || false);
+      setShowDocs(docs || false);
       setShowAllBirds(birds || false);
       setSelectedDay(day || null);
     };
@@ -11184,12 +11224,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Password dialog renders on top of any page
   const passwordDialog = showChangePassword ? <ChangePasswordDialog token={token} userName={userName} onClose={() => setShowChangePassword(false)} /> : null;
 
-  const goTo = (section: 'colony' | 'reports' | 'admin' | 'enter' | 'birds') => {
+  const goTo = (section: 'colony' | 'reports' | 'docs' | 'admin' | 'enter' | 'birds') => {
     // Drop any ?tab from the previous section so admin/reports don't inherit each other's tab.
     { const u = new URL(window.location.href); u.searchParams.delete('tab'); window.history.replaceState(null, '', u.pathname + u.search); }
     setSelectedBox(null); setSelectedBird(null); setSelectedDay(null);
     setShowAdmin(section === 'admin');
     setShowReports(section === 'reports');
+    setShowDocs(section === 'docs');
     setShowEntry(section === 'enter');
     setShowAllBirds(section === 'birds');
   };
@@ -11197,12 +11238,12 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const goToDay = (day: string, box?: string) => {
     // Day view is an overlay: keep the box + bird panel underneath so dismissing the day
     // (Escape / back / returning to the box) restores exactly where you were.
-    setShowAdmin(false); setShowReports(false); setShowEntry(false); setShowAllBirds(false);
+    setShowAdmin(false); setShowReports(false); setShowDocs(false); setShowEntry(false); setShowAllBirds(false);
     setDayBox(box ?? null);
     setSelectedDay(day);
   };
 
-  const currentSection = showAdmin ? 'admin' : showReports ? 'reports' : 'colony';
+  const currentSection = showAdmin ? 'admin' : showDocs ? 'docs' : showReports ? 'reports' : 'colony';
 
   // The single-purpose Penguin/Box/Date searches are superseded by the unified box and now
   // show for one account only, as a fallback while it settles in. A display choice, not a
@@ -11225,6 +11266,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     <nav className="site-nav">
       <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => goTo('colony'))}>Colony</a>
       <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => goTo('reports'))}>Reports</a>
+      <a className={currentSection === 'docs' ? 'active' : ''} href="/docs" onClick={e => navClick(e, () => goTo('docs'))}>Docs</a>
       {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => goTo('admin'))}>Admin</a>}
     </nav>
   );
@@ -11338,6 +11380,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           </div>
           <nav className="mobile-nav">
             <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => { goTo('reports'); closeMenu(); })}>Reports</a>
+            <a className={currentSection === 'docs' ? 'active' : ''} href="/docs" onClick={e => navClick(e, () => { goTo('docs'); closeMenu(); })}>Docs</a>
             {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin</a>}
             {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
             <a className="mobile-nav-link" href="/birds" onClick={e => navClick(e, () => { goTo('birds'); closeMenu(); })}>All penguins</a>
@@ -11357,7 +11400,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Day view is a full-screen overlay (not an early return) so the box + bird panel beneath
   // it stay mounted — their scroll position and expanded sections survive the detour. Dialogs
   // (z-index ≥ 900) still layer above it; Escape / browser-back clear selectedDay to dismiss.
-  const dayOverlay = (selectedDay && !showAdmin && !showReports && !showEntry && !showAllBirds && !showSettings) ? (
+  const dayOverlay = (selectedDay && !showAdmin && !showReports && !showDocs && !showEntry && !showAllBirds && !showSettings) ? (
     <div className="app day-overlay">
       {siteHeader}
       <div className="colony-toolbar">
@@ -11463,6 +11506,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   }
 
   // Reports page
+  if (showDocs) {
+    return wrap(
+      <div className="app">
+        {siteHeader}
+        <DocsPage />
+        {passwordDialog}
+      </div>
+    );
+  }
+
   if (showReports) {
     return wrap(
       <div className="app">
