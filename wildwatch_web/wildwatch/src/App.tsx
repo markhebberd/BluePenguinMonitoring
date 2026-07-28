@@ -6743,8 +6743,15 @@ function DayCalendar({ date, dates, onDayClick }: { date: string; dates: string[
     const raf = requestAnimationFrame(() => {
       // Centre the active day's month, not the day itself — switching days within a
       // month then leaves the calendar still, instead of jerking to re-centre each day.
-      const target = calRef.current?.querySelector('.cal-month.current') || calRef.current?.querySelector('.cal-day.active');
-      if (target) target.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+      // Done by setting this strip's own scrollLeft rather than scrollIntoView: that walks
+      // every scrollable ancestor including the document, so a calendar opening below the
+      // fold (focusing the search from a box page) scrolled the header and toolbar off the
+      // top of the page. Only the horizontal position was ever wanted.
+      const el = calRef.current;
+      const target = el?.querySelector('.cal-month.current') || el?.querySelector('.cal-day.active');
+      if (!el || !target) return;
+      const t = target.getBoundingClientRect(), c = el.getBoundingClientRect();
+      el.scrollLeft += (t.left + t.width / 2) - (c.left + c.width / 2);
     });
     return () => cancelAnimationFrame(raf);
   }, [currentMonth, datesKey]);
