@@ -2528,6 +2528,9 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   pengNum: string; biometrics: any[]; deleted: any[]; token?: string; canEdit: boolean; editing: boolean;
 }) {
   const [showBio, setShowBio] = useState(false);
+  // Editing the bird means working on these, so they open with it — scrolling past a section
+  // costs nothing, hunting for a collapsed one costs a click every time.
+  useEffect(() => { if (editing) setShowBio(true); }, [editing]);
   const [showRemoved, setShowRemoved] = useState(false);
   const [adding, setAdding] = useState(false);
   // Every biometric field the DB carries, so nothing is hidden.
