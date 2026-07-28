@@ -7737,8 +7737,15 @@ namespace PenguinMonitor
                 }
                 catch (Exception ex)
                 {
-                    RunOnUiThread(() =>
-                        Toast.MakeText(this, $"Sync failed: {ex.Message}", ToastLength.Short)?.Show());
+                    // A dropped socket on a phone that retries every 15 seconds is not news: the
+                    // upload is still queued, the next poll sends it, and saying "sync failed" for
+                    // something that fixes itself teaches people to distrust the message that
+                    // matters. Anything else still gets said.
+                    if (Http.IsTransient(ex))
+                        System.Diagnostics.Debug.WriteLine($"Background upload, transient: {ex.Message}");
+                    else
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, $"Sync failed: {ex.Message}", ToastLength.Short)?.Show());
                 }
             }).Start();
         }

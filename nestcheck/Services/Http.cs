@@ -12,7 +12,32 @@ namespace PenguinMonitor.Services
     {
         internal static HttpClient CreateClient(TimeSpan timeout)
         {
-            return new HttpClient { Timeout = timeout };
+            // Don't reuse a socket that has been sitting idle. The phone polls every 15 seconds on a
+            // radio that sleeps between them, and the far end (or a carrier NAT) drops the keep-alive
+            // without telling anyone — the next request onto that dead socket fails with "software
+            // caused connection abort". Retiring idle connections early costs one handshake and
+            // removes a failure that only ever looked like a flaky sync.
+            var handler = new SocketsHttpHandler
+            {
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(10),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                ConnectTimeout = TimeSpan.FromSeconds(10),
+            };
+            return new HttpClient(handler) { Timeout = timeout };
+        }
+
+        /// <summary>True for the failures that mean "the network moved", not "the request was
+        /// wrong": a dropped socket, a reset, a name that didn't resolve while the radio was
+        /// changing hands. Worth one quiet retry; not worth telling anyone about.</summary>
+        internal static bool IsTransient(Exception ex)
+        {
+            for (var e = ex; e != null; e = e.InnerException)
+                if (e is System.Net.Sockets.SocketException
+                    || e is System.IO.IOException
+                    || e is HttpRequestException
+                    || e is TaskCanceledException)
+                    return true;
+            return false;
         }
     }
 }
