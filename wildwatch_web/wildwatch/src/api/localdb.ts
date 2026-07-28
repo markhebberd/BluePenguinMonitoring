@@ -1093,6 +1093,50 @@ export function observedSexGuess(pengNum: string | null | undefined): { m: numbe
   return out;
 }
 
+/** Weight of one observed_sex code towards its side: a "Probably" (or a legacy hard M/F) is
+ *  worth two, a "Maybe" one, "Unsure" nothing. Two probablies or four maybes reach the
+ *  SEX_CONFIRM_SCORE threshold at which the bird is worth sexing for real. */
+export function observedSexWeight(code: string | null | undefined): number {
+  const s = (code || '').toUpperCase();
+  if (s === 'PM' || s === 'PF' || s === 'M' || s === 'F') return 2;
+  if (s === 'MM' || s === 'MF') return 1;
+  return 0;
+}
+
+/** Guesses agreeing on one side must total this before we ask anyone to commit penguins.sex. */
+export const SEX_CONFIRM_SCORE = 4;
+
+export type SexGuessRow = { biometric_id: any; observation_id: any; observation_date: string; observed_sex: string; weight: number;
+                            /** Observer on the parent observation — the fallback when the day has no note naming who was out. */
+                            obs_observer_id: number | null };
+
+/** Weighted read of a bird's field sex guesses, for the "confirm this bird's sex" prompt.
+ *  Each side is scored separately — four maybe-males and four maybe-females is not evidence,
+ *  it's disagreement — so `side` is only set when exactly one side is over the line.
+ *  `rows` is every scoring guess, newest first, for showing the working. */
+export function observedSexScore(pengNum: string | null | undefined):
+    { m: number; f: number; side: 'M' | 'F' | null; conflicted: boolean; rows: SexGuessRow[] } {
+  const out: { m: number; f: number; side: 'M' | 'F' | null; conflicted: boolean; rows: SexGuessRow[] } =
+    { m: 0, f: 0, side: null, conflicted: false, rows: [] };
+  if (!mem || !pengNum) return out;
+  for (const b of (mem.bioByPeng.get(pengNum) || [])) {
+    if (b.is_deleted) continue;
+    const s = (b.observed_sex || '').toUpperCase();
+    const w = observedSexWeight(s);
+    if (!w) continue;
+    if (s === 'PM' || s === 'MM' || s === 'M') out.m += w;
+    else if (s === 'PF' || s === 'MF' || s === 'F') out.f += w;
+    else continue;
+    out.rows.push({ biometric_id: b.biometric_id, observation_id: b.observation_id,
+                    observation_date: b.observation_date, observed_sex: s, weight: w });
+  }
+  out.rows.sort((a, b) => String(b.observation_date || '').localeCompare(String(a.observation_date || '')));
+  const mOver = out.m >= SEX_CONFIRM_SCORE, fOver = out.f >= SEX_CONFIRM_SCORE;
+  out.conflicted = mOver && fOver;
+  out.side = mOver && !fOver ? 'M' : fOver && !mOver ? 'F' : null;
+  return out;
+}
+
 // ============ Reports (computed client-side from cache) ============
 // These mirror the SQL in reports.php. Breeding season runs Apr–Mar; a date in
 // Jan–Mar belongs to the season that started the previous April.

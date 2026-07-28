@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
+import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
 import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -38,10 +38,10 @@ interface Observation {
   breeding_status:string|null; gate_status:string|null; notes:string;
   no_scan?:number;
   fledged_unchipped?:number;
-  // What the counts can't show: an end of life a monitor saw on this visit. Optional —
-  // blank means nothing to add, not zero failures.
-  failed_eggs?:number;
-  dead_chicks?:number;
+  // What the counts can't show: an end of life a monitor saw on this visit. null is "nothing
+  // recorded", 0 is "looked, nothing failed" — a distinction detection will need.
+  failed_eggs?:number|null;
+  dead_chicks?:number|null;
   scans: Scan[];
   edit_count?:string|number;
   observer_id?:number|string|null;
@@ -1965,7 +1965,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   // Edit mode is a local DRAFT — nothing is written to the server until "Done"
   // (Cancel discards). This removes the silent last-write-wins where each field saved
   // live, letting a second editor's stale view clobber the first's data.
-  type Draft = { adults:number; eggs:number; chicks:number; breeding_status:string; gate_status:string; notes:string; no_scan:number; fledged_unchipped:number; failed_eggs:number; dead_chicks:number };
+  type Draft = { adults:number; eggs:number; chicks:number; breeding_status:string; gate_status:string; notes:string; no_scan:number; fledged_unchipped:number; failed_eggs:number|null; dead_chicks:number|null };
   const [draft, setDraft] = useState<Draft|null>(null);
   const [draftScans, setDraftScans] = useState<Scan[]>([]);
   const setField = (f: keyof Draft, v: any) => setDraft(d => d ? { ...d, [f]: v } : d);
@@ -1976,7 +1976,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
       adults: Number(obs.adults)||0, eggs: Number(obs.eggs)||0, chicks: Number(obs.chicks)||0,
       breeding_status: obs.breeding_status || '', gate_status: obs.gate_status || '',
       notes: obs.notes || '', no_scan: Number(obs.no_scan)||0, fledged_unchipped: Number(obs.fledged_unchipped)||0,
-      failed_eggs: Number(obs.failed_eggs)||0, dead_chicks: Number(obs.dead_chicks)||0,
+      failed_eggs: obs.failed_eggs == null ? null : Number(obs.failed_eggs),
+      dead_chicks: obs.dead_chicks == null ? null : Number(obs.dead_chicks),
     });
     setDraftScans([...obs.scans]);
     setEditing(true);
@@ -2017,7 +2018,13 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   const commit = async (withNote = false) => {
     if (!obsId || !token || !draft) { cancelEdit(); return; }
     const fields: Record<string, any> = {};
-    for (const f of ['adults','eggs','chicks','no_scan','fledged_unchipped','failed_eggs','dead_chicks'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
+    for (const f of ['adults','eggs','chicks','no_scan','fledged_unchipped'] as (keyof Draft)[]) if (Number((obs as any)[f]||0) !== Number(draft[f]||0)) fields[f] = Number(draft[f]||0);
+    // Nullable: an emptied field clears the record rather than claiming a zero.
+    for (const f of ['failed_eggs','dead_chicks'] as (keyof Draft)[]) {
+      const was = (obs as any)[f] == null ? null : Number((obs as any)[f]);
+      const now = draft[f] == null ? null : Number(draft[f]);
+      if (was !== now) fields[f] = now;
+    }
     for (const f of ['breeding_status','gate_status','notes'] as (keyof Draft)[]) if (((obs as any)[f]||'') !== (draft[f]||'')) fields[f] = draft[f] || null;
     const draftKeys = new Set(draftScans.map(scanKey));
     const toAdd = draftScans.filter(s => !s.scan_id);
@@ -2096,16 +2103,18 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
-            {/* An end of life a monitor entered by hand. Shown whenever it's set, or the value
-                is only visible to someone who opens the edit row again. */}
-            {Number(localObs.failed_eggs) > 0 && (
-              <span className="obs-lost" title="Eggs recorded as failed on this visit">
-                {'\uD83E\uDD5A\u2717'}{Number(localObs.failed_eggs) > 1 ? ` ${localObs.failed_eggs}` : ''}
+            {/* An end of life a monitor entered by hand — including an explicit zero, which is
+                a statement that they checked. Unset stays invisible. */}
+            {localObs.failed_eggs != null && (
+              <span className={`obs-lost${Number(localObs.failed_eggs) === 0 ? ' checked' : ''}`}
+                title={Number(localObs.failed_eggs) === 0 ? 'Checked: no eggs failed on this visit' : 'Eggs recorded as failed on this visit'}>
+                {'\uD83E\uDD5A\u2717'} {localObs.failed_eggs}
               </span>
             )}
-            {Number(localObs.dead_chicks) > 0 && (
-              <span className="obs-lost" title="Chicks recorded as dead on this visit">
-                {'\uD83D\uDC23\u2717'}{Number(localObs.dead_chicks) > 1 ? ` ${localObs.dead_chicks}` : ''}
+            {localObs.dead_chicks != null && (
+              <span className={`obs-lost${Number(localObs.dead_chicks) === 0 ? ' checked' : ''}`}
+                title={Number(localObs.dead_chicks) === 0 ? 'Checked: no chicks died on this visit' : 'Chicks recorded as dead on this visit'}>
+                {'\uD83D\uDC23\u2717'} {localObs.dead_chicks}
               </span>
             )}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
@@ -2152,8 +2161,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <label>{'\uD83E\uDD5A'}</label><EditableField value={draft?.eggs ?? 0} type="number" onSave={async v => { setField('eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={draft?.chicks ?? 0} type="number" onSave={async v => { setField('chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label title="Unchipped chicks presumed fledged">{'\uD83D\uDD4A'}</label><EditableField value={draft?.fledged_unchipped ?? 0} type="number" onSave={async v => { setField('fledged_unchipped', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
-          <label title="Eggs seen failed on this visit — for a failure the counts can't show, e.g. one replaced the same day">{'\uD83E\uDD5A\u2717'}</label><EditableField value={draft?.failed_eggs ?? 0} type="number" onSave={async v => { setField('failed_eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
-          <label title="Chicks seen dead on this visit">{'\uD83D\uDC23\u2717'}</label><EditableField value={draft?.dead_chicks ?? 0} type="number" onSave={async v => { setField('dead_chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
+          <label title="Eggs seen failed on this visit — for a failure the counts can't show, e.g. one replaced the same day. Blank = not recorded, 0 = checked, none failed">{'\uD83E\uDD5A\u2717'}</label><EditableField value={draft?.failed_eggs ?? ''} type="number" onSave={async v => { setField('failed_eggs', v); }} canEdit={true} inline narrow min={0} />
+          <label title="Chicks seen dead on this visit. Blank = not recorded, 0 = checked, none died">{'\uD83D\uDC23\u2717'}</label><EditableField value={draft?.dead_chicks ?? ''} type="number" onSave={async v => { setField('dead_chicks', v); }} canEdit={true} inline narrow min={0} />
           <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN','IGN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Nest status" />
           <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />

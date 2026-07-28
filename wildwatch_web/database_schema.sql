@@ -88,9 +88,10 @@ CREATE TABLE IF NOT EXISTS observations (
     no_scan INT DEFAULT 0,
     fledged_unchipped INT DEFAULT 0,
     -- End-of-life seen on this visit, for what the counts alone can't show (a failed egg
-    -- replaced within the same observation). Blank = nothing to add, not zero failures.
-    failed_eggs INT DEFAULT 0,
-    dead_chicks INT DEFAULT 0,
+    -- replaced within the same observation). NULL = nothing recorded, 0 = looked and nothing
+    -- failed, n = n failed here. Never filled in on most observations.
+    failed_eggs INT NULL DEFAULT NULL,
+    dead_chicks INT NULL DEFAULT NULL,
     breeding_status VARCHAR(50),
     gate_status VARCHAR(50),
     notes TEXT,
