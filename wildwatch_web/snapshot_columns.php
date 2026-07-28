@@ -19,6 +19,8 @@ const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc,
 const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted';
 const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, alert, notes';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo';
+// Same list, aliased — the incremental query joins and needs the pc. prefix.
+const SNAP_COLS_CHIP_P = 'pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.chipper_id, pc.assistant_id, pc.solo';
 const SNAP_COLS_LOC  = 'location_id, location_name, persistent_notes, watched, pit_id, latitude, longitude, accuracy';
 const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted';
 

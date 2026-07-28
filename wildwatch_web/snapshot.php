@@ -99,11 +99,11 @@ if ($since) {
         WHERE ol.colony_id = ? AND (o.updated_at >= ? OR ps.deleted_at >= ?)");
     $scans->execute([$colonyId, $ts, $ts]);
 
-    $penguins = $pdo->prepare("SELECT peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, notes FROM penguins WHERE updated_at >= ?");
+    $penguins = $pdo->prepare("SELECT " . SNAP_COLS_PENG . " FROM penguins WHERE updated_at >= ?");
     $penguins->execute([$ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
-    $chips = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.chipper_id, pc.assistant_id, pc.solo
+    $chips = $pdo->prepare("SELECT " . SNAP_COLS_CHIP_P . "
         FROM penguin_chips pc
         WHERE pc.created_at >= ?
            OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");
@@ -112,7 +112,7 @@ if ($since) {
     $locations = $pdo->prepare("SELECT " . SNAP_COLS_LOC . " FROM observation_locations WHERE colony_id = ? AND updated_at >= ?");
     $locations->execute([$colonyId, $ts]);
 
-    $bio = $pdo->prepare("SELECT biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
+    $bio = $pdo->prepare("SELECT " . SNAP_COLS_BIO . " FROM penguin_biometric_data WHERE biometric_id IN (SELECT DISTINCT record_id FROM audit_log WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?)");
     $bio->execute([$ts]);
 
     $obsRows = $obs->fetchAll();
