@@ -8579,9 +8579,26 @@ namespace PenguinMonitor
                 var stamp = ToNzTime(DateTime.UtcNow).ToString("yyyy-MM-dd-HHmm");
                 var colony = string.IsNullOrWhiteSpace(CurrentColonyAcronym()) ? "colony" : CurrentColonyAcronym();
                 var fileName = $"nestcheck-{colony}-{stamp}.json";
-                var json = JsonConvert.SerializeObject(_colonyState, Formatting.Indented);
 
-                int boxes = _colonyState.TodayBoxes.Count;
+                // Exactly what a sync would have posted, so the file can be fed straight to
+                // wildwatch. Today only: previous days' boxes are cached for on-screen comparison
+                // and mean nothing to the server, and the raw colony state carries a pile of
+                // other local bookkeeping besides.
+                var todays = new Dictionary<string, BoxObservation>();
+                foreach (var kv in _colonyState.TodayBoxes)
+                    if (!string.IsNullOrEmpty(kv.Key)) todays[kv.Key] = kv.Value;
+                foreach (var p in _colonyState.PendingObservations)
+                    if (!string.IsNullOrEmpty(p.BoxName) && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday)
+                        todays[p.BoxName!] = p;   // a local edit wins over the synced copy
+
+                var observations = todays.Values
+                    .OrderBy(o => o.BoxName)
+                    .Select(o => (object)DataStorageService.BuildObservationPayload(o))
+                    .ToList();
+                var json = JsonConvert.SerializeObject(
+                    DataStorageService.BuildUploadBody(_colonyState, observations), Formatting.Indented);
+
+                int boxes = observations.Count;
                 int pending = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
 
                 if (OperatingSystem.IsAndroidVersionAtLeast(29))

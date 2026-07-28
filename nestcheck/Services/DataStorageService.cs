@@ -698,6 +698,38 @@ namespace PenguinMonitor.Services
             return uploaded;
         }
 
+        /// <summary>One observation in the shape sync.php's upload action accepts. Shared with the
+        /// manual JSON export so a hand-delivered file is byte-for-byte what a sync would have
+        /// sent — an export that drifted from the wire format would be useless at the far end.</summary>
+        internal static Dictionary<string, object?> BuildObservationPayload(BoxObservation obs)
+        {
+            var scans = obs.ScannedIds.Select(scan => (object)new {
+                pit_id = scan.BirdId,
+                scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                latitude = scan.Latitude, longitude = scan.Longitude, accuracy = scan.Accuracy,
+            }).ToList();
+            var payload = new Dictionary<string, object?>
+            {
+                ["box_name"] = obs.BoxName,
+                ["observation_time_utc"] = ObsTimeUtc(obs),
+                ["adults"] = obs.Adults, ["eggs"] = obs.Eggs, ["chicks"] = obs.Chicks,
+                ["breeding_status"] = obs.BreedingStatus, ["gate_status"] = obs.GateStatus,
+                ["notes"] = obs.Notes, ["failed_eggs"] = obs.FailedEggs, ["dead_chicks"] = obs.DeadChicks,
+                ["scans"] = scans,
+            };
+            if (obs.ConfirmedAgainstObsId.HasValue)
+                payload["expected_observation_id"] = obs.ConfirmedAgainstObsId.Value;
+            return payload;
+        }
+
+        /// <summary>The upload envelope: the day's label and people, wrapped around the observations.</summary>
+        internal static object BuildUploadBody(ColonyState colonyState, List<object> observations) => new {
+            daily_label = colonyState.DailyLabel,
+            daily_observer_id = colonyState.DailyObserverId,
+            daily_scribe_id = colonyState.DailyScribeId,
+            observations,
+        };
+
         /// <summary>
         /// Upload-only: send pending observations to server, check for conflicts. No download.
         /// </summary>
@@ -708,31 +740,12 @@ namespace PenguinMonitor.Services
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
             if (colonyState.PendingObservations.Count(p => p.IsPendingUpload) == 0) return result;
 
-            var pendingBoxes = new List<object>();
-            foreach (var pending in colonyState.PendingObservations)
-            {
-                if (!pending.IsPendingUpload || string.IsNullOrEmpty(pending.BoxName)) continue;
-                var scans = pending.ScannedIds.Select(scan => (object)new {
-                    pit_id = scan.BirdId,
-                    scan_time_utc = scan.Timestamp.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                    latitude = scan.Latitude, longitude = scan.Longitude, accuracy = scan.Accuracy,
-                }).ToList();
-                var obsPayload = new Dictionary<string, object?>
-                {
-                    ["box_name"] = pending.BoxName,
-                    ["observation_time_utc"] = ObsTimeUtc(pending),
-                    ["adults"] = pending.Adults, ["eggs"] = pending.Eggs, ["chicks"] = pending.Chicks,
-                    ["breeding_status"] = pending.BreedingStatus, ["gate_status"] = pending.GateStatus,
-                    ["notes"] = pending.Notes, ["failed_eggs"] = pending.FailedEggs, ["dead_chicks"] = pending.DeadChicks, ["scans"] = scans,
-                };
-                if (pending.ConfirmedAgainstObsId.HasValue)
-                    obsPayload["expected_observation_id"] = pending.ConfirmedAgainstObsId.Value;
-                pendingBoxes.Add(obsPayload);
-            }
+            var pendingBoxes = colonyState.PendingObservations
+                .Where(p => p.IsPendingUpload && !string.IsNullOrEmpty(p.BoxName))
+                .Select(p => (object)BuildObservationPayload(p))
+                .ToList();
 
-            var uploadBody = JsonConvert.SerializeObject(new { daily_label = colonyState.DailyLabel,
-                daily_observer_id = colonyState.DailyObserverId, daily_scribe_id = colonyState.DailyScribeId,
-                observations = pendingBoxes });
+            var uploadBody = JsonConvert.SerializeObject(BuildUploadBody(colonyState, pendingBoxes));
             var request = new HttpRequestMessage(HttpMethod.Post, $"{WILDWATCH_SYNC_URL}?action=upload&colony_id={(appSettings.SelectedColonyId > 0 ? appSettings.SelectedColonyId : 1)}");
             request.Headers.Add("Authorization", $"Bearer {token}");
             request.Content = new StringContent(uploadBody, Encoding.UTF8, "application/json");
