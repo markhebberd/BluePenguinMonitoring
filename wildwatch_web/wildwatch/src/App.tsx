@@ -8350,9 +8350,9 @@ function SeasonBreedingReport() {
 
 /** Reports page body: the report cards grouped into tabs (mirrors AdminPanel's tab bar).
  *  The active tab is persisted to the URL's ?tab= param, just like the admin page. */
-/** Keys the app answers to. Kept next to the algorithm explanation because both are things
- *  a monitor reads rather than operates. */
-function ShortcutsDoc() {
+/** How to get around: the keys the app answers to. Kept next to the algorithm explanation
+ *  because both are things a monitor reads rather than operates. */
+function SiteNavigationDoc() {
   const rows: [string, string][] = [
     ['/', 'Jump to the search box'],
     ['↓ ↑', 'Move through the search results'],
@@ -8363,7 +8363,7 @@ function ShortcutsDoc() {
   ];
   return (
     <section className="doc-section">
-      <h2>Keyboard shortcuts</h2>
+      <h2>Site navigation</h2>
       <p className="muted">Shortcuts are ignored while you are typing in a field, so a "/" or a comma in a note is just text.</p>
       <table className="doc-keys">
         <tbody>
@@ -8386,7 +8386,7 @@ function DocsPage() {
   return (
     <div className="docs-page">
       <h1 className="docs-title">Documentation</h1>
-      <ShortcutsDoc />
+      <SiteNavigationDoc />
       <section className="doc-section">
         <Suspense fallback={<p className="muted">Loading…</p>}>
           <AlgorithmDoc seasonStartMonth={SEASON_START_MONTH} seasonStartDay={SEASON_START_DAY} />
