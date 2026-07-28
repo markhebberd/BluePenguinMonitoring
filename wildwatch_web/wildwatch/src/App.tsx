@@ -2012,6 +2012,11 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
   // toward the adult total — add/remove it in step with the adult count.
   const draftAddNoScan = () => { if (draft) { setField('no_scan', (draft.no_scan || 0) + 1); setField('adults', (draft.adults || 0) + 1); } };
   const draftRemoveNoScan = () => { if (draft && (draft.no_scan || 0) > 0) { setField('no_scan', (draft.no_scan || 0) - 1); setField('adults', Math.max(0, (draft.adults || 0) - 1)); } };
+  // Losses are counted independently of the live eggs/chicks totals — a failure the counts
+  // can't show (one replaced the same day) is exactly what these fields are for — so these
+  // only ever bump their own number. Null (not recorded) becomes 1 on the first tap.
+  const draftAddFailedEgg = () => { if (draft) setField('failed_eggs', (draft.failed_eggs || 0) + 1); };
+  const draftAddDeadChick = () => { if (draft) setField('dead_chicks', (draft.dead_chicks || 0) + 1); };
 
   // Commit the whole draft on Done: one observations update for changed fields, plus
   // create/delete for added/removed scans. Nothing was written before this point.
@@ -2144,7 +2149,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             </span>
           ))}
           <div className="add-scan-search">
-            <input className="ef-input" placeholder="Add penguin #..." value={birdSearch} onChange={e => setBirdSearch(e.target.value)} />
+            <input className="ef-input ef-addpeng" placeholder="peng #" value={birdSearch} onChange={e => setBirdSearch(e.target.value)} />
             {filteredAdd.length > 0 && (
               <div className="add-scan-results">
                 {filteredAdd.map((p: any) => (
@@ -2155,7 +2160,16 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
               </div>
             )}
           </div>
-          <button type="button" className="add-noscan-btn" onClick={draftAddNoScan}>Add no scan</button>
+          <button type="button" className="add-noscan-btn" onClick={draftAddNoScan}>No scan</button>
+          {/* Losses seen on this visit. One tap each — the numbers stay editable in the row
+              below, this is just the fast path for the common "found one dead" case. */}
+          <div className="add-lost">
+            <span className="add-lost-label">failed</span>
+            <span className="add-lost-btns">
+              <button type="button" title="Record an egg failed on this visit" onClick={draftAddFailedEgg}>{'🥚✗'}</button>
+              <button type="button" title="Record a chick dead on this visit" onClick={draftAddDeadChick}>{'🐣✗'}</button>
+            </span>
+          </div>
         </div>
         <div className="obs-edit-row">
           <label>{'\uD83D\uDC27'}</label><EditableField value={draft?.adults ?? 0} type="number" onSave={async v => { setField('adults', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
