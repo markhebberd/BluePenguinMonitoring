@@ -1038,18 +1038,8 @@ export function computeAllPenguinsRows(): any[] {
  * day as the bird's first chip, so this reflects the data as it stands rather than any import.
  */
 export function computeMissingChipMeasures(): any[] {
-  const c = mem;
-  if (!c) return [];
-  // penguins/chips/biometrics ride the snapshot un-scoped (a bird visits other colonies), so
-  // the colony filter is the chipping location — locById holds this colony's boxes only.
-  const chippedHere = (pengNum: string) => {
-    const chips = (c.chipsByPeng.get(pengNum) || []).slice()
-      .sort((a: any, b: any) => String(a.chip_date || '').localeCompare(String(b.chip_date || '')));
-    const first = chips[0];
-    return !!first && (first.location_id != null ? c.locById.has(first.location_id) : c.locByName.has(first.chip_box));
-  };
   return computeAllPenguinsRows()
-    .filter(r => r.first_chip_date && (r.chip_weight == null || r.chip_flipper == null) && chippedHere(r.peng_num))
+    .filter(r => r.first_chip_date && (r.chip_weight == null || r.chip_flipper == null))
     .map(r => ({
       peng_num: r.peng_num,
       chip_date: String(r.first_chip_date).slice(0, 10),
