@@ -406,6 +406,8 @@ function chickContextDate(chipDate: string): string {
 }
 
 /** Sort scans: M first, F second, chicks/unknown last */
+/** Males, then females, then the rest; chicks among themselves biggest first (BC, LC, SC), which
+ *  is the order they're weighed, written down and talked about. */
 function scanSortMFC(a: any, b: any): number {
   const order = (s: any) => {
     const sex = (s.sex || '').toUpperCase();
@@ -413,7 +415,8 @@ function scanSortMFC(a: any, b: any): number {
     if (sex === 'F') return 1;
     return 2;
   };
-  return order(a) - order(b);
+  const size = (s: any) => ({ BC: 0, LC: 1, SC: 2 } as Record<string, number>)[(s.chick_size_code || '').toUpperCase()] ?? 3;
+  return order(a) - order(b) || size(a) - size(b);
 }
 
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
@@ -1783,7 +1786,8 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         ) : null;
         const renderClutch = (ci: number) => {
           const fam = families[ci];
-          const { clutch, parents: pairBirds, chicks: famChicks, failedEggs, plainChicks, fledgedUnchipped } = fam;
+          const { clutch, parents: pairBirds, failedEggs, plainChicks, fledgedUnchipped } = fam;
+          const famChicks = [...fam.chicks].sort(scanSortMFC);
           const active = clutchActive(clutch);
           // green = a chipped chick; blue = eggs still active; red = eggs, no chipped chick.
           const cardStatus = famChicks.length > 0 ? 'bred' : active ? 'active' : 'fail';
@@ -2966,7 +2970,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           <ClutchBody clutch={c} dates={dates}>
                             <span className="clutch-birds">
                               {e.role === 'parent' ? (<>
-                                {e.fam.chicks.map((ck: any) => (
+                                {[...e.fam.chicks].sort(scanSortMFC).map((ck: any) => (
                                   <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={offspringDate(ck)} />
                                 ))}
                                 {Array.from({ length: e.fam.failedEggs }).map((_, j) => (
@@ -3129,7 +3133,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 PenguinMini, chick never chipped → red-✕ 🐣, egg that
                                 never hatched → red-✕ egg. */}
                             <span className="partner-window-offspring">
-                              {fam.chicks.map((ck: any) => (
+                              {[...fam.chicks].sort(scanSortMFC).map((ck: any) => (
                                 <PenguinMini key={ck.pit_id} scan={ck} onClick={() => onBirdClick(ck.peng_num || ck.pit_id)} observationDate={ck.chip_date ? chickContextDate(ck.chip_date) : undefined} />
                               ))}
                               {Array.from({ length: fam.plainChicks }).map((_, j) => (
