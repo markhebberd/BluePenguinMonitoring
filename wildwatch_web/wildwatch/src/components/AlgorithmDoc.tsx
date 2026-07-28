@@ -338,7 +338,7 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         just an egg in the nest. The failure marks appear only once the window has closed.
       </p>
 
-      <h3>12. Human verification overrides all of it</h3>
+      <h3>12. Human verification of calculated breeding data</h3>
       <p>
         Each breeding attempt carries a tick with two halves — the <b>adults</b> and the
         <b> offspring</b> — that a monitor can accept or reject. Accepting snapshots the detected
