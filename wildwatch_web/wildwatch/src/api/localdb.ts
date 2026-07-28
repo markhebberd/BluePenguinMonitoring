@@ -1127,10 +1127,8 @@ export function observedSexScore(pengNum: string | null | undefined):
     if (s === 'PM' || s === 'MM' || s === 'M') out.m += w;
     else if (s === 'PF' || s === 'MF' || s === 'F') out.f += w;
     else continue;
-    const obs = b.observation_id != null ? mem.obsById.get(Number(b.observation_id)) : null;
     out.rows.push({ biometric_id: b.biometric_id, observation_id: b.observation_id,
-                    observation_date: b.observation_date, observed_sex: s, weight: w,
-                    obs_observer_id: obs?.observer_id != null ? Number(obs.observer_id) : null });
+                    observation_date: b.observation_date, observed_sex: s, weight: w });
   }
   out.rows.sort((a, b) => String(b.observation_date || '').localeCompare(String(a.observation_date || '')));
   const mOver = out.m >= SEX_CONFIRM_SCORE, fOver = out.f >= SEX_CONFIRM_SCORE;

@@ -1045,15 +1045,3 @@ select.ef-input.ef-placeholder { color:#888; }
 .group-share-slider { display:flex; align-items:center; gap:6px; font-size:13px; color:#555; margin-left:8px; }
 .group-share-slider input { width:120px; }
 .group-members { display:flex; flex-wrap:wrap; gap:3px; }
-
-/* Sex confirmation prompt — an unsexed bird whose field guesses have reached the threshold.
-   Amber rather than red: it's a job waiting, not something broken. Sits above the bird record. */
-.sex-confirm { background:#fff8e8; border:1px solid #e6cf9a; border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:12px; }
-.sex-confirm-head { color:#7a5a12; font-weight:600; margin-bottom:6px; }
-.sex-confirm-list { list-style:none; margin:0 0 6px; padding:0; }
-.sex-confirm-list li { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:2px 0; }
-.sex-confirm-actions { display:flex; gap:8px; align-items:center; }
-.sex-confirm-actions button { padding:4px 12px; border:none; border-radius:6px; background:#2f6fb0; color:#fff; font-size:12px; cursor:pointer; }
-.sex-confirm-actions button:disabled { opacity:.55; cursor:default; }
-button.sex-confirm-later { background:transparent; color:#7d8a96; border:1px solid #cfd7de; }
-.sex-confirm-err { background:#fbeceb; border:1px solid #e6b8b3; color:#a3382f; border-radius:6px; padding:4px 8px; margin-top:6px; }
