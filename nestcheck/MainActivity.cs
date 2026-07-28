@@ -5918,6 +5918,11 @@ namespace PenguinMonitor
             boxData.ObserverName = _appSettings.ObserverName;
             boxData.IsDraft = true;
             _colonyState.SaveBoxObservation(_currentBoxName, boxData);
+            // Persist immediately. SaveCurrentBoxData only writes to disk when a TYPED count
+            // (adults/eggs/chicks) changed, and a loss tap changes none of those — so without
+            // this the recorded loss lives only in memory and is lost if the app is killed
+            // before the box is locked. Every ordinary count edit persists on the spot; match that.
+            SaveToAppDataDir();
             SaveCurrentBoxData();
             _dataChangedSinceUnlock = true;
             DrawPageLayouts();
