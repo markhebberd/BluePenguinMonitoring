@@ -5142,6 +5142,96 @@ function MissedScansReport() {
   );
 }
 
+/**
+ * Import a nestcheck day file — the same JSON the phone posts when it syncs
+ * ({daily_label, daily_observer_id, daily_scribe_id, observations[]}), read from a file instead
+ * of the wire. It goes to the identical endpoint, so a file import and a phone sync produce the
+ * same rows, the same conflicts and the same audit trail ("nestcheck_sync").
+ *
+ * Two passes, as the phone has: `upload` writes what it can and reports any box/day that already
+ * has an observation; `confirm` re-sends and force-replaces those in place.
+ */
+function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: number }) {
+  const [file, setFile] = useState<string>('');
+  const [body, setBody] = useState<any>(null);
+  const [result, setResult] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const read = async (f: File | undefined) => {
+    setResult(null); setError(''); setBody(null); setFile(f?.name || '');
+    if (!f) return;
+    try {
+      const parsed = JSON.parse(await f.text());
+      if (!parsed || !Array.isArray(parsed.observations)) throw new Error('No "observations" array — is this a nestcheck day file?');
+      setBody(parsed);
+    } catch (e: any) { setError(e?.message || 'Could not read that file'); }
+  };
+
+  const send = async (action: 'upload' | 'confirm') => {
+    if (!body) return;
+    setBusy(true); setError('');
+    try {
+      const r = await fetch(`/api/sync.php?action=${action}&colony_id=${colonyId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const json = await r.json();
+      if (json.error) setError(json.error); else setResult(json);
+      triggerSync();
+    } catch (e: any) { setError(e?.message || 'Import failed'); }
+    finally { setBusy(false); }
+  };
+
+  const obsCount = Array.isArray(body?.observations) ? body.observations.length : 0;
+  return (
+    <div className="admin-section">
+      <h3>Import nestcheck day file</h3>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        The JSON a phone sends when it syncs — <code>daily_label</code>, <code>daily_observer_id</code>,
+        {' '}<code>daily_scribe_id</code> and an <code>observations</code> array. Same endpoint the phone uses, so
+        the result is identical to that phone having synced: unknown boxes and unreadable rows are reported,
+        a box already holding an observation for that day comes back as a conflict, and nothing is
+        overwritten until you choose to replace it. The day label fills an empty day note; it never
+        overwrites one.
+      </p>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <input type="file" accept=".json,application/json" onChange={e => read(e.target.files?.[0])} />
+        {body && <span className="muted" style={{ fontSize: 12 }}>
+          {file}: {obsCount} observation{obsCount === 1 ? '' : 's'}{body.daily_label ? ` · "${body.daily_label}"` : ''}
+        </span>}
+        {body && <button className="edit-btn" disabled={busy} onClick={() => send('upload')}>{busy ? 'Importing…' : 'Import'}</button>}
+      </div>
+      {error && <p style={{ color: '#F44336', fontSize: 13 }}>{error}</p>}
+      {result && (
+        <div style={{ fontSize: 13 }}>
+          <p style={{ color: '#4CAF50', margin: '4px 0' }}>{(result.created || []).length} observation(s) written.</p>
+          {(result.errors || []).length > 0 && (
+            <details open><summary style={{ color: '#e65100' }}>{result.errors.length} skipped</summary>
+              <ul className="muted">{result.errors.map((x: any, i: number) => <li key={i}>{typeof x === 'string' ? x : JSON.stringify(x)}</li>)}</ul>
+            </details>
+          )}
+          {(result.conflicts || []).length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <p style={{ color: '#e65100', margin: '4px 0' }}>
+                {result.conflicts.length} box(es) already have an observation for that day.
+              </p>
+              <ul className="muted">{result.conflicts.map((cf: any, i: number) => (
+                <li key={i}>Box {cf.box_name || cf.box || '?'}{cf.date ? ` · ${cf.date}` : ''}</li>
+              ))}</ul>
+              <button className="edit-btn" disabled={busy} onClick={() => send('confirm')}
+                title="Re-send, replacing the existing observation for each conflicting box/day">
+                {busy ? 'Replacing…' : 'Replace existing'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MISSING_NO_SCANS_TITLE = 'Missing no scans';
 
 function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time: string) => string; token: string }) {
@@ -9292,6 +9382,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           } catch (e: any) { alert('Export failed: ' + e.message); }
           setExporting(false);
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
+      </div>
+
+      <div style={{ display: adminTab === 'io' ? undefined : 'none' }}>
+        <NestcheckJsonImport token={token} colonyId={impColony} />
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'io' ? undefined : 'none' }}>
