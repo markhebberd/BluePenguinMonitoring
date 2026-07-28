@@ -2266,6 +2266,9 @@ namespace PenguinMonitor
                     var problem = GetBoxScanMismatch(boxObs2);
                     if (problem != null)
                         mismatchLines.Add($"⚠ Box {bn}: {problem}");
+                    var drop = GetOffspringDropWarning(bn, boxObs2);
+                    if (drop != null)
+                        mismatchLines.Add($"⚠ Box {bn}: {drop}");
                 }
                 if (mismatchLines.Count > 0)
                 {
@@ -2601,8 +2604,10 @@ namespace PenguinMonitor
             else if (currentExists)
             {
                 // Today's synced data — solid black border
+                // Same rule as the header warning, so the two agree: a drop stops reading as a
+                // loss once the chip window has closed and the chicks are expected to be leaving.
                 if (previousBoxData != null && thisBoxData != null
-                    && (thisBoxData.Eggs + thisBoxData.Chicks < previousBoxData.Eggs + previousBoxData.Chicks))
+                    && GetOffspringDropWarning(boxName, thisBoxData) != null)
                 {
                     differenceFound = true;
                     boxOverviewCard.Background = _uiFactory.CreateCardBackground(borderWidth: 8, borderColour: UIFactory.DANGER_RED, backgroundColor: selected ? UIFactory.WARNING_YELLOW : null);
@@ -4097,6 +4102,39 @@ namespace PenguinMonitor
             if (chickScans > box.Chicks)
                 problems.Add($"{chickScans} chick scans > {box.Chicks} chick{(box.Chicks != 1 ? "s" : "")}");
             return problems.Count > 0 ? string.Join("; ", problems) : null;
+        }
+
+        /// <summary>
+        /// Eggs+chicks lower than the last visit — a loss worth a second look, since it's usually
+        /// either a real failure or a miscount. Silent once the chip window has closed: chicks
+        /// leave the nest from then on, so the count dropping is the expected outcome, not news.
+        /// Returns a description of the drop, or null if there's nothing to flag.
+        /// </summary>
+        private string? GetOffspringDropWarning(string boxName, BoxObservation today)
+        {
+            if (!_colonyState.PreviousBoxes.TryGetValue(boxName, out var prev)) return null;
+
+            int nowTotal = today.Eggs + today.Chicks;
+            int wasTotal = prev.Eggs + prev.Chicks;
+            if (nowTotal >= wasTotal) return null;
+
+            // Past the chip window's close, fledging accounts for it
+            if (_remoteBreedingDates != null
+                && _remoteBreedingDates.TryGetValue(boxName, out var dates)
+                && !string.IsNullOrEmpty(dates.chipWindowFinish)
+                && DateTime.TryParse(dates.chipWindowFinish, out var chipClose)
+                && NzToday > chipClose.Date)
+                return null;
+
+            string Describe(int eggs, int chicks) =>
+                eggs == 0 && chicks == 0 ? "empty"
+                : string.Join(" + ", new[] {
+                    eggs > 0 ? $"{eggs} egg{(eggs != 1 ? "s" : "")}" : null,
+                    chicks > 0 ? $"{chicks} chick{(chicks != 1 ? "s" : "")}" : null
+                  }.Where(s => s != null));
+
+            var when = ToNzTime(prev.WhenDataCollectedUtc).ToString("d MMM");
+            return $"offspring down {wasTotal} → {nowTotal} ({Describe(prev.Eggs, prev.Chicks)} on {when}, now {Describe(today.Eggs, today.Chicks)})";
         }
 
         private (string label, string sex, bool isChick, PenguinData? pd) LookupPenguinLabel(string birdId)
