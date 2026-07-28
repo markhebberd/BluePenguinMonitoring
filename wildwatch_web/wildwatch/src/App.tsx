@@ -10115,14 +10115,6 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           desc="Chipped birds with no weight and/or no flipper length on their chip date. Chipping is the one time every bird is in the hand, so a gap here is a measurement that can never be taken later. Live from the cache — a value entered on the bird clears its row."
           empty="Every chipped bird has both measurements"
           columns={[{ key: 'chip_date', label: 'Chip date' }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_box', label: 'Box', render: boxCell }, { key: 'chip_by', label: 'By' }, { key: 'missing', label: 'Missing' }, { key: 'chip_weight', label: 'Weight (g)', render: (v: any) => v ?? '—' }, { key: 'chip_flipper', label: 'Flipper (mm)', render: (v: any) => v ?? '—' }]} />
-        <h3 style={{ marginTop: 28 }}>Flipper-length import (6 Jul 2026)</h3>
-        <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
-          One-off record from that import: the spreadsheet's chip weight disagreed with what was already stored, so
-          the flipper length was added and the existing weight kept. Not recomputable — the sheet isn't in the app.
-        </p>
-        <IntegrityCheck rows={FLIPPER_IMPORT_WEIGHT_DIFFS} title="Chip-weight discrepancies"
-          desc="The spreadsheet's chip weight disagreed with the weight already stored on the chip-day biometric. The existing database weight was kept and the flipper length was still added — worth reconciling by hand." empty="None"
-          columns={[{ key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_date', label: 'Chip date' }, { key: 'sheet_weight', label: 'Sheet (g)' }, { key: 'db_weight', label: 'Kept in DB (g)' }, { key: 'flipper', label: 'Flipper added (mm)' }]} />
       </div>
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
@@ -11084,20 +11076,6 @@ const boxesCell = (csv: string) => (csv || '').split(',').map((b: string, i: num
   <Fragment key={i}>{i > 0 ? ', ' : ''}<span className="clickable">{b.trim()}</span></Fragment>
 ));
 
-// One-off record of exceptions from the 6 Jul 2026 flipper-length import (chip spreadsheet).
-// The source sheet isn't in the app and the weight comparison can't be recomputed live, so the
-// birds needing manual attention are recorded here rather than derived from the cache.
-const FLIPPER_IMPORT_WEIGHT_DIFFS = [
-  { peng_num: 'PT215', chip_date: '2021-09-21', sheet_weight: 890, db_weight: 910, flipper: 115 },
-  { peng_num: 'PT214', chip_date: '2021-09-21', sheet_weight: 910, db_weight: 890, flipper: 112 },
-  { peng_num: 'PT518', chip_date: '2023-06-27', sheet_weight: 940, db_weight: 960, flipper: 120 },
-  { peng_num: 'PT328', chip_date: '2022-04-11', sheet_weight: 1100, db_weight: 1110, flipper: 123 },
-  { peng_num: 'PT339', chip_date: '2022-05-03', sheet_weight: 1100, db_weight: 1350, flipper: 120 },
-  { peng_num: 'PT338', chip_date: '2022-05-03', sheet_weight: 1010, db_weight: 1180, flipper: 111 },
-  { peng_num: 'PT344', chip_date: '2022-06-15', sheet_weight: 960, db_weight: 860, flipper: 113 },
-  { peng_num: 'PT247', chip_date: '2021-10-19', sheet_weight: 800, db_weight: 880, flipper: 110 },
-  { peng_num: 'PT646', chip_date: '2023-11-15', sheet_weight: 980, db_weight: 920, flipper: 109 },
-];
 
 function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: string; userName: string; userRole: string; onLogout: () => void }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
