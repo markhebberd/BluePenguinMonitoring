@@ -8772,6 +8772,22 @@ namespace PenguinMonitor
         /// back a content:// URI that can go straight into a share. Below that it goes to the
         /// public Downloads path, which is still readable but can't be shared without a
         /// FileProvider — so those devices get the path and no share button.</summary>
+        /// <summary>What the file contains, named item by item. Someone exports because they don't
+        /// trust the sync; "3 boxes" leaves them wondering whether the birds and the bird details
+        /// went with it.</summary>
+        private string ExportSummary(int boxes, int pending)
+        {
+            var parts = new List<string> { $"{boxes} box observation{(boxes == 1 ? "" : "s")}" };
+            int bios = _colonyState.TodayBiometrics.Count;
+            int birds = _dataStorageService.LoadQueuedChips(this).Count;
+            int notes = _boxNotes.Values.Count(n => !string.IsNullOrWhiteSpace(n.PersistentNotes));
+            if (bios > 0) parts.Add($"{bios} bird detail{(bios == 1 ? "" : "s")}");
+            if (birds > 0) parts.Add($"{birds} new bird{(birds == 1 ? "" : "s")}");
+            if (notes > 0) parts.Add($"{notes} box note{(notes == 1 ? "" : "s")}");
+            return string.Join(", ", parts)
+                 + (pending > 0 ? $"\n\n{pending} of these have not reached wildwatch." : "\n\nAll of it has reached wildwatch already.");
+        }
+
         private void ExportTodayJson()
         {
             try
@@ -8780,26 +8796,91 @@ namespace PenguinMonitor
                 var colony = string.IsNullOrWhiteSpace(CurrentColonyAcronym()) ? "colony" : CurrentColonyAcronym();
                 var fileName = $"nestcheck-{colony}-{stamp}.json";
 
-                // Exactly what a sync would have posted, so the file can be fed straight to
-                // wildwatch. Today only: previous days' boxes are cached for on-screen comparison
-                // and mean nothing to the server, and the raw colony state carries a pile of
-                // other local bookkeeping besides.
-                var todays = new Dictionary<string, BoxObservation>();
+                // The observations keep sync.php's upload shape so the file stays feedable to
+                // wildwatch. What goes in them is everything the server might not have: today's
+                // round, AND any earlier day still queued — a phone that's been out of signal for
+                // three days is exactly when someone reaches for this button, and exporting only
+                // today would hand back a file missing the very work at risk.
+                var toExport = new Dictionary<string, BoxObservation>();   // box|date, so days don't collide
+                string Key(BoxObservation o) => $"{o.BoxName}|{ToNzTime(o.WhenDataCollectedUtc):yyyy-MM-dd}";
                 foreach (var kv in _colonyState.TodayBoxes)
-                    if (!string.IsNullOrEmpty(kv.Key)) todays[kv.Key] = kv.Value;
+                    if (!string.IsNullOrEmpty(kv.Key)) toExport[Key(kv.Value)] = kv.Value;
                 foreach (var p in _colonyState.PendingObservations)
-                    if (!string.IsNullOrEmpty(p.BoxName) && ToNzTime(p.WhenDataCollectedUtc).Date == NzToday)
-                        todays[p.BoxName!] = p;   // a local edit wins over the synced copy
+                    if (!string.IsNullOrEmpty(p.BoxName)) toExport[Key(p)] = p;   // a local edit wins
 
-                var observations = todays.Values
-                    .OrderBy(o => o.BoxName)
+                var observations = toExport.Values
+                    .OrderBy(o => ToNzTime(o.WhenDataCollectedUtc)).ThenBy(o => o.BoxName)
                     .Select(o => (object)DataStorageService.BuildObservationPayload(o))
                     .ToList();
-                var json = JsonConvert.SerializeObject(
-                    DataStorageService.BuildUploadBody(_colonyState, observations), Formatting.Indented);
+
+                // Everything else the phone is holding that the server may not have. The counts
+                // dialog has always said "still waiting to upload" — this is what that means, and
+                // until now the file didn't contain any of it.
+                var users = DataStorageService.LoadUsers(this);
+                string? UserName(int id) => id > 0 ? users.FirstOrDefault(u => u.id == id)?.name : null;
+                var queuedBirds = _dataStorageService.LoadQueuedChips(this);
+
+                var body = new Dictionary<string, object?>
+                {
+                    // sync.php's upload shape, unchanged
+                    ["daily_label"] = _colonyState.DailyLabel,
+                    ["daily_observer_id"] = _colonyState.DailyObserverId,
+                    ["daily_scribe_id"] = _colonyState.DailyScribeId,
+                    ["observations"] = observations,
+                    // and the rest, so the file stands on its own
+                    ["exported_at_utc"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    ["app_version"] = version,
+                    ["colony_id"] = CurrentColonyIdOrDefault(),
+                    ["colony"] = CurrentColonyAcronym(),
+                    // Names beside the ids: a file read by a person, or imported somewhere without
+                    // this colony's user table, shouldn't reduce who was out to a pair of numbers.
+                    ["daily_observer"] = UserName(_colonyState.DailyObserverId),
+                    ["daily_scribe"] = UserName(_colonyState.DailyScribeId),
+                    ["day_notes"] = _colonyState.PendingDayNotes.Select(n => new {
+                        nz_date = n.NzDate, note = n.Note,
+                        observer_id = n.ObserverId, scribe_id = n.ScribeId,
+                        observer = UserName(n.ObserverId), scribe = UserName(n.ScribeId),
+                    }).ToList(),
+                    ["biometrics"] = _colonyState.TodayBiometrics.Values
+                        .OrderBy(b => b.ObservationDate).ThenBy(b => b.PengNum)
+                        .Select(b => new {
+                            peng_num = b.PengNum, observation_date = b.ObservationDate,
+                            weight = b.Weight, flipper_length = b.FlipperLength, observed_sex = b.ObservedSex,
+                            is_moulting = b.ConditionMoulting, condition_ticks = b.ConditionTicks,
+                            dead = b.ConditionDead, notes = b.Notes,
+                            biometric_id = b.BiometricId, unsent = b.IsPendingUpload,
+                        }).ToList(),
+                    ["queued_birds"] = queuedBirds.Select(q => new {
+                        pit_id = q.FullPitId, requested_peng_num = q.RequestedPengNum,
+                        chip_box = string.IsNullOrEmpty(q.ChipBox) ? q.BoxName : q.ChipBox,
+                        chip_date = ToNzTime(q.CreatedUtc).ToString("yyyy-MM-dd"),
+                        chipped_as_adult = q.IsChick ? 0 : 1, chick_size_code = q.ChickSizeCode,
+                        is_rechip = q.IsRechip, rechip_peng_num = q.RechipPengNum,
+                        chipper_id = q.ChipperId, chipper = UserName(q.ChipperId),
+                        assistant_id = q.AssistantId, assistant = UserName(q.AssistantId),
+                        weight = q.Weight, flipper_length = q.Flipper, observed_sex = q.SexCode, notes = q.Notes,
+                    }).ToList(),
+                    ["box_notes"] = _boxNotes.Values
+                        .Where(n => !string.IsNullOrWhiteSpace(n.PersistentNotes) || n.Watched || n.WatchedPendingUpload)
+                        .OrderBy(n => n.BoxName)
+                        .Select(n => new {
+                            box_name = n.BoxName, location_id = n.LocationId,
+                            persistent_notes = n.PersistentNotes, watched = n.Watched,
+                            watched_unsent = n.WatchedPendingUpload,
+                        }).ToList(),
+                    ["unsent"] = new {
+                        observations = _colonyState.PendingUploadCount,
+                        biometrics = _colonyState.PendingBiometricCount,
+                        birds = queuedBirds.Count,
+                        day_notes = _colonyState.PendingDayNotes.Count
+                                    + (_colonyState.DailyLabelPendingUpload ? 1 : 0),
+                    },
+                };
+                var json = JsonConvert.SerializeObject(body, Formatting.Indented);
 
                 int boxes = observations.Count;
-                int pending = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
+                int pending = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount
+                              + queuedBirds.Count;
 
                 if (OperatingSystem.IsAndroidVersionAtLeast(29))
                 {
@@ -8818,9 +8899,8 @@ namespace PenguinMonitor
                     }
 
                     new AlertDialog.Builder(this)
-                        .SetTitle("Today's data exported")
-                        .SetMessage($"Downloads/{fileName}\n\n{boxes} box{(boxes == 1 ? "" : "es")} recorded today" +
-                                    (pending > 0 ? $", {pending} still waiting to upload." : "."))
+                        .SetTitle("Data exported")
+                        .SetMessage($"Downloads/{fileName}\n\n{ExportSummary(boxes, pending)}")
                         .SetNegativeButton("Done", (s, e) => { })
                         .SetPositiveButton("Share", (s, e) =>
                         {
@@ -8844,9 +8924,8 @@ namespace PenguinMonitor
                 var path = System.IO.Path.Combine(downloadsPath, fileName);
                 File.WriteAllText(path, json);
                 new AlertDialog.Builder(this)
-                    .SetTitle("Today's data exported")
-                    .SetMessage($"Downloads/{fileName}\n\n{boxes} box{(boxes == 1 ? "" : "es")} recorded today" +
-                                (pending > 0 ? $", {pending} still waiting to upload." : "."))
+                    .SetTitle("Data exported")
+                    .SetMessage($"Downloads/{fileName}\n\n{ExportSummary(boxes, pending)}")
                     .SetPositiveButton("Done", (s, e) => { })
                     .Show();
             }
