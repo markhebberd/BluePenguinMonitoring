@@ -1382,7 +1382,7 @@ namespace PenguinMonitor
             UpdateStatusText("Syncing...");
             if (_syncButton != null)
             {
-                _syncButton.Text = "Sync";
+                _syncButton.Text = "Force Sync";
                 _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.WARNING_YELLOW, 8);
                 _syncButton.Enabled = false;
             }
@@ -1439,7 +1439,7 @@ namespace PenguinMonitor
                     _isDownloadingCsvData = false;
                     if (_syncButton != null)
                     {
-                        _syncButton.Text = "Sync";
+                        _syncButton.Text = "Force Sync";
                         _syncButton.Background = _uiFactory.CreateRoundedBackground(UIFactory.PRIMARY_BLUE, 8);
                         _syncButton.Enabled = true;
                     }
@@ -3077,7 +3077,7 @@ namespace PenguinMonitor
 
             // Enter Edit Box Tags mode. There's no matching exit button here — leaving is done
             // with the "Finish editing box tags" bar, and settings is locked out while in the mode.
-            Button editBoxTagsButton = _uiFactory.CreateStyledButton("Box detail", UIFactory.SUCCESS_GREEN);
+            Button editBoxTagsButton = _uiFactory.CreateStyledButton("Edit box details", UIFactory.SUCCESS_GREEN);
             editBoxTagsButton.Click += (s, e) =>
             {
                 // Entering would force the box locked, dropping whatever is half-typed in it
@@ -3511,39 +3511,49 @@ namespace PenguinMonitor
             _settingsCard.AddView(scannerSection);
 
             // 4. Box Tags + Sync + Logout/Login (horizontal row)
-            _syncButton = _uiFactory.CreateStyledButton("Sync", UIFactory.PRIMARY_BLUE);
+            _syncButton = _uiFactory.CreateStyledButton("Force Sync", UIFactory.PRIMARY_BLUE);
             _syncButton.Click += OnSyncClick;
 
             // Escape hatch for a sync that won't go through: today's data as a file the observer
             // can hand over by any means, so a day's work is never trapped on the phone.
-            var exportJsonButton = _uiFactory.CreateStyledButton("Json", UIFactory.PRIMARY_BLUE);
+            var exportJsonButton = _uiFactory.CreateStyledButton("Export todays json", UIFactory.PRIMARY_BLUE);
             exportJsonButton.Click += (s, e) => ExportTodayJson();
 
-            var actionRow = new PenguinMonitor.UI.FlowLayout(this);
-            var actionDensity = Resources?.DisplayMetrics?.Density ?? 2;
-            actionRow.HorizontalSpacing = (int)(6 * actionDensity);
-            actionRow.VerticalSpacing = (int)(6 * actionDensity);
-            var actionRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-            actionRowParams.SetMargins(0, 4, 0, 4);
-            actionRow.LayoutParameters = actionRowParams;
-
+            // Two rows of two, every button on an equal share of the width. Wrapping flow left
+            // ragged gaps and sized each button to its label, so the shortest ones were the
+            // hardest to hit; an even split also buys the room for labels that say what they do.
             var density = Resources?.DisplayMetrics?.Density ?? 2;
-            var gap = (int)(3 * density);
-            foreach (var btn in new[] { editBoxTagsButton, _syncButton, exportJsonButton, authButton as Button })
+            var actionRows = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            var actionRowsParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            actionRowsParams.SetMargins(0, 4, 0, 4);
+            actionRows.LayoutParameters = actionRowsParams;
+
+            LinearLayout ActionRow(View left, View right)
             {
-                if (btn == null) continue;
-                btn.SetPadding((int)(12 * density), (int)(8 * density), (int)(12 * density), (int)(8 * density));
-                var p = new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-                btn.LayoutParameters = p;
+                var row = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
+                var rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                rowParams.SetMargins(0, 0, 0, (int)(6 * density));
+                row.LayoutParameters = rowParams;
+                foreach (var (v, first) in new[] { (left, true), (right, false) })
+                {
+                    if (v is Button b)
+                    {
+                        b.SetPadding((int)(8 * density), (int)(10 * density), (int)(8 * density), (int)(10 * density));
+                        b.SetMinimumWidth(0);
+                        // Labels differ a lot in length; let the long ones shrink rather than clip
+                        b.SetAutoSizeTextTypeUniformWithConfiguration(9, 14, 1, (int)Android.Util.ComplexUnitType.Sp);
+                    }
+                    var p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+                    p.SetMargins(first ? 0 : (int)(3 * density), 0, first ? (int)(3 * density) : 0, 0);
+                    v.LayoutParameters = p;
+                    row.AddView(v);
+                }
+                return row;
             }
-            // No width floor: the label is always the four letters "Sync", and the 100dp minimum
-            // padded it out far enough to wrap the action row onto a second line.
-            _syncButton.SetMinimumWidth(0);
-            actionRow.AddView(editBoxTagsButton);
-            actionRow.AddView(_syncButton);
-            actionRow.AddView(exportJsonButton);
-            actionRow.AddView(authButton);
-            _settingsCard.AddView(actionRow);
+
+            actionRows.AddView(ActionRow(editBoxTagsButton, _syncButton));
+            actionRows.AddView(ActionRow(exportJsonButton, authButton));
+            _settingsCard.AddView(actionRows);
         }
 
         private void OnScrollViewTouch(object? sender, View.TouchEventArgs e)
