@@ -3345,7 +3345,7 @@ function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
         ].filter(Boolean);
         if (refused.length) {
           rejected.push({ ...base, what: refused.join(' + '),
-            note: [v.adults_note, v.chicks_note].filter(Boolean).join(' · ') });
+            note: [...new Set([v.adults_note, v.chicks_note].filter(Boolean))].join(' · ') });
           continue;
         }
         const moved = [
@@ -3355,17 +3355,13 @@ function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
         if (moved.length) drifted.push({ ...base, what: moved.join(' + '), why: 'detection changed since it was accepted' });
       }
     }
-    // Verdicts with no window left to attach to. Which table they belong in still depends on
-    // what the reviewer said: a rejection stands whether or not the window survived, and a row
-    // carrying neither verdict was never a claim about anything.
+    // Verdicts with no window left to attach to. Only acceptances are a problem: a rejection
+    // whose window has since disappeared is settled — the reviewer said the detection was
+    // wrong and the algorithm now agrees there is nothing there.
     for (const v of vers) {
       if (anchored.has(v.observation_id)) continue;
-      const refused = [
-        v.adults_verdict === 'rejected' ? 'pair' : null,
-        v.chicks_verdict === 'rejected' ? 'offspring' : null,
-      ].filter(Boolean);
-      const accepted = v.adults_verdict === 'accepted' || v.chicks_verdict === 'accepted';
-      if (!refused.length && !accepted) continue;
+      if (v.adults_verdict === 'rejected' || v.chicks_verdict === 'rejected') continue;
+      if (v.adults_verdict !== 'accepted' && v.chicks_verdict !== 'accepted') continue;
       const obs = [...(detail.observations || []), ...(detail.deleted || [])]
         .find((o: any) => o.observation_id === v.observation_id);
       const time = obs?.observation_time_utc;
@@ -3376,15 +3372,10 @@ function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
         by: named(v),
         _href: time ? `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}` : undefined,
       };
-      if (refused.length) {
-        rejected.push({ ...row, what: refused.join(' + '),
-          note: [v.adults_note, v.chicks_note].filter(Boolean).join(' · ') });
-      } else {
-        drifted.push({ ...row, what: 'whole window',
-          why: deletedIds.has(v.observation_id)
-            ? 'the observation it was recorded against was deleted'
-            : 'no breeding window starts here any more' });
-      }
+      drifted.push({ ...row, what: 'whole window',
+        why: deletedIds.has(v.observation_id)
+          ? 'the observation it was recorded against was deleted'
+          : 'no breeding window starts here any more' });
     }
   }
   const bySeason = (a: any, b: any) => String(b.obs_date).localeCompare(String(a.obs_date));
