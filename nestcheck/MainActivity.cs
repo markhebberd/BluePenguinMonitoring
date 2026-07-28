@@ -5672,22 +5672,9 @@ namespace PenguinMonitor
             };
             searchRow.AddView(noScanBtn);
 
-            // Losses seen this visit — a label over two one-tap buttons, sized to share the row
-            // with the search field rather than taking a line of its own.
-            var lostCol = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
-            lostCol.SetGravity(GravityFlags.CenterHorizontal);
-            var lostColParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            lostColParams.SetMargins(8, 0, 0, 0);
-            lostColParams.Gravity = GravityFlags.CenterVertical;
-            lostCol.LayoutParameters = lostColParams;
-
-            var lostLabel = new TextView(this) { Text = "failed", TextSize = 10, Gravity = GravityFlags.Center };
-            lostLabel.SetTextColor(UIFactory.TEXT_SECONDARY);
-            lostLabel.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-            lostCol.AddView(lostLabel);
-
-            var lostRow = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Horizontal };
-            // No count on the face — each loss is its own removable row above.
+            // Losses seen this visit. They sit straight in the row beside No scan — the "failed"
+            // caption that used to head them pushed these two out of line with it, and the ✗ on
+            // each already says what they are.
             Button MakeLostButton(string text, string toast, Action<BoxObservation> bump)
             {
                 var b = new Button(this) { Text = text, TextSize = 17 };
@@ -5697,17 +5684,16 @@ namespace PenguinMonitor
                 b.Background = ButtonFace();
                 b.SetAllCaps(false);
                 var p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-                p.SetMargins(3, 0, 3, 0);
+                p.SetMargins(6, 0, 0, 0);
+                p.Gravity = GravityFlags.CenterVertical;
                 b.LayoutParameters = p;
                 b.Click += (s, e) => BumpLoss(bump, toast);
                 return b;
             }
             // These stand apart from the live egg/chick totals on purpose: they record a loss the
             // totals can't show, such as an egg that failed and was replaced the same day.
-            lostRow.AddView(MakeLostButton("🥚✗", "+1 failed egg", d => d.FailedEggs = (d.FailedEggs ?? 0) + 1));
-            lostRow.AddView(MakeLostButton("🐣✗", "+1 dead chick", d => d.DeadChicks = (d.DeadChicks ?? 0) + 1));
-            lostCol.AddView(lostRow);
-            searchRow.AddView(lostCol);
+            searchRow.AddView(MakeLostButton("🥚✗", "+1 failed egg", d => d.FailedEggs = (d.FailedEggs ?? 0) + 1));
+            searchRow.AddView(MakeLostButton("🐣✗", "+1 dead chick", d => d.DeadChicks = (d.DeadChicks ?? 0) + 1));
 
             searchContainer.AddView(searchRow);
 
