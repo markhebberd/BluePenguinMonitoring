@@ -2759,9 +2759,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   const saveAlert = async (val: any) => {
     const on = val === 'Yes' ? 1 : 0;
     if ((p.alert ? 1 : 0) === on) return;
-    const reason = prompt(`Turn the scan alert ${on ? 'ON' : 'OFF'} for penguin #${p.peng_num}?\n\nReason (optional):`);
-    if (reason === null) return;
-    return updateRecord(token || '', 'penguins', p.peng_num, { alert: on }, reason || undefined);
+    // No reason prompt: a flag you switch on to catch a bird next time, and off once you have,
+    // is routine housekeeping. audit_log still records who changed it and when.
+    return updateRecord(token || '', 'penguins', p.peng_num, { alert: on });
   };
   // Stored inverted (chipped_as_adult), so this can't go through savePenguin without the
   // audit prompt reading "chipped_as_adult from 0 to 1". Ask the question the panel asks.
