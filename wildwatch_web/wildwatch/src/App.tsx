@@ -2108,13 +2108,13 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             {localObs.failed_eggs != null && (
               <span className={`obs-lost${Number(localObs.failed_eggs) === 0 ? ' checked' : ''}`}
                 title={Number(localObs.failed_eggs) === 0 ? 'Checked: no eggs failed on this visit' : 'Eggs recorded as failed on this visit'}>
-                {'\uD83E\uDD5A\u2717'} {localObs.failed_eggs}
+<OffspringFinal kind="egg" active={false} /> {localObs.failed_eggs}
               </span>
             )}
             {localObs.dead_chicks != null && (
               <span className={`obs-lost${Number(localObs.dead_chicks) === 0 ? ' checked' : ''}`}
                 title={Number(localObs.dead_chicks) === 0 ? 'Checked: no chicks died on this visit' : 'Chicks recorded as dead on this visit'}>
-                {'\uD83D\uDC23\u2717'} {localObs.dead_chicks}
+<OffspringFinal kind="chick" active={false} /> {localObs.dead_chicks}
               </span>
             )}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
@@ -2161,8 +2161,8 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
           <label>{'\uD83E\uDD5A'}</label><EditableField value={draft?.eggs ?? 0} type="number" onSave={async v => { setField('eggs', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label>{'\uD83D\uDC23'}</label><EditableField value={draft?.chicks ?? 0} type="number" onSave={async v => { setField('chicks', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
           <label title="Unchipped chicks presumed fledged">{'\uD83D\uDD4A'}</label><EditableField value={draft?.fledged_unchipped ?? 0} type="number" onSave={async v => { setField('fledged_unchipped', v == null ? 0 : v); }} canEdit={true} inline narrow min={0} />
-          <label title="Eggs seen failed on this visit — for a failure the counts can't show, e.g. one replaced the same day. Blank = not recorded, 0 = checked, none failed">{'\uD83E\uDD5A\u2717'}</label><EditableField value={draft?.failed_eggs ?? ''} type="number" onSave={async v => { setField('failed_eggs', v); }} canEdit={true} inline narrow min={0} />
-          <label title="Chicks seen dead on this visit. Blank = not recorded, 0 = checked, none died">{'\uD83D\uDC23\u2717'}</label><EditableField value={draft?.dead_chicks ?? ''} type="number" onSave={async v => { setField('dead_chicks', v); }} canEdit={true} inline narrow min={0} />
+          <label title="Eggs seen failed on this visit — for a failure the counts can't show, e.g. one replaced the same day. Blank = not recorded, 0 = checked, none failed"><OffspringFinal kind="egg" active={false} /></label><EditableField value={draft?.failed_eggs ?? ''} type="number" onSave={async v => { setField('failed_eggs', v); }} canEdit={true} inline narrow min={0} />
+          <label title="Chicks seen dead on this visit. Blank = not recorded, 0 = checked, none died"><OffspringFinal kind="chick" active={false} /></label><EditableField value={draft?.dead_chicks ?? ''} type="number" onSave={async v => { setField('dead_chicks', v); }} canEdit={true} inline narrow min={0} />
           <EditableField value={draft?.breeding_status ?? ''} type="select" options={['','CON','POT','UNL','NO','DCM','ABN','IGN']} onSave={async v => { setField('breeding_status', v || ''); }} canEdit={true} placeholder="Nest status" />
           <EditableField value={draft?.gate_status ?? ''} type="select" options={['','Gate up','Regate']} onSave={async v => { setField('gate_status', v || ''); }} canEdit={true} placeholder="Gate status" />
           <EditableField value={draft?.notes ?? ''} onSave={async v => { setField('notes', v || ''); }} placeholder="notes" canEdit={true} inline multiline />

@@ -265,10 +265,13 @@ header h1:hover { opacity:.8; }
 @keyframes flash-highlight { 0%,100% { background:#fff; } 50% { background:#FFF9C4; box-shadow:0 0 8px rgba(253,216,53,.4); } }
 .obs-card { background:#fff; border-radius:6px; padding:8px 10px; margin-bottom:6px; border-left:3px solid #2196F3; }
 .obs-card.chip-card { border-left-color:#4CAF50; } /* chipping event, not an observation */
-/* Breeding history: offspring that did not progress (egg never hatched, chick never
-   chipped) — red ✕ overlay */
+/* An offspring that did not progress (egg never hatched, chick died) — red ✕ over the glyph.
+   The box sizing lives here rather than only in the breeding containers, so the overlay lands
+   on the glyph wherever this renders: breeding cards, the observation row, an edit label.
+   The ✕ is sized in em so it tracks whatever font-size the surrounding context sets. */
+.offspring-final { position:relative; display:inline-flex; align-items:center; }
 .offspring-failed { position:relative; display:inline-block; }
-.offspring-failed .fail-x { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#F44336; font-weight:900; font-size:15px; text-shadow:0 0 2px #fff, 0 0 2px #fff; pointer-events:none; }
+.offspring-failed .fail-x { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#F44336; font-weight:900; font-size:.95em; text-shadow:0 0 2px #fff, 0 0 2px #fff; pointer-events:none; }
 /* Breeding history: chick chipped in this nest — green ring + hover detail */
 .chick-chipped-marker { position:relative; display:inline-flex; align-items:center; justify-content:center; border:2px solid #4CAF50; border-radius:50%; padding:1px 2px; cursor:pointer; line-height:1; }
 .chick-chipped-marker .chick-tip { display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); flex-direction:column; align-items:center; gap:4px; background:#fff; border:1px solid #ddd; border-radius:6px; padding:6px 8px; box-shadow:0 4px 12px rgba(0,0,0,.18); white-space:nowrap; font-size:11px; z-index:600; }
@@ -284,7 +287,8 @@ header h1:hover { opacity:.8; }
 .gate { font-size:10px; color:#666; background:#e8e8e8; padding:1px 5px; border-radius:3px; }
 /* Hand-entered end of life on an observation, beside the counts it explains. An explicit
    zero is a monitor saying they checked, so it shows too — muted, not alarming. */
-.obs-lost { font-size:11px; color:#a4362d; background:#fbeceb; border:1px solid #f3d6d3; padding:1px 5px; border-radius:3px; white-space:nowrap; }
+.obs-lost { display:inline-flex; align-items:center; gap:2px; font-size:11px; color:#a4362d; background:#fbeceb; border:1px solid #f3d6d3; padding:1px 5px; border-radius:3px; white-space:nowrap; }
+.obs-lost .offspring-final { font-size:13px; }
 .obs-lost.checked { color:#5f6c78; background:#eef1f4; border-color:#dde3e9; }
 .badge.clickable { cursor:pointer; }
 .badge.clickable:hover { filter:brightness(1.05); box-shadow:0 0 0 2px rgba(26,82,118,.25); }
