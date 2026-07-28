@@ -27,6 +27,7 @@ function lazyWithReload<T extends React.ComponentType<any>>(factory: () => Promi
 const DiskHistoryChart = lazyWithReload(() => import('./components/DiskHistoryChart'));
 const AlgorithmDoc = lazyWithReload(() => import('./components/AlgorithmDoc'));
 import type { BoxTag } from './types';
+import type { SexGuessRow } from './api/localdb';
 import './App.css';
 
 interface Scan { scan_id?:number; peng_num?:string|null; pit_id:string; sex:string|null; life_stage:string|null; chip_date:string|null; chipped_as_adult:number|null; }
@@ -2596,6 +2597,80 @@ function BiometricsEditor({ pengNum, biometrics, deleted, token, canEdit, editin
   </>);
 }
 
+/** Who was out when a guess was made. The day's Observer & Scribe is the fuller answer and the
+ *  one people recognise, so it wins; a biometric taken outside a written-up day (chipping, an
+ *  import) falls back to whoever logged the parent observation, and says nothing if neither
+ *  is known rather than inventing an attribution. */
+function guessCredit(row: SexGuessRow): string | null {
+  const day = getDayPeople(String(row.observation_date || '').slice(0, 10));
+  const observer = getUserName(day.observer_id);
+  const scribe = getUserName(day.scribe_id);
+  if (observer && scribe) return `${observer} & ${scribe}`;
+  if (observer || scribe) return (observer || scribe) as string;
+  return getObserverName(row.obs_observer_id);
+}
+
+/** Asks someone to commit penguins.sex once the field guesses have piled up past the threshold.
+ *  Shows its working — every guess that counted, with who made it — because the whole point is
+ *  that the reader judges the evidence rather than trusting a number. */
+function SexConfirmPrompt({ p, activeChip, score, token, canEdit }: {
+  p: any; activeChip: any; score: ReturnType<typeof observedSexScore>; token?: string; canEdit?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+
+  const side = score.side;
+  const total = side === 'M' ? score.m : side === 'F' ? score.f : Math.max(score.m, score.f);
+
+  const confirm = async (sex: 'M' | 'F') => {
+    if (!token) return;
+    setBusy(true); setErr('');
+    try {
+      const r: any = await updateRecord(token, 'penguins', p.peng_num, { sex },
+        `Confirmed ${sex} from field sex guesses (score ${total})`);
+      if (r?.error) { setErr(r.error); setBusy(false); return; }
+      // The banner disappears on the next render because p.sex is now set.
+    } catch (e: any) { setErr(String(e?.message || e)); setBusy(false); }
+  };
+
+  return (
+    <div className="sex-confirm">
+      <div className="sex-confirm-head">
+        {score.conflicted
+          ? <>Field guesses disagree — {score.m} male vs {score.f} female. Someone needs to settle this.</>
+          : <>Enough field guesses to sex this bird: <b>{total} points</b> towards <b>{side === 'M' ? 'male' : 'female'}</b>.</>}
+      </div>
+      <ul className="sex-confirm-list">
+        {score.rows.map(r => {
+          const by = guessCredit(r);
+          return (
+            <li key={String(r.biometric_id)}>
+              <span className="muted">seen on </span>{formatDate(r.observation_date)}
+              <span className="muted"> with </span>
+              <PenguinMini
+                scan={{peng_num: p.peng_num, pit_id: activeChip?.pit_id, sex: p.sex, chip_date: activeChip?.chip_date,
+                       chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code}}
+                observationDate={r.observation_date} navigateDirectly onClick={() => {}} />
+              {by && <><span className="muted"> by </span>{by}</>}
+              <span className="muted"> — </span>{observedSexLabel(r.observed_sex, false)}
+            </li>
+          );
+        })}
+      </ul>
+      {canEdit ? (
+        <div className="sex-confirm-actions">
+          <button disabled={busy} onClick={() => confirm('M')}>Confirm male</button>
+          <button disabled={busy} onClick={() => confirm('F')}>Confirm female</button>
+          <button className="sex-confirm-later" disabled={busy} onClick={() => setDismissed(true)}>Not now</button>
+        </div>
+      ) : <div className="muted">An editor can confirm this.</div>}
+      {err && <div className="sex-confirm-err">{err}</div>}
+    </div>
+  );
+}
+
 function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, token, canEdit, onClose }: { data: any; onBirdClick: (tag:string)=>void; onBoxClick: (box:string)=>void; onSightingClick: (box:string, date:string)=>void; onDayClick?: (day:string)=>void; token?: string; canEdit?: boolean; onClose?: () => void }) {
   const p = data.penguin;
   // Step to the next penguin by number. The colony prefix is part of the key, so ordering is
@@ -2761,6 +2836,8 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
   // books here. Blank (and the row hidden) until it has been seen since being chipped.
   const residency = activeChip?.chip_date && sightings.length > 0
     ? durationBetween(parseDate(activeChip.chip_date), parseDate(sightings[0].date)) : '';
+  // Weighted tally of the field sex guesses — drives the confirm prompt above the record.
+  const sexScore = useMemo(() => observedSexScore(p.peng_num), [p.peng_num, data]);
   const chipDay = (c: any) => (c.chip_date ? String(c.chip_date).slice(0, 10) : null);
   const chipBio = (c: any) => {
     const day = chipDay(c);
@@ -2799,6 +2876,11 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
       </div>
 
       {showHistory && token && <HistoryPanel token={token} table={showHistory.table} id={showHistory.id} onClose={() => setShowHistory(null)} />}
+
+      {/* Unsexed bird whose field guesses have added up — ask someone to settle it. Sits above
+          the record rather than inside it: it's a job to do, not a field to read. */}
+      {!p.sex && (sexScore.side || sexScore.conflicted) &&
+        <SexConfirmPrompt p={p} activeChip={activeChip} score={sexScore} token={token} canEdit={canEdit} />}
 
       {/* All penguin data. Collapsed it is three or four lines — last seen, the active
           chip's date and box, and notes if there are any. The ▸ on the right opens the
