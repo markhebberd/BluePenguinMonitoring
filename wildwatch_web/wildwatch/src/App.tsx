@@ -2096,6 +2096,18 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
+            {/* An end of life a monitor entered by hand. Shown whenever it's set, or the value
+                is only visible to someone who opens the edit row again. */}
+            {Number(localObs.failed_eggs) > 0 && (
+              <span className="obs-lost" title="Eggs recorded as failed on this visit">
+                {'\uD83E\uDD5A\u2717'}{Number(localObs.failed_eggs) > 1 ? ` ${localObs.failed_eggs}` : ''}
+              </span>
+            )}
+            {Number(localObs.dead_chicks) > 0 && (
+              <span className="obs-lost" title="Chicks recorded as dead on this visit">
+                {'\uD83D\uDC23\u2717'}{Number(localObs.dead_chicks) > 1 ? ` ${localObs.dead_chicks}` : ''}
+              </span>
+            )}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
             {[...obs.scans].sort(scanSortMFC).map((s,j) => (
               <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />

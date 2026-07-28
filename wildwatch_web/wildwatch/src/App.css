@@ -282,6 +282,8 @@ header h1:hover { opacity:.8; }
 .badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; border:0.5px solid transparent; }
 .badge.bordered { border-color:#999; }
 .gate { font-size:10px; color:#666; background:#e8e8e8; padding:1px 5px; border-radius:3px; }
+/* Hand-entered end of life on an observation, beside the counts it explains. */
+.obs-lost { font-size:11px; color:#a4362d; background:#fbeceb; border:1px solid #f3d6d3; padding:1px 5px; border-radius:3px; white-space:nowrap; }
 .badge.clickable { cursor:pointer; }
 .badge.clickable:hover { filter:brightness(1.05); box-shadow:0 0 0 2px rgba(26,82,118,.25); }
 /* Quick radial breeding-status picker on a locked observation */
