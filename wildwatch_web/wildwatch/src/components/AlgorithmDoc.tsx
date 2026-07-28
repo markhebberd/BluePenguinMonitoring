@@ -77,14 +77,6 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
     <div className="algo-doc">
       <style>{CSS}</style>
 
-      <div className="stamp">
-        {ALGORITHM_DOC.reviewed
-          ? <>This explanation was last checked against the code on <b>{ALGORITHM_DOC.reviewed}</b> (algorithm fingerprint <code>{ALGORITHM_DOC.fingerprint}</code>).</>
-          : <>This explanation has not yet been stamped against the code.</>}
-          {' '}The deploy checks the two still match: if the algorithm changes and this page
-          isn’t re-reviewed, the deploy fails. Every number below is read live from the code.
-      </div>
-
       <p className="lede">
         Nobody records which two penguins bred together. Monitors record what was in a box on a
         day — adults, eggs, chicks — and which microchipped birds were scanned there. Everything
@@ -379,6 +371,14 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         {' '}<code>computeClutchVerify</code> (step 12) in <code>src/App.tsx</code>; all numbers in
         {' '}<code>src/breedingConstants.ts</code>. Both the box breeding overview and the bird panel’s
         family view consume the same functions, so what you read here is what both screens show.
+      </div>
+      {/* Maintenance detail, not something a monitor needs — last thing on the page. */}
+      <div className="stamp">
+        {ALGORITHM_DOC.reviewed
+          ? <>This explanation was last checked against the code on <b>{ALGORITHM_DOC.reviewed}</b> (algorithm fingerprint <code>{ALGORITHM_DOC.fingerprint}</code>).</>
+          : <>This explanation has not yet been stamped against the code.</>}
+          {' '}The deploy checks the two still match: if the algorithm changes and this page
+          isn’t re-reviewed, the deploy fails. Every number above is read live from the code.
       </div>
     </div>
   );
