@@ -4335,6 +4335,11 @@ namespace PenguinMonitor
                 string.Concat(Enumerable.Repeat("🥚", obs.Eggs)) +
                 string.Concat(Enumerable.Repeat("🐣", obs.Chicks));
             if (!string.IsNullOrEmpty(icons)) statusItems.Add((icons, 14));
+            // Losses recorded on that visit — the reason the counts dropped, shown alongside them
+            // so a previous card explains itself instead of just looking like birds went missing.
+            var losses = string.Concat(Enumerable.Repeat("🥚✗", obs.FailedEggs ?? 0)) +
+                string.Concat(Enumerable.Repeat("🐣✗", obs.DeadChicks ?? 0));
+            if (!string.IsNullOrEmpty(losses)) statusItems.Add((losses, 14));
             if (!string.IsNullOrEmpty(obs.GateStatus)) statusItems.Add((obs.GateStatus, 13));
             // Date joins the row as a regular item so spacing stays even between/around all items
             if (showDate) statusItems.Add((ToNzTime(obs.WhenDataCollectedUtc).ToString("d MMM"), 13));
@@ -4474,7 +4479,10 @@ namespace PenguinMonitor
             string compact = $"{nzDate:d MMM}: " +
                 string.Concat(Enumerable.Repeat("🐧", prev.Adults)) +
                 string.Concat(Enumerable.Repeat("🥚", prev.Eggs)) +
-                string.Concat(Enumerable.Repeat("🐣", prev.Chicks));
+                string.Concat(Enumerable.Repeat("🐣", prev.Chicks)) +
+                // Losses too, so the collapsed badge doesn't read as an unexplained empty nest
+                string.Concat(Enumerable.Repeat("🥚✗", prev.FailedEggs ?? 0)) +
+                string.Concat(Enumerable.Repeat("🐣✗", prev.DeadChicks ?? 0));
             if (prev.Eggs == 0 && prev.Chicks == 0 && !string.IsNullOrEmpty(prev.BreedingStatus))
                 compact += $" {prev.BreedingStatus}";
 
