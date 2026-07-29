@@ -108,8 +108,11 @@ render_calendar() {
 }
 
 write_status() {
-  local badge="RESTORE VERIFIED" cls=ok sub="Last night&rsquo;s backup was restored into an empty database and checked."
-  [ "$FAILED" -ne 0 ] && { badge="RESTORE FAILED"; cls=bad; sub="Last night&rsquo;s check did not pass &mdash; see the steps below."; }
+  # Name the dump this run restored: "last night" was a lie whenever the button was pressed
+  # during the day, and it is exactly the lie that hid the missing hours.
+  local taken="${DUMP_TAKEN:-unknown time}"
+  local badge="RESTORE VERIFIED" cls=ok sub="The backup taken $taken was restored into an empty database and checked."
+  [ "$FAILED" -ne 0 ] && { badge="RESTORE FAILED"; cls=bad; sub="The restore check did not pass &mdash; see the steps below."; }
   {
     printf '<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
     printf '<title>Wildwatch backup status</title><style>'
@@ -171,10 +174,16 @@ finish() {
 
 # ---------------------------------------------------------------- 1. download
 say "=== $STAMP ==="
-if [ -f "$DEST" ]; then
+# An on-demand run (the admin button, via trigger-watch.sh) always pulls a current dump: the
+# point of pressing it is to mirror what production holds NOW. The scheduled run reuses the
+# day's file if it is already there, which keeps a retry after a failed step from re-downloading
+# — but that reuse is why a mid-afternoon press restored the pre-dawn copy and showed none of
+# the day's observations.
+if [ -f "$DEST" ] && [ "${FRESH:-0}" != "1" ]; then
   say "already have $DEST — re-verifying restore from it"
   cp "$DEST" "$WORK"
-  step ok "Download" "already had $DATE.sql.gz"
+  DUMP_TAKEN=$(date -r "$DEST" '+%-d %b %H:%M' 2>/dev/null || echo "earlier")
+  step ok "Download" "already had $DATE.sql.gz (taken $DUMP_TAKEN)"
 else
   if [ -z "${WW_API_KEY:-}" ]; then
     step fail "Download" "WW_API_KEY missing from shared/nas.env"
@@ -187,7 +196,8 @@ else
     step fail "Download" "HTTP $CODE, ${SIZE} bytes, gzip check failed"
     rm -f "$WORK"; finish
   fi
-  step ok "Download" "HTTP 200, $((SIZE / 1024)) KB gzipped"
+  DUMP_TAKEN=$(date '+%-d %b %H:%M')
+  step ok "Download" "HTTP 200, $((SIZE / 1024)) KB gzipped, taken $DUMP_TAKEN"
 fi
 
 # Sanity: it must look like our schema, not an error page that happened to gzip.
@@ -201,6 +211,11 @@ if [ ! -f "$DEST" ]; then
   mkdir -p "$DEST_DIR"
   mv "$WORK" "$DEST" && chmod 440 "$DEST"
   step ok "Archive" "$DEST"
+elif [ "${FRESH:-0}" = "1" ] && [ -s "$WORK" ]; then
+  # The restore below reads the archived file, so a fresh pull has to become that file or it
+  # would be downloaded and then thrown away. Same day, strictly more complete: it supersedes.
+  mv -f "$WORK" "$DEST" && chmod 440 "$DEST"
+  step ok "Archive" "$DEST (replaced with the current dump)"
 else
   rm -f "$WORK"
   step ok "Archive" "$DEST (kept)"
