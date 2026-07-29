@@ -354,6 +354,21 @@ namespace PenguinMonitor.Services
                     catch { }
                 }
 
+                // No colony resolved after the fetch above — the user has no colony access, or a
+                // first-run fetch failed before one was ever set. Never fall back to colony 1: that
+                // would file this user's work under Tarakohe. Stop before any upload or download
+                // targets the wrong colony; unsynced work stays queued for when a colony is known.
+                if (appSettings.SelectedColonyId <= 0)
+                {
+                    bool hasWork = colonyState.PendingObservations.Any(p => p.IsPendingUpload)
+                                   || colonyState.PendingBiometricCount > 0
+                                   || LoadQueuedChips(context).Count > 0;
+                    result.Error = hasWork
+                        ? "No colony selected — your unsynced work is kept safe and will upload once you have colony access."
+                        : "No colony selected. Log in and sync to load your colony.";
+                    return result;
+                }
+
                 // Step 0: Download-first reconcile — drop pending boxes whose data already
                 // matches the server (a lost reply on a patchy connection re-queues an
                 // observation the server already saved), so we never re-upload them or get
@@ -586,6 +601,8 @@ namespace PenguinMonitor.Services
         {
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) return 0;
+            // Never confirm-upload to the colony-1 fallback — stays queued until a colony is resolved.
+            if (appSettings.SelectedColonyId <= 0) return 0;
 
             var uploads = new List<object>();
             foreach (var (boxName, nzDate) in confirmedBoxes)
@@ -695,6 +712,8 @@ namespace PenguinMonitor.Services
             var result = new SyncResult();
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
+            // Never upload to the colony-1 fallback — keep it queued until a colony is resolved.
+            if (appSettings.SelectedColonyId <= 0) { result.Error = "No colony selected — kept local until you sync with colony access."; return result; }
             if (colonyState.PendingObservations.Count(p => p.IsPendingUpload) == 0) return result;
 
             var pendingBoxes = colonyState.PendingObservations
@@ -1050,6 +1069,8 @@ namespace PenguinMonitor.Services
             var result = new SyncResult();
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) { result.Error = "Not logged in"; result.AuthFailed = true; return result; }
+            // Never upload to the colony-1 fallback — biometrics stay queued until a colony is resolved.
+            if (appSettings.SelectedColonyId <= 0) { result.Error = "No colony selected — kept local until you sync with colony access."; return result; }
             await UploadPendingBiometrics(colonyState, token, result, ColonyIdOf(appSettings));
             return result;
         }
@@ -1307,6 +1328,9 @@ namespace PenguinMonitor.Services
             var warnings = new List<string>();
             var token = appSettings.AuthToken;
             if (string.IsNullOrEmpty(token)) return warnings;
+            // Never flush chips to the colony-1 fallback — a bird chipped here must not land in
+            // Tarakohe. Keep them queued until a real colony is resolved.
+            if (appSettings.SelectedColonyId <= 0) return warnings;
             if (LoadQueuedChips(context).Count == 0) return warnings;
             if (!await _chipFlushLock.WaitAsync(0)) return warnings; // another sync is already flushing
 

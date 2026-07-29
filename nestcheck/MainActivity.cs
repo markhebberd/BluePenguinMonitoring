@@ -3380,23 +3380,45 @@ namespace PenguinMonitor
                             // so normally you must sync first. But a change that CAN'T upload (e.g. one that
                             // silently keeps failing) would otherwise trap you here forever — so also offer
                             // to discard it and switch.
-                            int unsynced = _colonyState.PendingUploadCount + _colonyState.PendingBiometricCount;
+                            // Unsynced work belongs to the CURRENT colony and must never upload to
+                            // another — colony is only read at upload time, so switching first would
+                            // file it under the new one. UnsentTotal counts every queue (chips, day
+                            // notes, watched flags), not just observations/biometrics: a bird chipped
+                            // here would otherwise land in the colony you switched to.
+                            int unsynced = UnsentTotal();
+                            int unsyncedChips = _dataStorageService.LoadQueuedChips(this).Count;
                             if (unsynced > 0)
                             {
-                                new AlertDialog.Builder(this)
+                                var builder = new AlertDialog.Builder(this)
                                     .SetTitle("Unsynced changes")
-                                    .SetMessage($"{unsynced} change{(unsynced == 1 ? "" : "s")} for {_appSettings.SelectedColonyName} haven't uploaded yet. Sync first, or discard {(unsynced == 1 ? "it" : "them")} to switch to {selected["colony_name"]}.")
                                     .SetCancelable(false)
                                     .SetPositiveButton("Sync now", (s2, e2) => { RevertColonySpinner(); StartSync(); })
-                                    .SetNeutralButton("Discard & switch", (s2, e2) =>
-                                    {
-                                        _colonyState.PendingObservations.RemoveAll(p => p.IsPendingUpload);
-                                        foreach (var b in _colonyState.TodayBiometrics.Values) b.IsPendingUpload = false;
-                                        DataStorageService.SaveColonyState(this, _colonyState);
-                                        ApplySwitch();
-                                    })
-                                    .SetNegativeButton("Cancel", (s2, e2) => RevertColonySpinner())
-                                    .Show();
+                                    .SetNegativeButton("Cancel", (s2, e2) => RevertColonySpinner());
+                                if (unsyncedChips > 0)
+                                {
+                                    // A queued chip is a tag physically in a bird — sync-only, never
+                                    // discarded. No "discard" path while chips are waiting.
+                                    builder.SetMessage($"{unsynced} change{(unsynced == 1 ? "" : "s")} for {_appSettings.SelectedColonyName} haven't uploaded yet, including {unsyncedChips} bird{(unsyncedChips == 1 ? "" : "s")} chipped offline. Sync first to switch to {selected["colony_name"]} — chipped birds can't be discarded.");
+                                }
+                                else
+                                {
+                                    builder.SetMessage($"{unsynced} change{(unsynced == 1 ? "" : "s")} for {_appSettings.SelectedColonyName} haven't uploaded yet. Sync first, or discard {(unsynced == 1 ? "it" : "them")} to switch to {selected["colony_name"]}.")
+                                        .SetNeutralButton("Discard & switch", (s2, e2) =>
+                                        {
+                                            _colonyState.PendingObservations.RemoveAll(p => p.IsPendingUpload);
+                                            foreach (var b in _colonyState.TodayBiometrics.Values) b.IsPendingUpload = false;
+                                            _colonyState.PendingDayNotes.Clear();
+                                            _colonyState.DailyLabelPendingUpload = false;
+                                            DataStorageService.SaveColonyState(this, _colonyState);
+                                            // Box-note / watched edits are keyed to the old colony's
+                                            // locations; clear their pending flags too so they don't
+                                            // upload to the colony we're switching to.
+                                            foreach (var n in _boxNotes.Values) { n.NotesPendingUpload = false; n.WatchedPendingUpload = false; }
+                                            _dataStorageService.SaveBoxNotesToDisk(this, _boxNotes);
+                                            ApplySwitch();
+                                        });
+                                }
+                                builder.Show();
                                 return;
                             }
 
@@ -3425,9 +3447,13 @@ namespace PenguinMonitor
                 var logoutButton = _uiFactory.CreateStyledButton($"Logout {_appSettings.ObserverName}", UIFactory.DANGER_RED);
                 logoutButton.Click += (s, e) =>
                 {
-                    int pending = (_colonyState?.PendingUploadCount ?? 0) + (_colonyState?.PendingBiometricCount ?? 0);
+                    int pending = UnsentTotal();   // every queue — incl. chips, day notes, watched flags
+                    int pendingChips = _dataStorageService.LoadQueuedChips(this).Count;
+                    var chipWarn = pendingChips > 0
+                        ? $" This includes {pendingChips} bird{(pendingChips == 1 ? "" : "s")} chipped offline — losing {(pendingChips == 1 ? "it" : "them")} leaves a tag with no record of the bird it's in."
+                        : "";
                     var message = pending > 0
-                        ? $"Logout {_appSettings.ObserverName}?\n\n⚠️ You have {pending} unsynced record{(pending == 1 ? "" : "s")} that will be PERMANENTLY LOST. Sync first to keep them.\n\nAll local data will be cleared and you'll need to log in again."
+                        ? $"Logout {_appSettings.ObserverName}?\n\n⚠️ You have {pending} unsynced record{(pending == 1 ? "" : "s")} that will be PERMANENTLY LOST. Sync first to keep them.{chipWarn}\n\nAll local data will be cleared and you'll need to log in again."
                         : $"Logout {_appSettings.ObserverName}?\n\nAll local data will be cleared and you'll need to log in again to sync.";
                     new AlertDialog.Builder(this)
                         .SetTitle("Logout")
