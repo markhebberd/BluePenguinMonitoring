@@ -179,6 +179,8 @@ namespace PenguinMonitor.Services
         internal static void DeriveViews(LocalDb db, ColonyState colonyState, DateTime nzToday,
             Func<DateTime, DateTime> toNz, Func<ColonyState, string, DateTime, bool> hasUnsentLocalEdit)
         {
+            DeriveDayNote(db, colonyState, nzToday);
+
             var byBox = new Dictionary<string, List<LocalDb.ObsRow>>();
             foreach (var o in db.Observations.Values)
             {
@@ -232,6 +234,42 @@ namespace PenguinMonitor.Services
                     ConditionMoulting = b.is_moulting != 0, ConditionTicks = b.condition_ticks != 0,
                     Notes = b.notes, BiometricId = b.biometric_id, IsPendingUpload = false,
                 };
+            }
+        }
+
+        /// <summary>Today's day note — the label, and who was looking in the boxes and who was
+        /// working the phone — taken from the feed into the state the settings card reads.
+        ///
+        /// These three were write-only on the phone: the day_notes rows have ridden every payload
+        /// since the feed swap, but nothing read them back, so a note set on wildwatch (or by
+        /// someone else's phone) never appeared here — the pickers stayed empty however many times
+        /// you synced. They are one row, so they move as one: taking the note text without its
+        /// observer would leave the card half-filled from two different sources.
+        ///
+        /// An unsent local edit wins, exactly as it does for a box. That is the only thing standing
+        /// between "the server has no note today" and wiping a label set out of signal.</summary>
+        private static void DeriveDayNote(LocalDb db, ColonyState colonyState, DateTime nzToday)
+        {
+            var today = nzToday.ToString("yyyy-MM-dd");
+
+            // Set here and not yet accepted by the server: leave it be, the flush will send it.
+            if (colonyState.DailyLabelPendingUpload && colonyState.DailyLabelDate == today) return;
+            if (colonyState.PendingDayNotes.Any(n => n.NzDate == today)) return;
+
+            if (db.DayNotes.TryGetValue(today, out var note))
+            {
+                colonyState.DailyLabel = note.note ?? "";
+                colonyState.DailyObserverId = note.observer_id ?? 0;
+                colonyState.DailyScribeId = note.scribe_id ?? 0;
+                colonyState.DailyLabelDate = today;
+            }
+            else if (colonyState.DailyLabelDate == today)
+            {
+                // Day notes arrive whole every payload, so no row for today means the note was
+                // cleared on the website. Absence is the only way that can reach the phone.
+                colonyState.DailyLabel = "";
+                colonyState.DailyObserverId = 0;
+                colonyState.DailyScribeId = 0;
             }
         }
 
