@@ -26,6 +26,15 @@ namespace PenguinMonitor.Services
             public bool Incremental;
             public int Observations, Scans, Biometrics, Penguins, Chips, Locations, DayNotes, Observers;
             public int Deleted;
+            /// <summary>The bird stores were cleared and refilled from a whole set, rather than
+            /// merged into. Set when the server sent birds_full.</summary>
+            public bool BirdsRebuilt;
+            /// <summary>Did anything about the birds move in this payload? False on the ordinary
+            /// sync, where the bird tables come back empty because nothing changed — and the cue to
+            /// leave the derived bird cache on disk alone rather than rewrite 300 KB to say the same
+            /// thing. A field sexing arrives as a penguin row (the server resends the bird when its
+            /// sex_guess tally moves), so that counts here too.</summary>
+            public bool BirdsChanged => BirdsRebuilt || Penguins > 0 || Chips > 0;
             public string? Error;
             public HashSet<string> PayloadWarnings = new();
             /// <summary>The colony's people, for the observer/scribe/chipper pickers. Carried whole
@@ -114,7 +123,13 @@ namespace PenguinMonitor.Services
                 // 870KB; this is ~300 rows. Small enough to take whole every sync, which is also
                 // what makes it exact: an insert, an edit and a delete are all just "what the set
                 // contains now", with no tombstone to carry and no way to drift out of step.
+                //
+                // The watermark rides along so the birds can come as a delta. Everything else in
+                // the payload still arrives whole whatever we send — `since` only decides whether
+                // the two big bird tables are the full set or what changed, and the server says
+                // which it sent in birds_full.
                 var url = $"{WILDWATCH_SNAPSHOT_URL}?colony_id={colonyId}&scope=field";
+                if (!string.IsNullOrEmpty(db.Watermark)) url += $"&since={Uri.EscapeDataString(db.Watermark)}";
                 var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.Add("Authorization", $"Bearer {token}");
                 var resp = await http.SendAsync(req);
@@ -245,20 +260,11 @@ namespace PenguinMonitor.Services
         internal static Dictionary<string, PenguinData> DeriveBirds(LocalDb db)
         {
             var birds = new Dictionary<string, PenguinData>();
-            // Field-sex evidence, weighted as the server weighted it: a "probably" counts 2, a
-            // "maybe" 1. Computed here because the phone now holds every biometric row, so the
-            // tally is a local sum rather than two more columns to fetch and keep in step.
-            var guessM = new Dictionary<string, int>();
-            var guessF = new Dictionary<string, int>();
-            foreach (var b in db.Biometrics.Values)
-            {
-                if (string.IsNullOrEmpty(b.peng_num)) continue;
-                var s = (b.observed_sex ?? "").ToUpperInvariant();
-                int m = s is "PM" or "M" ? 2 : s == "MM" ? 1 : 0;
-                int f = s is "PF" or "F" ? 2 : s == "MF" ? 1 : 0;
-                if (m > 0) guessM[b.peng_num!] = guessM.GetValueOrDefault(b.peng_num!) + m;
-                if (f > 0) guessF[b.peng_num!] = guessF.GetValueOrDefault(b.peng_num!) + f;
-            }
+            // Field-sex evidence comes off the penguin row, summed server-side over the bird's whole
+            // biometric history. It was briefly tallied here instead, from db.Biometrics — but the
+            // field payload carries only the current round's biometrics, so that sum was a fraction
+            // of the real one and never reached SexConfirmScore: the "enough guesses to sex it"
+            // prompt silently stopped firing for every bird.
             foreach (var chip in db.Chips.Values)
             {
                 if (string.IsNullOrEmpty(chip.pit_id) || chip.pit_id.Length < 8) continue;
@@ -284,6 +290,7 @@ namespace PenguinMonitor.Services
                     LastKnownLifeStage = stage, Sex = p.sex ?? "", ChipDate = chipDate,
                     ChipAs = p.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = p.chick_size_code ?? "",
                     HasAlert = p.alert == 1,
+                    SexGuessM = p.sex_guess_m ?? 0, SexGuessF = p.sex_guess_f ?? 0,
                 };
             }
             return birds;
@@ -299,12 +306,23 @@ namespace PenguinMonitor.Services
             // leave the phone with it. Merging would leave it behind as a ghost visit.
             if (payload.Value<string>("scope") == "field")
             {
-                // Every table in this payload arrives whole, so every one of them is rebuilt from
-                // it. Merging instead would leave a row the server no longer has sitting on the
-                // phone for good: penguins, chips, locations and day notes carry no deleted flag,
-                // so absence from the payload is the only way a deletion can be expressed at all.
+                // These tables arrive whole, so each is rebuilt from the payload. Merging instead
+                // would leave a row the server no longer has sitting on the phone for good:
+                // observations carry a deleted flag but scans, biometrics, locations and day notes
+                // do not, so absence is the only way their deletion can be expressed at all.
                 db.Observations.Clear(); db.Scans.Clear(); db.Biometrics.Clear();
-                db.Penguins.Clear(); db.Chips.Clear(); db.Locations.Clear(); db.DayNotes.Clear();
+                db.Locations.Clear(); db.DayNotes.Clear();
+
+                // Birds and chips are the exception: they're the bulk of the payload and rarely
+                // change, so they come on the watermark and are merged into. Absence no longer
+                // means deleted for them — the server sets birds_full when it has sent the whole
+                // set, which is when a bird has actually gone or been renumbered, and only then is
+                // clearing first correct.
+                if (payload.Value<bool?>("birds_full") != false)
+                {
+                    db.Penguins.Clear(); db.Chips.Clear();
+                    r.BirdsRebuilt = true;
+                }
             }
             r.Observations = Merge<LocalDb.ObsRow, int>(payload, "observations", db.Observations,
                 row => row.observation_id, row => row.is_deleted != 0, r);

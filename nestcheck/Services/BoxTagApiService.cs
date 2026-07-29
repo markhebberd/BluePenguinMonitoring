@@ -49,64 +49,9 @@ namespace PenguinMonitor.Services
             return req;
         }
 
-        /// <summary>
-        /// Get all box tags from the remote API
-        /// </summary>
-        public async Task<Dictionary<string, BoxTag>> GetAllBoxTagsAsync()
-        {
-            try
-            {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url()));
-                var httpTime = sw.ElapsedMilliseconds;
-                response.EnsureSuccessStatusCode();
-
-                var json = await response.Content.ReadAsStringAsync();
-                var readTime = sw.ElapsedMilliseconds;
-                var result = JsonConvert.DeserializeObject<ApiResponse<Dictionary<string, BoxTag>>>(json);
-                System.Diagnostics.Debug.WriteLine($"BoxTagApiService.GetAllBoxTagsAsync: HTTP={httpTime}ms, Read={readTime - httpTime}ms, Total={sw.ElapsedMilliseconds}ms");
-
-                if (result?.Success == true && result.Data != null)
-                {
-                    return result.Data;
-                }
-
-                return new Dictionary<string, BoxTag>();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"BoxTagApiService.GetAllBoxTagsAsync failed: {ex.Message}");
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Get a single box tag by box ID
-        /// </summary>
-        public async Task<BoxTag?> GetBoxTagAsync(string boxId)
-        {
-            try
-            {
-                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url($"box_id={Uri.EscapeDataString(boxId)}")));
-
-                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    return null;
-                }
-
-                response.EnsureSuccessStatusCode();
-
-                var json = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<ApiResponse<BoxTag>>(json);
-
-                return result?.Data;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"BoxTagApiService.GetBoxTagAsync failed: {ex.Message}");
-                throw;
-            }
-        }
+        // No reads here. Box tags arrive on the snapshot feed with the locations they belong to —
+        // pit_id, the stored fix and when it was read are columns on the location row — so this
+        // client is write-only: save a tag, clear a tag.
 
         /// <summary>
         /// Create or update a box tag
@@ -155,38 +100,5 @@ namespace PenguinMonitor.Services
             }
         }
 
-        /// <summary>
-        /// Check if the API is reachable
-        /// </summary>
-        public async Task<bool> IsApiAvailableAsync()
-        {
-            try
-            {
-                var response = await _httpClient.SendAsync(Request(HttpMethod.Get, Url()));
-                return response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// API response wrapper
-        /// </summary>
-        private class ApiResponse<T>
-        {
-            [JsonProperty("success")]
-            public bool Success { get; set; }
-
-            [JsonProperty("data")]
-            public T? Data { get; set; }
-
-            [JsonProperty("error")]
-            public string? Error { get; set; }
-
-            [JsonProperty("message")]
-            public string? Message { get; set; }
-        }
     }
 }

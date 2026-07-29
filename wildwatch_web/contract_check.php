@@ -11,9 +11,14 @@
  * So: fetch the real payloads as a real user and assert the shape the app declares. A mismatch
  * fails the deploy, which rolls back.
  *
- * The contract below mirrors nestcheck/Services/DataStorageService.cs (SyncResponse, SyncBox,
- * SyncScan, SyncLocation, SyncUser, SyncObserver) and nestcheck/Models/WildWatchPenguin.cs.
- * When a field is added to one of those classes, add it here.
+ * Three payloads, because there are three readers. snapshot.php?scope=field is what nestcheck
+ * downloads — checked both cold (no watermark, whole set) and warm (watermarked, bird tables as a
+ * delta), since those are separate branches and only the cold one used to be exercised at all. The
+ * full snapshot.php is the website's cache. sync.php and penguins.php are what the legacy v37 app
+ * still parses, plus sync.php's boxes, which nestcheck reads for the pre-upload reconcile.
+ *
+ * The contracts below mirror nestcheck's LocalDb row classes and DataStorageService.SyncBox /
+ * SyncScan / SyncUser. When a field is added to one of those, add it here.
  *
  * Types: 'int' and 'string' are strict — the C# property is non-nullable, so a JSON null throws on
  * the phone. 'int?' / 'string?' accept null. Missing keys are allowed (the app leaves the default);
@@ -140,8 +145,11 @@ try {
                            'failed_eggs' => 'int?', 'dead_chicks' => 'int?', 'breeding_status' => 'string?',
                            'gate_status' => 'string?', 'notes' => 'string?', 'observer_id' => 'int?', 'is_deleted' => 'int'],
         'scans'        => ['scan_id' => 'int', 'observation_id' => 'int', 'pit_id' => 'string?', 'scan_deleted' => 'int?'],
+        // sex_guess_m/f decide whether the phone offers to sex a bird. Absent or wrong-typed, the
+        // score reads as 0 and the prompt never fires for any bird — silent, and it has happened.
         'penguins'     => ['peng_num' => 'string', 'chipped_as_adult' => 'int?', 'sex' => 'string?', 'is_dead' => 'int?',
-                           'death_date' => 'string?', 'chick_size_code' => 'string?', 'alert' => 'int?', 'notes' => 'string?'],
+                           'death_date' => 'string?', 'chick_size_code' => 'string?', 'alert' => 'int?', 'notes' => 'string?',
+                           'sex_guess_m' => 'int?', 'sex_guess_f' => 'int?'],
         'chips'        => ['pit_id' => 'string', 'peng_num' => 'string?', 'chip_date' => 'string?', 'is_active' => 'int?', 'chip_box' => 'string?'],
         'locations'    => ['location_id' => 'int', 'location_name' => 'string?', 'persistent_notes' => 'string?', 'watched' => 'int'],
         'biometrics'   => ['biometric_id' => 'int', 'peng_num' => 'string?', 'observation_date' => 'string?',
@@ -153,6 +161,11 @@ try {
         'observers'    => ['observer_id' => 'int', 'observer_name' => 'string?', 'surname' => 'string?',
                            'chip_acronym' => 'string?', 'falcon_id' => 'string?'],
     ];
+    // The location row carries the box tag as well — nestcheck builds its box_tags store from
+    // these columns rather than calling boxtags.php, so a wrong type here empties the tag map.
+    $SNAP['locations'] += ['pit_id' => 'string?', 'scan_time_utc' => 'string?',
+                           'latitude' => 'string?', 'longitude' => 'string?', 'accuracy' => 'string?'];
+
     foreach ($SNAP as $group => $contract) {
         $rows = $snap[$group] ?? null;
         if (!is_array($rows) || !$rows) { $breaches[] = "snapshot.$group: missing or empty"; continue; }
@@ -163,6 +176,40 @@ try {
     // No watermark means the phone can't record where it got to, so it would either replay
     // everything forever or lose whatever arrived in between.
     if (empty($snap['snapshot_time'])) $breaches[] = 'snapshot.snapshot_time: missing';
+
+    // scope=field is the payload nestcheck ACTUALLY downloads — the full one above is the
+    // website's. Same row shapes, different set of rows, and its own branch in snapshot.php, so
+    // checking only the full payload left the phone's own feed untested. An empty group is not a
+    // breach here: a colony with no round today legitimately has no observations, scans or
+    // biometrics, and the bird tables come as a delta once the phone has a watermark.
+    $field = fetchJson("/api/snapshot.php?colony_id=$colonyId&scope=field", $token);
+    foreach ($SNAP as $group => $contract) {
+        $rows = $field[$group] ?? null;
+        if (!is_array($rows)) { $breaches[] = "field.$group: missing"; continue; }
+        if (!$rows) { echo "contract: note — field.$group is empty in this payload\n"; continue; }
+        foreach ($rows as $i => $row) check("field.{$group}[{$i}]", $row, $contract);
+    }
+    check('field.me', $field['me'] ?? [], ['observer_id' => 'int', 'name' => 'string?', 'chip_acronym' => 'string?', 'falcon_id' => 'string?']);
+    if (empty($field['snapshot_time'])) $breaches[] = 'field.snapshot_time: missing';
+    // The phone rebuilds its bird stores on true and merges on false. Absent reads as true (an
+    // older server always sent the whole set), so a non-boolean here is the dangerous case: it
+    // would be read as "full set" and clear the stores before applying a delta of a few rows.
+    if (array_key_exists('birds_full', $field) && !is_bool($field['birds_full']))
+        $breaches[] = 'field.birds_full: expected a boolean, got ' . describe($field['birds_full']);
+    if (($field['scope'] ?? null) !== 'field') $breaches[] = 'field.scope: expected "field"';
+
+    // And the delta branch, asked for as the phone asks: same shapes, watermark in hand. Its bird
+    // tables are normally empty, which is the entire point — the check is that they parse and that
+    // birds_full says so, not that they carry rows.
+    $delta = fetchJson("/api/snapshot.php?colony_id=$colonyId&scope=field&since="
+        . urlencode($field['snapshot_time'] ?? '2000-01-01 00:00:00'), $token);
+    foreach ($SNAP as $group => $contract) {
+        foreach (($delta[$group] ?? []) as $i => $row) check("delta.{$group}[{$i}]", $row, $contract);
+    }
+    if (empty($delta['snapshot_time'])) $breaches[] = 'delta.snapshot_time: missing';
+    if (($delta['birds_full'] ?? null) !== false)
+        $breaches[] = 'delta.birds_full: expected false for a watermarked field payload, got '
+                    . describe($delta['birds_full'] ?? null);
 } finally {
     wwSessionDelete($pdo, $token);
 }

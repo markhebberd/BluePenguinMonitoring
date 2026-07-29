@@ -17,7 +17,7 @@ namespace PenguinMonitor.Models
     {
         /// <summary>Bump to force a full re-pull — the stores are rebuilt from scratch when the shape
         /// they hold changes. A phone that skipped the release still gets a correct cache.</summary>
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
         public int Version { get; set; }
 
         /// <summary>Server's max updated_at from the last fully applied payload, sent back as
@@ -84,6 +84,11 @@ namespace PenguinMonitor.Models
             public string? chick_size_code { get; set; }
             public int? alert { get; set; }
             public string? notes { get; set; }
+            /// <summary>Weighted field-sex evidence over the bird's whole biometric history — a
+            /// "probably" counts 2, a "maybe" 1 — summed server-side, because the phone holds only
+            /// the current round's biometrics and could never reach the real score from those.</summary>
+            public int? sex_guess_m { get; set; }
+            public int? sex_guess_f { get; set; }
         }
 
         public class ChipRow
@@ -101,6 +106,15 @@ namespace PenguinMonitor.Models
             public string? location_name { get; set; }
             public string? persistent_notes { get; set; }
             public int watched { get; set; }
+            // The box tag lives on the location row, so it rides the one feed rather than its own
+            // call: pit_id is the tag, the rest is where and when it was read. Decimals arrive as
+            // strings from MySQL, kept as strings for the same reason the biometrics are — parsing
+            // is the reader's job, and a null must stay tellable from a zero.
+            public string? pit_id { get; set; }
+            public string? scan_time_utc { get; set; }
+            public string? latitude { get; set; }
+            public string? longitude { get; set; }
+            public string? accuracy { get; set; }
         }
 
         public class DayNoteRow

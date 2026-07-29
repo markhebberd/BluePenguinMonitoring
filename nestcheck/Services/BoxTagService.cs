@@ -190,86 +190,16 @@ namespace PenguinMonitor.Services
         }
 
         /// <summary>
-        /// Check if API is configured and available
-        /// </summary>
-        public static bool IsApiConfigured => _apiService != null;
-
-        /// <summary>
-        /// Result of a box tag sync operation
+        /// What the sync found for box tags. Filled from the snapshot feed's locations now — a box
+        /// tag IS a location's pit_id and stored fix, so there is nothing left to fetch separately;
+        /// this API only takes the writes.
         /// </summary>
         public class SyncResult
         {
             public Dictionary<string, BoxTag> Tags { get; set; } = new();
-            public int Uploaded { get; set; }
-            public int Downloaded { get; set; }
-            public int Failed { get; set; }
             public bool ApiAvailable { get; set; }
             public string? Error { get; set; }
         }
-
-        /// <summary>
-        /// Sync box tags with remote API
-        /// Downloads remote tags and merges with local (remote wins for conflicts)
-        /// Only syncs tags for boxes that exist in validBoxIds
-        /// </summary>
-        public static async Task<SyncResult> SyncWithApiAsync(
-            Dictionary<string, BoxTag> localTags,
-            string filesDir,
-            ICollection<string>? validBoxIds = null)
-        {
-            var result = new SyncResult { Tags = localTags };
-
-            if (_apiService == null)
-            {
-                System.Diagnostics.Debug.WriteLine("BoxTagService.SyncWithApiAsync: API not configured");
-                result.Error = "API not configured";
-                return result;
-            }
-
-            try
-            {
-                // Get remote tags (skip IsApiAvailableAsync - if it fails, GetAllBoxTagsAsync will throw)
-                result.ApiAvailable = true;
-                var remoteTags = await _apiService.GetAllBoxTagsAsync();
-                System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Got {remoteTags.Count} remote tags");
-
-                // Filter to only valid box IDs if specified
-                bool IsValidBox(string boxId) => validBoxIds == null || validBoxIds.Contains(boxId);
-
-                // Download remote tags that are valid and don't exist locally
-                foreach (var kvp in remoteTags)
-                {
-                    if (IsValidBox(kvp.Key) && !localTags.ContainsKey(kvp.Key))
-                    {
-                        result.Downloaded++;
-                    }
-                }
-
-                // Download only — no upload. Box tags are managed server-side.
-
-                // Use remote tags as source of truth
-                var mergedTags = new Dictionary<string, BoxTag>();
-                foreach (var kvp in remoteTags)
-                {
-                    if (IsValidBox(kvp.Key))
-                        mergedTags[kvp.Key] = kvp.Value;
-                }
-
-                // Save merged result locally
-                SaveBoxTags(mergedTags, filesDir);
-
-                result.Tags = mergedTags;
-                System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync: Sync complete, {mergedTags.Count} total tags, {result.Uploaded} uploaded, {result.Downloaded} downloaded");
-                return result;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"BoxTagService.SyncWithApiAsync failed: {ex.Message}");
-                result.Error = ex.Message;
-                return result;
-            }
-        }
-
 
         /// <summary>
         /// Remove a box tag from both local and remote

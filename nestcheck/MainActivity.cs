@@ -441,7 +441,7 @@ namespace PenguinMonitor
             _pendingSilentSync = false;
             try
             {
-                var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys);
+                var result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxNamesAndIndexes?.Keys);
                 await ApplyPostSync(result);
                 new Handler(Looper.MainLooper).Post(() =>
                 {
@@ -1493,7 +1493,7 @@ namespace PenguinMonitor
                 DataStorageService.SyncResult result;
                 try
                 {
-                    result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxTags, _boxNamesAndIndexes?.Keys,
+                    result = await _dataStorageService.SyncWithServer(this, _colonyState, _appSettings, _boxNamesAndIndexes?.Keys,
                         onLineProgress: (lineIndex, status) =>
                         {
                             if (lineIndex >= 0 && lineIndex < progressMessages.Length)

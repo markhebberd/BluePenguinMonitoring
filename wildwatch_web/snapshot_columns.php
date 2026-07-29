@@ -17,11 +17,26 @@
 
 const SNAP_COLS_OBS  = 'o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.failed_eggs, o.dead_chicks, o.is_deleted, o.observer_id';
 const SNAP_COLS_SCAN = 'ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted as scan_deleted';
-const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, alert, notes';
+// sex_guess_m / sex_guess_f are the weighted field-sex evidence for the bird — "probably" 2,
+// "maybe" 1 — summed over its WHOLE biometric history, which is why they are computed here and not
+// on the client: nestcheck holds only the current round's biometrics, so a tally it worked out
+// itself would be a fraction of the real one and the "enough guesses to sex it" prompt would never
+// reach the score. Correlated subqueries on an indexed peng_num: 26 ms for all 1043 birds.
+// Qualified with the table name rather than an alias, because every caller says a bare FROM penguins.
+const SNAP_COLS_PENG = 'peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, alert, notes,
+    (SELECT COALESCE(SUM(CASE WHEN UPPER(b.observed_sex) IN (\'PM\',\'M\') THEN 2 WHEN UPPER(b.observed_sex) = \'MM\' THEN 1 ELSE 0 END), 0)
+       FROM penguin_biometric_data b
+      WHERE b.peng_num = penguins.peng_num AND (b.is_deleted = FALSE OR b.is_deleted IS NULL)) AS sex_guess_m,
+    (SELECT COALESCE(SUM(CASE WHEN UPPER(b.observed_sex) IN (\'PF\',\'F\') THEN 2 WHEN UPPER(b.observed_sex) = \'MF\' THEN 1 ELSE 0 END), 0)
+       FROM penguin_biometric_data b
+      WHERE b.peng_num = penguins.peng_num AND (b.is_deleted = FALSE OR b.is_deleted IS NULL)) AS sex_guess_f';
 const SNAP_COLS_CHIP = 'pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo';
 // Same list, aliased — the incremental query joins and needs the pc. prefix.
 const SNAP_COLS_CHIP_P = 'pc.pit_id, pc.peng_num, pc.chip_date, pc.is_active, pc.chip_box, pc.location_id, pc.chip_by, pc.chipper_id, pc.assistant_id, pc.solo';
-const SNAP_COLS_LOC  = 'location_id, location_name, persistent_notes, watched, pit_id, latitude, longitude, accuracy';
+// pit_id / latitude / longitude / accuracy / scan_time_utc ARE the box tag: nestcheck builds its
+// box_tags store straight off these rows rather than calling boxtags.php, so a tag, a moved fix or a
+// cleared tag reaches the phone on the one feed. boxtags.php still takes the writes.
+const SNAP_COLS_LOC  = 'location_id, location_name, persistent_notes, watched, pit_id, latitude, longitude, accuracy, scan_time_utc';
 const SNAP_COLS_BIO  = 'biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, weight, flipper_length, body_length, beak_length, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted';
 
 // Human-verified breeding truth (single table). Reviewer names come from the observer joins

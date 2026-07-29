@@ -49,7 +49,6 @@ namespace PenguinMonitor.Services
         internal const string WILDWATCH_BASE_URL = "https://wildwatch.co.nz/penguin-api";
         private const string USERS_FILENAME = "wildwatch_users.json";
 
-        internal const string WILDWATCH_PENGUINS_URL = "https://wildwatch.co.nz/api/penguins.php";
         internal const string WILDWATCH_API_URL = "https://wildwatch.co.nz/api/crud.php";
         internal const string WILDWATCH_SYNC_URL = "https://wildwatch.co.nz/api/sync.php";
         internal const string WILDWATCH_API_KEY = "b30181424b2d70102fb90a32af6c013e63e7b0d49ae466ebf90aa0f969ddbe02";
@@ -143,8 +142,12 @@ namespace PenguinMonitor.Services
         {
             public Dictionary<string, BoxTag>? BoxTags { get; set; }
             public BoxTagService.SyncResult? TagSyncResult { get; set; }
-            public string? BoxTagError { get; set; }
+            /// <summary>Entries in the scanner's bird cache — one per chip, so a rechipped bird
+            /// counts twice. This is the number that matters to a scan.</summary>
             public int BirdCount { get; set; }
+            /// <summary>Distinct birds behind those chips. Fewer than BirdCount by the number of
+            /// rechippings, and the honest answer to "how many birds does the phone know".</summary>
+            public int ChippedBirdCount { get; set; }
             public int BoxCount { get; set; }
             public int Uploaded { get; set; }
             public int UploadErrors { get; set; }
@@ -218,6 +221,12 @@ namespace PenguinMonitor.Services
             colonyState.PendingObservations.Any(p => p.BoxName == boxName
                 && (p.IsPendingUpload || p.IsDraft)
                 && MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzDate);
+
+        /// <summary>A lat/long/accuracy as MySQL sends it — a decimal string, or null for "never
+        /// recorded", which a 0 would read as the equator.</summary>
+        private static double? ParseCoord(string? s) =>
+            double.TryParse(s, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
 
         // The colony every crud.php write belongs to. Bare peng_nums are resolved against it
         // server-side, so leaving it off silently files another colony's bird under Tarakohe's.
@@ -306,7 +315,9 @@ namespace PenguinMonitor.Services
 
         // ===== Main Sync: Upload pending, download fresh state =====
 
-        internal async Task<SyncResult> SyncWithServer(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings, Dictionary<string, BoxTag>? boxTags = null, ICollection<string>? validBoxIds = null, Action<int, string>? onLineProgress = null, Func<bool>? isCancelled = null)
+        // No boxTags in: box tags are no longer merged with a local copy, they are read off the
+        // locations in the one feed, so what the caller happens to be holding can't matter.
+        internal async Task<SyncResult> SyncWithServer(Android.Content.Context context, ColonyState colonyState, AppSettings appSettings, ICollection<string>? validBoxIds = null, Action<int, string>? onLineProgress = null, Func<bool>? isCancelled = null)
         {
             var result = new SyncResult();
             try
@@ -479,9 +490,17 @@ namespace PenguinMonitor.Services
                         (cs, box, day) => HasUnsentLocalEdit(cs, box, day));
 
                     var birds = SnapshotSyncService.DeriveBirds(db);
-                    File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, REMOTE_BIRD_DATA_FILENAME),
-                        JsonConvert.SerializeObject(birds, Formatting.Indented));
+                    // ~300 KB of indented JSON for two thousand birds, and on a quiet sync it would
+                    // be byte-for-byte what is already there. Written only when the payload actually
+                    // moved a bird — or when the file is missing, which is a first run.
+                    var birdPath = Path.Combine(context.FilesDir?.AbsolutePath ?? "", REMOTE_BIRD_DATA_FILENAME);
+                    if (applied.BirdsChanged || !File.Exists(birdPath))
+                        File.WriteAllText(birdPath, JsonConvert.SerializeObject(birds, Formatting.Indented));
+                    // Keyed per chip, because a chip is what the scanner reads — so a rechipped bird
+                    // is two entries. Reporting that count as "birds" overstated the colony by the
+                    // number of rechippings; say both, since both are the answer to a real question.
                     result.BirdCount = birds.Count;
+                    result.ChippedBirdCount = birds.Values.Select(b => b.PengNum).Distinct().Count();
 
                     // Box notes: server text, with a locally-edited note or watched flag that hasn't
                     // been accepted yet left standing.
@@ -516,11 +535,38 @@ namespace PenguinMonitor.Services
                         saveApplicationSettings(appSettings);
                     }
 
+                    // Box tags: pit_id and the stored fix are columns on the location row, so they
+                    // come down with the locations above. This was the last download still on its
+                    // own endpoint; boxtags.php now only takes the writes.
+                    var tags = new Dictionary<string, BoxTag>();
+                    foreach (var loc in db.Locations.Values)
+                    {
+                        var box = loc.location_name ?? "";
+                        if (box.Length == 0) continue;
+                        if (validBoxIds != null && !validBoxIds.Contains(box)) continue;
+                        // A tagged box, or one whose position was recorded \u2014 the same pair
+                        // boxtags.php returned, so nothing appears or vanishes with the change.
+                        if (string.IsNullOrEmpty(loc.pit_id) && loc.latitude == null) continue;
+                        tags[box] = new BoxTag
+                        {
+                            BoxID = box,
+                            TagNumber = loc.pit_id ?? "",
+                            ScanTimeUTC = SnapshotSyncService.ParseUtc(loc.scan_time_utc),
+                            Latitude = ParseCoord(loc.latitude) ?? 0,
+                            Longitude = ParseCoord(loc.longitude) ?? 0,
+                            Accuracy = (float)(ParseCoord(loc.accuracy) ?? -1),
+                        };
+                    }
+                    BoxTagService.SaveBoxTags(tags, context.FilesDir?.AbsolutePath ?? "");
+                    result.BoxTags = tags;
+                    result.TagSyncResult = new BoxTagService.SyncResult { Tags = tags, ApiAvailable = true };
+
                     colonyState.LastSyncedUtc = DateTime.UtcNow;
                     result.BoxCount = colonyState.TodayBoxes.Count;
                     result.BiometricCount = colonyState.TodayBiometrics.Count;
                     onLineProgress?.Invoke(0, $"{applied} \u2713");
-                    onLineProgress?.Invoke(1, $"{result.BirdCount} penguin records \u2713");
+                    onLineProgress?.Invoke(1, $"{result.BirdCount} chips \u00b7 {result.ChippedBirdCount} birds \u2713");
+                    onLineProgress?.Invoke(2, $"{tags.Count} box tags \u2713");
                     return result.BoxCount;
                 }, "Sync", s => onLineProgress?.Invoke(0, s), isCancelled);
 
@@ -545,46 +591,23 @@ namespace PenguinMonitor.Services
                     return parsed?.Count ?? 0;
                 }, "Breeding dates", null, isCancelled);
 
-                // Tags: fetch + sync
-                Task<BoxTagService.SyncResult?> tagSyncTask;
-                if (boxTags != null && BoxTagService.IsApiConfigured && context?.FilesDir?.AbsolutePath != null)
-                    tagSyncTask = WithRetry(async () =>
-                    {
-                        var tagResult = await BoxTagService.SyncWithApiAsync(boxTags, context.FilesDir.AbsolutePath, validBoxIds);
-                        if (tagResult.Error != null) throw new Exception(tagResult.Error);
-                        return (BoxTagService.SyncResult?)tagResult;
-                    }, "Tags", s => onLineProgress?.Invoke(2, s), isCancelled);
-                else
-                    tagSyncTask = Task.FromResult<BoxTagService.SyncResult?>(null);
-
                 // Wait for all — don't throw if individual tasks fail
-                try { await Task.WhenAll(boxesTask, birdsTask, tagSyncTask, bioTask, datesTask); } catch { }
+                try { await Task.WhenAll(boxesTask, birdsTask, bioTask, datesTask); } catch { }
 
                 // Save colony state after all tasks complete (boxes task already mutated it)
                 SaveColonyState(context, colonyState);
 
                 if (authFailed) { result.Error = "Session expired. Please log in again."; result.AuthFailed = true; return result; }
-                if (boxesTask.IsFaulted) { result.Error = $"Boxes: {boxesTask.Exception?.InnerException?.Message ?? "Failed"}"; return result; }
+                if (boxesTask.IsFaulted)
+                {
+                    // Tags come down with the boxes now, so they fail with them. Left blank the line
+                    // would read as "no tags in this colony" rather than "not fetched".
+                    onLineProgress?.Invoke(2, "Box tags ✗");
+                    result.Error = $"Boxes: {boxesTask.Exception?.InnerException?.Message ?? "Failed"}";
+                    return result;
+                }
                 if (birdsTask.IsFaulted)
                     result.Error = $"Penguin data: {birdsTask.Exception?.InnerException?.Message ?? "Failed"}";
-
-                // Process tag results
-                if (tagSyncTask.IsFaulted)
-                {
-                    result.TagSyncResult = new BoxTagService.SyncResult { Error = tagSyncTask.Exception?.InnerException?.Message ?? "Failed" };
-                    onLineProgress?.Invoke(2, "Tags ✗");
-                }
-                else
-                {
-                    var tagSyncResult = await tagSyncTask;
-                    result.TagSyncResult = tagSyncResult;
-                    if (tagSyncResult != null)
-                    {
-                        result.BoxTags = tagSyncResult.Tags;
-                        result.BoxTagError = tagSyncResult.Error;
-                        onLineProgress?.Invoke(2, $"{tagSyncResult.Tags.Count} box tags ✓");
-                    }
-                }
             }
             catch (Exception ex)
             {
@@ -1100,23 +1123,15 @@ namespace PenguinMonitor.Services
         }
 
         // ===== JSON models for sync.php response =====
+        //
+        // Only what the pre-upload reconcile reads. sync.php's download was retired when the
+        // snapshot feed took over — boxes for today is all that is still asked of it, and every
+        // other group it sends (previous, locations, users, observer) now arrives on the feed.
+        // Newtonsoft ignores the keys we no longer declare.
 
         private class SyncResponse
         {
-            public string? snapshot_time { get; set; }
             public Dictionary<string, SyncBox>? boxes { get; set; }
-            public Dictionary<string, SyncBox>? previous { get; set; }
-            public List<SyncLocation>? locations { get; set; }
-            public List<SyncUser>? users { get; set; }
-            public SyncObserver? observer { get; set; }
-        }
-        /// <summary>The logged-in user as the server sees them, refreshed each sync.</summary>
-        private class SyncObserver
-        {
-            public int observer_id { get; set; }
-            public string? name { get; set; }
-            public string? chip_acronym { get; set; }
-            public string? falcon_id { get; set; }
         }
         private class SyncBox
         {
@@ -1155,13 +1170,6 @@ namespace PenguinMonitor.Services
             /// <summary>Initials this person signs a chipping with (users.chip_acronym).</summary>
             public string? chip_acronym { get; set; }
             public string? falcon_id { get; set; }
-        }
-        private class SyncLocation
-        {
-            public int location_id { get; set; }
-            public string? location_name { get; set; }
-            public string? persistent_notes { get; set; }
-            public int watched { get; set; }
         }
 
         // ===== Colony State persistence =====

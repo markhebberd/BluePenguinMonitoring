@@ -133,10 +133,45 @@ function getTotalCounts($pdo, $colonyId) {
 if ($fieldScope) {
     // The field set is small enough to send whole every time, and sending it whole is what makes
     // it correct: an insert, an edit and a delete are all just "what the set contains now", with
-    // no tombstone to carry and no way for the phone to drift out of step. The big tables still
-    // come with it — birds and chips are what the scanner reads, and they are ~2k rows.
+    // no tombstone to carry and no way for the phone to drift out of step.
+    //
+    // Birds and chips are the exception, because they ARE the bulk: 1043 + 1054 rows, 324 KB of the
+    // payload's 448 KB and 22 KB of its 32 KB on the wire. The phone re-syncs on every watermark
+    // move, its own uploads included, so through a round it was re-sending the whole colony's birds
+    // every few seconds to learn nothing — one bird in the last day was actually touched. They go
+    // on the watermark instead. What makes THAT safe is the fallback below: the two ways a bird can
+    // leave the phone without an updated_at to announce it (a hard delete, and a renumber, which
+    // moves the primary key and cascades to chips) are both recorded in audit_log, and either one
+    // puts the whole bird set back on this payload. That fired on four days out of the last sixty.
     $ids = wwFieldScopeIds($pdo, $colonyId);
     $ph = $ids ? implode(',', array_fill(0, count($ids), '?')) : 'NULL';
+
+    // Read the watermark BEFORE the rows, not after: a bird saved between the two would otherwise
+    // fall in the gap — its updated_at behind a watermark the phone has already been told it holds.
+    // Sending a row twice costs nothing; skipping one loses it for good.
+    $fieldWm = $pdo->query("SELECT GREATEST(
+        COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
+        COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
+        COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
+    ) as wm")->fetch()['wm'];
+
+    // A bird the phone must forget, either way it can happen. penguin_chips.peng_num is ON UPDATE
+    // CASCADE, so a renumber silently repoints chips with nothing to detect it row-by-row — hence
+    // "send the lot" rather than a tombstone list.
+    $birdsFull = true;
+    $sinceTs = null;
+    if ($since) {
+        $sinceTs = date('Y-m-d H:i:s', strtotime($since));
+        // UPDATE only on the peng_num test: an INSERT audits the whole new row, peng_num included,
+        // so counting those would put every field chipping back on the full payload — and a new
+        // bird needs no fallback, its row arrives on the delta like any other change.
+        $st = $pdo->prepare("SELECT COUNT(*) FROM audit_log
+            WHERE table_name IN ('penguins', 'penguin_chips') AND change_timestamp >= ?
+              AND (action = 'DELETE' OR (action = 'UPDATE' AND changed_fields LIKE '%\"peng_num\"%'))");
+        $st->execute([$sinceTs]);
+        $birdsFull = (int)$st->fetchColumn() > 0;
+    }
 
     $obs = $pdo->prepare("SELECT " . SNAP_COLS_OBS . " FROM observations o WHERE o.observation_id IN ($ph)");
     $obs->execute($ids);
@@ -152,8 +187,31 @@ if ($fieldScope) {
           AND (observation_date = ? OR observation_id IN ($ph))");
     $bio->execute(array_merge([$nzToday], $ids));
 
-    $penguins = $pdo->query("SELECT " . SNAP_COLS_PENG . " FROM penguins");
-    $chips = $pdo->query("SELECT " . SNAP_COLS_CHIP . " FROM penguin_chips");
+    // No colony filter, and there must not be one: a Ngawhiti bird carried to a Tarakohe box has to
+    // scan as itself there, so every colony's birds go to every phone. The prefix strip below is
+    // what makes them readable — only the viewing colony's own prefix comes off.
+    if ($birdsFull) {
+        $penguins = $pdo->query("SELECT " . SNAP_COLS_PENG . " FROM penguins");
+        $chips = $pdo->query("SELECT " . SNAP_COLS_CHIP . " FROM penguin_chips");
+    } else {
+        // The second clause is for sex_guess_m/f: those are summed from the bird's biometrics, and
+        // writing a biometric doesn't touch penguins.updated_at, so without it a field sexing would
+        // never change the tally the phone holds. audit_log is where a biometric write is recorded.
+        $penguins = $pdo->prepare("SELECT " . SNAP_COLS_PENG . " FROM penguins
+            WHERE updated_at >= ?
+               OR peng_num IN (SELECT peng_num FROM penguin_biometric_data
+                                WHERE biometric_id IN (SELECT record_id FROM audit_log
+                                  WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?))");
+        $penguins->execute([$sinceTs, $sinceTs]);
+        // penguin_chips has no updated_at, so a chip's own edits are found through the audit log;
+        // created_at catches the new ones, and the penguin join catches a bird whose details moved.
+        $chips = $pdo->prepare("SELECT " . SNAP_COLS_CHIP_P . " FROM penguin_chips pc
+            WHERE pc.created_at >= ?
+               OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)
+               OR pc.pit_id IN (SELECT record_id FROM audit_log
+                                WHERE table_name = 'penguin_chips' AND change_timestamp >= ?)");
+        $chips->execute([$sinceTs, $sinceTs, $sinceTs]);
+    }
     $locations = $pdo->prepare("SELECT " . SNAP_COLS_LOC . " FROM observation_locations WHERE colony_id = ?");
     $locations->execute([$colonyId]);
 
@@ -165,13 +223,12 @@ if ($fieldScope) {
     echo json_encode(array_merge([
         'incremental' => false,
         'scope' => 'field',
+        // Whether the two bird tables in this payload are the whole set or only what changed. The
+        // phone rebuilds its bird stores on true and merges into them on false — it cannot infer
+        // which from the rows, and guessing either way is a ghost bird or a lost one.
+        'birds_full' => $birdsFull,
         'me' => wwSnapshotMe($observer),
-        'snapshot_time' => $pdo->query("SELECT GREATEST(
-            COALESCE((SELECT MAX(updated_at) FROM observations), '2000-01-01'),
-            COALESCE((SELECT MAX(updated_at) FROM penguins), '2000-01-01'),
-            COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
-            COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
-        ) as wm")->fetch()['wm'],
+        'snapshot_time' => $fieldWm,
         'observations' => $obs->fetchAll(),
         'scans' => $scans->fetchAll(),
         'penguins' => $pengRows,
@@ -200,8 +257,14 @@ if ($since) {
         WHERE ol.colony_id = ? AND (o.updated_at >= ? OR ps.deleted_at >= ?)");
     $scans->execute([$colonyId, $ts, $ts]);
 
-    $penguins = $pdo->prepare("SELECT " . SNAP_COLS_PENG . " FROM penguins WHERE updated_at >= ?");
-    $penguins->execute([$ts]);
+    // Same reason as the field branch: a biometric write moves the bird's sex_guess tallies without
+    // touching its updated_at, so the bird has to come again for the cache to see the new score.
+    $penguins = $pdo->prepare("SELECT " . SNAP_COLS_PENG . " FROM penguins
+        WHERE updated_at >= ?
+           OR peng_num IN (SELECT peng_num FROM penguin_biometric_data
+                            WHERE biometric_id IN (SELECT record_id FROM audit_log
+                              WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?))");
+    $penguins->execute([$ts, $ts]);
 
     // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
     $chips = $pdo->prepare("SELECT " . SNAP_COLS_CHIP_P . "
