@@ -1,8 +1,8 @@
 #!/bin/bash
 # Wildwatch NAS mirror — nightly backup + restore-proof.
 #
-#   1. pull today's dump from wildwatch.co.nz            (outbound HTTPS only)
-#   2. archive it forever under backups/YYYY/MM/         (never overwritten, never pruned)
+#   1. take a CURRENT dump from wildwatch.co.nz          (outbound HTTPS only)
+#   2. archive it under backups/YYYY/MM/                 (the day's file, latest run wins)
 #   3. wipe the INACTIVE slot (ww_a/ww_b) and restore into it from empty
 #   4. verify the restore (tables, row counts, freshness, HTTP smoke test)
 #   5. only then flip the live slot, so a bad night keeps serving the last good one
@@ -174,31 +174,24 @@ finish() {
 
 # ---------------------------------------------------------------- 1. download
 say "=== $STAMP ==="
-# An on-demand run (the admin button, via trigger-watch.sh) always pulls a current dump: the
-# point of pressing it is to mirror what production holds NOW. The scheduled run reuses the
-# day's file if it is already there, which keeps a retry after a failed step from re-downloading
-# — but that reuse is why a mid-afternoon press restored the pre-dawn copy and showed none of
-# the day's observations.
-if [ -f "$DEST" ] && [ "${FRESH:-0}" != "1" ]; then
-  say "already have $DEST — re-verifying restore from it"
-  cp "$DEST" "$WORK"
-  DUMP_TAKEN=$(date -r "$DEST" '+%-d %b %H:%M' 2>/dev/null || echo "earlier")
-  step ok "Download" "already had $DATE.sql.gz (taken $DUMP_TAKEN)"
-else
-  if [ -z "${WW_API_KEY:-}" ]; then
-    step fail "Download" "WW_API_KEY missing from shared/nas.env"
-    finish
-  fi
-  CODE=$(curl -sS -o "$WORK" -w '%{http_code}' --max-time 300 \
-           -H "X-API-Key: $WW_API_KEY" "$BACKUP_URL" 2>>"$LOG")
-  SIZE=$(wc -c < "$WORK" 2>/dev/null || echo 0)
-  if [ "$CODE" != "200" ] || [ "$SIZE" -lt 100000 ] || ! gzip -t "$WORK" 2>/dev/null; then
-    step fail "Download" "HTTP $CODE, ${SIZE} bytes, gzip check failed"
-    rm -f "$WORK"; finish
-  fi
-  DUMP_TAKEN=$(date '+%-d %b %H:%M')
-  step ok "Download" "HTTP 200, $((SIZE / 1024)) KB gzipped, taken $DUMP_TAKEN"
+# Always pull a current dump. Restoring a file that happens to be lying about is what let a
+# mid-afternoon run re-restore the pre-dawn copy — and worse, it makes the mirror depend on a
+# remote cron having succeeded: if that cron stops, the restore keeps passing against a stale
+# file and the failure hides behind a green badge. Taking the dump here means the backup itself
+# is part of what this run verifies, and a production that can't be dumped fails loudly.
+if [ -z "${WW_API_KEY:-}" ]; then
+  step fail "Download" "WW_API_KEY missing from shared/nas.env"
+  finish
 fi
+CODE=$(curl -sS -o "$WORK" -w '%{http_code}' --max-time 300 \
+         -H "X-API-Key: $WW_API_KEY" "$BACKUP_URL" 2>>"$LOG")
+SIZE=$(wc -c < "$WORK" 2>/dev/null || echo 0)
+if [ "$CODE" != "200" ] || [ "$SIZE" -lt 100000 ] || ! gzip -t "$WORK" 2>/dev/null; then
+  step fail "Download" "HTTP $CODE, ${SIZE} bytes, gzip check failed"
+  rm -f "$WORK"; finish
+fi
+DUMP_TAKEN=$(date '+%-d %b %H:%M')
+step ok "Download" "HTTP 200, $((SIZE / 1024)) KB gzipped, taken $DUMP_TAKEN"
 
 # Sanity: it must look like our schema, not an error page that happened to gzip.
 if ! gzip -cd "$WORK" | grep -q 'CREATE TABLE `observations`'; then
@@ -207,19 +200,12 @@ if ! gzip -cd "$WORK" | grep -q 'CREATE TABLE `observations`'; then
 fi
 
 # ---------------------------------------------------------------- 2. archive
-if [ ! -f "$DEST" ]; then
-  mkdir -p "$DEST_DIR"
-  mv "$WORK" "$DEST" && chmod 440 "$DEST"
-  step ok "Archive" "$DEST"
-elif [ "${FRESH:-0}" = "1" ] && [ -s "$WORK" ]; then
-  # The restore below reads the archived file, so a fresh pull has to become that file or it
-  # would be downloaded and then thrown away. Same day, strictly more complete: it supersedes.
-  mv -f "$WORK" "$DEST" && chmod 440 "$DEST"
-  step ok "Archive" "$DEST (replaced with the current dump)"
-else
-  rm -f "$WORK"
-  step ok "Archive" "$DEST (kept)"
-fi
+# The dump just taken becomes the day's archive, and the restore below reads that file. A
+# second run the same day supersedes the first: same date, more complete.
+mkdir -p "$DEST_DIR"
+HAD=""; [ -f "$DEST" ] && HAD=" (replaced the earlier copy)"
+mv -f "$WORK" "$DEST" && chmod 440 "$DEST"
+step ok "Archive" "$DEST$HAD"
 KEPT=$(find "$BACKUPS" -name '*.sql.gz' | wc -l | tr -d ' ')
 TOTAL=$(du -sh "$WW_ROOT" 2>/dev/null | cut -f1)
 

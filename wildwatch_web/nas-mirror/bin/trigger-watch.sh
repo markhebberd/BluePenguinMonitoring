@@ -22,7 +22,5 @@ fi
 if [ -f "$T/backup.req" ]; then
   rm -f "$T/backup.req"
   echo "[$(date '+%F %T')] backup requested" >> "$LOG"
-  # FRESH: pressing the button means "show me production as it is now", so this run pulls a
-  # current dump instead of reusing whichever one the scheduled run already downloaded today.
-  WW_ROOT="$WW_ROOT" FRESH=1 "$WW_ROOT/bin/nightly.sh" >> "$LOG" 2>&1
+  WW_ROOT="$WW_ROOT" "$WW_ROOT/bin/nightly.sh" >> "$LOG" 2>&1
 fi
