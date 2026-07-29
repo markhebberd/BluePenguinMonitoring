@@ -148,14 +148,8 @@ CREATE TABLE IF NOT EXISTS day_notes (
     -- An all-blank row is deleted instead (crud.php save_day_note), so "nothing recorded for
     -- this day" has exactly one representation.
     CONSTRAINT fk_dn_colony FOREIGN KEY (colony_id) REFERENCES colonies (colony_id),
-    -- An all-blank row is deleted instead (crud.php save_day_note), so "nothing recorded for
-    -- this day" has exactly one representation.
     CONSTRAINT fk_dn_observer FOREIGN KEY (observer_id) REFERENCES users (id),
-    -- An all-blank row is deleted instead (crud.php save_day_note), so "nothing recorded for
-    -- this day" has exactly one representation.
     CONSTRAINT fk_dn_scribe FOREIGN KEY (scribe_id) REFERENCES users (id),
-    -- An all-blank row is deleted instead (crud.php save_day_note), so "nothing recorded for
-    -- this day" has exactly one representation.
     CONSTRAINT chk_dn_any CHECK (char_length(trim(coalesce(note,''))) > 0 or observer_id is not null or scribe_id is not null)
 ) ENGINE=InnoDB AUTO_INCREMENT=100 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
