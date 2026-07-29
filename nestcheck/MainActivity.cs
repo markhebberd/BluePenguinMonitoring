@@ -142,6 +142,12 @@ namespace PenguinMonitor
         private bool _dataChangedSinceUnlock;
         private bool _suppressDataChanged;
         private bool _suppressColonySwitch;
+        // Set while RebuildSettingsCard() re-creates the settings card (which runs after every sync).
+        // The card holds the "Connect scanner" checkbox, and setting its initial .Checked re-fires the
+        // CheckedChange handler — which would dispose and reconnect the live scanner on every sync,
+        // bouncing the Bluetooth connection. Suppressed on rebuild so the connection is left alone; the
+        // startup createSettingsCard (not a rebuild) still fires and makes the first connect.
+        private bool _suppressBtCheckbox;
         // Track server observation IDs that user already confirmed locally (fallback for non-optimistic paths)
         private Dictionary<string, int> _confirmedAgainstServerObsId = new();
         private LinearLayout? _singleBoxDataOuterLayout;
@@ -3012,7 +3018,9 @@ namespace PenguinMonitor
             int idx = parent.IndexOfChild(_settingsCard);
             var wasVisible = _settingsCard.Visibility;
             parent.RemoveView(_settingsCard);
+            _suppressBtCheckbox = true;    // the re-created checkbox must not reconnect the scanner
             createSettingsCard();
+            _suppressBtCheckbox = false;
             _settingsCard.Visibility = wasVisible;
             parent.AddView(_settingsCard, idx);
         }
@@ -3037,6 +3045,9 @@ namespace PenguinMonitor
             _isBluetoothEnabledCheckBox.SetTextColor(Color.Black);
             _isBluetoothEnabledCheckBox.CheckedChange += (s, e) =>
             {
+                // A settings-card rebuild (after every sync) re-fires this; ignore it so we don't
+                // dispose and reconnect the live scanner. Only a real user toggle touches Bluetooth.
+                if (_suppressBtCheckbox) return;
                 if (_isBluetoothEnabledCheckBox.Checked)
                 {
                     _appSettings.IsBlueToothEnabled = true;   // must be set before InitializeBluetooth (it gates connect on this)
