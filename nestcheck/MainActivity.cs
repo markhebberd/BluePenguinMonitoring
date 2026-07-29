@@ -4023,8 +4023,11 @@ namespace PenguinMonitor
                             // offered it. Re-checked on every draw, because the role comes down
                             // with the sync and can change while the app is running.
                             if (_tagModeDeleteObsButton != null)
+                            {
                                 _tagModeDeleteObsButton.Visibility =
                                     _appSettings.CanEditRecords ? ViewStates.Visible : ViewStates.Gone;
+                                _tagModeDeleteObsButton.Text = $"🗑  Delete today's observation for Box {_currentBoxName}";
+                            }
 
                             _boxTags.TryGetValue(_currentBoxName, out var tagInfo);
                             bool hasTag = tagInfo != null && !string.IsNullOrEmpty(tagInfo.TagNumber);
@@ -5302,7 +5305,9 @@ namespace PenguinMonitor
             // danger colour rather than sitting in the purple pair. Shown only to editors and
             // admins: crud.php answers "Editors only" to everyone else, and a button that always
             // fails is worse than no button.
-            _tagModeDeleteObsButton = _uiFactory.CreateStyledButton("🗑  Delete an observation", UIFactory.DANGER_RED);
+            // Names the box and the day, so what the button will take is settled before it is pressed.
+            // Text is rewritten on every draw, when the box is known.
+            _tagModeDeleteObsButton = _uiFactory.CreateStyledButton("🗑  Delete today's observation", UIFactory.DANGER_RED);
             _tagModeDeleteObsButton.TextSize = 16;
             _tagModeDeleteObsButton.SetPadding(8, 24, 8, 24);
             var delParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -5617,56 +5622,62 @@ namespace PenguinMonitor
                 JumpToBox(boxNameAndIndex.Value.Key);
             }            
         }
-        /// <summary>The observations for this box that the server actually has, newest first.
+        /// <summary>Today's observation for this box, if the server has it.
         ///
-        /// Deliberately not "every observation ever": the field payload carries today's visit plus
-        /// each box's most recent earlier one, so that is all this phone can offer. Deleting a
-        /// mistake just made is the case this is for; wildwatch remains the place to reach into old
-        /// history. A record with no ObservationId has never been uploaded, so there is nothing on
-        /// the server to delete — those are left out rather than listed and then refused.</summary>
-        private List<(string label, BoxObservation obs)> DeletableObservationsForCurrentBox()
+        /// Today only, on purpose: the case this is for is correcting a nest observation just made,
+        /// and the button names the day so there is no question which record goes. Earlier days stay
+        /// a wildwatch job. A record with no ObservationId has never been uploaded, so there is
+        /// nothing on the server to delete.</summary>
+        private BoxObservation? TodaysDeletableObservation()
         {
-            var list = new List<(string, BoxObservation)>();
-            void Add(BoxObservation? o, string prefix)
-            {
-                if (o?.ObservationId == null) return;
-                var nz = ToNzTime(o.WhenDataCollectedUtc);
-                var by = string.IsNullOrEmpty(o.ObserverName) ? "" : $" · {o.ObserverName}";
-                int scans = o.ScannedIds.Count(s => !s.BirdId.StartsWith("NOSCAN_"));
-                var birds = scans > 0 ? $", {scans} bird{(scans != 1 ? "s" : "")}" : "";
-                list.Add(($"{prefix} {nz:d MMM HH:mm} — {o.Adults}a {o.Eggs}e {o.Chicks}c{birds}{by}", o));
-            }
-            Add(_colonyState.GetTodayForBox(_currentBoxName), "Today");
-            Add(_colonyState.PreviousBoxes.TryGetValue(_currentBoxName, out var p) ? p : null, "Previous");
-            return list;
+            var o = _colonyState.GetTodayForBox(_currentBoxName);
+            return o?.ObservationId == null ? null : o;
         }
 
         private void ShowDeleteObservationPicker()
         {
-            var options = DeletableObservationsForCurrentBox();
-            if (options.Count == 0)
+            var todays = TodaysDeletableObservation();
+            if (todays == null)
             {
                 new AlertDialog.Builder(this)
                     .SetTitle($"Box {_currentBoxName}")
-                    .SetMessage("Nothing here to delete — this phone holds no uploaded observation for this box.\n\n"
-                              + "A record made today that hasn't synced yet isn't on the server: leave this page and unlock the box to change it.")
+                    .SetMessage("Nothing to delete — this phone holds no uploaded observation for this box today.\n\n"
+                              + "A record made today that hasn't synced yet isn't on the server: leave this page and unlock the box to change it.\n\n"
+                              + "Earlier days are deleted on wildwatch.")
                     .SetPositiveButton("OK", (s, e) => { })
                     .Show();
                 return;
             }
-            // Straight to the list even when there is only one, so nobody deletes a visit they
-            // hadn't realised they were looking at.
-            new AlertDialog.Builder(this)
-                .SetTitle($"Box {_currentBoxName} — delete which visit?")
-                .SetItems(options.Select(o => o.label).ToArray(),
-                          (s, e) => ConfirmDeleteObservation(options[e.Which]))
-                .SetNegativeButton("Cancel", (s, e) => { })
-                .Show();
+            ConfirmDeleteObservation(todays);
         }
 
-        /// <summary>Name what goes, then ask. The reason is optional and audited, matching the same
+        /// <summary>What the record actually says, written out in the dialog — counts, gate, notes and
+        /// the birds scanned. Plain text rather than the card view used elsewhere: the card's badges
+        /// are tappable and would send you off to a bird panel from inside a confirm.</summary>
+        private string DescribeObservation(BoxObservation obs)
+        {
+            var lines = new List<string>();
+            var nz = ToNzTime(obs.WhenDataCollectedUtc);
+            lines.Add($"🗓  {nz:dddd d MMM, HH:mm}");
+            if (!string.IsNullOrEmpty(obs.ObserverName)) lines.Add($"👤  {obs.ObserverName}");
+            if (!string.IsNullOrEmpty(obs.BreedingStatus)) lines.Add($"📋  {obs.BreedingStatus}");
+            lines.Add($"🐧  {obs.Adults} adult{(obs.Adults != 1 ? "s" : "")}   "
+                    + $"🥚  {obs.Eggs} egg{(obs.Eggs != 1 ? "s" : "")}   "
+                    + $"🐣  {obs.Chicks} chick{(obs.Chicks != 1 ? "s" : "")}");
+            int failed = obs.FailedEggs ?? 0, dead = obs.DeadChicks ?? 0;
+            if (failed > 0 || dead > 0)
+                lines.Add($"✗  {failed} failed egg{(failed != 1 ? "s" : "")}, {dead} dead chick{(dead != 1 ? "s" : "")}");
+            if (!string.IsNullOrEmpty(obs.GateStatus)) lines.Add($"🚪  {obs.GateStatus}");
+            // NOSCAN_ rows are "looked, no chip read" placeholders, not birds.
+            var birds = obs.ScannedIds.Where(s => !s.BirdId.StartsWith("NOSCAN_")).Select(s => s.BirdId).ToList();
+            lines.Add(birds.Count > 0 ? $"🔖  {string.Join(", ", birds)}" : "🔖  No birds scanned");
+            if (!string.IsNullOrEmpty(obs.Notes)) lines.Add($"📝  {obs.Notes}");
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>Show what goes, then ask. The reason is optional and audited, matching the same
         /// prompt on wildwatch, so the two leave the same trail.</summary>
-        private void ConfirmDeleteObservation((string label, BoxObservation obs) chosen)
+        private void ConfirmDeleteObservation(BoxObservation obs)
         {
             var reasonInput = new EditText(this) { Hint = "Reason (optional)", TextSize = 15 };
             reasonInput.SetPadding(16, 12, 16, 12);
@@ -5675,13 +5686,13 @@ namespace PenguinMonitor
             wrap.AddView(reasonInput);
 
             new AlertDialog.Builder(this)
-                .SetTitle("Delete this observation?")
-                .SetMessage($"Box {_currentBoxName}\n{chosen.label}\n\n"
-                          + "The birds scanned on this visit and any measurements taken go with it. "
+                .SetTitle($"Delete today's observation for Box {_currentBoxName}?")
+                .SetMessage($"{DescribeObservation(obs)}\n\n"
+                          + "The birds scanned on this observation and any measurements taken go with it. "
                           + "It can be restored on wildwatch.")
                 .SetView(wrap)
                 .SetPositiveButton("Delete", async (s, e) =>
-                    await DeleteObservationNow(chosen.obs, reasonInput.Text))
+                    await DeleteObservationNow(obs, reasonInput.Text))
                 .SetNegativeButton("Cancel", (s, e) => { })
                 .SetCancelable(false)
                 .Show();
@@ -5703,7 +5714,7 @@ namespace PenguinMonitor
 
             // Gone on the server, so take it off this phone now rather than leaving it on screen
             // until the next sync gets round to saying so. The row store goes too: the derived views
-            // are rebuilt from it, so a row left there would put the visit straight back.
+            // are rebuilt from it, so a row left there would put the observation straight back.
             if (_colonyState.TodayBoxes.TryGetValue(_currentBoxName, out var t) && t.ObservationId == id)
                 _colonyState.TodayBoxes.Remove(_currentBoxName);
             if (_colonyState.PreviousBoxes.TryGetValue(_currentBoxName, out var pv) && pv.ObservationId == id)
