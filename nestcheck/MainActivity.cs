@@ -4970,13 +4970,17 @@ namespace PenguinMonitor
                     {
                         ShowEmptyBoxDialog(() =>
                         {
-                            SaveCurrentBoxData();
+                            // The one place an empty observation is created on purpose.
+                            SaveCurrentBoxData(allowEmpty: true);
                             CommitDraftForUpload();
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                             TryBackgroundUpload();
                         }, () =>
                         {
+                            // "Don't save" means don't save: drop any draft for today so the next
+                            // lock has nothing to find and can't quietly commit it.
+                            DiscardTodayDraftForCurrentBox();
                             _dataChangedSinceUnlock = false;
                             DrawPageLayouts();
                         });
@@ -5590,14 +5594,28 @@ namespace PenguinMonitor
                 JumpToBox(boxNameAndIndex.Value.Key);
             }            
         }
+        /// <summary>Drop today's uncommitted draft for the current box. A committed or already-synced
+        /// observation is left alone — that is a record someone made, not a leftover.</summary>
+        private void DiscardTodayDraftForCurrentBox()
+        {
+            var existing = _colonyState.GetTodayForBox(_currentBoxName);
+            if (existing == null || !existing.IsDraft || existing.IsPendingUpload) return;
+            _colonyState.PendingObservations.Remove(existing);
+            SaveToAppDataDir();
+        }
+
+        // Not cancelable, for the same reason the close-warning dialog isn't: a back-tap that runs
+        // neither answer left the box locked with the draft still sitting there, which is one of the
+        // ways an unwanted observation used to survive to the next lock.
         private void ShowEmptyBoxDialog(Action onConfirm, Action onCancel)
         {
-            ShowConfirmationDialog(
-                "Empty Box",
-                "This box has been inspected and is empty",
-                ("Save as empty", onConfirm),
-                ("Don't save", onCancel)
-            );
+            new AlertDialog.Builder(this)
+                .SetTitle("Empty Box")
+                .SetMessage("This box has been inspected and is empty")
+                .SetPositiveButton("Save as empty", (s, e) => onConfirm())
+                .SetNegativeButton("Don't save", (s, e) => onCancel())
+                .SetCancelable(false)
+                .Show();
         }
         private void OnSaveDataClick(object? sender, EventArgs e)
         {
@@ -5808,14 +5826,44 @@ namespace PenguinMonitor
                 .SetCancelable(false)
                 .Show();
         }
-        private void SaveCurrentBoxData()
+        /// <param name="allowEmpty">Record the box even with nothing in it. Only the "Save as empty"
+        /// answer sets this: an empty observation is a real finding, but it has to be asked for.</param>
+        private void SaveCurrentBoxData(bool allowEmpty = false)
         {
-            var boxData = _colonyState.GetTodayForBox(_currentBoxName) ?? new BoxObservation { BoxName = _currentBoxName };
+            var existing = _colonyState.GetTodayForBox(_currentBoxName);
 
             int adults, eggs, chicks;
             int.TryParse(_adultsEditText?[0].Text ?? "0", out adults);
             int.TryParse(_eggsEditText?[0].Text ?? "0", out eggs);
             int.TryParse(_chicksEditText?[0].Text ?? "0", out chicks);
+
+            // Nothing counted, nothing scanned, nothing written down. A draft saying "0 adults, 0
+            // eggs, 0 chicks" is indistinguishable from a box someone stood at and recorded as
+            // empty — and it was being promoted to exactly that by the next lock, because both the
+            // lock branches ask "is there a row for today?" rather than "is there anything in it?".
+            // Drafts still exist for boxes with content: a backgrounded app can be killed at any
+            // time and losing a round is worse than a stray row. But a draft of nothing protects
+            // nothing, so it isn't kept.
+            if (!allowEmpty && adults == 0 && eggs == 0 && chicks == 0
+                && string.IsNullOrEmpty(GetSelectedStatus(_gateStatusSpinner[0]))
+                && string.IsNullOrEmpty(GetSelectedStatus(_breedingChanceSpinner[0]))
+                && string.IsNullOrWhiteSpace(_notesEditText?[0].Text)
+                && (existing == null || (existing.ScannedIds.Count == 0
+                                         && (existing.FailedEggs ?? 0) == 0 && (existing.DeadChicks ?? 0) == 0)))
+            {
+                // Zeroes over a record that already exists are an edit, not an absence: someone
+                // correcting a miscounted clutch down to nothing has to be able to save that. Only
+                // an uncommitted draft — a row nobody has confirmed — is dropped.
+                if (existing == null) return;
+                if (existing.IsDraft && !existing.IsPendingUpload)
+                {
+                    _colonyState.PendingObservations.Remove(existing);
+                    SaveToAppDataDir();
+                    return;
+                }
+            }
+
+            var boxData = existing ?? new BoxObservation { BoxName = _currentBoxName };
 
             bool changed = boxData.Adults != adults || boxData.Eggs != eggs || boxData.Chicks != chicks
                 || (boxData.GateStatus ?? "") != (GetSelectedStatus(_gateStatusSpinner[0]) ?? "")
