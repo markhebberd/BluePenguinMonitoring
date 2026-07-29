@@ -157,9 +157,11 @@ try {
                            'is_moulting' => 'int?', 'condition_ticks' => 'int?', 'notes' => 'string?', 'is_deleted' => 'int'],
         'day_notes'    => ['note_date' => 'string', 'note' => 'string?', 'observer_id' => 'int?', 'scribe_id' => 'int?'],
         // chip_acronym and falcon_id decide who may be named as a chipper on the phone; without
-        // them the picker is empty, which is a silent failure rather than a loud one.
+        // them the picker is empty, which is a silent failure rather than a loud one. role is how
+        // the phone knows whether to offer deleting an observation — crud.php allows that to
+        // editors and admins only, so without it the control just isn't there.
         'observers'    => ['observer_id' => 'int', 'observer_name' => 'string?', 'surname' => 'string?',
-                           'chip_acronym' => 'string?', 'falcon_id' => 'string?'],
+                           'chip_acronym' => 'string?', 'falcon_id' => 'string?', 'role' => 'string?'],
     ];
     // The location row carries the box tag as well — nestcheck builds its box_tags store from
     // these columns rather than calling boxtags.php, so a wrong type here empties the tag map.

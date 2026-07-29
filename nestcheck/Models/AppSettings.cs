@@ -694,6 +694,30 @@ namespace PenguinMonitor.Models
             }
         }
 
+        /// <summary>This user's role on the server (users.role), refreshed every sync. Read from the
+        /// observers list the payload already carries, matched on the id the server reports as "me",
+        /// so no extra call and nothing new to keep in step.</summary>
+        private string observerRole = "";
+        public string ObserverRole
+        {
+            get => observerRole;
+            set
+            {
+                if (observerRole != value)
+                {
+                    observerRole = value;
+                    OnAnyPropertyChanged();
+                }
+            }
+        }
+
+        /// <summary>May this user change server records that aren't their own observations — deleting
+        /// an observation, in particular. crud.php answers "Editors only" to anyone else, so the
+        /// destructive controls are hidden rather than offered and then refused.</summary>
+        [JsonIgnore]
+        public bool CanEditRecords =>
+            observerRole == "admin" || observerRole == "editor";
+
         [JsonIgnore]
         public bool IsAuthenticated => !string.IsNullOrEmpty(AuthToken);
 

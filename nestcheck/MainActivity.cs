@@ -222,6 +222,7 @@ namespace PenguinMonitor
         private Java.Lang.Runnable? _tagGpsRunnable;
         private LinearLayout? _tagModeContentLayout;
         private LinearLayout? _tagModeLastObsCard;   // last known contents: black = today, orange = older
+        private Button? _tagModeDeleteObsButton;     // editors/admins only — hidden for viewers
         private TextView? _tagModeTagText;
         private TextView? _tagModePositionText;
         private Button? _tagModeSetButton;           // "Set location"
@@ -1914,7 +1915,7 @@ namespace PenguinMonitor
             expandSettingsImageButton.SetBackgroundColor(Color.Transparent);
             expandSettingsImageButton.Click += (s,e) => {
                 // Settings is unreachable in box tags mode — the only way out is the
-                // "Finish editing box tags" bar, so the mode can't be left half-done.
+                // "Finish editing box details" bar, so the mode can't be left half-done.
                 if (_appSettings.EditBoxTagsMode) return;
                 if (_settingsCard.Visibility == ViewStates.Gone)
                 {
@@ -2040,7 +2041,9 @@ namespace PenguinMonitor
             _tagModeFinishBar = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _tagModeFinishBar.SetPadding(16, 12, 16, 12);
             _tagModeFinishBar.Background = _uiFactory.CreateRoundedBackground(TAG_MODE_PURPLE, 0);
-            var finishButton = _uiFactory.CreateStyledButton("✓  Finish editing box tags", Color.White);
+            // "box tags" until the page also set positions and deleted observations. "Box details"
+            // matches the button that opens it, which already said that.
+            var finishButton = _uiFactory.CreateStyledButton("✓  Finish editing box details", Color.White);
             finishButton.TextSize = 18;
             finishButton.SetPadding(24, 28, 24, 28);
             finishButton.LayoutParameters = new LinearLayout.LayoutParams(
@@ -3207,7 +3210,7 @@ namespace PenguinMonitor
             dailyLabelLayout.AddView(setLabelButton);
 
             // Enter Edit Box Tags mode. There's no matching exit button here — leaving is done
-            // with the "Finish editing box tags" bar, and settings is locked out while in the mode.
+            // with the "Finish editing box details" bar, and settings is locked out while in the mode.
             Button editBoxTagsButton = _uiFactory.CreateStyledButton("Edit box details", UIFactory.SUCCESS_GREEN);
             editBoxTagsButton.Click += (s, e) =>
             {
@@ -4015,6 +4018,13 @@ namespace PenguinMonitor
                             {
                                 _tagModeLastObsCard.Visibility = ViewStates.Gone;
                             }
+
+                            // Only editors and admins may delete on the server, so only they are
+                            // offered it. Re-checked on every draw, because the role comes down
+                            // with the sync and can change while the app is running.
+                            if (_tagModeDeleteObsButton != null)
+                                _tagModeDeleteObsButton.Visibility =
+                                    _appSettings.CanEditRecords ? ViewStates.Visible : ViewStates.Gone;
 
                             _boxTags.TryGetValue(_currentBoxName, out var tagInfo);
                             bool hasTag = tagInfo != null && !string.IsNullOrEmpty(tagInfo.TagNumber);
@@ -5288,6 +5298,19 @@ namespace PenguinMonitor
             tagModeActionRow.AddView(_tagModeSetButton);
             _tagModeContentLayout.AddView(tagModeActionRow);
 
+            // Third job on this page, and the only destructive one — so it gets its own row and the
+            // danger colour rather than sitting in the purple pair. Shown only to editors and
+            // admins: crud.php answers "Editors only" to everyone else, and a button that always
+            // fails is worse than no button.
+            _tagModeDeleteObsButton = _uiFactory.CreateStyledButton("🗑  Delete an observation", UIFactory.DANGER_RED);
+            _tagModeDeleteObsButton.TextSize = 16;
+            _tagModeDeleteObsButton.SetPadding(8, 24, 8, 24);
+            var delParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+            delParams.SetMargins(0, 8, 0, 4);
+            _tagModeDeleteObsButton.LayoutParameters = delParams;
+            _tagModeDeleteObsButton.Click += (s, e) => ShowDeleteObservationPicker();
+            _tagModeContentLayout.AddView(_tagModeDeleteObsButton);
+
             // Capture panel — the guided two-step, then one Save that commits both steps
             _tagModeCapturePanel = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
             _tagModeCapturePanel.SetPadding(14, 12, 14, 14);
@@ -5594,6 +5617,107 @@ namespace PenguinMonitor
                 JumpToBox(boxNameAndIndex.Value.Key);
             }            
         }
+        /// <summary>The observations for this box that the server actually has, newest first.
+        ///
+        /// Deliberately not "every observation ever": the field payload carries today's visit plus
+        /// each box's most recent earlier one, so that is all this phone can offer. Deleting a
+        /// mistake just made is the case this is for; wildwatch remains the place to reach into old
+        /// history. A record with no ObservationId has never been uploaded, so there is nothing on
+        /// the server to delete — those are left out rather than listed and then refused.</summary>
+        private List<(string label, BoxObservation obs)> DeletableObservationsForCurrentBox()
+        {
+            var list = new List<(string, BoxObservation)>();
+            void Add(BoxObservation? o, string prefix)
+            {
+                if (o?.ObservationId == null) return;
+                var nz = ToNzTime(o.WhenDataCollectedUtc);
+                var by = string.IsNullOrEmpty(o.ObserverName) ? "" : $" · {o.ObserverName}";
+                int scans = o.ScannedIds.Count(s => !s.BirdId.StartsWith("NOSCAN_"));
+                var birds = scans > 0 ? $", {scans} bird{(scans != 1 ? "s" : "")}" : "";
+                list.Add(($"{prefix} {nz:d MMM HH:mm} — {o.Adults}a {o.Eggs}e {o.Chicks}c{birds}{by}", o));
+            }
+            Add(_colonyState.GetTodayForBox(_currentBoxName), "Today");
+            Add(_colonyState.PreviousBoxes.TryGetValue(_currentBoxName, out var p) ? p : null, "Previous");
+            return list;
+        }
+
+        private void ShowDeleteObservationPicker()
+        {
+            var options = DeletableObservationsForCurrentBox();
+            if (options.Count == 0)
+            {
+                new AlertDialog.Builder(this)
+                    .SetTitle($"Box {_currentBoxName}")
+                    .SetMessage("Nothing here to delete — this phone holds no uploaded observation for this box.\n\n"
+                              + "A record made today that hasn't synced yet isn't on the server: leave this page and unlock the box to change it.")
+                    .SetPositiveButton("OK", (s, e) => { })
+                    .Show();
+                return;
+            }
+            // Straight to the list even when there is only one, so nobody deletes a visit they
+            // hadn't realised they were looking at.
+            new AlertDialog.Builder(this)
+                .SetTitle($"Box {_currentBoxName} — delete which visit?")
+                .SetItems(options.Select(o => o.label).ToArray(),
+                          (s, e) => ConfirmDeleteObservation(options[e.Which]))
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .Show();
+        }
+
+        /// <summary>Name what goes, then ask. The reason is optional and audited, matching the same
+        /// prompt on wildwatch, so the two leave the same trail.</summary>
+        private void ConfirmDeleteObservation((string label, BoxObservation obs) chosen)
+        {
+            var reasonInput = new EditText(this) { Hint = "Reason (optional)", TextSize = 15 };
+            reasonInput.SetPadding(16, 12, 16, 12);
+            var wrap = new LinearLayout(this) { Orientation = Android.Widget.Orientation.Vertical };
+            wrap.SetPadding(36, 4, 36, 0);
+            wrap.AddView(reasonInput);
+
+            new AlertDialog.Builder(this)
+                .SetTitle("Delete this observation?")
+                .SetMessage($"Box {_currentBoxName}\n{chosen.label}\n\n"
+                          + "The birds scanned on this visit and any measurements taken go with it. "
+                          + "It can be restored on wildwatch.")
+                .SetView(wrap)
+                .SetPositiveButton("Delete", async (s, e) =>
+                    await DeleteObservationNow(chosen.obs, reasonInput.Text))
+                .SetNegativeButton("Cancel", (s, e) => { })
+                .SetCancelable(false)
+                .Show();
+        }
+
+        private async Task DeleteObservationNow(BoxObservation obs, string? reason)
+        {
+            var id = obs.ObservationId!.Value;
+            var error = await _dataStorageService.DeleteObservationAsync(id, reason, _appSettings);
+            if (error != null)
+            {
+                new AlertDialog.Builder(this)
+                    .SetTitle("Not deleted")
+                    .SetMessage(error)
+                    .SetPositiveButton("OK", (s, e) => { })
+                    .Show();
+                return;
+            }
+
+            // Gone on the server, so take it off this phone now rather than leaving it on screen
+            // until the next sync gets round to saying so. The row store goes too: the derived views
+            // are rebuilt from it, so a row left there would put the visit straight back.
+            if (_colonyState.TodayBoxes.TryGetValue(_currentBoxName, out var t) && t.ObservationId == id)
+                _colonyState.TodayBoxes.Remove(_currentBoxName);
+            if (_colonyState.PreviousBoxes.TryGetValue(_currentBoxName, out var pv) && pv.ObservationId == id)
+                _colonyState.PreviousBoxes.Remove(_currentBoxName);
+            _colonyState.PendingObservations.RemoveAll(o => o.ObservationId == id);
+            DataStorageService.SaveColonyState(this, _colonyState);
+
+            var db = SnapshotSyncService.Load(this);
+            if (db.Observations.Remove(id)) SnapshotSyncService.Save(this, db);
+
+            DrawPageLayouts();
+            Toast.MakeText(this, $"Observation deleted — Box {_currentBoxName}", ToastLength.Short)?.Show();
+        }
+
         /// <summary>Drop today's uncommitted draft for the current box. A committed or already-synced
         /// observation is left alone — that is a record someone made, not a leftover.</summary>
         private void DiscardTodayDraftForCurrentBox()

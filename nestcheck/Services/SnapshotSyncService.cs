@@ -399,6 +399,7 @@ namespace PenguinMonitor.Services
                         users.Add(new DataStorageService.SyncUser {
                             id = id.Value, name = full, f_name = fname, surname = surname,
                             chip_acronym = o.Value<string>("chip_acronym"), falcon_id = o.Value<string>("falcon_id"),
+                            role = o.Value<string>("role"),
                         });
                 }
                 r.Observers = db.Observers.Count;

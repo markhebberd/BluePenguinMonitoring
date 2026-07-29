@@ -222,6 +222,50 @@ namespace PenguinMonitor.Services
                 && (p.IsPendingUpload || p.IsDraft)
                 && MainActivity.ToNzTime(p.WhenDataCollectedUtc).Date == nzDate);
 
+        /// <summary>Soft-delete one observation on the server, the same call wildwatch's own Delete
+        /// button makes (crud.php action=delete, POST, optional _reason in the body). The server
+        /// takes the observation's scans and biometrics with it, auditing each in its own right, so
+        /// the history names the birds that went rather than just the parent row.
+        ///
+        /// Returns null on success, or a message worth showing. Needs the server: there is no queue
+        /// for this, because a destructive action waiting invisibly for signal is worse than being
+        /// told plainly that it didn't happen.</summary>
+        internal async Task<string?> DeleteObservationAsync(int observationId, string? reason,
+            AppSettings appSettings)
+        {
+            var token = appSettings.AuthToken;
+            if (string.IsNullOrEmpty(token)) return "Not logged in.";
+            if (appSettings.SelectedColonyId <= 0) return "No colony selected.";
+            try
+            {
+                var url = $"{WILDWATCH_API_URL}?action=delete&table=observations"
+                        + $"&id={observationId}&colony_id={appSettings.SelectedColonyId}";
+                var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("Authorization", $"Bearer {token}");
+                if (!string.IsNullOrWhiteSpace(reason))
+                    req.Content = new StringContent(
+                        JsonConvert.SerializeObject(new { _reason = reason }),
+                        System.Text.Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req);
+                var body = await resp.Content.ReadAsStringAsync();
+
+                // 403 is the one worth naming: the server allows this to editors and admins only,
+                // and "failed" would send someone looking for a fault that isn't there.
+                if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    return "Deleting an observation needs editor access — ask an admin on wildwatch.";
+                if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    return "Session expired. Please log in again.";
+                if (!resp.IsSuccessStatusCode) return $"Server refused it (HTTP {(int)resp.StatusCode}).";
+
+                var parsed = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
+                if (parsed != null && parsed.TryGetValue("error", out var err))
+                    return err?.ToString() ?? "Server refused it.";
+                if (parsed == null || !parsed.ContainsKey("success")) return "Unexpected reply from the server.";
+                return null;
+            }
+            catch (Exception ex) { return $"No connection — {ex.Message}"; }
+        }
+
         /// <summary>A lat/long/accuracy as MySQL sends it — a decimal string, or null for "never
         /// recorded", which a 0 would read as the equator.</summary>
         private static double? ParseCoord(string? s) =>
@@ -526,12 +570,20 @@ namespace PenguinMonitor.Services
                     if (applied.Users != null && applied.Users.Count > 0) users = applied.Users;
                     File.WriteAllText(Path.Combine(context.FilesDir?.AbsolutePath, USERS_FILENAME),
                         JsonConvert.SerializeObject(users, Formatting.Indented));
+                    // This user's own role, found by matching the id the server calls "me" against
+                    // the observers list that rides every payload — so what the phone offers and
+                    // what crud.php will accept are decided from the same place.
+                    var myRole = applied.Me != null
+                        ? users.FirstOrDefault(u => u.id == applied.Me.observer_id)?.role ?? ""
+                        : appSettings.ObserverRole;
                     if (applied.Me != null &&
                         (appSettings.ObserverChipAcronym != (applied.Me.chip_acronym ?? "")
-                         || appSettings.ObserverFalconId != (applied.Me.falcon_id ?? "")))
+                         || appSettings.ObserverFalconId != (applied.Me.falcon_id ?? "")
+                         || appSettings.ObserverRole != myRole))
                     {
                         appSettings.ObserverChipAcronym = applied.Me.chip_acronym ?? "";
                         appSettings.ObserverFalconId = applied.Me.falcon_id ?? "";
+                        appSettings.ObserverRole = myRole;
                         saveApplicationSettings(appSettings);
                     }
 
@@ -1170,6 +1222,9 @@ namespace PenguinMonitor.Services
             /// <summary>Initials this person signs a chipping with (users.chip_acronym).</summary>
             public string? chip_acronym { get; set; }
             public string? falcon_id { get; set; }
+            /// <summary>users.role — admin, editor, viewer or api. Carried so the phone can tell what
+            /// this user is allowed to do without asking, and hide what crud.php would refuse.</summary>
+            public string? role { get; set; }
         }
 
         // ===== Colony State persistence =====
