@@ -18,10 +18,14 @@ TABLES='observations|penguin_scans|penguins|penguin_chips|observation_locations|
 
 # Flatten to one line per statement so a SELECT and its FROM are seen together.
 # Aggregates (the sync watermark) name tables but return no row shape, so they're exempt.
+# So is a select of one bare id column: the field-scope branch picks which observations to send
+# before it sends them, and a list of ids is not a row anything caches. The invariant is about
+# what lands in the client's stores, and an id on its own never does.
 bad=$(tr '\n' ' ' < "$FILE" \
   | grep -oE '(prepare|query)\("SELECT [^"]*"' \
   | grep -vE '\. *SNAP_COLS_' \
   | grep -vE '\("SELECT +(GREATEST|COUNT|MAX|DISTINCT) *\(' \
+  | grep -vE '\("SELECT +([a-z0-9_]+\.)?[a-z0-9_]+_id +FROM' \
   | grep -E "FROM +($TABLES)\b" || true)
 
 if [ -n "$bad" ]; then
