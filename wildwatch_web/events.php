@@ -23,7 +23,16 @@ $stmt = $pdo->query("SELECT GREATEST(
     COALESCE((SELECT MAX(updated_at) FROM observation_locations), '2000-01-01'),
     COALESCE((SELECT MAX(deleted_at) FROM penguin_scans), '2000-01-01'),
     COALESCE((SELECT MAX(updated_at) FROM colonies), '2000-01-01'),
-    COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01')
+    COALESCE((SELECT MAX(updated_at) FROM breeding_verifications), '2000-01-01'),
+    -- The day's note, and who was observing and scribing it. Absent here, setting one on the
+    -- website moved no watermark this poll could see, so the phone learned about it only when
+    -- something else happened to change or the user pressed Sync — which is exactly how it looked
+    -- in the field: the pickers stayed empty until the button was hit.
+    COALESCE((SELECT MAX(updated_at) FROM day_notes), '2000-01-01'),
+    -- Every audited write, which is the same thing snapshot.php's own watermark uses. Named tables
+    -- will always lag the payload by whatever was added last; this does not. It covers biometrics
+    -- and chips, neither of which has an updated_at of its own to watch.
+    COALESCE((SELECT MAX(change_timestamp) FROM audit_log), '2000-01-01')
 ) as wm");
 $wm = $stmt->fetch()['wm'];
 
