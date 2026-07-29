@@ -4945,27 +4945,19 @@ namespace PenguinMonitor
 
                     // The box is finished, so its counts have settled — sanity-check them once here
                     // rather than while the user is still editing. Cancel drops back into edit mode.
-                    var highValueWarning = GetHighValueWarning();
-                    if (highValueWarning != null)
+                    var closeWarnings = GetBoxCloseWarnings();
+                    if (closeWarnings.Count > 0)
                     {
-                        // Not cancelable: dismissing without a choice would leave the box locked
-                        // but never committed for upload.
-                        new AlertDialog.Builder(this)
-                            .SetTitle("High Value Confirmation")
-                            .SetMessage(highValueWarning)
-                            .SetPositiveButton("Yes, that's right", (s2, e2) => FinishLock())
-                            .SetNegativeButton("Go back", (s2, e2) =>
-                            {
-                                // Draft-save first: the redraw repopulates the fields from stored data,
-                                // so without this the counts being queried would be thrown away.
-                                // _dataChangedSinceUnlock stays true so the next lock still commits.
-                                SaveCurrentBoxData();
-                                _isBoxLocked = false;
-                                _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
-                                DrawPageLayouts();
-                            })
-                            .SetCancelable(false)
-                            .Show();
+                        ShowBoxCloseWarnings(closeWarnings, FinishLock, () =>
+                        {
+                            // Draft-save first: the redraw repopulates the fields from stored data,
+                            // so without this the counts being queried would be thrown away.
+                            // _dataChangedSinceUnlock stays true so the next lock still commits.
+                            SaveCurrentBoxData();
+                            _isBoxLocked = false;
+                            _singleBoxDataContentLayout.Visibility = ViewStates.Visible;
+                            DrawPageLayouts();
+                        });
                         return;
                     }
                     FinishLock();
@@ -5429,11 +5421,30 @@ namespace PenguinMonitor
                 string status = _gateStatusSpinner[0].SelectedItem.ToString();
                 if (status.Equals("Gate up") || status.Equals("Regate"))
                 {
-                    SaveCurrentBoxData();
-                    CommitDraftForUpload();
-                    _isBoxLocked = true;
-                    DrawPageLayouts();
-                    TryBackgroundUpload();
+                    // Setting the gate closes the box, so it is a close and gets the same check the
+                    // lock button gets. It was skipping all of them, including the improbable-count
+                    // one the lock button has always asked — the quickest way to finish a nest was
+                    // also the only way to finish it with an unexamined alarm on it.
+                    void CloseFromGate()
+                    {
+                        SaveCurrentBoxData();
+                        CommitDraftForUpload();
+                        _isBoxLocked = true;
+                        DrawPageLayouts();
+                        TryBackgroundUpload();
+                    }
+                    var gateWarnings = GetBoxCloseWarnings();
+                    if (gateWarnings.Count > 0)
+                        // Going back keeps the gate that was just chosen — it is not what is in
+                        // question — and leaves the box open on the counts that are.
+                        ShowBoxCloseWarnings(gateWarnings, CloseFromGate, () =>
+                        {
+                            SaveCurrentBoxData();
+                            _isBoxLocked = false;
+                            DrawPageLayouts();
+                        });
+                    else
+                        CloseFromGate();
                 }
             };
 
@@ -5727,26 +5738,75 @@ namespace PenguinMonitor
         /// (a bird added before the no-scan it replaces is removed, a "1" on the way to "12")
         /// that are not worth interrupting for, so this is checked at lock time.
         /// </summary>
-        private string? GetHighValueWarning()
+        /// <summary>Everything about this box that wants a second look before it is closed, as lines
+        /// for one dialog.
+        ///
+        /// The improbable-count check was already asked here. The other two were not: a scan/adult
+        /// mismatch was computed by a method nothing ever called, and an offspring drop only painted
+        /// a red border on the colony grid — both of which reach the person after they have shut the
+        /// lid and walked to the next box, when the one thing that would settle it is another look
+        /// inside this one. Asked while they are still standing there, they are answerable.</summary>
+        private List<string> GetBoxCloseWarnings()
         {
             int adults, eggs, chicks;
             int.TryParse(_adultsEditText?[0].Text ?? "0", out adults);
             int.TryParse(_eggsEditText?[0].Text ?? "0", out eggs);
             int.TryParse(_chicksEditText?[0].Text ?? "0", out chicks);
 
-            var highValues = new List<(string type, int count)>();
-            if (adults > 2) highValues.Add(("adults", adults));
-            if (eggs > 2) highValues.Add(("eggs", eggs));
-            if (chicks > 2) highValues.Add(("chicks", chicks));
-            if (chicks + eggs > 2 && eggs > 0 && chicks > 0) highValues.Add(("eggs & chicks", chicks + eggs));
+            var warnings = new List<string>();
 
-            if (highValues.Count == 0) return null;
+            // Improbably high for a little blue penguin — a miscount or a mistyped field far more
+            // often than a real find, so it is worth confirming rather than refusing.
+            if (adults > 2) warnings.Add($"{adults} adults");
+            if (eggs > 2) warnings.Add($"{eggs} eggs");
+            if (chicks > 2) warnings.Add($"{chicks} chicks");
+            if (eggs > 0 && chicks > 0 && eggs + chicks > 2) warnings.Add($"{eggs + chicks} eggs & chicks");
 
-            var message = "Are you sure you have found:\n\n";
-            foreach (var (type, count) in highValues)
-                message += $"• {count} {type}\n";
-            message += "\nPlease check this is correct.";
-            return message;
+            var probe = ProbeObservationFromScreen(adults, eggs, chicks);
+            var mismatch = GetBoxScanMismatch(probe);
+            if (mismatch != null) warnings.Add(mismatch);
+            var drop = GetOffspringDropWarning(_currentBoxName, probe);
+            if (drop != null) warnings.Add(drop);
+
+            return warnings;
+        }
+
+        /// <summary>The box as it stands on screen: the counts currently in the fields, over the
+        /// birds and recorded losses from the stored copy — scans and losses are not fields, so the
+        /// stored row is the only place they live. Never saved; it exists purely so the warning
+        /// checks can be asked about what is about to be committed rather than what was committed
+        /// last time.</summary>
+        private BoxObservation ProbeObservationFromScreen(int adults, int eggs, int chicks)
+        {
+            var probe = new BoxObservation
+            {
+                BoxName = _currentBoxName, Adults = adults, Eggs = eggs, Chicks = chicks,
+            };
+            var stored = _colonyState.GetTodayForBox(_currentBoxName);
+            if (stored != null)
+            {
+                probe.ScannedIds.AddRange(stored.ScannedIds);
+                probe.FailedEggs = stored.FailedEggs;
+                probe.DeadChicks = stored.DeadChicks;
+            }
+            return probe;
+        }
+
+        /// <summary>Put the close warnings in front of the user, with going back to the box as a
+        /// real option. Not cancelable: dismissing without choosing would leave the box locked but
+        /// never committed for upload, which is the round quietly losing a nest.</summary>
+        private void ShowBoxCloseWarnings(List<string> warnings, Action onConfirm, Action onGoBack)
+        {
+            var message = "Before closing this box, please check:\n\n"
+                        + string.Join("\n", warnings.Select(w => $"• {w}"))
+                        + "\n\nGo back and look again, or confirm this is right.";
+            new AlertDialog.Builder(this)
+                .SetTitle("Check before closing")
+                .SetMessage(message)
+                .SetPositiveButton("Yes, that's right", (s, e) => onConfirm())
+                .SetNegativeButton("Go back", (s, e) => onGoBack())
+                .SetCancelable(false)
+                .Show();
         }
         private void SaveCurrentBoxData()
         {
