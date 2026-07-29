@@ -1423,16 +1423,21 @@ namespace PenguinMonitor
             var totalFailedEggs = todayBoxes.Values.Sum(box => box.FailedEggs ?? 0);
             var totalDeadChicks = todayBoxes.Values.Sum(box => box.DeadChicks ?? 0);
 
-            // New eggs are counted box by box against that box's own last visit, then added up.
-            // A colony-wide "today minus last time" would net one box's new egg off against
-            // another's loss and report nothing laid on a day two clutches started.
-            // Historical view has no matching previous set, so it stays a plain total.
-            int newEggs = 0;
+            // New eggs and new chicks are both counted box by box against that box's own last
+            // visit, then added up. A colony-wide "today minus last time" would net one box's new
+            // egg off against another's loss and report nothing laid on a day two clutches started.
+            // Historical view has no matching previous set, so both stay plain totals.
+            //
+            // A hatch shows up only on the chicks line, which is the honest reading of it: the egg
+            // count goes down, so it contributes no new egg, and the chick it became is the new
+            // thing in the box.
+            int newEggs = 0, newChicks = 0;
             if (!_isHistoricalView)
                 foreach (var kv in todayBoxes)
                 {
-                    int was = _colonyState.PreviousBoxes.TryGetValue(kv.Key, out var prev) ? prev.Eggs : 0;
-                    newEggs += Math.Max(0, kv.Value.Eggs - was);
+                    _colonyState.PreviousBoxes.TryGetValue(kv.Key, out var prev);
+                    newEggs += Math.Max(0, kv.Value.Eggs - (prev?.Eggs ?? 0));
+                    newChicks += Math.Max(0, kv.Value.Chicks - (prev?.Chicks ?? 0));
                 }
 
             var pending = _colonyState.PendingUploadCount;
@@ -1442,7 +1447,7 @@ namespace PenguinMonitor
                          $"🐧 {totalScannedBirds} bird scans" + (totalNoScans > 0 ? $" + {totalNoScans} no-scan" : "") + "\n" +
                          $"👥 {totalAdults} adults\n" +
                          $"🥚 {totalEggs} eggs" + (newEggs > 0 ? $" - {newEggs} new" : "") + "\n" +
-                         $"🐣 {totalChicks} chicks\n" +
+                         $"🐣 {totalChicks} chicks" + (newChicks > 0 ? $" - {newChicks} new" : "") + "\n" +
                          (totalFailedEggs > 0 ? $"🥚✗ {totalFailedEggs} failed egg{(totalFailedEggs != 1 ? "s" : "")}\n" : "") +
                          (totalDeadChicks > 0 ? $"🐣✗ {totalDeadChicks} dead chick{(totalDeadChicks != 1 ? "s" : "")}\n" : "") +
                          $"🚪 Gate: {gateUpCount} up, {regateCount} regate";
