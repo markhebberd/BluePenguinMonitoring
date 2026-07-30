@@ -5463,6 +5463,26 @@ function RemoteMirrorCard() {
     return isNaN(d.getTime()) ? '' : ago((Date.now() - d.getTime()) / 1000);
   };
   const files: any[] = Array.isArray(data?.files) ? data.files : [];
+  const calendar = useMemo(() => {
+    const have = new Set(files.map((f: any) => String(f.name || '').replace('.sql.gz', '')));
+    const dates = [...have].sort();
+    if (dates.length === 0) return [];
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const [fy, fm] = dates[0].split('-').map(Number);
+    const [ly, lm] = dates[dates.length - 1].split('-').map(Number);
+    const now = new Date();
+    const rows: { label: string; days: { date: string; on: boolean }[]; count: number }[] = [];
+    for (let y = fy, m = fm; y * 12 + m <= ly * 12 + lm; m === 12 ? (m = 1, y++) : m++) {
+      const inMonth = new Date(y, m, 0).getDate();
+      const last = (y === now.getFullYear() && m === now.getMonth() + 1) ? now.getDate() : inMonth;
+      const days = Array.from({ length: last }, (_, i) => {
+        const date = `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
+        return { date, on: have.has(date) };
+      });
+      rows.push({ label: `${MONTHS[m - 1]} ${y}`, days, count: days.filter(d => d.on).length });
+    }
+    return rows;
+  }, [data]);
 
   return (
     <div className="admin-section">
@@ -5507,13 +5527,28 @@ function RemoteMirrorCard() {
         </p>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
           Reported {ago(Number(data.inventory_age_seconds) || 0)} · {files.length} backup{files.length === 1 ? '' : 's'} held
+          {data.mirror_url && <> · <a className="clickable" href={data.mirror_url} target="_blank" rel="noreferrer">open the mirror</a>
+            {' · '}<a className="clickable" href={`${data.mirror_url}/status/`} target="_blank" rel="noreferrer">its status page</a></>}
         </p>
+        {calendar.length > 0 && (
+          <div className="mirror-cal">
+            {calendar.map(row => (
+              <div className="mrow" key={row.label}>
+                <span className="ml">{row.label}</span>
+                <span className="days">
+                  {row.days.map(d => <i key={d.date} className={d.on ? 'on' : 'off'} title={d.date} />)}
+                </span>
+                <span className="mc">{row.count}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="table-scroll">
           <table className="guess-rank-table zebra">
             <thead><tr><th>Backup</th><th>Taken</th><th>Size</th></tr></thead>
             <tbody>{[...files].reverse().map((f: any) => (
               <tr key={f.name}>
-                <td>{f.name}{f.name === data.tested_dump && <span className="muted"> · restored</span>}</td>
+                <td>{f.name}{f.name === data.tested_dump && <span className="muted"> · live</span>}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {nz(f.taken_utc)}<span className="muted"> · {since(f.taken_utc)}</span>
                 </td>

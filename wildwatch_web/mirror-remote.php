@@ -36,6 +36,11 @@ if ($url === '' || $key === '') {
     exit;
 }
 
+// The mirror's own pages (status, and the app itself) are worth linking to from here — this
+// card is a summary, its status page is the detail. Origin only: never the key.
+$parts = parse_url($url);
+$origin = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '');
+
 $run = $_SERVER['REQUEST_METHOD'] === 'POST';
 $ch = curl_init($url . ($run ? (str_contains($url, '?') ? '&run=1' : '?run=1') : ''));
 curl_setopt_array($ch, [
@@ -54,7 +59,7 @@ $err  = curl_error($ch);
 curl_close($ch);
 
 if ($body === false || $code === 0) {
-    echo json_encode(['reachable' => false, 'state' => 'unreachable', 'detail' => $err ?: 'No response from the mirror.']);
+    echo json_encode(['reachable' => false, 'state' => 'unreachable', 'mirror_url' => $origin, 'detail' => $err ?: 'No response from the mirror.']);
     exit;
 }
 
@@ -78,7 +83,7 @@ if (!is_array($json)) {
 // 404 from the mirror is meaningful, not an error: it is how the mirror endpoint says "not a
 // mirror" or "no run has completed yet".
 if ($code >= 400) {
-    echo json_encode(['reachable' => true, 'state' => $code === 429 ? 'rate_limited' : 'error', 'http' => $code] + $json);
+    echo json_encode(['reachable' => true, 'state' => $code === 429 ? 'rate_limited' : 'error', 'http' => $code, 'mirror_url' => $origin] + $json);
     exit;
 }
-echo json_encode(['reachable' => true, 'state' => $run ? 'queued' : 'ok'] + $json);
+echo json_encode(['reachable' => true, 'state' => $run ? 'queued' : 'ok', 'mirror_url' => $origin] + $json);
