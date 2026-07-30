@@ -5371,6 +5371,102 @@ function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: num
   );
 }
 
+/**
+ * Production asking the mirror what it holds. The mirror is only reachable through its
+ * Cloudflare tunnel, so "no answer" is an ordinary outcome here and gets said plainly — an
+ * admin needs to know the difference between a mirror with no backups and a mirror it cannot
+ * see. Every state below is a real answer to "is the offsite copy good?".
+ */
+function RemoteMirrorCard() {
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await fetch('/api/mirror-remote.php', { headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` } });
+      setData(await r.json());
+    } catch (e: any) { setData({ reachable: false, state: 'unreachable', detail: e?.message || 'Request failed' }); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const requestRun = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await fetch('/api/mirror-remote.php?run=1', {
+        method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` },
+      });
+      const d = await r.json();
+      setMsg(d.state === 'queued' ? (d.message || 'Queued on the mirror.')
+        : d.state === 'rate_limited' ? `The mirror is already running one — asked for ${d.requested_seconds_ago}s ago, try again in ${d.retry_after_seconds}s.`
+        : (d.detail || d.error || 'The mirror did not accept the request.'));
+      load();
+    } catch (e: any) { setMsg(e?.message || 'Request failed'); }
+    finally { setBusy(false); }
+  };
+
+  const kb = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+  const ago = (s: number) => s < 3600 ? `${Math.round(s / 60)} min` : s < 172800 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} days`;
+  const files: any[] = Array.isArray(data?.files) ? data.files : [];
+
+  return (
+    <div className="admin-section">
+      <h3>Backup mirror</h3>
+      <p className="muted">
+        The offsite copy: it pulls a current dump from this server, restores it into an empty
+        database and checks the result. This card is what the mirror reports back.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+        <button className="edit-btn" disabled={busy} onClick={load}>{busy ? 'Asking…' : 'Refresh'}</button>
+        <button className="edit-btn" disabled={busy || !data?.reachable} onClick={requestRun}>Ask the mirror to run now</button>
+      </div>
+      {msg && <p className="muted" style={{ color: '#1a6b8f' }}>{msg}</p>}
+
+      {!data ? <p className="muted">Asking the mirror…</p> : !data.reachable ? (
+        <div style={{ border: '1px solid #f3d6d3', background: '#fbeceb', borderRadius: 8, padding: '10px 14px' }}>
+          <p style={{ margin: 0, color: '#a4362d', fontWeight: 600 }}>
+            {data.state === 'not_configured' ? 'No mirror configured'
+              : data.state === 'blocked_by_access' ? 'The mirror is up, but this server is not allowed through'
+              : 'Cannot reach the mirror'}
+          </p>
+          <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>{data.detail || data.error}</p>
+          <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+            This says nothing about whether the mirror is healthy — only that it can&rsquo;t be asked from here.
+            Its own status page is the fallback.
+          </p>
+        </div>
+      ) : data.state === 'ok' || files.length > 0 ? (<>
+        <p style={{ margin: '4px 0', fontWeight: 600, color: data.restore === 'verified' ? '#1f6b41' : '#a4362d' }}>
+          {data.restore === 'verified' ? 'RESTORE VERIFIED' : 'RESTORE FAILED'}
+          <span className="muted" style={{ fontWeight: 400 }}>
+            {' '}· tested {data.tested_dump}{data.tested_dump_taken ? `, taken ${data.tested_dump_taken}` : ''}
+            {data.tables ? ` · ${data.tables} tables, ${Number(data.rows_total).toLocaleString()} rows` : ''}
+          </span>
+        </p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Reported {ago(Number(data.inventory_age_seconds) || 0)} ago · {files.length} backup{files.length === 1 ? '' : 's'} held
+        </p>
+        <div className="table-scroll">
+          <table className="guess-rank-table zebra">
+            <thead><tr><th>Backup</th><th>Taken</th><th>Size</th></tr></thead>
+            <tbody>{[...files].reverse().map((f: any) => (
+              <tr key={f.name}>
+                <td>{f.name}{f.name === data.tested_dump && <span className="muted"> · restored</span>}</td>
+                <td>{String(f.taken_utc || '').replace('T', ' ').replace('Z', '')}</td>
+                <td>{kb(Number(f.bytes) || 0)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </>) : (
+        <p className="muted">{data.detail || data.error || 'The mirror has not published an inventory yet.'}</p>
+      )}
+    </div>
+  );
+}
+
 const MISSING_NO_SCANS_TITLE = 'Missing no scans';
 
 function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time: string) => string; token: string }) {
@@ -9502,7 +9598,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['enter', 'Enter data'], ['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
+        {(([['enter', 'Enter data'], ['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ['mirror', 'Mirror']]) as [AdminTab, string][]).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -10258,7 +10354,9 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
         </Suspense>
       </div>
 
-      <div style={{ display: adminTab === 'mirror' ? undefined : 'none' }}>
+      {adminTab === 'mirror' && !isMirror && <RemoteMirrorCard />}
+
+      <div style={{ display: adminTab === 'mirror' && isMirror ? undefined : 'none' }}>
         <h3>Backup mirror</h3>
         <p className="muted">This server is the offline, restore-tested copy of Wildwatch. It pulls production&rsquo;s backup and code automatically each night; the button runs that on demand.</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
