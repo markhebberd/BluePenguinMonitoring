@@ -377,6 +377,15 @@ h3.collapsible:hover { color:#1a5276; }
 .bird-title-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; min-width:60px; text-align:center; }
 .header-nav { display:flex; gap:6px; align-items:center; }
 .admin-panel { max-width:800px; margin:0 auto; padding:16px 20px; }
+/* Admin tab bar. One row, always: wrapping dropped the last tab (Mirror) onto a line of its own
+   as soon as the window narrowed or a badge widened it, which read as a stray heading rather
+   than a tab. Too narrow to fit, it scrolls sideways instead. */
+.admin-tabs { display:flex; gap:2px; margin:0 0 16px; border-bottom:1px solid #ddd;
+  overflow-x:auto; scrollbar-width:thin; }
+.admin-tab { flex:none; white-space:nowrap; padding:8px 10px; border:none; border-bottom:2px solid transparent;
+  margin-bottom:-1px; background:none; cursor:pointer; font-size:14px; color:#555; }
+.admin-tab:hover { color:#1a6b8f; }
+.admin-tab.active { border-bottom-color:#1a6b8f; color:#1a6b8f; font-weight:600; }
 .admin-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
 .admin-header h2 { margin:0; color:#1a5276; }
 .admin-section { margin-bottom:20px; }

@@ -9758,11 +9758,9 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
   return (
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
+      <div className="admin-tabs">
         {(([['enter', 'Enter data'], ['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ['mirror', 'Mirror']]) as [AdminTab, string][]).map(([id, label]) => (
-          <button key={id} onClick={() => selectTab(id)}
-            style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
-              background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
+          <button key={id} onClick={() => selectTab(id)} className={`admin-tab${adminTab === id ? ' active' : ''}`}>
             {label}{id === 'mirror' && mirrorAlert && <MirrorAlertBadge reason={mirrorAlert} />}
           </button>
         ))}
