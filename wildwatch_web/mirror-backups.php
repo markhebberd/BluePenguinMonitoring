@@ -26,10 +26,38 @@ const MARKER    = TRIGGERS . '/.last-backup-request';
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
-// The API key is read-only and GET-only in requireReadAuth, so the POST below authenticates
-// with a session token instead. Both paths go through the same function.
 $pdo = getDbConnection();
-requireReadAuth($pdo);
+
+/**
+ * requireReadAuth accepts the API key on GET only — a read key must not be able to write data.
+ * The POST here writes no data: it touches a flag file that a root watcher turns into a run of
+ * one fixed script, and it is refused inside 15 minutes of the last one. Production has no
+ * session on the mirror (separate app, separate sessions table), so a key it can present is the
+ * only way it can ask at all. Hence an explicit key check for this endpoint, matching
+ * requireReadAuth's own two sources.
+ */
+function mirrorAuth($pdo): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') { requireReadAuth($pdo); return; }
+    $headers = array_change_key_case(getallheaders(), CASE_LOWER);
+    $key = (string)($headers['x-api-key'] ?? '');
+    if ($key !== '') {
+        if (hash_equals(API_KEY, $key)) return;
+        $stmt = $pdo->prepare("SELECT 1 FROM users WHERE api_key = ? AND (deleted_at IS NULL)");
+        $stmt->execute([$key]);
+        if ($stmt->fetchColumn()) return;
+    }
+    // A logged-in admin on the mirror itself can also queue a run; that is the existing button.
+    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
+        $stmt = $pdo->prepare("SELECT 1 FROM sessions WHERE token = ? AND expires_at > NOW()");
+        $stmt->execute([$m[1]]);
+        if ($stmt->fetchColumn()) return;
+    }
+    http_response_code(401);
+    echo json_encode(['error' => 'Authentication required']);
+    exit;
+}
+mirrorAuth($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!is_dir(TRIGGERS) || !is_writable(TRIGGERS)) {
