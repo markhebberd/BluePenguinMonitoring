@@ -11663,14 +11663,16 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // One element, dropped into each toolbar. Defined here so it sits after the navigation
   // helpers it closes over and before the toolbars that use it. Every destination clears the
   // day overlay first — a result found from inside it should land on the thing, not behind it.
-  const unifiedSearch = (
+  const searchFor = (onDone?: () => void) => (
     <UnifiedSearch dates={dayDates}
-      onBoxClick={(b) => { setSelectedDay(null); openBox(b); }}
-      onBirdClick={(t) => { setSelectedDay(null); openBird(t); }}
-      onDayClick={goToDay}
-      onObsClick={(b, t) => { setSelectedDay(null); goToBoxFromBird(b, t); }}
+      onBoxClick={(b) => { setSelectedDay(null); openBox(b); onDone?.(); }}
+      onBirdClick={(t) => { setSelectedDay(null); openBird(t); onDone?.(); }}
+      onDayClick={(d) => { goToDay(d); onDone?.(); }}
+      onObsClick={(b, t) => { setSelectedDay(null); goToBoxFromBird(b, t); onDone?.(); }}
       onFocusChange={onSearchFocus} />
   );
+  const unifiedSearch = searchFor();
+  const mobileSearch = searchFor(closeMenu);
 
   const siteNav = (
     <nav className="site-nav">
@@ -11695,6 +11697,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
       <span className="header-desktop">
         {siteNav}
+        <span className="header-search">{unifiedSearch}</span>
         {colonies.length > 1 && (
           <select className="colony-select" value={colonyId} onChange={e => switchColony(Number(e.target.value))} title="Switch colony">
             {colonyOptionEls}
@@ -11746,7 +11749,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           )}
           <div className="mobile-search-group">
             <label className="mobile-label">Search</label>
-            {unifiedSearch}
+            {mobileSearch}
           </div>
           {legacySearches && (<>
             <div className="mobile-search-group">
@@ -11815,7 +11818,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       {siteHeader}
       <div className="colony-toolbar">
 
-        {unifiedSearch}
 
         {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
@@ -11956,7 +11958,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className="colony-toolbar">
 
-          {unifiedSearch}
 
           {legacySearches && (<>
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
@@ -11990,7 +11991,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       {siteHeader}
       <div className="colony-toolbar">
 
-        {unifiedSearch}
 
         {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
