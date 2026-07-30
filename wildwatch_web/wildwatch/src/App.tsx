@@ -8769,24 +8769,24 @@ function DocsPage() {
   );
 }
 
-function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void }) {
-  const REPORT_TABS = ['colony', 'breeding', 'population', 'social', 'quality'] as const;
+function ReportsPage({ onOpenBird, onDayClick, token, colonyName }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void; token: string; colonyName?: string }) {
+  const REPORT_TABS = ['birds', 'colony', 'breeding', 'population', 'social', 'quality'] as const;
   type ReportTab = typeof REPORT_TABS[number];
   const [tab, setTab] = useState<ReportTab>(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
-    return (REPORT_TABS as readonly string[]).includes(t || '') ? (t as ReportTab) : 'colony';
+    return (REPORT_TABS as readonly string[]).includes(t || '') ? (t as ReportTab) : 'birds';
   });
   const selectTab = (id: ReportTab) => {
     setTab(id);
     const u = new URL(window.location.href);
-    if (id === 'colony') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
+    if (id === 'birds') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
     window.history.replaceState(null, '', u.pathname + u.search);
   };
 
   return (
     <>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['colony', 'Colony'], ['breeding', 'Breeding & chicks'], ['population', 'Population'], ['social', 'Pairs & groups'], ['quality', 'Data quality']]) as const).map(([id, label]) => (
+        {(([['birds', 'All penguins'], ['colony', 'Colony'], ['breeding', 'Breeding & chicks'], ['population', 'Population'], ['social', 'Pairs & groups'], ['quality', 'Data quality']]) as const).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: tab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: tab === id ? 600 : 400, color: tab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -8794,6 +8794,9 @@ function ReportsPage({ onOpenBird, onDayClick }: { onOpenBird: (num: string) => 
           </button>
         ))}
       </div>
+
+      {/* Mounted only when open: it builds a row per bird in every colony. */}
+      {tab === 'birds' && <AllPenguinsPage token={token} colonyName={colonyName} onOpenBird={onOpenBird} />}
 
       <div style={{ display: tab === 'colony' ? undefined : 'none' }}>
         <DistinctAdultsChart />
@@ -8943,11 +8946,13 @@ function DcmBoxesChart() {
   );
 }
 
-function AdminPanel({ token, observationDates, checkTarget }: {
+function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColony, onLeaveEntry }: {
   token: string; observationDates?: string[];
   // A header pin was clicked: jump to the validation tab and scroll to this check. The nonce
   // makes a repeat click on the same pin re-trigger the effect.
   checkTarget?: { slug: string; nonce: number } | null;
+  // For the data-entry tab, which is the same page it was as a standalone route.
+  allPenguins?: any[]; fmColony?: boolean; onLeaveEntry?: () => void;
 }) {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -8986,7 +8991,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
-  const ADMIN_TABS = ['io', 'validation', 'users', 'database', 'system', 'mirror'] as const;
+  const ADMIN_TABS = ['enter', 'io', 'validation', 'users', 'database', 'system', 'mirror'] as const;
   type AdminTab = typeof ADMIN_TABS[number];
   // "Mirror" tab is only meaningful on the backup mirror (set by the /me response). Its
   // status view + action buttons all 404 on production.
@@ -9497,7 +9502,7 @@ function AdminPanel({ token, observationDates, checkTarget }: {
     <>
     <div className={`admin-panel${adminBird && adminBirdData?.penguin ? ' admin-page-docked' : ''}`}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '0 0 16px', borderBottom: '1px solid #ddd' }}>
-        {(([['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
+        {(([['enter', 'Enter data'], ['io', 'Import & export'], ['validation', 'Data validation'], ['users', 'Users & colonies'], ['database', 'Database'], ['system', 'System'], ...(isMirror ? [['mirror', 'Mirror']] : [])]) as [AdminTab, string][]).map(([id, label]) => (
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
@@ -9523,6 +9528,10 @@ function AdminPanel({ token, observationDates, checkTarget }: {
           setExporting(false);
         }}>{exporting ? 'Exporting...' : 'Export all days as Nestcheck ZIP'}</button>
       </div>
+
+      {adminTab === 'enter' && (
+        <DataEntryPage token={token} allPenguins={allPenguins || []} onBack={() => onLeaveEntry?.()} fmColony={!!fmColony} />
+      )}
 
       <div style={{ display: adminTab === 'io' ? undefined : 'none' }}>
         <NestcheckJsonImport token={token} colonyId={impColony} />
@@ -11696,13 +11705,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     <header>
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
       <span className="header-desktop">
-        {siteNav}
+        {/* Search and the colony it searches sit left of the sections: what you're looking at,
+            then where you're looking. */}
         <span className="header-search">{unifiedSearch}</span>
         {colonies.length > 1 && (
           <select className="colony-select" value={colonyId} onChange={e => switchColony(Number(e.target.value))} title="Switch colony">
             {colonyOptionEls}
           </select>
         )}
+        {siteNav}
         {pinnedChecks.length > 0 && (
           <span className="pinned-checks">
             {pinnedChecks.map(p => (
@@ -11816,17 +11827,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const dayOverlay = (selectedDay && !showAdmin && !showReports && !showDocs && !showEntry && !showAllBirds && !showSettings) ? (
     <div className="app day-overlay">
       {siteHeader}
+      {legacySearches && (
       <div className="colony-toolbar">
-
-
-        {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={(num) => setSelectedBird(num)} />
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedDay(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={dayDates} onDayClick={goToDay} onFocusChange={onSearchFocus} />
-        </>)}
-        {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
-        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
       </div>
+      )}
       <DayView date={selectedDay} dates={dayDates} highlightBox={dayBox} onBoxClick={(box, date) => { setSelectedDay(null); if (window.innerWidth < 900) setSelectedBird(null); setObsAnchor(date ? { box, time: date } : null); setSelectedBox(box); if (date) { setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(date); setScrollToObs(date); }, 10); } else { setHighlightObs(null); setScrollToObs(null); } }} onBirdClick={openBird} onDayClick={goToDay} externalBird={selectedBird} token={token} canEdit={userRole !== 'viewer'} allPenguins={allPenguins} peekCalendar={datePickerVisible} />
     </div>
   ) : null;
@@ -11875,7 +11882,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <CheckNavContext.Provider value={openCheckHref}>
-          <AdminPanel token={token} observationDates={stats?.observation_dates} checkTarget={checkTarget} />
+          <AdminPanel token={token} observationDates={stats?.observation_dates} checkTarget={checkTarget}
+            allPenguins={allPenguins} onLeaveEntry={() => goTo('colony')}
+            fmColony={(colonies.find((c: any) => Number(c.colony_id) === colonyId)?.colony_prefix ?? 'PT') === 'PT'} />
         </CheckNavContext.Provider>
         {passwordDialog}
       </div>
@@ -11933,7 +11942,8 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <div className="app">
         {siteHeader}
         <div className={`reports-page${reportsBird && reportsBirdData?.penguin ? ' reports-page-docked' : ''}`}>
-          <ReportsPage onOpenBird={setReportsBird}
+          <ReportsPage onOpenBird={setReportsBird} token={token}
+            colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name}
             onDayClick={(d: string) => { setShowReports(false); goToDay(d); }} />
         </div>
         {reportsBird && reportsBirdData?.penguin && (
@@ -11956,17 +11966,13 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {legacySearches && (
         <div className="colony-toolbar">
-
-
-          {legacySearches && (<>
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
             <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
             <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={onSearchFocus} />
-          </>)}
-          {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
-        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         </div>
+        )}
         <div className="bird-page">
           <div className="page-header">
             <a className="page-back" href={previousBox ? `/box/${previousBox}` : '/'} onClick={e => navClick(e, () => { closeBird(); if (previousBox) { setHighlightObs(null); setScrollToObs(null); setSelectedBox(previousBox); setPreviousBox(null); } })}>&larr; {previousBox ? `Box ${previousBox}` : 'Colony'}</a>
@@ -11989,18 +11995,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   return wrap(
     <div className="app">
       {siteHeader}
+      {legacySearches && (
       <div className="colony-toolbar">
-
-
-        {legacySearches && (<>
           <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
           <input className="box-search-input" type="text" placeholder="Box" onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.replace(/#/g, '').trim(); if (v) { setSelectedBird(null); setHighlightObs(null); setScrollToObs(null); setSelectedBox(v); (e.target as HTMLInputElement).value = ''; } } }} />
           <DateSearch dates={stats?.observation_dates || []} onDayClick={goToDay} onFocusChange={onSearchFocus} />
-        </>)}
-        {userRole !== 'viewer' && <button className="toolbar-btn" onClick={() => goTo('enter')}>Enter data</button>}
-        <button className="toolbar-btn" onClick={() => goTo('birds')}>All penguins</button>
         {stats && <span className="colony-stats">{stats.total_boxes} boxes &middot; {stats.season_observations} obs &middot; {stats.season_penguins} penguins this season</span>}
       </div>
+      )}
       {(datePickerVisible || (!selectedBox && !selectedBird && !selectedDay)) && (
         <DayCalendar date={datePickerCenter || latestDay} dates={sortedDates} onDayClick={goToDay} />
       )}
