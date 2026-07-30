@@ -20,13 +20,16 @@ mkdir -p "$APP/api"
 tar -c -C "$REL" --exclude='./penguin-api' --exclude='./api' --exclude='./.htaccess' . \
   | tar -x -C "$APP"
 
-# PHP API -> app/api, minus credentials.
+# PHP API -> app/api, minus credentials. The breeding algorithm's node bundle travels with
+# it: reports.php spawns it, and the mirror has no build step to produce one of its own.
 cp "$REL"/penguin-api/*.php "$APP/api/" 2>/dev/null || true
+cp "$REL"/penguin-api/breeding-cli.mjs "$APP/api/" 2>/dev/null || true
 rm -f "$APP/api/secrets.php" "$APP/api/secrets.php.sample"
 
 # Sanity: refuse to ship an empty or broken release rather than blanking the mirror.
 [ -f "$APP/index.html" ]     || { echo "release-tar: no index.html in release" >&2; exit 1; }
 ls "$APP"/api/*.php >/dev/null 2>&1 || { echo "release-tar: no PHP API in release" >&2; exit 1; }
+[ -f "$APP/api/breeding-cli.mjs" ] || { echo "release-tar: no breeding-cli.mjs in release" >&2; exit 1; }
 
 # Stamp which release this is, so the NAS can show it on the status page.
 { basename "$REL"; git -C /var/www/wildwatch/repo rev-parse --short HEAD 2>/dev/null; } \

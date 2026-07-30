@@ -9,7 +9,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "check:algorithm": "node ../../scripts/check-algorithm-doc.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:cli": "esbuild src/breedingCli.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist-node/breeding-cli.mjs"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
@@ -25,6 +26,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "esbuild": "^0.28.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

@@ -22,3 +22,6 @@ dist-ssr
 *.sln
 *.sw?
 dist/
+
+# Node bundle of the breeding algorithm, built at deploy time (npm run build:cli)
+dist-node

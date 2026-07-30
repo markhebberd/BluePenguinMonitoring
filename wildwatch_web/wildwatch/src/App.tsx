@@ -4,7 +4,10 @@ import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, 
 import { getStoreVersion, syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
 import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch, useMissingChipMeasures } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
-import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
+import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP } from './breedingConstants';
+// The breeding algorithm itself — one implementation, shared with the server. See src/breeding.ts.
+import { parseDate, isChickAtObsDate, segmentClutches, postGuardRanges } from './breeding';
+import type { Clutch } from './breeding';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
 import { StatsPanel } from './components/StatsPanel';
@@ -62,40 +65,6 @@ function displayStatus(status: string|null, eggs: number, chicks: number, postGu
   }
   // Guard the box has since left is post-guard, however it was recorded.
   return postGuard && s === 'G' ? 'PG' : status;
-}
-
-/**
- * When each breeding attempt at a box left guard behind.
- *
- * Guard ends when the chicks are first left on their own: the parents stop brooding them
- * and both feed at sea, coming back only to feed. It isn't a clean switch — a pair
- * commonly leaves the chicks for a day and one of them is back the next, and the two
- * parents don't stop together — so post-guard is dated from the FIRST check that found
- * the chicks with neither parent there, and the nest stays post-guard from that check on
- * whatever a later one finds.
- *
- * The chicks have to be old enough first. Nothing counts before {@link BREEDING_OFFSETS.pg}
- * days after laying, which is two weeks past the estimated hatch: earlier than that a
- * check finding no adult caught a parent briefly off the nest, not the end of guard.
- *
- * One range per attempt that reached post-guard — from that first check to whatever ended
- * the attempt (offspring gone, or ABN; open-ended while it's still running).
- */
-function postGuardRanges(observations: Observation[]): { from: number; to: number }[] {
-  const chrono = [...observations].sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
-  const ranges: { from: number; to: number }[] = [];
-  for (const c of segmentClutches(chrono)) {
-    // Laid + 52d, from the same estimate the timeline and the breeding calendar date PG by.
-    // A clutch whose laying can't be estimated falls back to its discovery, as guardEnd does.
-    const earliest = Math.max((c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY, c.start);
-    const end = c.end ?? Infinity;
-    const alone = chrono.find(o => {
-      const t = parseDate(o.observation_time_utc).getTime();
-      return t >= earliest && t <= end && (o.chicks || 0) > 0 && (o.adults || 0) === 0;
-    });
-    if (alone) ranges.push({ from: parseDate(alone.observation_time_utc).getTime(), to: end });
-  }
-  return ranges;
 }
 
 /** Post-guard ranges for one box, rebuilt only when the local database changes — the box
@@ -422,11 +391,6 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo, hideLegend }
 }
 
 
-
-function isChickAtObsDate(chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): boolean {
-  if (chippedAsAdult || !chipDate) return false;
-  return ((observationDate ? new Date(observationDate).getTime() : Date.now()) - new Date(chipDate).getTime()) < 90 * 86400000;
-}
 
 /** One day after chipping — renders a chick-chipped bird in its chick-time context
  *  (pale yellow) without triggering the same-day chipped-here (green) styling. */
@@ -899,184 +863,6 @@ function PenguinMini({ scan, onClick, observationDate, navigateDirectly, current
       {num}{num && icon ? <span className="scan-sp" /> : null}{!sizeLabel && icon && <span className="sex-icon">{icon}</span>}{(num || icon) && chip ? <span className="scan-sp" /> : null}{chip}{mid ? <><span className="scan-sp" />{mid}</> : null}
     </a>
   );
-}
-
-/** One breeding attempt in a season. A clutch starts when eggs appear after an empty
- *  check — or chicks do, after a monitoring gap long enough to have hidden the egg
- *  phase — and its window runs from laying until the check that ends it: ABN, or egg
- *  removal / offspring absence (implies death or fledging). A later egg appearance after
- *  an empty check is a SECOND clutch with its own family. */
-interface Clutch {
-  laid: number | null;      // estimated laid time; null when un-estimable
-  laidUncertainty: number | null; // ± days on the laid estimate (half the plausible-laying range)
-  laidFailed: boolean;      // nothing to measure back from (eggs at the first check ever, or
-                            // an abandoned discovery) — data needs fixing
-  start: number;            // first obs with offspring present (egg appearance)
-  startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
-  startObsId: number | null;// that observation's id — the anchor a verification is keyed to
-  end: number | null;       // obs that ended the attempt; null = still running
-  windowStart: number;      // breeding window: laying (estimated), or discovery when un-estimable …
-  windowEnd: number;        // … the check that ended it; predicted fledge while still running
-  guardEnd: number;         // end of guard (laid + 52d): parents stop attending after this
-  attendStart: number;      // courtship/nest-building start: COURTSHIP_LEAD_DAYS before the EARLIEST
-                            // plausible laid date. Attendance from here to guardEnd is
-                            // parent evidence — the laid estimate is a midpoint, so
-                            // measuring from it alone would cut off real courtship visits.
-  maxEggs: number;
-  maxChicks: number;
-}
-
-/** A microchipped chick is in this observation — so the offspring here are close to
- *  fledging, not newly hatched, and the attempt began much further back. */
-const hasChippedChick = (o: Observation) =>
-  o.scans.some(s => isChickAtObsDate(s.chip_date, s.chipped_as_adult, o.observation_time_utc));
-
-/** What one clutch's own observations say about when it was laid. Gathered during the
- *  walk and turned into an estimate once the clutch has run its course — the hatch
- *  evidence arrives long after the discovery does. */
-interface LaidEvidence {
-  emptyBefore: number | null;   // last check that found the box empty, before discovery
-  firstEggT: number | null;     // discovery, when it had eggs — laying dates straight off this
-  firstEggCount: number;
-  lastNoChickT: number | null;  // latest check that still had no chicks
-  firstChickT: number | null;   // earliest check with chicks
-  abnAtStart: boolean;          // discovery already abandoned — nothing to date
-}
-
-/**
- * Date laying from the events that can actually be observed either side of it: the box filling
- * with eggs, and the eggs becoming chicks. Each bounds laying; the estimate is the midpoint of
- * where all the bounds agree, and the ± is that overlap's half-width.
- *
- * Every bound is applied at once rather than the best one being picked — which end of the
- * attempt was watched most closely is an accident of visiting, and whichever it was, it
- * tightens the same answer.
- */
-function estimateLaidFrom(ev: LaidEvidence): { laid: number | null; unc: number | null } {
-  if (ev.abnAtStart) return { laid: null, unc: null };
-  // Midpoint, rounded up to a whole day to match reports.php — but never past the top of the
-  // window: with the bounds this tight a window can be hours wide, and rounding up would
-  // otherwise put laying after the eggs were seen.
-  const halve = (lo: number, hi: number) =>
-    ({ laid: Math.min(hi, lo + Math.ceil((hi - lo) / 2 / DAY) * DAY), unc: Math.floor((hi - lo) / 2 / DAY) });
-
-  // What the box itself showed, which laying has to fit between: it was empty, so laying came
-  // after; it held eggs, so laying came before — less the second-egg lag, since it's the FIRST
-  // egg being dated.
-  const seenEmpty = ev.emptyBefore;
-  let seenEggs = ev.firstEggT !== null
-    ? ev.firstEggT - (ev.firstEggCount > 1 ? SECOND_EGG_LAG_DAYS : 0) * DAY : null;
-  // On a box checked every day or two that lag can put the bound before the check that found
-  // the box empty. The empty box was seen; the lag is inferred from a count — so the lag is
-  // what gives way, not the observation.
-  if (seenEggs !== null && seenEmpty !== null && seenEggs < seenEmpty) seenEggs = ev.firstEggT;
-  // What the hatch says. The box had no chicks, then it had them, so hatching fell between
-  // those two checks and laying an incubation before each — on a box watched closely around
-  // hatching this is far the sharper signal, since the hatch is a single event where laying
-  // smears over two eggs.
-  //
-  // ONLY the hatch, though. What a chick's own stage implies — that a chipped one is near
-  // fledging, that one still in the nest hasn't fledged — is an inference about the bird's
-  // age, not a dated event. Those are good enough to rule a breeding window out (they gate
-  // whether chicks may start an attempt at all) but not to date one, so they stay out of here.
-  const hatchedBetween = ev.firstChickT !== null && ev.lastNoChickT !== null;
-  const chickHi = hatchedBetween ? ev.firstChickT! - BREEDING_OFFSETS.hatch * DAY : null;
-  const chickLo = hatchedBetween ? ev.lastNoChickT! - BREEDING_OFFSETS.hatch * DAY : null;
-
-  // Every bound at once, not the better of two: each is a fact about the same unknown, so the
-  // answer is where they all agree. Whichever end was watched more closely is what tightens it.
-  const notNull = (xs: (number | null)[]) => xs.filter((x): x is number => x !== null);
-  const los = notNull([seenEmpty, chickLo]), his = notNull([seenEggs, chickHi]);
-  if (los.length && his.length) {
-    const lo = Math.max(...los), hi = Math.min(...his);
-    if (lo <= hi) return halve(lo, hi);
-  }
-  // No overlap: the chicks contradict the box's own contents — an empty box, or eggs still
-  // unhatched, too few days before a chick that needs a whole incubation. One of the two
-  // records is wrong, and the box's contents are what was directly seen, so fall back to
-  // those alone.
-  if (seenEmpty !== null && seenEggs !== null) return halve(seenEmpty, seenEggs);
-  return { laid: null, unc: null };
-}
-
-/**
- * @param priorObsT when this box was last checked BEFORE these observations start (null =
- *   never). Callers passing one season's observations must pass it: the gap that decides
- *   whether chicks can start an attempt is the real monitoring gap, not one manufactured
- *   by the season boundary.
- */
-function segmentClutches(sObs: Observation[], priorObsT: number | null = null): Clutch[] {
-  const clutches: Clutch[] = [];
-  const evidence: LaidEvidence[] = [];      // one per clutch, same index
-  let current: Clutch | null = null;
-  let ev: LaidEvidence | null = null;       // the running clutch's laid evidence
-  // After an ABN close the doomed eggs may linger in later checks — require an
-  // empty check before a new clutch can start.
-  let awaitingEmpty = false;
-  let prevEmpty: number | null = null;
-  let prevObs: number | null = priorObsT;   // last check of ANY kind — the monitoring gap
-  for (const o of sObs) {
-    const t = parseDate(o.observation_time_utc).getTime();
-    const off = (o.eggs || 0) + (o.chicks || 0);
-    const abn = o.breeding_status === 'ABN';
-    // Chicks with no egg phase are usually stale/carry-forward data — but not if the box
-    // went unwatched long enough for the egg phase to have happened unseen. How long
-    // depends on what's in there: downy chicks put laying at least a hatch back, already
-    // chipped chicks put it most of a breeding cycle back.
-    const gapDays = prevObs === null ? Infinity : (t - prevObs) / DAY;
-    const chicksCanStart = gapDays >= (hasChippedChick(o) ? CHIPPED_CHICK_START_MIN_GAP_DAYS : CHICK_START_MIN_GAP_DAYS);
-    if (current) {
-      if (off === 0) {
-        current.end = t; current = null; ev = null; prevEmpty = t; awaitingEmpty = false;
-      } else {
-        current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
-        current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
-        // Hatch evidence: the last check with the eggs still unhatched, and the first with
-        // chicks. Only until chicks appear — a chick lost later says nothing about hatching.
-        if (ev && ev.firstChickT === null) {
-          if ((o.chicks || 0) > 0) ev.firstChickT = t;
-          else ev.lastNoChickT = t;
-        }
-        if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
-      }
-    } else if (off === 0) {
-      prevEmpty = t; awaitingEmpty = false;
-    } else if (!awaitingEmpty && ((o.eggs || 0) > 0 || chicksCanStart)) {
-      const chicksAtStart = (o.chicks || 0) > 0;
-      ev = {
-        emptyBefore: prevEmpty,
-        firstEggT: (o.eggs || 0) > 0 ? t : null,
-        firstEggCount: o.eggs || 0,
-        // Discovered on chicks: the last we knew there were none is the empty check itself.
-        lastNoChickT: chicksAtStart ? prevEmpty : t,
-        firstChickT: chicksAtStart ? t : null,
-        abnAtStart: abn,
-      };
-      evidence.push(ev);
-      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
-        windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
-      clutches.push(current);
-      if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
-    }
-    prevObs = t;
-  }
-  clutches.forEach((c, i) => {
-    const { laid, unc } = estimateLaidFrom(evidence[i]);
-    c.laid = laid; c.laidUncertainty = unc; c.laidFailed = laid === null;
-  });
-  for (const c of clutches) {
-    const anchor = c.laid ?? c.start; // fall back to first sighting when laid unknown
-    // The attempt runs from laying to the check that ended it — offspring gone, or ABN. Not
-    // from the discovery, which is only when someone happened to look, and not to a predicted
-    // fledge, which would cut a window short while the box plainly still held chicks. A window
-    // still running has no observed end, so there the predicted fledge stands in: it's what
-    // eventually stops an unrevisited box reading as "current".
-    c.windowStart = anchor;
-    c.guardEnd = Math.min(c.end ?? Infinity, anchor + BREEDING_OFFSETS.pg * DAY);
-    c.windowEnd = c.end ?? (anchor + BREEDING_OFFSETS.fledge * DAY);
-    c.attendStart = (c.laid !== null ? c.laid - (c.laidUncertainty || 0) * DAY : c.windowStart) - COURTSHIP_LEAD_DAYS * DAY;
-  }
-  return clutches;
 }
 
 /** One bird at one box on one day — the unit of "we know this bird was here".
@@ -12425,10 +12211,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   );
 }
 
-function parseDate(d: string): Date {
-  // MySQL "YYYY-MM-DD HH:MM:SS" → ISO format for reliable cross-browser parsing
-  return new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z');
-}
 function formatDate(d:string) {
   return parseDate(d).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 }

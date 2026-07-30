@@ -38,9 +38,9 @@ const STAMP = join(SRC, 'algorithmFingerprint.ts');
  */
 const REGIONS = [
   { file: 'breedingConstants.ts', whole: true },
-  { file: 'App.tsx', name: 'Clutch', kind: 'interface' },
-  { file: 'App.tsx', name: 'segmentClutches' },
-  { file: 'App.tsx', name: 'postGuardRanges' },
+  // The algorithm proper — one implementation, shared by the SPA and (bundled for node,
+  // via breedingCli.ts) reports.php. Whole file: everything in it is algorithm.
+  { file: 'breeding.ts', whole: true },
   { file: 'App.tsx', name: 'BoxSighting', kind: 'interface' },
   { file: 'App.tsx', name: 'boxSightings' },
   { file: 'App.tsx', name: 'detectClutchPair' },

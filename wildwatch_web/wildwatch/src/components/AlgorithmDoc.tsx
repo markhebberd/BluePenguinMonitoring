@@ -393,12 +393,14 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       </ul>
 
       <div className="src">
-        The code this describes: <code>segmentClutches</code> (step 5–6), <code>boxSightings</code> (step 4),
-        {' '}<code>postGuardRanges</code> (step 7), <code>detectClutchPair</code> (step 9),
-        {' '}<code>computeBoxFamilies</code> (steps 3, 10–11) and
+        The code this describes: <code>segmentClutches</code> (steps 5–6), <code>postGuardRanges</code> and
+        {' '}<code>predictedDates</code> (step 7) in <code>src/breeding.ts</code>; <code>boxSightings</code> (step 4),
+        {' '}<code>detectClutchPair</code> (step 9), <code>computeBoxFamilies</code> (steps 3, 10–11) and
         {' '}<code>computeClutchVerify</code> (step 12) in <code>src/App.tsx</code>; all numbers in
         {' '}<code>src/breedingConstants.ts</code>. Both the box breeding overview and the bird panel’s
-        family view consume the same functions, so what you read here is what both screens show.
+        family view consume the same functions, so what you read here is what both screens show —
+        and so does nestcheck’s Next breeding dates card, which the server answers by running
+        {' '}<code>src/breeding.ts</code> under node rather than keeping a second copy of the rules.
       </div>
       {/* Maintenance detail, not something a monitor needs — last thing on the page. */}
       <div className="stamp">

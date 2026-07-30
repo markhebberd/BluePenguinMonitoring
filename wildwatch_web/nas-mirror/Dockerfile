@@ -2,6 +2,11 @@
 # VPS, so a dump that restores here restores there. Apache stands in for nginx+php-fpm; the
 # API is ordinary PHP and doesn't care, and one process manager is enough for a mirror.
 #
+# node is here because the API needs it: reports.php's breeding_dates runs the breeding
+# algorithm by spawning the same bundle the web app runs (api/breeding-cli.mjs, copied in
+# with the release), rather than a PHP port of it that could drift. Any node will do — the
+# bundle targets node18 and uses nothing newer.
+#
 # Everything lives in this single image + one bind-mounted folder, so deleting the mirror is
 # "remove the project, delete /volume1/wildwatch" — no leftover volumes, networks or packages.
 FROM debian:trixie-slim
@@ -11,6 +16,7 @@ RUN apt-get update \
       apache2 libapache2-mod-php8.4 php8.4-mysql php8.4-opcache \
       mariadb-server mariadb-client \
       ca-certificates curl \
+      nodejs \
  && a2enmod rewrite \
  && a2dismod -f mpm_event 2>/dev/null || true \
  && a2enmod mpm_prefork \

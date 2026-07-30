@@ -21,5 +21,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The node entry point for the breeding algorithm — browser libs and
+  // types don't apply to it. It builds under tsconfig.node.json instead.
+  "exclude": ["src/breedingCli.ts"]
 }

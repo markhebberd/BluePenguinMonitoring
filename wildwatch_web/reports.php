@@ -80,65 +80,95 @@ function eggArrival($pdo, $colonyId) {
 
 /**
  * Per-box predicted breeding milestones for the box's CURRENT clutch, keyed by box name.
- * Faithful port of nestcheck's removed local estimator (GetBoxBreedingStatusString): walk
- * back from the latest observation while offspring are present to the last empty check, take
- * the midpoint as the probable laid date (minus 2 days if the current clutch has 2+ eggs),
- * then project stages at laid + 38/52/80/87 days. Returns ± uncertainty (half the gap).
  * Consumed by nestcheck's "Next breeding dates" card.
+ *
+ * The maths is deliberately NOT here. This used to be a hand port of nestcheck's removed
+ * local estimator, and it drifted from the one the web app runs — the app dates laying by
+ * overlapping the egg-appearance and chick-appearance windows, where this walked back to
+ * the last empty check and took a midpoint, so the same box could be given two different
+ * post-guard dates depending on which screen you looked at.
+ *
+ * So there is now one implementation, in TypeScript, and both callers run it:
+ * wildwatch_web/wildwatch/src/breeding.ts — in the browser for the app, and under node
+ * (bundled to breeding-cli.mjs beside this file) for us. All this function does is hand
+ * over the observations and pass back the answer.
  */
 function breedingDates($pdo, $colonyId) {
     $stmt = $pdo->prepare("SELECT ol.location_name AS box,
-        DATE(CONVERT_TZ(o.observation_time_utc, '+00:00', '+12:00')) AS nz_date,
-        COALESCE(o.eggs,0) AS eggs, COALESCE(o.chicks,0) AS chicks, o.breeding_status AS bs
+        o.observation_time_utc, COALESCE(o.adults,0) AS adults,
+        COALESCE(o.eggs,0) AS eggs, COALESCE(o.chicks,0) AS chicks, o.breeding_status,
+        pc.chip_date, p.chipped_as_adult
         FROM observations o
         JOIN observation_locations ol ON o.location_id = ol.location_id
+        LEFT JOIN penguin_scans ps ON ps.observation_id = o.observation_id
+             AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)
+        LEFT JOIN penguin_chips pc ON pc.pit_id = ps.pit_id
+        LEFT JOIN penguins p ON p.peng_num = pc.peng_num
         WHERE ol.colony_id = ? AND o.is_deleted = FALSE
-        ORDER BY ol.location_name, o.observation_time_utc ASC");
+        ORDER BY ol.location_name, o.observation_time_utc ASC, o.observation_id ASC");
     $stmt->execute([$colonyId]);
 
-    // Stage offsets (days after laid): hatch, post-guard, chip-window start, fledge.
-    $HATCH = 38; $PG = 52; $CHIP = 80; $FLEDGE = 87;
-    $mk = function(DateTime $laid, $off) { $d = clone $laid; $d->modify("+$off days"); return $d->format('Y-m-d'); };
-
-    // Group observations by box, chronological (query already sorts ascending).
+    // Group by box, one entry per observation, its scans folded in. The join above fans a
+    // multi-scan observation into several rows; the algorithm wants it back as one.
     $byBox = [];
-    foreach ($stmt->fetchAll() as $r) $byBox[$r['box']][] = $r;
-
-    $out = [];
-    foreach ($byBox as $box => $obs) {
-        $desc = array_reverse($obs);              // newest first
-        $cur = $desc[0];
-        if ($cur['bs'] === 'ABN') continue;       // abandoned
-        if ((int)$cur['eggs'] + (int)$cur['chicks'] === 0) continue; // not currently breeding
-
-        $whenFound = new DateTime($cur['nz_date']);   // walked back to first sighting of this clutch
-        $sawEggs = (int)$cur['eggs'] > 0;
-        for ($i = 1; $i < count($desc); $i++) {
-            $o = $desc[$i];
-            if ($o['bs'] === 'ABN' && (int)$o['eggs'] + (int)$o['chicks'] > 0) break; // abandoned mid-clutch
-            if ((int)$o['eggs'] > 0) $sawEggs = true;
-            if ((int)$o['eggs'] + (int)$o['chicks'] === 0) {        // last empty check before the clutch
-                if ($o['bs'] === 'ABN') break;
-                if ((int)$cur['eggs'] > 1) $whenFound->modify('-2 days'); // 1st egg ~2d before found
-                $notFound = new DateTime($o['nz_date']);
-                $gapDays = ($whenFound->getTimestamp() - $notFound->getTimestamp()) / 86400;
-                $laid = (clone $notFound)->modify('+' . (int)ceil($gapDays / 2) . ' days');
-                $out[$box] = [
-                    'boxNumber' => is_numeric($box) ? (int)$box : 0,
-                    'estHatchDate' => ($sawEggs && (int)$cur['chicks'] === 0) ? $mk($laid, $HATCH) : '',
-                    'estPGDate' => $mk($laid, $PG),
-                    'chipWindowStart' => $mk($laid, $CHIP),
-                    'chipWindowFinish' => $mk($laid, $FLEDGE),
-                    'estFledgeDate' => $mk($laid, $FLEDGE),
-                    'probableLaidDate' => $laid->format('Y-m-d'),
-                    'uncertaintyDays' => (int)floor($gapDays / 2),
-                ];
-                break;
-            }
-            $whenFound = new DateTime($o['nz_date']);   // still offspring — keep walking back
+    $seen = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $box = $r['box'];
+        $key = $box . '|' . $r['observation_time_utc'];
+        if (!isset($seen[$key])) {
+            $seen[$key] = count($byBox[$box] ?? []);
+            $byBox[$box][] = [
+                'observation_time_utc' => $r['observation_time_utc'],
+                'adults' => (int)$r['adults'],
+                'eggs' => (int)$r['eggs'],
+                'chicks' => (int)$r['chicks'],
+                'breeding_status' => $r['breeding_status'],
+                'scans' => [],
+            ];
+        }
+        // Only chipped birds carry the dates the algorithm reads; an unscanned row joins as nulls.
+        if ($r['chip_date'] !== null) {
+            $byBox[$box][$seen[$key]]['scans'][] = [
+                'chip_date' => $r['chip_date'],
+                'chipped_as_adult' => $r['chipped_as_adult'] === null ? null : (int)$r['chipped_as_adult'],
+            ];
         }
     }
-    echo json_encode((object)$out); // object (not []) so an empty result deserialises as a map
+
+    echo runBreedingCli($byBox);
+}
+
+/**
+ * Run the shared breeding algorithm over one colony's observations and return its JSON.
+ *
+ * Node is a hard dependency of this endpoint — it is on the production VPS and installed in
+ * the NAS mirror image for exactly this reason. If it can't run we return an empty map with
+ * a 500 rather than a plausible-looking one: nestcheck showing no predicted dates is an
+ * obvious fault, where nestcheck showing wrong ones is not.
+ */
+function runBreedingCli(array $byBox) {
+    $cli = __DIR__ . '/breeding-cli.mjs';
+    $node = is_executable('/usr/bin/node') ? '/usr/bin/node' : 'node';
+    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $proc = @proc_open([$node, $cli], $descriptors, $pipes);
+    if (!is_resource($proc)) {
+        http_response_code(500);
+        error_log('breeding_dates: could not start node');
+        return '{}';
+    }
+    fwrite($pipes[0], json_encode((object)$byBox));
+    fclose($pipes[0]);
+    $out = stream_get_contents($pipes[1]);
+    $err = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+    if ($code !== 0 || $out === '' || $out === false) {
+        http_response_code(500);
+        error_log("breeding_dates: node exited $code: " . trim($err));
+        return '{}';
+    }
+    return $out;   // object (not []) so an empty result deserialises as a map
 }
 
 function chickSex($pdo, $colonyId) {

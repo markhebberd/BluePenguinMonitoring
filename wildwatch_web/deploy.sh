@@ -23,6 +23,11 @@ echo "[2/5] build SPA on server"
 cd "$APP/wildwatch"
 npm ci --no-audit --no-fund --silent
 npx vite build
+# The breeding algorithm again, bundled for node: reports.php runs the SAME source the SPA
+# does rather than a PHP port of it, which is what stopped the two drifting apart. The NAS
+# mirror has no build step — it copies this artifact out of the release we assemble below.
+npm run build:cli --silent
+echo '{}' | node dist-node/breeding-cli.mjs > /dev/null   # a broken bundle fails here, before the flip
 
 echo "[3/5] assemble release"
 TS=$(date +%Y%m%d-%H%M%S)
@@ -30,6 +35,7 @@ REL="$BASE/releases/$TS"
 mkdir -p "$REL/penguin-api"
 cp -a "$APP/wildwatch/dist/." "$REL/"
 find "$APP" -maxdepth 1 -name '*.php' ! -name 'secrets.php' ! -name 'secrets.php.sample' -exec cp {} "$REL/penguin-api/" \;
+cp "$APP/wildwatch/dist-node/breeding-cli.mjs" "$REL/penguin-api/"   # reports.php spawns this
 ln -sfn penguin-api "$REL/api"
 ln -sfn "$BASE/shared/secrets.php" "$REL/penguin-api/secrets.php"
 sudo chown -R wildwatch:wildwatch "$REL/penguin-api"
