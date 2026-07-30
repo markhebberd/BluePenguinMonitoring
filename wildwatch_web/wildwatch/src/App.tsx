@@ -5372,11 +5372,11 @@ function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: num
 }
 
 /**
- * How old the mirror's last report may be before the admin tabs start nagging about it.
- * DEBUG VALUE: 15 minutes is short enough to see the badge appear on a normal day — the real
- * threshold for a nightly backup is more like 26-30 hours. One constant, so raise it here.
+ * How old the mirror's last report may be before the admin tabs start nagging about it. A day:
+ * the mirror runs nightly, so 24 hours means a night was missed (or the NAS was off), which is
+ * exactly when an admin wants telling. One constant, so change it here.
  */
-const MIRROR_STALE_SECONDS = 15 * 60;
+const MIRROR_STALE_SECONDS = 24 * 60 * 60;
 
 /**
  * Is there something wrong with the offsite copy? Returns the reason, or null when there isn't
@@ -5397,7 +5397,11 @@ function useMirrorAlert(enabled: boolean): string | null {
     if (!enabled) { setReason(null); return; }
     const onMirror = localStorage.getItem('ww_is_mirror') === '1';
     const url = onMirror ? '/api/mirror-backups.php' : '/api/mirror-remote.php';
-    const mins = Math.round(MIRROR_STALE_SECONDS / 60);
+    // The hover text names the threshold, in whatever unit reads naturally for it — an admin
+    // shouldn't have to divide "1440 minutes" to know what the badge is complaining about.
+    const limit = MIRROR_STALE_SECONDS >= 3600
+      ? `${Math.round(MIRROR_STALE_SECONDS / 3600)} hours`
+      : `${Math.round(MIRROR_STALE_SECONDS / 60)} minutes`;
     let dead = false;
     const check = async () => {
       try {
@@ -5408,7 +5412,7 @@ function useMirrorAlert(enabled: boolean): string | null {
         if (!(onMirror ? r.ok : d?.reachable === true)) { setReason('The mirror cannot be asked how old the offsite copy is'); return; }
         const age = Number(d?.inventory_age_seconds);
         if (!Number.isFinite(age)) { setReason('The mirror did not say how old its report is'); return; }
-        if (age > MIRROR_STALE_SECONDS) { setReason(`The mirror's last report is more than ${mins} minutes old`); return; }
+        if (age > MIRROR_STALE_SECONDS) { setReason(`The mirror's last report is more than ${limit} old`); return; }
         if (d?.restore !== 'verified') { setReason('The mirror’s last run did not restore and verify'); return; }
         setReason(null);
       } catch { if (!dead) setReason('The mirror cannot be asked how old the offsite copy is'); }
