@@ -134,11 +134,12 @@ tracks properly).
 
 ```bash
 # on the VPS, install the helper scripts from this repo's bin/:
-sudo install -m 755 -o root -g root {rebuild-kit,release-tar,nas-fetch,nas-checkin,nas-alert,nas-watchdog}.sh /usr/local/bin/
+sudo install -m 755 -o root -g root {rebuild-kit,release-tar,nas-fetch,nas-checkin,nas-alert,nas-watchdog,nas-reach}.sh /usr/local/bin/
 # append to /home/mark/.ssh/authorized_keys, one line (key from shared/id_nas.pub):
 command="/usr/local/bin/nas-fetch.sh",restrict ssh-ed25519 AAAA... nas-rebuild-kit
-# watchdog cron:
+# watchdog cron (daily) + reachability cron (every 5 min):
 echo '0 21 * * * root /usr/local/bin/nas-watchdog.sh' | sudo tee /etc/cron.d/nas-watchdog
+echo '*/5 * * * * root /usr/local/bin/nas-reach.sh'   | sudo tee /etc/cron.d/nas-reach
 ```
 
 **4. First run + schedule.** Run `sudo /volume1/docker/wildwatch/bin/nightly.sh` once and watch
@@ -171,6 +172,23 @@ SSH channel: `checkin ok` on success, `checkin fail` otherwise.
 - **No check-in for ~20h** → the VPS watchdog ([nas-watchdog.sh](bin/nas-watchdog.sh), cron
   21:00 UTC) emails you. This is the important one: it catches the NAS being off, the cron
   breaking, or the network dying — none of which a NAS-side alert could ever report.
+- **The NAS stops answering at all** → the reachability watcher ([nas-reach.sh](bin/nas-reach.sh),
+  cron every 5 min) emails **markhebberd@gmail.com and bdot@snotch.com** — wider than the other
+  two, because a NAS that is off stays off until someone in the house walks past it. It calls
+  the mirror's own API through the Cloudflare tunnel; any JSON back means the machine is there,
+  and only the edge apologising for it (HTTP 502–530, an Access login page, no answer at all)
+  counts as unreachable.
+
+  **Edge-triggered: one email when it goes down, one when it comes back, nothing in between.**
+  A five-minute check that mailed every time would be a flood you'd learn to ignore. It waits
+  for **3 failures in a row (~15 min)** before calling it down, so a reboot or a flapping tunnel
+  doesn't alarm; the nightly run never trips it, since `nightly.sh` swaps DB slots inside the
+  running container and never stops it. State (`reach-state`, `reach-fails`, `reach-since`)
+  lives in `/var/lib/nas-mirror/` alongside the check-in files. Overridable for testing:
+  `sudo STATE=/tmp/nr SECRETS=/tmp/fake.php ALERT_TO=you@example.com nas-reach.sh`.
+
+  This says nothing about whether the *backup* is good — that's the two alerts above. It only
+  answers "is the machine there?", which nothing else asked between nightly runs.
 
 > **Alerts are ASCII-only, enforced.** The SMTP2GO relay doesn't offer SMTPUTF8, so a single
 > non-ASCII character (an em-dash, a smart quote) bounces the whole message — a silent-failure
