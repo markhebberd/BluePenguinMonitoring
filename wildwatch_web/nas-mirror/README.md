@@ -134,12 +134,12 @@ tracks properly).
 
 ```bash
 # on the VPS, install the helper scripts from this repo's bin/:
-sudo install -m 755 -o root -g root {rebuild-kit,release-tar,nas-fetch,nas-checkin,nas-alert,nas-watchdog,nas-reach}.sh /usr/local/bin/
+sudo install -m 755 -o root -g root {rebuild-kit,release-tar,nas-fetch,nas-checkin,nas-alert,nas-watchdog,nas-health}.sh /usr/local/bin/
 # append to /home/mark/.ssh/authorized_keys, one line (key from shared/id_nas.pub):
 command="/usr/local/bin/nas-fetch.sh",restrict ssh-ed25519 AAAA... nas-rebuild-kit
-# watchdog cron (daily) + reachability cron (every 5 min):
+# watchdog cron (daily) + health cron (every 5 min):
 echo '0 21 * * * root /usr/local/bin/nas-watchdog.sh' | sudo tee /etc/cron.d/nas-watchdog
-echo '*/5 * * * * root /usr/local/bin/nas-reach.sh'   | sudo tee /etc/cron.d/nas-reach
+echo '*/5 * * * * root /usr/local/bin/nas-health.sh'  | sudo tee /etc/cron.d/nas-health
 ```
 
 **4. First run + schedule.** Run `sudo /volume1/docker/wildwatch/bin/nightly.sh` once and watch
@@ -172,23 +172,38 @@ SSH channel: `checkin ok` on success, `checkin fail` otherwise.
 - **No check-in for ~20h** → the VPS watchdog ([nas-watchdog.sh](bin/nas-watchdog.sh), cron
   21:00 UTC) emails you. This is the important one: it catches the NAS being off, the cron
   breaking, or the network dying — none of which a NAS-side alert could ever report.
-- **The NAS stops answering at all** → the reachability watcher ([nas-reach.sh](bin/nas-reach.sh),
-  cron every 5 min) emails **markhebberd@gmail.com and bdot@snotch.com** — wider than the other
-  two, because a NAS that is off stays off until someone in the house walks past it. It calls
-  the mirror's own API through the Cloudflare tunnel; any JSON back means the machine is there,
-  and only the edge apologising for it (HTTP 502–530, an Access login page, no answer at all)
-  counts as unreachable.
+Those two alone leave real holes. `checkin fail` fires **once**, at 06:30, and only if the NAS
+can still reach the VPS over SSH — miss the email and nothing repeats it. And the watchdog is
+satisfied by **any** check-in, `ok` or `fail`, so a NAS that runs and fails every night keeps it
+permanently quiet. So a third alert asks the NAS itself, continuously:
 
-  **Edge-triggered: one email when it goes down, one when it comes back, nothing in between.**
-  A five-minute check that mailed every time would be a flood you'd learn to ignore. It waits
-  for **3 failures in a row (~15 min)** before calling it down, so a reboot or a flapping tunnel
-  doesn't alarm; the nightly run never trips it, since `nightly.sh` swaps DB slots inside the
-  running container and never stops it. State (`reach-state`, `reach-fails`, `reach-since`)
-  lives in `/var/lib/nas-mirror/` alongside the check-in files. Overridable for testing:
-  `sudo STATE=/tmp/nr SECRETS=/tmp/fake.php ALERT_TO=you@example.com nas-reach.sh`.
+- **The health watcher** ([nas-health.sh](bin/nas-health.sh), cron **every 5 min**) emails
+  **markhebberd@gmail.com and bdot@snotch.com** — wider than the other two, because a NAS that
+  is off stays off until someone in the house walks past it. It calls `mirror-backups.php`
+  through the Cloudflare tunnel (key from production's `secrets.php`, read by `php`, never
+  logged) and judges three things independently:
 
-  This says nothing about whether the *backup* is good — that's the two alerts above. It only
-  answers "is the machine there?", which nothing else asked between nightly runs.
+  | Alarm | Fires when | Why it isn't covered elsewhere |
+  |---|---|---|
+  | `reach` | 3 failed checks in a row (~15 min): no answer, HTTP 502–530, or an Access login page | Nothing asked between nightly runs |
+  | `age` | the last report is older than **25h** (`inventory_age_seconds`) | The watchdog checks *check-in* age, once a day, and a failing run still counts as a check-in |
+  | `restore` | `restore != verified`, **or 0 rows** — an empty database restores perfectly | `checkin fail` says it once at 06:30 and never again |
+
+  **Edge-triggered: one email when an alarm goes off, one when it clears, nothing in between.**
+  A five-minute check that mailed every time would be a flood you'd learn to ignore. **Being
+  unreachable suppresses the other two** — if the NAS can't be asked, its report's age and
+  verdict are unknown, and guessing would turn one outage into three emails.
+
+  Only `reach` waits for 3 strikes (a reboot or a flapping tunnel shouldn't alarm); the other two
+  read a report that changes once a night and can't flap. The nightly run never trips any of
+  them — `nightly.sh` swaps DB slots inside the running container and never stops it. The 25h
+  threshold is 24h + an hour of grace for a slow or DST-shifted run; the admin page badges at 24h
+  (`MIRROR_STALE_SECONDS` in `App.tsx`), because a screen can afford to be twitchier than email.
+
+  State (`<alarm>-state`, `<alarm>-since`, `reach-fails`) lives in `/var/lib/nas-mirror/`
+  alongside the check-in files. Everything is overridable for testing — point it at a file of
+  canned JSON and a mailbox only you read:
+  `sudo STATE=/tmp/nh SECRETS=/tmp/fake.php ALERT_TO=you@localhost STALE_H=25 nas-health.sh`.
 
 > **Alerts are ASCII-only, enforced.** The SMTP2GO relay doesn't offer SMTPUTF8, so a single
 > non-ASCII character (an em-dash, a smart quote) bounces the whole message — a silent-failure
