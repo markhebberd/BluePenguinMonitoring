@@ -1,4 +1,3 @@
-import type { BoxTag } from '../types';
 import { triggerSync, getColonyId } from './localdb';
 
 function authHeaders(): Record<string, string> {
@@ -16,15 +15,10 @@ function checkAuth(r: Response): Response {
   return r;
 }
 
-export async function fetchBoxTags(): Promise<Record<string, BoxTag>> {
-  const r = checkAuth(await fetch(`/api/boxtags.php?${colonyQS()}`, { headers: authHeaders() }));
-  const d = await r.json();
-  return d.data ?? {};
-}
-
-export async function fetchOverview() {
-  return checkAuth(await fetch(`/api/dashboard.php?view=overview&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() })).json();
-}
+// fetchBoxTags / fetchOverview lived here. Both read data the snapshot already carries, so the
+// app builds them from the local cache instead — queryBoxTags and computeOverview in localdb.
+// boxtags.php still takes the WRITES (from nestcheck); observation_locations.updated_at is in
+// the change watermark, so a tag saved on the phone reaches the web app on the next poll.
 
 export async function fetchColonies() {
   return checkAuth(await fetch('/api/colonies.php', { headers: authHeaders() })).json();

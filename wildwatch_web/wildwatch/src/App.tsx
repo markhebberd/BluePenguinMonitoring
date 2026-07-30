@@ -1,8 +1,8 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
+import { updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
 import { getStoreVersion, syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
-import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch, useMissingChipMeasures } from './api/useLocalDb';
+import { useAllPenguins, useBoxInfo, useOverview, useBoxTags, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch, useMissingChipMeasures } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP } from './breedingConstants';
 // The breeding algorithm itself — one implementation, shared with the server. See src/breeding.ts.
@@ -1408,6 +1408,40 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
     for (const k of parentKeys) bredBefore.add(k);   // established here; later seasons weigh it
   }
   return result.reverse();   // newest season first, the order every screen renders
+}
+
+/**
+ * One pass over the whole colony, shared by every report that needs it.
+ *
+ * A dozen reports each opened with `for (loc of queryAllLocations()) queryBoxDetailSync(loc)`,
+ * half of them then running computeBoxFamilies over the result — so opening the reports or
+ * admin page rebuilt every box, and re-detected every breeding family, once per chart. They
+ * all read the same cache at the same version, so the answer is the same every time: build it
+ * once and hand out the same arrays.
+ *
+ * Cached against the local DB's store version, so a sync (or an edit) invalidates it exactly
+ * as each report's own `useMemo(..., [v])` does — the reports need no cache-busting of their own.
+ * `families` is built lazily: the reports that only want observations don't pay for detection.
+ */
+interface ColonyBox { box: string; loc: any; detail: any; readonly families: BoxSeasonData[] }
+let _colonyBoxCache: { version: number; boxes: ColonyBox[] } | null = null;
+function allColonyBoxes(): ColonyBox[] {
+  const version = getStoreVersion();
+  if (_colonyBoxCache && _colonyBoxCache.version === version) return _colonyBoxCache.boxes;
+  const boxes: ColonyBox[] = [];
+  for (const loc of queryAllLocations()) {
+    // Deleted rows ride along: they cost nothing here (the box query filters them out of
+    // `observations` either way) and the verification-conflict check needs them — an accepted
+    // verdict can outlive the observation it was anchored to.
+    const detail = queryBoxDetailSync(loc.location_name, true);
+    let fams: BoxSeasonData[] | null = null;
+    boxes.push({
+      box: String(loc.location_name), loc, detail,
+      get families() { return fams ??= computeBoxFamilies(detail.observations, detail.all_penguins); },
+    });
+  }
+  _colonyBoxCache = { version, boxes };
+  return boxes;
 }
 
 function SeasonBirdsSection({ label, birds, seasonStatus, statusLabel, latestObs,
@@ -3192,14 +3226,13 @@ function computeClutchVerify(fam: BoxFamily, verification: any | null): ClutchVe
 function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
   const rejected: any[] = [], drifted: any[] = [];
   const named = (v: any) => v.adults_reviewed_by_name || v.chicks_reviewed_by_name || '';
-  for (const loc of queryAllLocations()) {
-    const box = String(loc.location_name);
-    const detail = queryBoxDetailSync(box, true);   // deleted rows too: a verdict can outlive its observation
+  // Deleted rows ride the shared pass too: a verdict can outlive its observation.
+  for (const { box, detail, families } of allColonyBoxes()) {
     const vers: any[] = detail?.verifications || [];
     const deletedIds = new Set<number>((detail.deleted || []).map((o: any) => o.observation_id));
     if (!vers.length) continue;
     const anchored = new Set<number>();
-    for (const season of computeBoxFamilies(detail.observations, detail.all_penguins)) {
+    for (const season of families) {
       for (const fam of season.families as any[]) {
         const anchor = fam.clutch.startObsId;
         const v = anchor != null ? vers.find((x: any) => x.observation_id === anchor) : null;
@@ -4068,26 +4101,41 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
   const [sideBird, setSideBird] = useState<string|null>(null);
   const sideBirdData = useBirdDetail(sideBird);
 
-  // Load date mappings for season
+  // Date mappings for this season, the one before and the one after. The previous season's
+  // date table often runs on into this season's calendar range (observers keep numbering past
+  // 1 Apr), and the next season's book can start before it — so all three land in the widened
+  // window this page shows.
+  //
+  // One request for every season, not three for these three: all_fm_dates is what the app
+  // already fetches and caches for the FM tags, so the cached copy paints the tables straight
+  // away and the fetch behind it only revalidates.
   useEffect(() => {
     if (season < 2020) return;
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    let live = true, revalidated = false;
+    const apply = (rows: any) => {
+      if (!Array.isArray(rows)) return;
+      const forSeason = (y: number) => rows
+        .filter((r: any) => Number(r.season_year) === y && r.actual_date)
+        .map((r: any) => ({ date_number: Number(r.date_number), actual_date: r.actual_date, partial_monitor: Number(r.partial_monitor) || 0 }))
+        .sort((a, b) => a.date_number - b.date_number);
+      setDateMappings(forSeason(season));
+      setPrevSeasonMappings(forSeason(season - 1));
+      setNextSeasonMappings(forSeason(season + 1));
+    };
+    // `revalidated` guards the order, not the speed: a slow IndexedDB read must never land on
+    // top of a server response that already arrived.
+    getCachedFmDates().then(rows => { if (live && !revalidated && rows) apply(rows); });
+    fetch(`/api/crud.php?action=all_fm_dates&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => setDateMappings(Array.isArray(d) ? d : []))
-      .catch(() => setDateMappings([]));
-    // The previous season's date table often runs on into this season's calendar range
-    // (observers keep numbering past 1 Apr); surface those trailing dates here too.
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season - 1}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setPrevSeasonMappings(Array.isArray(d) ? d : []))
-      .catch(() => setPrevSeasonMappings([]));
-    // The next season's book can start before 1 Apr (like this one); its early dates land in
-    // this season's widened window too, so surface them as cross-season dates as well.
-    fetch(`/api/crud.php?action=season_fm_dates&season=${season + 1}&colony_id=${getColonyId()}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setNextSeasonMappings(Array.isArray(d) ? d : []))
-      .catch(() => setNextSeasonMappings([]));
-  }, [season]);
+      .then(rows => {
+        if (!live) return;
+        revalidated = true;
+        apply(rows);
+        if (Array.isArray(rows)) setCachedFmDates(rows);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [season, token]);
 
   useEffect(() => {
     // Try date number lookup first, then "d m" format
@@ -4240,18 +4288,14 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
     setSaving(false);
   };
 
-  // Load all observations for this box (for status bar + season list)
-  const [allBoxObs, setAllBoxObs] = useState<Observation[]>([]);
-  const [boxPenguins, setBoxPenguins] = useState<any[]>([]);
-  useEffect(() => {
-    if (!box) { setAllBoxObs([]); setBoxPenguins([]); return; }
-    let stale = false; // ignore out-of-order responses when the box changes again
-    fetch(`/api/dashboard.php?view=box&name=${encodeURIComponent(box)}&colony_id=${getColonyId()}&_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => { if (!stale) { setAllBoxObs(d.observations || []); setBoxPenguins(d.all_penguins || []); } })
-      .catch(() => { if (!stale) { setAllBoxObs([]); setBoxPenguins([]); } });
-    return () => { stale = true; };
-  }, [box, saving]);
+  // All observations for this box (for status bar + season list), from the cache the rest of
+  // the app reads. This was a dashboard.php?view=box fetch keyed on [box, saving] — so it ran
+  // twice per save (once each way `saving` flipped) on top of the sync the write already
+  // triggers. Reading the cache means a saved observation appears the moment that sync lands,
+  // with no request of its own and no out-of-order response to guard against.
+  const boxData = useBoxDetail(box || null);
+  const allBoxObs: Observation[] = boxData?.observations || [];
+  const boxPenguins: any[] = boxData?.all_penguins || [];
 
   const wwStart = `${season}-04-01`;
   const wwEnd = `${season + 1}-03-31`;
@@ -4497,8 +4541,8 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
                   <button className="remove-scan" onClick={async () => {
                     const reason = prompt(`Delete observation from ${formatDate(o.observation_time_utc)}?\n\nReason (optional):`);
                     if (reason === null) return;
+                    // deleteRecord syncs the cache, and the list reads it — the row goes on its own.
                     await deleteRecord(token, 'observations', o.observation_id, reason || undefined);
-                    setAllBoxObs(prev => prev.filter(ob => ob.observation_id !== o.observation_id));
                   }}>&times;</button>
                 )}
                 <a className="day-box-link" style={{whiteSpace:'nowrap'}} href={`/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(o.observation_time_utc)}`}>to observation →</a>
@@ -4763,6 +4807,43 @@ function louvainCommunities(adj: Map<string, Map<string, number>>): Map<string, 
 /** Report tables show a short head plus a "Show all (N)" toggle, so one report's long tail
  *  never buries the reports below it on the page. Returns the visible slice and the toggle
  *  button (null when everything already fits). Call it before any early return — it's a hook. */
+/** Run something at the browser's convenience. Falls back to a short timer where
+ *  requestIdleCallback isn't implemented. Returns its canceller. */
+function whenIdle(fn: () => void): () => void {
+  const ric = (window as any).requestIdleCallback;
+  if (typeof ric === 'function') {
+    const id = ric(fn, { timeout: 2000 });
+    return () => (window as any).cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(fn, 200);
+  return () => window.clearTimeout(id);
+}
+
+/**
+ * Which of a tabbed page's panels have been built yet.
+ *
+ * Reports and Admin both render every tab into the DOM and hide the inactive ones, so opening
+ * either used to mount every chart at once — a dozen full-colony passes to show you the one tab
+ * you asked for. This builds the open tab alone, then brings the rest in one at a time while the
+ * browser is idle, so switching stays instant once the page has settled. A tab you reach before
+ * its turn comes up is built on the spot.
+ *
+ * `order` sets which tabs get built ahead and in what order; the active tab is always built
+ * whether or not it appears there (which is how a tab too expensive — or too stateful — to
+ * pre-build stays out of it).
+ */
+function useDeferredTabs<T extends string>(active: T, order: readonly T[]): (tab: T) => boolean {
+  const [built, setBuilt] = useState<ReadonlySet<T>>(() => new Set([active]));
+  useEffect(() => {
+    const next = order.find(t => !built.has(t));
+    if (next === undefined) return;
+    return whenIdle(() => setBuilt(b => b.has(next) ? b : new Set(b).add(next)));
+  }, [built, order]);
+  // The open tab counts as built without waiting to be recorded as one — which is also what
+  // keeps a tab left out of `order` behaving as it always did: shown while open, gone after.
+  return (tab: T) => tab === active || built.has(tab);
+}
+
 function useTopRows<T>(rows: T[], n = 3, collapsedLabel?: string): [T[], React.ReactNode] {
   const [showAll, setShowAll] = useState(false);
   const button = rows.length > n ? (
@@ -4782,9 +4863,8 @@ function PenguinGroupsReport({ onOpenBird }: { onOpenBird: (num: string) => void
   const base = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();
     const birdInfo = new Map<string, any>();
-    for (const loc of queryAllLocations()) {
-      const box = String(loc.location_name).trim();
-      const bd = queryBoxDetailSync(box);
+    for (const { box: rawBox, detail: bd } of allColonyBoxes()) {
+      const box = rawBox.trim();
       for (const o of bd?.observations || []) {
         for (const s of o.scans || []) {
           if (!s.peng_num) continue;
@@ -5580,10 +5660,8 @@ function TopChickParentsReport({ onOpenBird }: { onOpenBird: (num: string) => vo
     // Presumed fledged = chipped chicks (chipping happens at fledge) + unchipped chicks a
     // monitor logged as fledged.
     const byParent = new Map<string, { bird: any; eggs: number; chicksProduced: number; fledgedUnchipped: number; chicks: Set<string>; returned: Set<string> }>();
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+    for (const { families } of allColonyBoxes()) {
+      for (const sd of families) {
         for (const fam of sd.families) {
           for (const parent of fam.parents) {
             if (!parent.peng_num) continue;
@@ -5682,10 +5760,8 @@ function UnproductiveParentsReport({ onOpenBird }: { onOpenBird: (num: string) =
     // Same nest-family detection as Top chick parents, but counting breeding windows:
     // clutches where the bird was a detected parent AND at least one egg appeared.
     const byParent = new Map<string, { bird: any; windows: number; chicks: Set<string> }>();
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+    for (const { families } of allColonyBoxes()) {
+      for (const sd of families) {
         for (const fam of sd.families) {
           if (fam.parents.length === 0 || fam.clutch.maxEggs < 1) continue;
           for (const parent of fam.parents) {
@@ -6435,10 +6511,8 @@ function BreedingAgeHistograms() {
   const { eggMonths, chickMonths } = useMemo(() => {
     const firstEgg = new Map<string, number>();
     const firstChick = new Map<string, number>();
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+    for (const { families } of allColonyBoxes()) {
+      for (const sd of families) {
         for (const fam of sd.families) {
           for (const parent of fam.parents) {
             if (parent.chipped_as_adult || !parent.chip_date) continue; // age only known for chick-chipped birds
@@ -6536,9 +6610,7 @@ function PenguinAgeCharts() {
     const lastSeen = new Map<string, number>();
     const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
     let firstSeason = '';
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
+    for (const { detail: bd } of allColonyBoxes()) {
       for (const obs of bd.observations) {
         const t = parseDate(obs.observation_time_utc).getTime();
         const season = getSeasonLabel(parseDate(obs.observation_time_utc));
@@ -6585,9 +6657,7 @@ function SurvivalPredictionReport() {
     const birdSeasons = new Map<string, Set<string>>();
     const adultChipped = new Set(allPenguins.filter((p: any) => p.chipped_as_adult).map((p: any) => p.peng_num));
     let allSeasons = new Set<string>();
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
+    for (const { detail: bd } of allColonyBoxes()) {
       for (const obs of bd.observations) {
         const season = getSeasonLabel(parseDate(obs.observation_time_utc));
         allSeasons.add(season);
@@ -6800,10 +6870,8 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
     // For each box+season, find the detected breeding pair. Then track the seasons the same
     // pair appears together at ANY box.
     const pairSeasons = new Map<string, { a: any; b: any; seasons: Set<string>; boxes: Set<string> }>();
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+    for (const { loc, families } of allColonyBoxes()) {
+      for (const sd of families) {
         for (const fam of sd.families) {
           if (fam.parents.length < 2) continue;
           const nums = fam.parents.map((p: any) => p.peng_num).filter(Boolean).sort();
@@ -6897,9 +6965,8 @@ function PhilandererReport({ onOpenBird }: { onOpenBird: (num: string) => void }
       const withOthers = new Map<string, Map<string, number>>();
       const sharedObs = new Map<string, number>();
       const boxes = new Map<string, Set<string>>();
-      for (const loc of queryAllLocations()) {
-        const box = String(loc.location_name).trim();
-        const bd = queryBoxDetailSync(box);
+      for (const { box: rawBox, detail: bd } of allColonyBoxes()) {
+        const box = rawBox.trim();
         for (const o of bd?.observations || []) {
           // One entry per bird — a bird scanned twice in one observation is one presence.
           const present = new Map<string, any>();
@@ -6932,11 +6999,9 @@ function PhilandererReport({ onOpenBird }: { onOpenBird: (num: string) => void }
     const mates = new Map<string, Map<string, { bird: any; seasons: Set<string>; boxes: Set<string> }>>();
     const bySeason = new Map<string, Map<string, Set<string>>>(); // bird -> season -> mates that season
     const clutches = new Map<string, number>();
-    for (const loc of queryAllLocations()) {
-      const box = String(loc.location_name).trim();
-      const bd = queryBoxDetailSync(box);
-      if (!bd?.observations?.length) continue;
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+    for (const { box: rawBox, families } of allColonyBoxes()) {
+      const box = rawBox.trim();
+      for (const sd of families) {
         for (const fam of sd.families) {
           // Solo-parent fallbacks tell us nothing about mate choice — need both slots filled.
           const ps = fam.parents.filter((p: any) => p?.peng_num);
@@ -7075,12 +7140,10 @@ function FloaterReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
   const rows = useMemo(() => {
     const parentNums = new Set<string>();
     const birdBoxes = new Map<string, { info: any; boxes: Map<string, number>; totalScans: number }>();
-    for (const loc of queryAllLocations()) {
-      const box = String(loc.location_name).trim();
-      const bd = queryBoxDetailSync(box);
-      if (!bd?.observations?.length) continue;
+    for (const { box: rawBox, detail: bd, families } of allColonyBoxes()) {
+      const box = rawBox.trim();
       // Collect parents
-      for (const sd of computeBoxFamilies(bd.observations, bd.all_penguins)) {
+      for (const sd of families) {
         for (const fam of sd.families) {
           for (const p of fam.parents) if (p.peng_num) parentNums.add(p.peng_num);
         }
@@ -8224,6 +8287,11 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   );
 }
 
+/** The permission-filtered, colony-named bird list from the server, held for the session so
+ *  reopening the reports tab doesn't re-ask. Invalidated by a colony switch or a local DB sync. */
+let allPenguinsServerCache: { rows: any[] | null; colonyId: number; dbVersion: number } =
+  { rows: null, colonyId: -1, dbVersion: -1 };
+
 /** Every penguin across the colonies the user can view, newest initial chip first.
  *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
 function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: string; colonyName?: string; onBack?: () => void; onOpenBird?: (n: string) => void }) {
@@ -8232,14 +8300,29 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
   // real colony names and applies colony permissions.
   const dbv = useDbVersion();
   const localRows = useMemo(() => computeAllPenguinsRows(), [dbv]);
-  const [serverRows, setServerRows] = useState<any[] | null>(null);
+  // The server answer can't come from the cache: the snapshot's penguin rows are global, and it
+  // is this endpoint that applies the account's colony permissions (and names the colonies). So
+  // it stays a fetch — but held for the session, because the page is opened and closed often
+  // (it's a reports tab) and the answer only moves when a bird is chipped or a grant changes.
+  // A sync bumps dbVersion, which is when it's worth asking again.
+  const fresh = allPenguinsServerCache.colonyId === getColonyId() && allPenguinsServerCache.dbVersion === dbv;
+  const [serverRows, setServerRows] = useState<any[] | null>(allPenguinsServerCache.rows);
   const [error, setError] = useState('');
   useEffect(() => {
-    fetch(`/api/penguins.php?all=1&colony_id=${getColonyId()}`, { headers: { Authorization: `Bearer ${token}` } })
+    if (fresh) return;
+    const colonyId = getColonyId();
+    let live = true;
+    fetch(`/api/penguins.php?all=1&colony_id=${colonyId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => Array.isArray(d) ? setServerRows(d) : setError(d?.error || 'Failed to load'))
-      .catch(e => { setError(String(e?.message || e)); });
-  }, [token]);
+      .then(d => {
+        if (!live) return;
+        if (!Array.isArray(d)) { setError(d?.error || 'Failed to load'); return; }
+        allPenguinsServerCache = { rows: d, colonyId, dbVersion: dbv };
+        setServerRows(d);
+      })
+      .catch(e => { if (live) setError(String(e?.message || e)); });
+    return () => { live = false; };
+  }, [token, dbv]);
   const rows = serverRows || (localRows.length ? localRows : null);
   // Until the server refresh lands, label birds by their peng_num prefix; bare numbers are
   // the viewing colony's own standard.
@@ -8636,10 +8719,7 @@ function SeasonBreedingReport() {
   const { rows, seasons } = useMemo(() => {
     const seasons = new Set<number>();
     const all: any[] = [];
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      const box = String(loc.location_name);
+    for (const { box, detail: bd, families } of allColonyBoxes()) {
       const sObs = [...bd.observations].sort((a: any, b: any) =>
         parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
       // Segment over the box's whole history: a clutch laid just after 1 April needs the
@@ -8650,7 +8730,7 @@ function SeasonBreedingReport() {
       // chicks reached chipping age (~fledge); fledged also counts unchipped chicks a monitor
       // recorded as presumed fledged.
       const famByStart = new Map<number, any>();
-      for (const sd of computeBoxFamilies(bd.observations, (bd as any).all_penguins))
+      for (const sd of families)
         for (const fam of sd.families)
           if (fam.clutch.startObsId != null) famByStart.set(fam.clutch.startObsId, fam);
       clutches.forEach((c, i) => {
@@ -8841,9 +8921,11 @@ function DocsPage() {
   );
 }
 
+// Module scope so the deferred-build order is a stable reference across renders.
+const REPORT_TABS = ['birds', 'colony', 'breeding', 'population', 'social', 'quality'] as const;
+type ReportTab = typeof REPORT_TABS[number];
+
 function ReportsPage({ onOpenBird, onDayClick, token, colonyName }: { onOpenBird: (num: string) => void; onDayClick: (day: string) => void; token: string; colonyName?: string }) {
-  const REPORT_TABS = ['birds', 'colony', 'breeding', 'population', 'social', 'quality'] as const;
-  type ReportTab = typeof REPORT_TABS[number];
   const [tab, setTab] = useState<ReportTab>(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
     return (REPORT_TABS as readonly string[]).includes(t || '') ? (t as ReportTab) : 'birds';
@@ -8854,6 +8936,9 @@ function ReportsPage({ onOpenBird, onDayClick, token, colonyName }: { onOpenBird
     if (id === 'birds') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
     window.history.replaceState(null, '', u.pathname + u.search);
   };
+  // Every one of these tabs costs a pass over the colony. Build the open one, then the rest
+  // while the browser is idle, so the page appears at once and switching stays instant.
+  const built = useDeferredTabs(tab, REPORT_TABS);
 
   return (
     <>
@@ -8867,40 +8952,51 @@ function ReportsPage({ onOpenBird, onDayClick, token, colonyName }: { onOpenBird
         ))}
       </div>
 
-      {/* Mounted only when open: it builds a row per bird in every colony. */}
-      {tab === 'birds' && <AllPenguinsPage token={token} colonyName={colonyName} onOpenBird={onOpenBird} />}
+      <div style={{ display: tab === 'birds' ? undefined : 'none' }}>
+        {built('birds') && <AllPenguinsPage token={token} colonyName={colonyName} onOpenBird={onOpenBird} />}
+      </div>
 
       <div style={{ display: tab === 'colony' ? undefined : 'none' }}>
-        <DistinctAdultsChart />
-        <PeakAdultsChart onDayClick={onDayClick} />
-        <FirstEggReport onDayClick={onDayClick} />
-        <EggArrivalChart />
+        {built('colony') && <>
+          <DistinctAdultsChart />
+          <PeakAdultsChart onDayClick={onDayClick} />
+          <FirstEggReport onDayClick={onDayClick} />
+          <EggArrivalChart />
+        </>}
       </div>
 
       <div style={{ display: tab === 'breeding' ? undefined : 'none' }}>
-        <SeasonBreedingReport />
-        <ChickReturnChart />
-        <ChickSexChart />
-        <ChickSexBothReturnedChart />
-        <TopChickParentsReport onOpenBird={onOpenBird} />
-        <UnproductiveParentsReport onOpenBird={onOpenBird} />
+        {built('breeding') && <>
+          <SeasonBreedingReport />
+          <ChickReturnChart />
+          <ChickSexChart />
+          <ChickSexBothReturnedChart />
+          <TopChickParentsReport onOpenBird={onOpenBird} />
+          <UnproductiveParentsReport onOpenBird={onOpenBird} />
+        </>}
       </div>
 
       <div style={{ display: tab === 'population' ? undefined : 'none' }}>
-        <PenguinAgeCharts />
-        <SurvivalPredictionReport />
+        {built('population') && <>
+          <PenguinAgeCharts />
+          <SurvivalPredictionReport />
+        </>}
       </div>
 
       <div style={{ display: tab === 'social' ? undefined : 'none' }}>
-        <PairBondReport onOpenBird={onOpenBird} />
-        <PhilandererReport onOpenBird={onOpenBird} />
-        <FloaterReport onOpenBird={onOpenBird} />
-        <PenguinGroupsReport onOpenBird={onOpenBird} />
+        {built('social') && <>
+          <PairBondReport onOpenBird={onOpenBird} />
+          <PhilandererReport onOpenBird={onOpenBird} />
+          <FloaterReport onOpenBird={onOpenBird} />
+          <PenguinGroupsReport onOpenBird={onOpenBird} />
+        </>}
       </div>
 
       <div style={{ display: tab === 'quality' ? undefined : 'none' }}>
-        <MissedScansReport />
-        <UnsexedByGuessesReport />
+        {built('quality') && <>
+          <MissedScansReport />
+          <UnsexedByGuessesReport />
+        </>}
       </div>
     </>
   );
@@ -8921,11 +9017,8 @@ function DcmBoxesChart() {
     // Per box: DCM intervals [start, end) in NZ dates (end exclusive).
     const intervals = new Map<string, { start: string; end: string }[]>();
     let minNz: string | null = null, maxNz: string | null = null;
-    for (const loc of queryAllLocations()) {
-      const bd = queryBoxDetailSync(loc.location_name);
-      if (!bd?.observations?.length) continue;
-      const box = String(loc.location_name);
-      const sorted = [...bd.observations].sort((a, b) => String(a.observation_time_utc).localeCompare(String(b.observation_time_utc)));
+    for (const { box, detail: bd } of allColonyBoxes()) {
+      const sorted = [...bd.observations].sort((a: any, b: any) => String(a.observation_time_utc).localeCompare(String(b.observation_time_utc)));
       let runStart: string | null = null;
       const ivs: { start: string; end: string }[] = [];
       for (const o of sorted) {
@@ -9018,6 +9111,15 @@ function DcmBoxesChart() {
   );
 }
 
+// Module scope so the deferred-build order is a stable reference across renders.
+const ADMIN_TABS = ['enter', 'io', 'validation', 'users', 'database', 'system', 'mirror'] as const;
+type AdminTab = typeof ADMIN_TABS[number];
+// Which tabs are worth building ahead of being asked for. "enter" is a form with its own state
+// and its own workflow — people go there deliberately, and pre-mounting a data-entry form to
+// save a few ms is the wrong trade. "mirror" only exists on the mirror host and its status
+// view is a live fetch. Both still build the moment they're opened.
+const ADMIN_PRELOAD_TABS = ['io', 'validation', 'users', 'database', 'system'] as const;
+
 function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColony, onLeaveEntry, mirrorAlert }: {
   token: string; observationDates?: string[];
   // Why the mirror is unhealthy (stale, unverified, or unreachable), or null. Puts the same red
@@ -9067,8 +9169,6 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
     const seasons = Array.from(bySeason.entries()).sort((a, b) => a[0] - b[0]);
     return { seasons, total };
   }, [registeredFmDates, dbVersion]);
-  const ADMIN_TABS = ['enter', 'io', 'validation', 'users', 'database', 'system', 'mirror'] as const;
-  type AdminTab = typeof ADMIN_TABS[number];
   // "Mirror" tab is only meaningful on the backup mirror (set by the /me response). Its
   // status view + action buttons all 404 on production.
   const isMirror = localStorage.getItem('ww_is_mirror') === '1';
@@ -9082,6 +9182,9 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
     if (id === 'io') u.searchParams.delete('tab'); else u.searchParams.set('tab', id);
     window.history.replaceState(null, '', u.pathname + u.search);
   };
+  // Validation alone is a full pass over the colony, and each tab's data comes from its own
+  // fetch. Build the open tab, then the rest during idle time.
+  const built = useDeferredTabs<AdminTab>(adminTab, ADMIN_PRELOAD_TABS);
   // A pinned-check link lands as /?admin&tab=validation#check-slug. The check's rows come from
   // localdb, so the section can be a stub on first paint — re-run as the db version bumps,
   // but only until a scroll has happened with real data (dbVersion > 0). Without the guard,
@@ -9432,8 +9535,17 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
     setChangesLoading(false);
   };
   // Auto-load, and re-fetch whenever the local DB syncs (a sync means the server data — and so
-  // the audit log — has changed) or the window length changes.
-  useEffect(() => { loadRecentChanges(); }, [dbVersion, changesDays]);
+  // the audit log — has changed) or the window length changes. Only while the table is on
+  // screen, though: it lives on the io tab, and re-querying up to 30 days of audit log on every
+  // poll-detected change from another tab bought nothing. Coming back to the tab after a sync
+  // catches up, because the version it last loaded at no longer matches.
+  const changesKey = `${dbVersion}|${changesDays}`;
+  const changesLoadedAt = useRef('');
+  useEffect(() => {
+    if (adminTab !== 'io' || changesLoadedAt.current === changesKey) return;
+    changesLoadedAt.current = changesKey;
+    loadRecentChanges();
+  }, [adminTab, changesKey]);
 
   const previewDate = async (date: string) => {
     setDatePreview({ loading: true, date });
@@ -9443,15 +9555,26 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
     setDatePreview(d);
   };
 
+  // Each of these belongs to one tab, so each waits for that tab to be built rather than firing
+  // three requests the moment the panel opens. In practice they still land early — the tabs
+  // build during the first idle slice — but a tab you never open costs nothing.
+  const usersBuilt = built('users'), ioBuilt = built('io'), systemBuilt = built('system');
   useEffect(() => {
+    if (!usersBuilt) return;
     fetch('/api/admin.php?action=users', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
+  }, [token, usersBuilt]);
+  useEffect(() => {
+    if (!ioBuilt) return;
     fetch('/api/admin.php?action=colonies', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => setColonies(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [token, ioBuilt]);
+  useEffect(() => {
+    if (!systemBuilt) return;
     fetch(`/api/server_stats.php?_=${Date.now()}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json()).then(d => setServerDisk(d)).catch(() => {});
-  }, [token]);
+  }, [token, systemBuilt]);
 
   const [userErr, setUserErr] = useState('');
   // f_name is UNIQUE and email can collide, so a save can legitimately fail. Show the server's
@@ -9978,6 +10101,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
 
       {canSql && (
       <div className="admin-section" style={{ display: adminTab === 'database' ? undefined : 'none', width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw', padding: '0 24px', boxSizing: 'border-box' }}>
+        {built('database') && <>
         <h3>Database <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· read-only</span></h3>
         {browseErr && <p style={{ color: '#c0392b', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{browseErr}</p>}
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -10056,6 +10180,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
           {sqlResult && !sqlError && sqlResult.columns.length > 0 && <div style={{ marginTop: 8 }}>{resultGrid(sqlResult)}</div>}
           {sqlResult && !sqlError && sqlResult.columns.length === 0 && <p className="muted" style={{ marginTop: 8 }}>Query ran; no rows returned.</p>}
         </details>
+        </>}
       </div>
       )}
 
@@ -10252,10 +10377,11 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
       </div>
 
       <div style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
-        <DcmBoxesChart />
+        {built('validation') && <DcmBoxesChart />}
       </div>
 
       <div className="admin-section" style={{ display: adminTab === 'validation' ? undefined : 'none' }}>
+        {built('validation') && <>
         <h3>Data integrity</h3>
         <MissingNoScansReport token={token} hrefFor={(box, time) => `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}`} />
         <IntegrityCheck rows={iDupObs} errorType="duplicate_observations" title="Duplicate observations"
@@ -10321,15 +10447,18 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
           desc="Chipped birds with no weight and/or no flipper length on their chip date. Chipping is the one time every bird is in the hand, so a gap here is a measurement that can never be taken later. Live from the cache — a value entered on the bird clears its row."
           empty="Every chipped bird has both measurements"
           columns={[{ key: 'chip_date', label: 'Chip date' }, { key: 'peng_num', label: 'Penguin', render: pengCell }, { key: 'chip_box', label: 'Box', render: boxCell }, { key: 'chip_by', label: 'By' }, { key: 'missing', label: 'Missing' }, { key: 'chip_weight', label: 'Weight (g)', render: (v: any) => v ?? '—' }, { key: 'chip_flipper', label: 'Flipper (mm)', render: (v: any) => v ?? '—' }]} />
+        </>}
       </div>
 
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
-        <BackupsPanel token={token} />
-        <DayMoveMigrationPanel token={token} fromDate="2024-05-08" toDate="2024-04-08" />
-        <DayMoveMigrationPanel token={token} fromDate="2023-10-10" toDate="2023-10-09" />
-        <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
-          <DiskHistoryChart token={token} />
-        </Suspense>
+        {built('system') && <>
+          <BackupsPanel token={token} />
+          <DayMoveMigrationPanel token={token} fromDate="2024-05-08" toDate="2024-04-08" />
+          <DayMoveMigrationPanel token={token} fromDate="2023-10-10" toDate="2023-10-09" />
+          <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
+            <DiskHistoryChart token={token} />
+          </Suspense>
+        </>}
       </div>
 
       {adminTab === 'mirror' && !isMirror && <RemoteMirrorCard />}
@@ -11289,8 +11418,12 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [addPenguinBox, setAddPenguinBox] = useState<string | null>(null);
   const initial = parseUrl();
-  const [boxTags, setBoxTags] = useState<Record<string, BoxTag>>({});
-  const [stats, setStats] = useState<any>(null);
+  // Both used to be fetched — dashboard.php?view=overview and boxtags.php — and both are
+  // already in the snapshot the app syncs anyway. Reading them from the cache means the header
+  // counts, the nest grid and the map paint with the data instead of a round trip behind it,
+  // and the 30s change-poll no longer re-runs the heaviest query on the server.
+  const boxTags = useBoxTags() as Record<string, BoxTag>;
+  const stats = useOverview();
   const [selectedBox, setSelectedBox] = useState<string|null>(initial.box || null);
   // boxDetail from useBoxDetail hook
   const [showDeleted, setShowDeleted] = useState(false);
@@ -11389,9 +11522,10 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const refreshStats = useCallback(() => {
-    fetchOverview().then(ov => setStats(ov));
-  }, []);
+  // An edit's own writer already triggers a sync, and the overview now rides the cache — so the
+  // numbers refresh themselves when that sync lands. Kept as the name every editing surface
+  // calls after a change, so there is still one place to hang extra work off.
+  const refreshStats = useCallback(() => {}, []);
 
   // Date stats are precomputed in localdb on sync — just read the cache
   const dateStatsCache = useDateStats();
@@ -11458,20 +11592,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return !on;
   });
 
-  // Nest-grid tiles straight from the cache, so their colours and counts land with the
-  // numbers. stats.box_info replaces it once the overview fetch answers — except for the
-  // moulting flag, which only the cache knows (it comes from the biometrics, not the
-  // overview query), so it's laid back over the server's answer.
-  const localBoxInfo = useBoxInfo();
-  const gridBoxInfo = useMemo(() => {
-    const server = stats?.box_info;
-    if (!server) return localBoxInfo;
-    const merged: Record<string, any> = { ...server };
-    for (const [box, info] of Object.entries(localBoxInfo)) {
-      if (info.m) merged[box] = { ...(merged[box] || info), m: 1 };
-    }
-    return merged;
-  }, [stats, localBoxInfo]);
+  // Nest-grid tiles straight from the cache — the same source the numbers come from, so their
+  // colours and counts land together. This used to paint from the cache and then be replaced by
+  // the overview fetch's box_info, with the cache's moulting flag laid back over the top because
+  // the server query didn't know about it; now there is one answer and nothing to reconcile.
+  const gridBoxInfo = useBoxInfo();
   // Header pin → admin/validation, in-app. AdminPanel reads its tab from the URL only at
   // mount, so an already-mounted panel needs this signal to switch tabs and scroll.
   const [checkTarget, setCheckTarget] = useState<{ slug: string; nonce: number } | null>(null);
@@ -11505,27 +11630,28 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const lastLoadRef = useRef(0);
   const loadColony = useCallback(async () => {
-    // Paint immediately from the cached snapshot if we have one — the network sync
-    // and overview fetches below then refresh in the background. Only a first-ever
-    // visit (no cache) keeps the spinner up for the full download.
+    // Paint immediately from the cached snapshot if we have one — the sync below then
+    // refreshes in the background. Only a first-ever visit (no cache) keeps the spinner up
+    // for the full download. The grid, tiles and header counts all read the cache now, so
+    // this is the only thing standing between a returning user and a painted page.
     try {
       if (await primeFromCache()) setLoading(false);
     } catch (e) {
       console.warn('primeFromCache failed; falling back to full sync', e);
     }
-    // A sync failure (e.g. flaky mobile network on resume) must NOT block the
-    // box-grid fetches below, or the grid renders empty ("Nest Boxes (0)").
+    // A sync failure (e.g. flaky mobile network on resume) must NOT block the colony list
+    // fetch below.
     try {
       await syncDatabase((msg, pct) => { setLoadProgress(msg); setLoadPct(pct ?? null); });
     } catch (e) {
-      console.warn('syncDatabase failed; continuing with cached/API data', e);
+      console.warn('syncDatabase failed; continuing with cached data', e);
     }
+    // The one thing left that isn't in the snapshot: which colonies this account may view.
     try {
-      const [tags, ov, cols] = await Promise.all([fetchBoxTags(), fetchOverview(), fetchColonies()]);
-      setBoxTags(tags); setStats(ov);
+      const cols = await fetchColonies();
       if (Array.isArray(cols) && cols.length > 0) setColonies(cols);
     } catch (e) {
-      console.warn('overview/tags fetch failed', e);
+      console.warn('colonies fetch failed', e);
     } finally {
       setLoading(false);
       lastLoadRef.current = Date.now();
@@ -11549,7 +11675,9 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   useEffect(() => {
     loadColony(); // also fetches colonies via fetchColonies()
-    startPolling(() => { fetchOverview().then(ov => setStats(ov)).catch(() => {}); });
+    // The poll syncs the cache when the watermark moves; everything on screen reads the cache,
+    // so the store-version bump is the refresh — there is nothing left to re-fetch here.
+    startPolling(() => {});
 
     // Re-sync when the app is reopened/refocused (mobile PWA resume) or network
     // returns — Britta's "doesn't refresh on opening" was the lack of this.

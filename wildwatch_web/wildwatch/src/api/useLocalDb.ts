@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { subscribe, getStoreVersion, computeBoxInfo, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts, computeChickSizeMismatch, computeMissingChipMeasures } from './localdb';
+import { subscribe, getStoreVersion, computeBoxInfo, computeOverview, queryBoxTags, queryBoxDetailSync, queryBirdDetailSync, queryDay, queryAllPenguins, getDateStats, computeEggArrival, computeFirstEgg, computeDistinctAdults, computePeakAdults, computeChickReturn, computeMissedScans, computeMissingNoScans, computeBirdTwoBoxes, computeScanBeforeChip, computeDeadScanned, computeImprobableCounts, computeFutureObservations, computeRetiredTagScans, computeChicksNoScan, computeDuplicateObservations, computeDuplicateScans, computeSameGenderConflicts, computeChickSizeMismatch, computeMissingChipMeasures } from './localdb';
 
 export function useDbVersion(): number {
   return useSyncExternalStore(subscribe, getStoreVersion);
@@ -27,6 +27,16 @@ export function useMissingChipMeasures(): any[] {
 
 export function useBoxInfo(): Record<string, { s: string; a: number; e: number; c: number }> {
   return useSyncExternalStore(subscribe, () => cached('boxInfo', computeBoxInfo));
+}
+
+/** Colony overview — what dashboard.php?view=overview used to fetch, straight off the cache. */
+export function useOverview(): any {
+  return useSyncExternalStore(subscribe, () => cached('overview', computeOverview));
+}
+
+/** Box tags for the grid and map, off the snapshot's locations rows (see queryBoxTags). */
+export function useBoxTags(): Record<string, any> {
+  return useSyncExternalStore(subscribe, () => cached('boxTags', queryBoxTags));
 }
 
 export function useDateStats(): Map<string, any> {

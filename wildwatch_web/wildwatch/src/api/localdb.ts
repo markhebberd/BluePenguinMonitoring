@@ -4,6 +4,8 @@
  * Data lives in memory for instant queries; IndexedDB for persistence across reloads.
  */
 
+import { SEASON_START_MONTH, SEASON_START_DAY } from '../config';
+
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('ww_token');
   return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -105,6 +107,12 @@ interface MemCache {
   locByName: Map<string, any>;         // location_name → location
   locById: Map<number, any>;           // location_id → location
   chipsByPeng: Map<string, any[]>;     // peng_num → chips
+  // Where a chip was made. Chips ride the snapshot globally (visitor scans need them), so
+  // "which chips belong to this box" used to mean a scan of the whole list per box — paid
+  // once per box by every full-colony report. Indexed the two ways a chip identifies its box:
+  // location_id when it has one, else the legacy chip_box name. The two are disjoint.
+  chipsByLocId: Map<number, any[]>;    // location_id → chips made there
+  chipsByBoxName: Map<string, any[]>;  // chip_box → chips with no location_id
   scansByPit: Map<string, any[]>;      // pit_id → scans
   bioByPeng: Map<string, any[]>;       // peng_num → biometrics
   // Precomputed date stats
@@ -212,6 +220,8 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     locByName: new Map(),
     locById: new Map(),
     chipsByPeng: new Map(),
+    chipsByLocId: new Map(),
+    chipsByBoxName: new Map(),
     scansByPit: new Map(),
     bioByPeng: new Map(),
     verByObs: new Map(),
@@ -238,6 +248,14 @@ function buildIndexes(data: { observations: any[]; scans: any[]; penguins: any[]
     cache.chipByPit.set(c.pit_id, c);
     if (!cache.chipsByPeng.has(c.peng_num)) cache.chipsByPeng.set(c.peng_num, []);
     cache.chipsByPeng.get(c.peng_num)!.push(c);
+    // Same either/or the box query uses, so the two buckets never hold the same chip.
+    if (c.location_id) {
+      if (!cache.chipsByLocId.has(c.location_id)) cache.chipsByLocId.set(c.location_id, []);
+      cache.chipsByLocId.get(c.location_id)!.push(c);
+    } else if (c.chip_box) {
+      if (!cache.chipsByBoxName.has(c.chip_box)) cache.chipsByBoxName.set(c.chip_box, []);
+      cache.chipsByBoxName.get(c.chip_box)!.push(c);
+    }
   }
   for (const o of data.observations) {
     cache.obsById.set(o.observation_id, o);
@@ -723,6 +741,16 @@ function enrichScan(s: any, c: MemCache) {
   };
 }
 
+/** Every chip made at one box, off the build-time indexes rather than a scan of the global
+ *  chip list. Same either/or the rows were bucketed by: location_id identifies the box across
+ *  colonies, the chip_box name covers legacy rows that never got one. */
+function chipsAtBox(c: MemCache, locationId: number, boxName: string): any[] {
+  const byLoc = c.chipsByLocId.get(locationId);
+  const byName = c.chipsByBoxName.get(boxName);
+  if (!byName) return byLoc || [];
+  return byLoc ? [...byLoc, ...byName] : byName;
+}
+
 export function queryBoxDetailSync(boxName: string, includeDeleted?: boolean): any {
   return queryBoxDetailInner(boxName, includeDeleted);
 }
@@ -768,24 +796,23 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
   // bird chipped in another colony's box of the SAME NAME (e.g. PT's "1" vs NI's "1")
   // doesn't leak in — chips are loaded globally to support visitor scans. Fall back to
   // the box name only for the rare legacy chip with no location_id.
-  for (const chip of c.chips) {
-    if (chip.location_id ? chip.location_id === location.location_id : chip.chip_box === boxName) {
-      const peng = c.pengByNum.get(chip.peng_num);
-      if (!seenPenguins.has(chip.peng_num)) {
-        seenPenguins.set(chip.peng_num, {
-          peng_num: chip.peng_num, pit_id: chip.pit_id, sex: peng?.sex || null,
-          life_stage: peng?.life_stage || null, chipped_as_adult: peng?.chipped_as_adult || 0,
-          chick_size_code: peng?.chick_size_code || null, chip_date: chip.chip_date,
-          chip_by: chip.chip_by || null,
-          hasReturned: peng?.hasReturned || false,
-          scan_count: 0, last_seen: chip.chip_date, is_chipped_here: true,
-        });
-      } else {
-        const sp = seenPenguins.get(chip.peng_num)!;
-        sp.is_chipped_here = true;
-        sp.chip_by = chip.chip_by || null;
-        if (!sp.chip_date) sp.chip_date = chip.chip_date;
-      }
+  const boxChips = chipsAtBox(c, location.location_id, boxName);
+  for (const chip of boxChips) {
+    const peng = c.pengByNum.get(chip.peng_num);
+    if (!seenPenguins.has(chip.peng_num)) {
+      seenPenguins.set(chip.peng_num, {
+        peng_num: chip.peng_num, pit_id: chip.pit_id, sex: peng?.sex || null,
+        life_stage: peng?.life_stage || null, chipped_as_adult: peng?.chipped_as_adult || 0,
+        chick_size_code: peng?.chick_size_code || null, chip_date: chip.chip_date,
+        chip_by: chip.chip_by || null,
+        hasReturned: peng?.hasReturned || false,
+        scan_count: 0, last_seen: chip.chip_date, is_chipped_here: true,
+      });
+    } else {
+      const sp = seenPenguins.get(chip.peng_num)!;
+      sp.is_chipped_here = true;
+      sp.chip_by = chip.chip_by || null;
+      if (!sp.chip_date) sp.chip_date = chip.chip_date;
     }
   }
 
@@ -793,8 +820,7 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
   // bird), so a rechip done here shows as its own sighting card in the box timeline.
   // is_rechip: any chip that isn't the bird's earliest.
   const chip_events: any[] = [];
-  for (const chip of c.chips) {
-    if (!(chip.location_id ? chip.location_id === location.location_id : chip.chip_box === boxName)) continue;
+  for (const chip of boxChips) {
     if (!chip.chip_date) continue;
     const peng = c.pengByNum.get(chip.peng_num);
     const all = c.chipsByPeng.get(chip.peng_num) || [];
@@ -1886,7 +1912,18 @@ export function queryAllLocations(): any[] {
  * come from the newest live observation, but a newest observation with no breeding_status
  * falls back to the most recent one that has a status, rather than showing none.
  */
-export function computeBoxInfo(): Record<string, { s: string; a: number; e: number; c: number; m?: number }> {
+type BoxInfo = Record<string, { s: string; a: number; e: number; c: number; m?: number }>;
+// The grid reads this and so does computeOverview, which would otherwise walk every location's
+// history (and every biometric) twice per sync. Held against the store version, so a sync — the
+// only thing that can change the answer — is what rebuilds it.
+let _boxInfoCache: { version: number; info: BoxInfo } | null = null;
+export function computeBoxInfo(): BoxInfo {
+  if (_boxInfoCache && _boxInfoCache.version === storeVersion) return _boxInfoCache.info;
+  const info = computeBoxInfoUncached();
+  _boxInfoCache = { version: storeVersion, info };
+  return info;
+}
+function computeBoxInfoUncached(): BoxInfo {
   const cache = mem;
   if (!cache) return {};
   const out: Record<string, { s: string; a: number; e: number; c: number; m?: number }> = {};
@@ -1924,6 +1961,95 @@ export function computeBoxInfo(): Record<string, { s: string; a: number; e: numb
       e: latest.eggs || 0,
       c: latest.chicks || 0,
       m: isMoulting(latest) ? 1 : 0,
+    };
+  }
+  return out;
+}
+
+/**
+ * The colony overview — box tiles, season counts, status tallies and the list of dates with
+ * activity. Identical in shape and rule to what dashboard.php?view=overview returned, computed
+ * from the cache instead of fetched: every input (observations, scans, chips, locations)
+ * already rides the snapshot, so the round trip only bought latency. It was the app's heaviest
+ * server query and ran on load, on every 30s poll and on every tab resume.
+ *
+ * Deliberately keeps `box_info`'s moulting flag, which the server answer never had — the grid
+ * used to lay the local flag back over the fetched tiles to get it.
+ */
+export function computeOverview(): any | null {
+  if (!mem) return null;
+  const c = mem;
+  const now = new Date();
+  const year = now.getMonth() + 1 >= SEASON_START_MONTH ? now.getFullYear() : now.getFullYear() - 1;
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  // Compared against observation_time_utc, which is a 'YYYY-MM-DD HH:MM:SS' string — same
+  // string comparison the SQL did against its own '<year>-04-01 00:00:00' bound.
+  const seasonStart = `${year}-${pad2(SEASON_START_MONTH)}-${pad2(SEASON_START_DAY)} 00:00:00`;
+
+  let seasonObs = 0;
+  const seasonPengs = new Set<string>();
+  for (const o of c.observations) {
+    if (o.is_deleted) continue;
+    if (String(o.observation_time_utc) < seasonStart) continue;
+    seasonObs++;
+    for (const s of c.scansByObs.get(o.observation_id) || []) {
+      const peng = c.chipByPit.get(s.pit_id)?.peng_num;
+      if (peng) seasonPengs.add(peng);
+    }
+  }
+
+  // Tiles carry the same latest-observation-per-box rule the tallies below count, so the two
+  // can't disagree — computeBoxInfo is the single source for both.
+  const boxInfo = computeBoxInfo();
+  const statusCounts: Record<string, number> = { BR: 0, CON: 0, POT: 0, UNL: 0, NO: 0, ABN: 0, DCM: 0 };
+  let totalEggs = 0, totalChicks = 0;
+  for (const info of Object.values(boxInfo)) {
+    // Only the seven statuses the panel has cards for — a box parked on IGN was never a tally.
+    if (info.s && info.s in statusCounts) statusCounts[info.s]++;
+    totalEggs += info.e || 0;
+    totalChicks += info.c || 0;
+  }
+
+  return {
+    total_boxes: c.locations.length,
+    season_observations: seasonObs,
+    season_penguins: seasonPengs.size,
+    season_start: seasonStart,
+    status_counts: statusCounts,
+    total_eggs: totalEggs,
+    total_chicks: totalChicks,
+    box_info: boxInfo,
+    // Every date with activity, newest first — as the server sent it, which means chipping
+    // days count even with no box observation. locById is colony-scoped, so it is also what
+    // keeps another colony's chippings out.
+    observation_dates: (() => {
+      const days = new Set(c.observationDates);
+      for (const ch of c.chips) if (ch.chip_date && c.locById.has(ch.location_id)) days.add(String(ch.chip_date).slice(0, 10));
+      return [...days].sort().reverse();
+    })(),
+  };
+}
+
+/** Box tags (tag id + GPS fix) for the map and grid, keyed by box name.
+ *
+ *  These five columns ride the snapshot's locations rows precisely so they don't need fetching
+ *  — snapshot_columns.php calls them out as "the box tag", and nestcheck already builds its
+ *  store this way. Same filter boxtags.php applied: a box with neither a tag nor a fix isn't
+ *  one. Writes still go through boxtags.php; they come back on the next snapshot. */
+export function queryBoxTags(): Record<string, any> {
+  if (!mem) return {};
+  const out: Record<string, any> = {};
+  for (const l of mem.locations) {
+    if (!l.pit_id && l.latitude == null) continue;
+    out[l.location_name] = {
+      BoxID: l.location_name,
+      TagNumber: l.pit_id ?? '',
+      // The server substituted "now" for a missing scan time; keep that so the panel's
+      // formatter never renders an Invalid Date.
+      ScanTimeUTC: l.scan_time_utc ? new Date(String(l.scan_time_utc).replace(' ', 'T') + 'Z').toISOString() : new Date().toISOString(),
+      Latitude: l.latitude !== null && l.latitude !== undefined ? Number(l.latitude) : 0,
+      Longitude: l.longitude !== null && l.longitude !== undefined ? Number(l.longitude) : 0,
+      Accuracy: l.accuracy !== null && l.accuracy !== undefined ? Number(l.accuracy) : -1,
     };
   }
   return out;
