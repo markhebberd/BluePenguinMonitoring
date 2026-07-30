@@ -117,7 +117,10 @@ header h1:hover { opacity:.8; }
 .uni-search { position:relative; }
 .uni-search-input { border:2px solid #ddd; border-radius:8px; padding:5px 10px; font-size:13px; outline:none; width:195px; }
 .uni-search-input:focus { border-color:#2196F3; }
-.uni-results { position:absolute; left:0; top:100%; z-index:600; background:#fff; border:1px solid #ddd;
+/* A white panel, so it states its own text colour: the same search is mounted in the header,
+   where everything inherits color:#fff, and anything in here that didn't set a colour came out
+   white on white (the Box chips did). */
+.uni-results { position:absolute; left:0; top:100%; z-index:600; background:#fff; color:#333; border:1px solid #ddd;
   border-radius:0 0 8px 8px; margin-top:-2px; width:460px; max-width:90vw; max-height:70vh; overflow-y:auto;
   box-shadow:0 4px 12px rgba(0,0,0,.12); padding:6px; }
 .uni-label { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:#98a4b0; font-weight:600;
@@ -222,7 +225,9 @@ header h1:hover { opacity:.8; }
 .all-birds { margin:8px 0 12px; }
 .season-birds { margin-bottom:6px; }
 .bird-row { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; max-width:100%; overflow:hidden; }
-.bird-chip { font-size:11px; padding:3px 7px; border-radius:4px; font-family:monospace; background:#f0f0f0; border:1px solid #ddd; cursor:default; }
+/* Always a light background, so it carries dark text of its own rather than inheriting — it
+   also gets dropped into the header's search results, where inherited text is white. */
+.bird-chip { font-size:11px; padding:3px 7px; border-radius:4px; font-family:monospace; background:#f0f0f0; color:#333; border:1px solid #ddd; cursor:default; }
 .bird-chip.f { background:#FFE4E1; border-color:#E8B4B8; }
 .bird-chip.m { background:#E6F3FF; border-color:#B4D4E8; }
 .bird-chip.chick { background:#FFF9C4; border-color:#FDD835; }
