@@ -158,8 +158,37 @@ write_status() {
   chmod 644 "$STATUS/index.html"
 }
 
+# The inventory the API serves: what this mirror holds and what the run just proved about it.
+# Written into status/, which is already mounted (read-only) into the web container — the
+# backups directory itself is not, and does not need to be for a list of names.
+write_inventory() {
+  local out="$STATUS/backups.json" first=1
+  {
+    printf '{'
+    printf '"generated_utc":"%s",' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf '"restore":"%s",' "$([ "$FAILED" -eq 0 ] && echo verified || echo failed)"
+    printf '"tested_dump":"%s",' "$(basename "$DEST" 2>/dev/null)"
+    printf '"tested_dump_taken":"%s",' "${DUMP_TAKEN:-}"
+    printf '"tables":%s,' "${TABLES:-0}"
+    printf '"rows_total":%s,' "${ROWS_TOTAL:-0}"
+    printf '"files":['
+    while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      [ "$first" -eq 1 ] || printf ','
+      first=0
+      printf '{"name":"%s","bytes":%s,"taken_utc":"%s"}' \
+        "$(basename "$f")" "$(wc -c < "$f" | tr -d ' ')" "$(date -u -r "$f" '+%Y-%m-%dT%H:%M:%SZ')"
+    done <<EOF
+$(find "$BACKUPS" -name '*.sql.gz' | sort)
+EOF
+    printf ']}'
+  } > "$out.new" && mv "$out.new" "$out"
+  chmod 644 "$out"
+}
+
 finish() {
   write_status
+  write_inventory
   # Check in with the VPS dead-man's-switch: 'ok' on a clean night, 'fail' otherwise. A
   # missing check-in (this SSH never lands, or the whole run never happened) is what the
   # VPS watchdog alerts on. Never let a check-in failure change the run's own exit status.
