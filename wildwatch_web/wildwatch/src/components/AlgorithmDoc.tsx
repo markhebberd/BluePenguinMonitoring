@@ -211,6 +211,33 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         </tbody>
       </table>
 
+      <h4>When guard actually ends</h4>
+      <p>
+        Guard is the one predicted date the app also checks against what was seen. The
+        prediction — laid + {d(BREEDING_OFFSETS.pg)} — says when the parents <em>should</em> stop
+        attending the nest. The status badge on an observation waits for the evidence: it reads
+        post-guard from the first check that actually found the chicks with neither parent there.
+      </p>
+      <p>
+        A minimum age is what keeps that honest. No check before laid + {d(BREEDING_OFFSETS.pg)} —
+        {' '}{d(BREEDING_OFFSETS.pg - BREEDING_OFFSETS.hatch)} after the estimated hatch — can start
+        post-guard, because a nest found without an adult earlier than that caught a parent briefly
+        off it, not the end of guard. Nor is post-guard ever given back. Going post-guard is fluid:
+        a pair commonly leaves the chicks for a day and one of them is back the next, and the two
+        parents don’t stop together. So from that first check the attempt reads post-guard until it
+        ends, whatever the checks in between find.
+      </p>
+      <p>
+        The consequence is worth knowing: an attempt where every check after the mark happened to
+        catch a parent in the box never reads post-guard. Nothing was seen that says guard ended,
+        so the badge doesn’t claim it — the timeline still draws the predicted phase, which is a
+        prediction and says so.
+      </p>
+      <p>
+        The same mark decides the timeline’s ⚠ marker. Offspring in the box with no adult present is
+        worth flagging before it, and ordinary after it.
+      </p>
+
       <h3>8. Two different windows</h3>
       <p>The algorithm uses two date ranges per attempt, and they are not the same range:</p>
       <ul>
@@ -367,7 +394,8 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
 
       <div className="src">
         The code this describes: <code>segmentClutches</code> (step 5–6), <code>boxSightings</code> (step 4),
-        {' '}<code>detectClutchPair</code> (step 9), <code>computeBoxFamilies</code> (steps 3, 10–11) and
+        {' '}<code>postGuardRanges</code> (step 7), <code>detectClutchPair</code> (step 9),
+        {' '}<code>computeBoxFamilies</code> (steps 3, 10–11) and
         {' '}<code>computeClutchVerify</code> (step 12) in <code>src/App.tsx</code>; all numbers in
         {' '}<code>src/breedingConstants.ts</code>. Both the box breeding overview and the bird panel’s
         family view consume the same functions, so what you read here is what both screens show.

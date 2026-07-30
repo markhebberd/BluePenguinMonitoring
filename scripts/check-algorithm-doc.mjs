@@ -38,9 +38,9 @@ const STAMP = join(SRC, 'algorithmFingerprint.ts');
  */
 const REGIONS = [
   { file: 'breedingConstants.ts', whole: true },
-  { file: 'App.tsx', name: 'estimateLaidDate' },
   { file: 'App.tsx', name: 'Clutch', kind: 'interface' },
   { file: 'App.tsx', name: 'segmentClutches' },
+  { file: 'App.tsx', name: 'postGuardRanges' },
   { file: 'App.tsx', name: 'BoxSighting', kind: 'interface' },
   { file: 'App.tsx', name: 'boxSightings' },
   { file: 'App.tsx', name: 'detectClutchPair' },

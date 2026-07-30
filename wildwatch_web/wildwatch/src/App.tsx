@@ -1,7 +1,7 @@
 import React, { Fragment, Suspense, createContext, lazy, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchBoxTags, fetchOverview, updateRecord, createRecord, deleteRecord, fetchHistory, fetchColonies, saveVerification } from './api/boxtags';
-import { syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
+import { getStoreVersion, syncDatabase, triggerSync, primeFromCache, queryAllLocations, queryCarryForward, getDcmBoxes, prevNonIgnObs, queryPreviousObservations, getDateStats, computeDateStats, startPolling, stopPolling, getColonyId, setActiveColony, observedSexGuess, observedSexScore, SEX_CONFIRM_SCORE, queryBoxDetailSync, splitDismissed, dismissError, undismissError, computeAllPenguinsRows, computeBoxesSeenByPit, queryChipOnlyBoxes, getDayNote, getDayPeople, getUsers, getUserName, saveDayNote, getObserverName, getCachedFmDates, setCachedFmDates, searchLocal } from './api/localdb';
 import { useAllPenguins, useBoxInfo, useDateStats, useBoxDetail, useBirdDetail, useDayData, useEggArrival, useFirstEgg, useDistinctAdults, usePeakAdults, useChickReturn, useMissedScans, useMissingNoScans, useDbVersion, useBirdTwoBoxes, useScanBeforeChip, useDeadScanned, useImprobableCounts, useFutureObservations, useRetiredTagScans, useChicksNoScan, useDuplicateObservations, useDuplicateScans, useSameGenderConflicts, useChickSizeMismatch, useMissingChipMeasures } from './api/useLocalDb';
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, COURTSHIP_LEAD_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP, CHICK_START_MIN_GAP_DAYS, CHIPPED_CHICK_START_MIN_GAP_DAYS } from './breedingConstants';
@@ -50,47 +50,71 @@ interface ChippedHere { peng_num:string; pit_id:string; sex:string|null; life_st
 // The algorithm's tunable numbers live in one module so the admin page's Algorithm
 // tab can quote the same values the code runs on. See src/breedingConstants.ts.
 
-/** C# GetEstimatedBreedingDates: find probable laid date from observation history.
- *  Walk backwards from most recent obs with eggs/chicks to find when offspring first appeared.
- *  Probable laid date = midpoint between last empty check and first egg check.
- *  If 2+ eggs at discovery, subtract 2 days (second egg laid ~2 days after first). */
-function estimateLaidDate(observations: Observation[]): number | null {
-  const sorted = [...observations].sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
-  const reversed = [...sorted].reverse();
-  const mostRecent = reversed.find(o => o.eggs + o.chicks > 0);
-  if (!mostRecent) return null;
-
-  let whenOffspringFound = parseDate(mostRecent.observation_time_utc).getTime();
-  const olderThanRecent = sorted.filter(o =>
-    parseDate(o.observation_time_utc).getTime() < whenOffspringFound
-  ).reverse();
-
-  for (const older of olderThanRecent) {
-    if (older.breeding_status === 'ABN' && older.eggs + older.chicks > 0) return null;
-    if (older.eggs + older.chicks === 0) {
-      if (older.breeding_status === 'ABN') return null;
-      let adjustedFound = whenOffspringFound;
-      if (mostRecent.eggs > 1) adjustedFound -= SECOND_EGG_LAG_DAYS * DAY;
-      const whenNotFound = parseDate(older.observation_time_utc).getTime();
-      const uncertainty = (adjustedFound - whenNotFound) / 2;
-      return whenNotFound + Math.ceil(uncertainty / DAY) * DAY;
-    }
-    whenOffspringFound = parseDate(older.observation_time_utc).getTime();
-  }
-  return null;
-}
-
-function displayStatus(status: string|null, eggs: number, chicks: number): string|null {
+function displayStatus(status: string|null, eggs: number, chicks: number, postGuard = false): string|null {
   const s = (status || '').trim();
   // Eggs/chicks in the box mean incubation/guard has started, whatever pre-breeding
   // assessment (NO/UNL/POT/CON/BR/blank) was last recorded. Explicit stage or alert
   // statuses (I, G, PG, MOULT, ABN, DCM) always display as stored.
   if (['BR', 'CON', 'POT', 'UNL', 'NO', ''].includes(s)) {
-    if (chicks > 0) return 'G';
+    if (chicks > 0) return postGuard ? 'PG' : 'G';
     if (eggs > 0) return 'I';
     if (s === 'BR') return 'NO';
   }
-  return status;
+  // Guard the box has since left is post-guard, however it was recorded.
+  return postGuard && s === 'G' ? 'PG' : status;
+}
+
+/**
+ * When each breeding attempt at a box left guard behind.
+ *
+ * Guard ends when the chicks are first left on their own: the parents stop brooding them
+ * and both feed at sea, coming back only to feed. It isn't a clean switch — a pair
+ * commonly leaves the chicks for a day and one of them is back the next, and the two
+ * parents don't stop together — so post-guard is dated from the FIRST check that found
+ * the chicks with neither parent there, and the nest stays post-guard from that check on
+ * whatever a later one finds.
+ *
+ * The chicks have to be old enough first. Nothing counts before {@link BREEDING_OFFSETS.pg}
+ * days after laying, which is two weeks past the estimated hatch: earlier than that a
+ * check finding no adult caught a parent briefly off the nest, not the end of guard.
+ *
+ * One range per attempt that reached post-guard — from that first check to whatever ended
+ * the attempt (offspring gone, or ABN; open-ended while it's still running).
+ */
+function postGuardRanges(observations: Observation[]): { from: number; to: number }[] {
+  const chrono = [...observations].sort((a, b) => parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+  const ranges: { from: number; to: number }[] = [];
+  for (const c of segmentClutches(chrono)) {
+    // Laid + 52d, from the same estimate the timeline and the breeding calendar date PG by.
+    // A clutch whose laying can't be estimated falls back to its discovery, as guardEnd does.
+    const earliest = Math.max((c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY, c.start);
+    const end = c.end ?? Infinity;
+    const alone = chrono.find(o => {
+      const t = parseDate(o.observation_time_utc).getTime();
+      return t >= earliest && t <= end && (o.chicks || 0) > 0 && (o.adults || 0) === 0;
+    });
+    if (alone) ranges.push({ from: parseDate(alone.observation_time_utc).getTime(), to: end });
+  }
+  return ranges;
+}
+
+/** Post-guard ranges for one box, rebuilt only when the local database changes — the box
+ *  view asks once per observation card and the day view once per row. */
+const pgRangeCache = new Map<string, { version: number; ranges: { from: number; to: number }[] }>();
+function boxPostGuardRanges(box: string): { from: number; to: number }[] {
+  const version = getStoreVersion();
+  const hit = pgRangeCache.get(box);
+  if (hit && hit.version === version) return hit.ranges;
+  const ranges = postGuardRanges(queryBoxDetailSync(box)?.observations || []);
+  pgRangeCache.set(box, { version, ranges });
+  return ranges;
+}
+
+/** Had this box's chicks been left to themselves by this moment? */
+function isPostGuard(box?: string | null, timeUtc?: string | null): boolean {
+  if (!box || !timeUtc) return false;
+  const t = parseDate(timeUtc).getTime();
+  return boxPostGuardRanges(box).some(r => t >= r.from && t <= r.to);
 }
 
 /** Status badge for read-only views: an IGN observation shows the box's previous
@@ -100,9 +124,9 @@ function displayStatus(status: string|null, eggs: number, chicks: number): strin
 function displayStatusOrPrev(o: any, box?: string): string | null {
   if ((o.breeding_status || '').trim() === 'IGN') {
     const prev = box ? prevNonIgnObs(box, o.observation_time_utc || o.date) : null;
-    return prev ? displayStatus(prev.breeding_status, prev.eggs || 0, prev.chicks || 0) : null;
+    return prev ? displayStatus(prev.breeding_status, prev.eggs || 0, prev.chicks || 0, isPostGuard(box, prev.observation_time_utc)) : null;
   }
-  return displayStatus(o.breeding_status, o.eggs, o.chicks);
+  return displayStatus(o.breeding_status, o.eggs, o.chicks, isPostGuard(box, o.observation_time_utc || o.date));
 }
 
 const DARK_TEXT_STATUSES = new Set(['NO','UNL','POT','CON','I','']);
@@ -201,10 +225,15 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
 
   const dataEnd = todayCutoff ? Math.min(todayCutoff.getTime(), seasonEnd.getTime()) : seasonEnd.getTime();
 
-  // Breeding milestones from probable laid date (C# algorithm)
-  const probableLaidTime = estimateLaidDate(allSorted);
-  const pgTime2 = probableLaidTime ? probableLaidTime + BREEDING_OFFSETS.pg * DAY : null;
-  const fledgeTime = probableLaidTime ? probableLaidTime + BREEDING_OFFSETS.fledge * DAY : null;
+  // Predicted phases, one per breeding attempt, off the same clutch segmentation and laid
+  // estimate the rest of the app runs on. Per attempt matters twice over: a season with a
+  // relay clutch gets both phases drawn, and a season bar is drawn from ITS OWN clutches
+  // instead of whatever the box's latest attempt happened to be dated at.
+  const phases = segmentClutches(allSorted).map(c => ({
+    from: c.start,
+    pg: (c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY,   // guard ends: laid + 52d
+    to: c.windowEnd,                                       // the check that ended it, or the predicted fledge
+  }));
 
   // Build segments: observer-set statuses first, then overlay calculated phases
   const segments: { startPct: number; endPct: number; status: string }[] = [];
@@ -213,10 +242,9 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   for (let i = 0; i < changes.length; i++) {
     const segStart = Math.max(changes[i].time, seasonStart.getTime());
     let segEnd = (i + 1 < changes.length) ? Math.min(changes[i + 1].time, dataEnd) : dataEnd;
-    // Truncate Guard at PG start (calculated)
-    if (changes[i].status === 'G' && pgTime2 && pgTime2 < segEnd && pgTime2 > segStart) {
-      segEnd = pgTime2;
-    }
+    // Truncate Guard where its own attempt's guard ends (calculated)
+    const pgIn = phases.find(p => p.pg > segStart && p.pg < segEnd)?.pg;
+    if (changes[i].status === 'G' && pgIn) segEnd = pgIn;
     if (segEnd <= seasonStart.getTime()) continue;
     if (segStart >= dataEnd) continue;
     if (!changes[i].status) continue; // skip empty status segments
@@ -225,19 +253,16 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     segments.push({ startPct, endPct, status: changes[i].status });
   }
 
-  // Add calculated PG phase after guard ends
-  // Observer sets BR (displayed as G) from egg appearance. PG starts at +52d from laid date.
-  // Don't add a separate Guard - the observer-set G covers it.
-  if (probableLaidTime && pgTime2) {
-    const addPhase = (start: number, end: number, status: string) => {
-      const s = Math.max(start, seasonStart.getTime());
-      const e = Math.min(end, dataEnd);
-      if (e <= s) return;
-      segments.push({ startPct: ((s - seasonStart.getTime()) / totalMs) * 100, endPct: ((e - seasonStart.getTime()) / totalMs) * 100, status });
-    };
-    if (pgTime2 < dataEnd) addPhase(pgTime2, fledgeTime!, 'PG');
-    // Moulting only shown from biometric data, not calculated automatically
-  }
+  // Add the calculated PG phase after each attempt's guard ends. The observer sets BR
+  // (displayed as G) from egg appearance, so there's no separate Guard to draw — the
+  // observer-set G covers it. Moulting is shown from biometric data only, never calculated.
+  const addPhase = (start: number, end: number, status: string) => {
+    const s = Math.max(start, seasonStart.getTime());
+    const e = Math.min(end, dataEnd);
+    if (e <= s) return;
+    segments.push({ startPct: ((s - seasonStart.getTime()) / totalMs) * 100, endPct: ((e - seasonStart.getTime()) / totalMs) * 100, status });
+  };
+  for (const p of phases) if (p.pg < dataEnd) addPhase(p.pg, p.to, 'PG');
 
   // Future portion (white) after today
   const futurePct = todayCutoff ? ((todayCutoff.getTime() - seasonStart.getTime()) / totalMs) * 100 : null;
@@ -268,7 +293,6 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     prevEggs = o.eggs;
     prevChicks = o.chicks;
   }
-  const pgTime = firstEggTime ? firstEggTime + 52 * 24 * 60 * 60 * 1000 : null; // 52 days after first egg
 
   // Milestone markers for egg and chick first appearance
   const milestones: { pct: number; icon: string; label: string }[] = [];
@@ -293,7 +317,12 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     const chicksAppeared = prev !== null && prev.chicks === 0 && o.chicks > 0;
     const eggsGone = prev !== null && prev.eggs > 0 && o.eggs === 0 && o.chicks <= prev.chicks;
     const chicksGone = prev !== null && prev.chicks > 0 && o.chicks === 0;
-    const prePgNoAdults = pgTime !== null && t < pgTime && o.eggs + o.chicks > 0 && o.adults === 0;
+    // An unattended nest is only worth flagging while the parents should still be attending
+    // it — dated off this observation's OWN attempt, so the same laid estimate decides both
+    // this warning and where post-guard starts. Past that mark an empty nest is the end of
+    // guard, not an alarm.
+    const attempt = phases.find(p => t >= p.from && t <= p.to);
+    const prePgNoAdults = !!attempt && t < attempt.pg && o.eggs + o.chicks > 0 && o.adults === 0;
 
     let type: MarkerType = 'routine';
     let icon = '';
@@ -1927,7 +1956,7 @@ function ringPos(e: React.MouseEvent): { x: number; y: number } {
   };
 }
 
-function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, canEdit, allPenguins, hideDate, onDataChange }: { obs: Observation; onBirdClick?: (tag:string)=>void; onDayClick?: (day:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[]; hideDate?: boolean; onDataChange?: ()=>void }) {
+function ObsCard({ obs, box, onBirdClick, onDayClick, highlight, scrollTo, token, canEdit, allPenguins, hideDate, onDataChange }: { obs: Observation; box?: string; onBirdClick?: (tag:string)=>void; onDayClick?: (day:string)=>void; highlight?: boolean; scrollTo?: boolean; token?: string; canEdit?: boolean; allPenguins?: any[]; hideDate?: boolean; onDataChange?: ()=>void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -2093,7 +2122,7 @@ function ObsCard({ obs, onBirdClick, onDayClick, highlight, scrollTo, token, can
         <>
           <div className="obs-nums">
             {(() => {
-              const ds = displayStatus(effectiveStatus, localObs.eggs, localObs.chicks);
+              const ds = displayStatus(effectiveStatus, localObs.eggs, localObs.chicks, isPostGuard(box, localObs.observation_time_utc));
               const clickable = canEdit && !!obsId && !!token;
               return (
                 <span className="status-anchor">
@@ -2508,11 +2537,11 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
               ) : obs._chip ? (
                 <ChipCard key={`chip${obs.pit_id}`} date={obs.chip_date} birds={obs._chipBirds} onBirdClick={onBirdClick} onDayClick={onDayClick} />
               ) : (
-                <ObsCard key={obs.observation_id || `t${i}`} obs={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
+                <ObsCard key={obs.observation_id || `t${i}`} obs={obs} box={boxName} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && obs.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && obs.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
               ))}
               </>}
               {sortedPrev.map(([label, obs]) => (
-                <CollapsibleSeason key={label} label={label} observations={obs} onBirdClick={onBirdClick} onDayClick={onDayClick} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
+                <CollapsibleSeason key={label} label={label} observations={obs} box={boxName} onBirdClick={onBirdClick} onDayClick={onDayClick} highlightObs={highlightObs} scrollToObs={scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />
               ))}
             </>);
           })()}
@@ -3879,7 +3908,7 @@ function UnifiedSearch({ dates, onBoxClick, onBirdClick, onDayClick, onObsClick,
               <div key={o.observation_id} data-uni={`ob:${o.observation_id}`} className={cls(`ob:${o.observation_id}`, 'uni-obs')}>
                 <a className="bird-chip clickable" href={`/box/${o.box}`}
                   onClick={e => { e.preventDefault(); go(() => onObsClick(o.box, o.observation_time_utc))(); }}>Box {o.box}</a>
-                <ObsCard obs={o}
+                <ObsCard obs={o} box={o.box}
                   onBirdClick={(tag: string) => go(() => onBirdClick(tag))()}
                   onDayClick={(day: string) => go(() => onDayClick(day))()} />
               </div>
@@ -8621,7 +8650,7 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
   );
 }
 
-function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highlightObs, scrollToObs, token, canEdit, allPenguins, onDataChange }: any) {
+function CollapsibleSeason({ label, observations, box, onBirdClick, onDayClick, highlightObs, scrollToObs, token, canEdit, allPenguins, onDataChange }: any) {
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     const target = scrollToObs || highlightObs;
@@ -8632,7 +8661,7 @@ function CollapsibleSeason({ label, observations, onBirdClick, onDayClick, highl
       <div className="season-divider clickable" onClick={() => setExpanded(!expanded)}><hr/><span>{seasonRange(label)} ({observations.length}) {expanded ? '▲' : '▼'}</span><hr/></div>
       {expanded && mergeSameDayChips(observations).map((o: any, i: number) => o._chip
         ? <ChipCard key={`chip${o.pit_id}`} date={o.chip_date} birds={o._chipBirds} onBirdClick={onBirdClick} onDayClick={onDayClick} />
-        : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
+        : <ObsCard key={o.observation_id || `${label}${i}`} obs={o} box={box} onBirdClick={onBirdClick} onDayClick={onDayClick} highlight={highlightObs !== null && o.observation_time_utc === highlightObs} scrollTo={scrollToObs !== null && o.observation_time_utc === scrollToObs} token={token} canEdit={canEdit} allPenguins={allPenguins} onDataChange={onDataChange} />)}
     </div>
   );
 }
