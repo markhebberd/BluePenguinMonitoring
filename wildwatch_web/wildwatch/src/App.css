@@ -855,6 +855,9 @@ button.verify-danger { background:#c0453a; }
 
 /* Header user/logout */
 .logout-btn { background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.3); color:#fff; padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; }
+/* Legacy mode showing: the button carries the state so you can tell at a glance which
+   experience you're looking at. */
+.logout-btn.legacy-on { background:rgba(255,255,255,.22); border-color:rgba(255,255,255,.5); }
 .logout-btn:hover { background:rgba(255,255,255,.3); }
 
 /* Data entry page */

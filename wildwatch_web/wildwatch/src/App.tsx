@@ -11664,10 +11664,25 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const currentSection = showAdmin ? 'admin' : showDocs ? 'docs' : showReports ? 'reports' : 'colony';
 
-  // The single-purpose Penguin/Box/Date searches are superseded by the unified box, and one
-  // account is trialling life without them — everyone else keeps them alongside. A display
-  // choice, not a permission: everything they reach is reachable from the unified search.
-  const legacySearches = (localStorage.getItem('ww_email') || '').toLowerCase() !== 'mark@wildwatch.co.nz';
+  /**
+   * Legacy mode: the old Penguin/Box/Date toolbar, superseded by the unified search but kept
+   * while people get used to it. On by default so nobody's app changes under them; the one
+   * account trialling life without it starts off. Toggleable from the header, which is the
+   * point — it's how you see what another user sees without logging in as them.
+   *
+   * A display choice, not a permission: everything the toolbar reaches is reachable from the
+   * unified search either way.
+   */
+  const [legacyMode, setLegacyMode] = useState(() => {
+    const saved = localStorage.getItem('ww_legacy_mode');
+    if (saved !== null) return saved === '1';
+    return (localStorage.getItem('ww_email') || '').toLowerCase() !== 'mark@wildwatch.co.nz';
+  });
+  const toggleLegacyMode = () => setLegacyMode(on => {
+    localStorage.setItem('ww_legacy_mode', on ? '0' : '1');
+    return !on;
+  });
+  const legacySearches = legacyMode;
 
   // One element, dropped into each toolbar. Defined here so it sits after the navigation
   // helpers it closes over and before the toolbars that use it. Every destination clears the
@@ -11727,6 +11742,11 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         )}
         <span className="header-user">
           {userName}
+          <button className={`logout-btn${legacyMode ? ' legacy-on' : ''}`} onClick={toggleLegacyMode}
+            title={legacyMode ? 'Legacy mode is on — the old Penguin/Box/Date toolbar is showing. Click to turn it off.'
+                              : 'Legacy mode is off — search only. Click to bring the old Penguin/Box/Date toolbar back.'}>
+            Legacy mode {legacyMode ? 'on' : 'off'}
+          </button>
           <button className="logout-btn" onClick={() => setShowChangePassword(true)}>Password</button>
           <button className="logout-btn" onClick={onLogout}>Logout</button>
         </span>
