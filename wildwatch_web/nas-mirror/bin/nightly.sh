@@ -169,9 +169,11 @@ write_status() {
     printf '</table>'
     printf '<p class=m>%s on disk in total, covering the database, the source code and the server '
     printf 'rebuild kit &mdash; this NAS is a complete third copy of Wildwatch.</p>' "${TOTAL:-?}"
-    printf '<p><a href="/">Open the restored copy of Wildwatch &rarr;</a></p>'
-    printf '<p class=m>The site above is rebuilt from the newest backup every night, so any '
-    printf 'edits made there disappear. The real data lives at wildwatch.co.nz.</p></div>'
+    # No "open the restored copy" link: the site this page is served from IS that copy, so the
+    # link only ever pointed at where the reader already is (and inside the admin tab's frame it
+    # nested Wildwatch in Wildwatch). Say what the site is instead.
+    printf '<p class=m>This site is that restored copy, rebuilt from the newest backup every '
+    printf 'night, so any edits made here disappear. The real data lives at wildwatch.co.nz.</p></div>'
   } > "$STATUS/index.html.new" && mv "$STATUS/index.html.new" "$STATUS/index.html"
   chmod 644 "$STATUS/index.html"
 }

@@ -43,6 +43,12 @@ header h1:hover { opacity:.8; }
 .pinned-count { display:inline-block; margin-left:6px; background:rgba(0,0,0,.25); border-radius:9px;
   padding:0 6px; font-size:11px; font-weight:600; line-height:16px; }
 .pinned-count.zero { background:rgba(76,175,80,.85); }
+/* One thing needs an admin's attention: the offsite mirror's report has aged out. Sits on the
+   Admin nav item and, inside admin, on the Mirror tab — red on both the dark header and the
+   white tab bar, so it carries its own text colour rather than inheriting either. */
+.stale-badge { display:inline-block; margin-left:6px; min-width:16px; padding:0 5px; border-radius:9px;
+  background:#d93025; color:#fff; font-size:11px; font-weight:700; line-height:16px; text-align:center;
+  vertical-align:1px; }
 .check-title:hover { text-decoration:underline; }
 .check-pinned { font-size:12px; }
 .colony-select { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:4px; padding:3px 8px; font-size:13px; cursor:pointer; }
