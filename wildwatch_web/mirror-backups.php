@@ -99,4 +99,8 @@ if (!is_array($json)) {
     http_response_code(500); echo json_encode(['error' => 'Inventory unreadable']); exit;
 }
 $json['inventory_age_seconds'] = time() - (int)filemtime(INVENTORY);
+// When a run was last asked for, so the caller can say so and can tell a queued run from a
+// finished one without guessing from timings.
+$json['last_request_seconds_ago'] = is_file(MARKER) ? time() - (int)filemtime(MARKER) : null;
+$json['min_request_gap_seconds'] = MIN_GAP;
 echo json_encode($json);

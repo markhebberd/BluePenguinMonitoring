@@ -5381,34 +5381,87 @@ function RemoteMirrorCard() {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [waiting, setWaiting] = useState(false);
+  const poll = useRef<number | null>(null);
+  const stampBefore = useRef<string>('');
 
-  const load = async () => {
-    setBusy(true); setMsg('');
+  const load = async (quiet = false) => {
+    if (!quiet) setBusy(true);
     try {
       const r = await fetch('/api/mirror-remote.php', { headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` } });
-      setData(await r.json());
-    } catch (e: any) { setData({ reachable: false, state: 'unreachable', detail: e?.message || 'Request failed' }); }
-    finally { setBusy(false); }
+      const d = await r.json();
+      setData(d);
+      return d;
+    } catch (e: any) {
+      const d = { reachable: false, state: 'unreachable', detail: e?.message || 'Request failed' };
+      setData(d);
+      return d;
+    } finally { if (!quiet) setBusy(false); }
   };
-  useEffect(() => { load(); }, []);
+  const stopPoll = () => { if (poll.current) { clearInterval(poll.current); poll.current = null; } setWaiting(false); };
+  useEffect(() => { load(); return stopPoll; }, []);
 
+  /**
+   * Queue a run, then watch for its result. The run takes minutes, so refreshing once would only
+   * re-show the report the mirror had already published — the card waits for a NEW one instead,
+   * recognised by its generated timestamp changing, and says so while it waits.
+   */
   const requestRun = async () => {
     setBusy(true); setMsg('');
+    stampBefore.current = String(data?.generated_utc || '');
     try {
       const r = await fetch('/api/mirror-remote.php?run=1', {
         method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` },
       });
       const d = await r.json();
-      setMsg(d.state === 'queued' ? (d.message || 'Queued on the mirror.')
-        : d.state === 'rate_limited' ? `The mirror is already running one — asked for ${d.requested_seconds_ago}s ago, try again in ${d.retry_after_seconds}s.`
-        : (d.detail || d.error || 'The mirror did not accept the request.'));
-      load();
+      if (d.state === 'queued') {
+        setMsg(d.message || 'Queued on the mirror — it takes a few minutes. This card updates itself.');
+        stopPoll();
+        setWaiting(true);
+        let ticks = 0;
+        poll.current = window.setInterval(async () => {
+          const fresh = await load(true);
+          if (fresh?.generated_utc && fresh.generated_utc !== stampBefore.current) {
+            stopPoll();
+            setMsg(fresh.restore === 'verified'
+              ? 'Run finished — the new backup restored and verified.'
+              : 'Run finished, but the restore check did not pass. See the mirror\u2019s own status page.');
+          } else if (++ticks >= 40) {                      // ~10 min
+            stopPoll();
+            setMsg('Still no new report after 10 minutes — check the mirror\u2019s own status page.');
+          }
+        }, 15000);
+      } else {
+        setMsg(d.state === 'rate_limited'
+          ? `Asked ${ago(Number(d.requested_seconds_ago) || 0)} — the mirror won't take another for ${Math.ceil((Number(d.retry_after_seconds) || 0) / 60)} min.`
+          : (d.detail || d.error || 'The mirror did not accept the request.'));
+        load(true);
+      }
     } catch (e: any) { setMsg(e?.message || 'Request failed'); }
     finally { setBusy(false); }
   };
 
   const kb = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
-  const ago = (s: number) => s < 3600 ? `${Math.round(s / 60)} min` : s < 172800 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} days`;
+  // The inventory timestamps are UTC; a backup is judged against the day the colony had, so
+  // they read in NZ time. The age is what actually gets looked at — "is the offsite copy from
+  // today?" — so it comes with each one, in whatever unit is still meaningful at that distance.
+  const nz = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? String(iso || '') : d.toLocaleString('en-NZ',
+      { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+  const unit = (n: number, u: string) => `${n} ${u}${n === 1 ? '' : 's'} ago`;
+  const ago = (secs: number) => {
+    const s = Math.max(0, Math.round(secs));
+    if (s < 60) return unit(s, 'second');
+    if (s < 3600) return unit(Math.round(s / 60), 'minute');
+    if (s < 172800) return unit(Math.round(s / 3600), 'hour');
+    return unit(Math.round(s / 86400), 'day');
+  };
+  const since = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : ago((Date.now() - d.getTime()) / 1000);
+  };
   const files: any[] = Array.isArray(data?.files) ? data.files : [];
 
   return (
@@ -5419,8 +5472,15 @@ function RemoteMirrorCard() {
         database and checks the result. This card is what the mirror reports back.
       </p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
-        <button className="edit-btn" disabled={busy} onClick={load}>{busy ? 'Asking…' : 'Refresh'}</button>
-        <button className="edit-btn" disabled={busy || !data?.reachable} onClick={requestRun}>Ask the mirror to run now</button>
+        <button className="edit-btn" disabled={busy} onClick={() => load()}>{busy ? 'Asking…' : 'Refresh'}</button>
+        <button className="edit-btn" disabled={busy || waiting || !data?.reachable} onClick={requestRun}>
+          {waiting ? 'Running on the mirror…' : 'Ask the mirror to run now'}
+        </button>
+        {data?.last_request_seconds_ago != null && (
+          <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>
+            last asked {ago(Number(data.last_request_seconds_ago))}
+          </span>
+        )}
       </div>
       {msg && <p className="muted" style={{ color: '#1a6b8f' }}>{msg}</p>}
 
@@ -5446,7 +5506,7 @@ function RemoteMirrorCard() {
           </span>
         </p>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Reported {ago(Number(data.inventory_age_seconds) || 0)} ago · {files.length} backup{files.length === 1 ? '' : 's'} held
+          Reported {ago(Number(data.inventory_age_seconds) || 0)} · {files.length} backup{files.length === 1 ? '' : 's'} held
         </p>
         <div className="table-scroll">
           <table className="guess-rank-table zebra">
@@ -5454,7 +5514,9 @@ function RemoteMirrorCard() {
             <tbody>{[...files].reverse().map((f: any) => (
               <tr key={f.name}>
                 <td>{f.name}{f.name === data.tested_dump && <span className="muted"> · restored</span>}</td>
-                <td>{String(f.taken_utc || '').replace('T', ' ').replace('Z', '')}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {nz(f.taken_utc)}<span className="muted"> · {since(f.taken_utc)}</span>
+                </td>
                 <td>{kb(Number(f.bytes) || 0)}</td>
               </tr>
             ))}</tbody>
