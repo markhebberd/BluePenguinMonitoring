@@ -5379,40 +5379,50 @@ function NestcheckJsonImport({ token, colonyId }: { token: string; colonyId: num
 const MIRROR_STALE_SECONDS = 15 * 60;
 
 /**
- * Is the offsite copy's report older than it should be? Answered wherever the app runs: on
- * production by asking the mirror through mirror-remote.php, on the mirror itself by reading its
- * own inventory. A mirror that is configured but cannot be asked counts as stale too — an
- * unanswered "how old is the backup?" is not a reassuring answer. A server with no mirror
- * configured at all has nothing to nag about, so it never badges.
+ * Is there something wrong with the offsite copy? Returns the reason, or null when there isn't
+ * one. Answered wherever the app runs: on production by asking the mirror through
+ * mirror-remote.php, on the mirror itself by reading its own inventory.
+ *
+ * Three things count, because all three mean the same thing to an admin — the offsite copy is
+ * not known to be good right now:
+ *   - the report has aged past MIRROR_STALE_SECONDS;
+ *   - the last run's restore did not verify (a fresh report saying RESTORE FAILED is not a
+ *     backup, it is a file — only a restored, verified one counts);
+ *   - the mirror is configured but cannot be asked, so its age is unknown.
+ * A server with no mirror configured at all has nothing to nag about, so it never badges.
  */
-function useMirrorStale(enabled: boolean): boolean {
-  const [stale, setStale] = useState(false);
+function useMirrorAlert(enabled: boolean): string | null {
+  const [reason, setReason] = useState<string | null>(null);
   useEffect(() => {
-    if (!enabled) { setStale(false); return; }
+    if (!enabled) { setReason(null); return; }
     const onMirror = localStorage.getItem('ww_is_mirror') === '1';
     const url = onMirror ? '/api/mirror-backups.php' : '/api/mirror-remote.php';
+    const mins = Math.round(MIRROR_STALE_SECONDS / 60);
     let dead = false;
     const check = async () => {
       try {
         const r = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` } });
         const d = await r.json();
         if (dead) return;
-        if (!onMirror && d?.state === 'not_configured') { setStale(false); return; }
+        if (!onMirror && d?.state === 'not_configured') { setReason(null); return; }
+        if (!(onMirror ? r.ok : d?.reachable === true)) { setReason('The mirror cannot be asked how old the offsite copy is'); return; }
         const age = Number(d?.inventory_age_seconds);
-        const answered = onMirror ? r.ok : d?.reachable === true;
-        setStale(!answered || !Number.isFinite(age) || age > MIRROR_STALE_SECONDS);
-      } catch { if (!dead) setStale(true); }
+        if (!Number.isFinite(age)) { setReason('The mirror did not say how old its report is'); return; }
+        if (age > MIRROR_STALE_SECONDS) { setReason(`The mirror's last report is more than ${mins} minutes old`); return; }
+        if (d?.restore !== 'verified') { setReason('The mirror’s last run did not restore and verify'); return; }
+        setReason(null);
+      } catch { if (!dead) setReason('The mirror cannot be asked how old the offsite copy is'); }
     };
     check();
     const t = window.setInterval(check, 120000);
     return () => { dead = true; clearInterval(t); };
   }, [enabled]);
-  return stale;
+  return reason;
 }
 
-/** The red "1" the stale mirror puts on the Admin nav item and the Mirror tab. */
-function MirrorAlertBadge() {
-  return <span className="stale-badge" title={`The mirror's last report is more than ${Math.round(MIRROR_STALE_SECONDS / 60)} minutes old`}>1</span>;
+/** The red "1" an unhealthy mirror puts on the Admin nav item and the Mirror tab. */
+function MirrorAlertBadge({ reason }: { reason: string }) {
+  return <span className="stale-badge" title={reason}>1</span>;
 }
 
 /**
@@ -9189,11 +9199,12 @@ function DcmBoxesChart() {
   );
 }
 
-function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColony, onLeaveEntry, mirrorStale }: {
+function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColony, onLeaveEntry, mirrorAlert }: {
   token: string; observationDates?: string[];
-  // The mirror's report has aged out — same red "1" the Admin nav item shows, repeated on the
-  // Mirror tab so the trail from "something's wrong" to the card that explains it is unbroken.
-  mirrorStale?: boolean;
+  // Why the mirror is unhealthy (stale, unverified, or unreachable), or null. Puts the same red
+  // "1" the Admin nav item shows on the Mirror tab, so the trail from "something's wrong" to the
+  // card that explains it is unbroken.
+  mirrorAlert?: string | null;
   // A header pin was clicked: jump to the validation tab and scroll to this check. The nonce
   // makes a repeat click on the same pin re-trigger the effect.
   checkTarget?: { slug: string; nonce: number } | null;
@@ -9752,7 +9763,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
           <button key={id} onClick={() => selectTab(id)}
             style={{ padding: '8px 14px', border: 'none', borderBottom: adminTab === id ? '2px solid #1a6b8f' : '2px solid transparent',
               background: 'none', cursor: 'pointer', fontWeight: adminTab === id ? 600 : 400, color: adminTab === id ? '#1a6b8f' : '#555', fontSize: 14, marginBottom: -1 }}>
-            {label}{id === 'mirror' && mirrorStale && <MirrorAlertBadge />}
+            {label}{id === 'mirror' && mirrorAlert && <MirrorAlertBadge reason={mirrorAlert} />}
           </button>
         ))}
       </div>
@@ -11513,7 +11524,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [loadPct, setLoadPct] = useState<number|null>(null);
   // Admins only: the backup mirror going quiet is an admin's problem, and the endpoints are
   // admin-only anyway. Drives the red "1" on the Admin nav item and on the admin Mirror tab.
-  const mirrorStale = useMirrorStale(userRole === 'admin');
+  const mirrorAlert = useMirrorAlert(userRole === 'admin');
 
   // Sync state to URL. Admin/reports/enter/day are standalone full-screen modes, so
   // they own the URL exclusively. box + bird compose — both are serialized together so
@@ -11955,7 +11966,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       <a className={currentSection === 'colony' ? 'active' : ''} href="/" onClick={e => navClick(e, () => goTo('colony'))}>Colony</a>
       <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => goTo('reports'))}>Reports</a>
       <a className={currentSection === 'docs' ? 'active' : ''} href="/docs" onClick={e => navClick(e, () => goTo('docs'))}>Docs</a>
-      {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => goTo('admin'))}>Admin{mirrorStale && <MirrorAlertBadge />}</a>}
+      {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => goTo('admin'))}>Admin{mirrorAlert && <MirrorAlertBadge reason={mirrorAlert} />}</a>}
     </nav>
   );
 
@@ -12077,7 +12088,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
           <nav className="mobile-nav">
             <a className={currentSection === 'reports' ? 'active' : ''} href="/reports" onClick={e => navClick(e, () => { goTo('reports'); closeMenu(); })}>Reports</a>
             <a className={currentSection === 'docs' ? 'active' : ''} href="/docs" onClick={e => navClick(e, () => { goTo('docs'); closeMenu(); })}>Docs</a>
-            {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin{mirrorStale && <MirrorAlertBadge />}</a>}
+            {userRole === 'admin' && <a className={currentSection === 'admin' ? 'active' : ''} href="/admin" onClick={e => navClick(e, () => { goTo('admin'); closeMenu(); })}>Admin{mirrorAlert && <MirrorAlertBadge reason={mirrorAlert} />}</a>}
             {userRole !== 'viewer' && <a className="mobile-nav-link" href="/enter" onClick={e => navClick(e, () => { goTo('enter'); closeMenu(); })}>Enter data</a>}
             <a className="mobile-nav-link" href="/birds" onClick={e => navClick(e, () => { goTo('birds'); closeMenu(); })}>All penguins</a>
           </nav>
@@ -12155,7 +12166,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <CheckNavContext.Provider value={openCheckHref}>
           <AdminPanel token={token} observationDates={stats?.observation_dates} checkTarget={checkTarget}
-            allPenguins={allPenguins} onLeaveEntry={() => goTo('colony')} mirrorStale={mirrorStale}
+            allPenguins={allPenguins} onLeaveEntry={() => goTo('colony')} mirrorAlert={mirrorAlert}
             fmColony={(colonies.find((c: any) => Number(c.colony_id) === colonyId)?.colony_prefix ?? 'PT') === 'PT'} />
         </CheckNavContext.Provider>
         {passwordDialog}
