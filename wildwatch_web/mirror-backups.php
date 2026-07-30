@@ -13,15 +13,19 @@
  *   GET  /api/mirror-backups.php            what this mirror holds, and what the last run proved
  *   POST /api/mirror-backups.php?run=1      queue a backup+restore run (a flag; root acts on it)
  *
- * A run is refused if one was asked for less than MIN_GAP ago: the run takes minutes and a
- * second request inside that window can only interrupt or duplicate it.
+ * A run is refused only while one is already going — that is the whole rule. There is no time
+ * window: once a run has finished, asking for another is a reasonable thing to want.
  */
 require_once 'config.php';
 
-const MIN_GAP = 900;                       // 15 minutes between accepted requests
 const INVENTORY = '/var/www/status/backups.json';
+const RUNLOCK   = '/var/www/status/running';   // nightly.sh holds this for the length of a run
 const TRIGGERS  = '/var/www/triggers';
-const MARKER    = TRIGGERS . '/.last-backup-request';
+const REQUEST   = TRIGGERS . '/backup.req';    // queued, not yet picked up by the host watcher
+
+/** A run is under way if it has been asked for and not yet finished. No time window: the only
+ *  thing worth refusing is a second run on top of the first. */
+function runInProgress(): bool { return is_file(REQUEST) || is_file(RUNLOCK); }
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
@@ -31,7 +35,7 @@ $pdo = getDbConnection();
 /**
  * requireReadAuth accepts the API key on GET only — a read key must not be able to write data.
  * The POST here writes no data: it touches a flag file that a root watcher turns into a run of
- * one fixed script, and it is refused inside 15 minutes of the last one. Production has no
+ * one fixed script, and it is refused while a run is already going. Production has no
  * session on the mirror (separate app, separate sessions table), so a key it can present is the
  * only way it can ask at all. Hence an explicit key check for this endpoint, matching
  * requireReadAuth's own two sources.
@@ -63,23 +67,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!is_dir(TRIGGERS) || !is_writable(TRIGGERS)) {
         http_response_code(404); echo json_encode(['error' => 'Not a backup mirror']); exit;
     }
-    $last = is_file(MARKER) ? (int)filemtime(MARKER) : 0;
-    $age  = time() - $last;
-    if ($last && $age < MIN_GAP) {
-        http_response_code(429);
+    if (runInProgress()) {
+        http_response_code(409);
         echo json_encode([
-            'error' => 'A run was already requested recently',
-            'requested_seconds_ago' => $age,
-            'retry_after_seconds' => MIN_GAP - $age,
+            'error' => 'A run is already going',
+            'running' => true,
+            'started_seconds_ago' => is_file(RUNLOCK) ? time() - (int)filemtime(RUNLOCK) : null,
         ]);
         exit;
     }
     // Same contract as the admin button: drop a flag, never run anything. The host watcher
     // (root) is the only thing that acts on it, and only ever runs nightly.sh.
-    if (@touch(TRIGGERS . '/backup.req') === false) {
+    if (@touch(REQUEST) === false) {
         http_response_code(500); echo json_encode(['error' => 'Could not queue the run']); exit;
     }
-    @touch(MARKER);
     echo json_encode(['queued' => true, 'message' => 'Backup + restore queued — starts within a minute.']);
     exit;
 }
@@ -99,8 +100,7 @@ if (!is_array($json)) {
     http_response_code(500); echo json_encode(['error' => 'Inventory unreadable']); exit;
 }
 $json['inventory_age_seconds'] = time() - (int)filemtime(INVENTORY);
-// When a run was last asked for, so the caller can say so and can tell a queued run from a
-// finished one without guessing from timings.
-$json['last_request_seconds_ago'] = is_file(MARKER) ? time() - (int)filemtime(MARKER) : null;
-$json['min_request_gap_seconds'] = MIN_GAP;
+// Whether a run is going right now, so a caller can wait for it rather than ask again.
+$json['running'] = runInProgress();
+$json['running_seconds'] = is_file(RUNLOCK) ? time() - (int)filemtime(RUNLOCK) : null;
 echo json_encode($json);

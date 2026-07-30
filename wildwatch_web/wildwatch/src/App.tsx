@@ -5414,8 +5414,11 @@ function RemoteMirrorCard() {
         method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('ww_token') || ''}` },
       });
       const d = await r.json();
-      if (d.state === 'queued') {
-        setMsg(d.message || 'Queued on the mirror — it takes a few minutes. This card updates itself.');
+      const already = d.running === true || d.http === 409;
+      if (d.state === 'queued' || already) {
+        setMsg(already
+          ? `A run is already going${d.started_seconds_ago ? ` (started ${ago(Number(d.started_seconds_ago))})` : ''} — watching for its result.`
+          : (d.message || 'Queued on the mirror — it takes a few minutes. This card updates itself.'));
         stopPoll();
         setWaiting(true);
         let ticks = 0;
@@ -5432,9 +5435,7 @@ function RemoteMirrorCard() {
           }
         }, 15000);
       } else {
-        setMsg(d.state === 'rate_limited'
-          ? `Asked ${ago(Number(d.requested_seconds_ago) || 0)} — the mirror won't take another for ${Math.ceil((Number(d.retry_after_seconds) || 0) / 60)} min.`
-          : (d.detail || d.error || 'The mirror did not accept the request.'));
+        setMsg(d.detail || d.error || 'The mirror did not accept the request.');
         load(true);
       }
     } catch (e: any) { setMsg(e?.message || 'Request failed'); }
@@ -5491,14 +5492,21 @@ function RemoteMirrorCard() {
         The offsite copy: it pulls a current dump from this server, restores it into an empty
         database and checks the result. This card is what the mirror reports back.
       </p>
+      {data?.mirror_url && (
+        <p style={{ margin: '4px 0 8px', fontSize: 13 }}>
+          <a className="clickable" href={data.mirror_url} target="_blank" rel="noreferrer">{data.mirror_url}</a>
+          <span className="muted"> · </span>
+          <a className="clickable" href={`${data.mirror_url}/status/`} target="_blank" rel="noreferrer">status page</a>
+        </p>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
         <button className="edit-btn" disabled={busy} onClick={() => load()}>{busy ? 'Asking…' : 'Refresh'}</button>
-        <button className="edit-btn" disabled={busy || waiting || !data?.reachable} onClick={requestRun}>
-          {waiting ? 'Running on the mirror…' : 'Ask the mirror to run now'}
+        <button className="edit-btn" disabled={busy || waiting || data?.running || !data?.reachable} onClick={requestRun}>
+          {waiting || data?.running ? 'Running on the mirror…' : 'Ask the mirror to run now'}
         </button>
-        {data?.last_request_seconds_ago != null && (
+        {data?.running && (
           <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>
-            last asked {ago(Number(data.last_request_seconds_ago))}
+            a run is going{data.running_seconds ? ` — started ${ago(Number(data.running_seconds))}` : ''}
           </span>
         )}
       </div>
@@ -5527,8 +5535,6 @@ function RemoteMirrorCard() {
         </p>
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
           Reported {ago(Number(data.inventory_age_seconds) || 0)} · {files.length} backup{files.length === 1 ? '' : 's'} held
-          {data.mirror_url && <> · <a className="clickable" href={data.mirror_url} target="_blank" rel="noreferrer">open the mirror</a>
-            {' · '}<a className="clickable" href={`${data.mirror_url}/status/`} target="_blank" rel="noreferrer">its status page</a></>}
         </p>
         {calendar.length > 0 && (
           <div className="mirror-cal">

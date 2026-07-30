@@ -44,6 +44,24 @@ MONTH=$(echo "$DATE" | cut -d- -f2)
 DEST_DIR="$BACKUPS/$YEAR/$MONTH"
 DEST="$DEST_DIR/$DATE.sql.gz"
 TMP="$WW_ROOT/tmp"; mkdir -p "$TMP"
+
+# One run at a time. The lock lives in status/ because that is the directory the web container
+# can read: it is how the API answers "is a run going?" without being able to start or stop one.
+# Stale locks are cleared rather than blocking forever — a run that dies without its trap (power
+# cut, OOM) must not wedge the mirror. A restore takes minutes; six hours is far past dead.
+RUNLOCK="$STATUS/running"
+mkdir -p "$STATUS"
+if [ -f "$RUNLOCK" ]; then
+  LOCK_AGE=$(( $(date +%s) - $(date -r "$RUNLOCK" +%s 2>/dev/null || echo 0) ))
+  if [ "$LOCK_AGE" -lt 21600 ]; then
+    echo "[$(date '+%F %T')] a run started ${LOCK_AGE}s ago is still going — leaving it alone" >> "$LOG"
+    exit 0
+  fi
+  echo "[$(date '+%F %T')] clearing a stale run lock (${LOCK_AGE}s old)" >> "$LOG"
+fi
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$RUNLOCK" 2>/dev/null || true
+chmod 644 "$RUNLOCK" 2>/dev/null || true
+trap 'rm -f "$RUNLOCK"' EXIT
 WORK="$TMP/$DATE.sql.gz.part"
 
 STEPS=""          # accumulated "ok|warn|fail<TAB>label<TAB>detail" lines for the status page
