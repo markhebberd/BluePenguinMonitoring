@@ -11360,6 +11360,25 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Must stay above the `if (loading)` early return — a hook below it renders on some passes
   // and not others (React error 310).
   const pinnedChecks = usePinnedChecks();
+  /**
+   * Legacy mode: the old Penguin/Box/Date toolbar, superseded by the unified search but kept
+   * while people get used to it. On by default so nobody's app changes under them; the one
+   * account trialling life without it starts off. Toggleable from the header, which is the
+   * point — it's how you see what another user sees without logging in as them.
+   *
+   * A display choice, not a permission: everything the toolbar reaches is reachable from the
+   * unified search either way.
+   */
+  const [legacyMode, setLegacyMode] = useState(() => {
+    const saved = localStorage.getItem('ww_legacy_mode');
+    if (saved !== null) return saved === '1';
+    return (localStorage.getItem('ww_email') || '').toLowerCase() !== 'mark@wildwatch.co.nz';
+  });
+  const toggleLegacyMode = () => setLegacyMode(on => {
+    localStorage.setItem('ww_legacy_mode', on ? '0' : '1');
+    return !on;
+  });
+
   // Nest-grid tiles straight from the cache, so their colours and counts land with the
   // numbers. stats.box_info replaces it once the overview fetch answers — except for the
   // moulting flag, which only the cache knows (it comes from the biometrics, not the
@@ -11664,24 +11683,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
 
   const currentSection = showAdmin ? 'admin' : showDocs ? 'docs' : showReports ? 'reports' : 'colony';
 
-  /**
-   * Legacy mode: the old Penguin/Box/Date toolbar, superseded by the unified search but kept
-   * while people get used to it. On by default so nobody's app changes under them; the one
-   * account trialling life without it starts off. Toggleable from the header, which is the
-   * point — it's how you see what another user sees without logging in as them.
-   *
-   * A display choice, not a permission: everything the toolbar reaches is reachable from the
-   * unified search either way.
-   */
-  const [legacyMode, setLegacyMode] = useState(() => {
-    const saved = localStorage.getItem('ww_legacy_mode');
-    if (saved !== null) return saved === '1';
-    return (localStorage.getItem('ww_email') || '').toLowerCase() !== 'mark@wildwatch.co.nz';
-  });
-  const toggleLegacyMode = () => setLegacyMode(on => {
-    localStorage.setItem('ww_legacy_mode', on ? '0' : '1');
-    return !on;
-  });
   const legacySearches = legacyMode;
 
   // One element, dropped into each toolbar. Defined here so it sits after the navigation
