@@ -257,6 +257,29 @@ function postGuardRanges(observations: BreedingObservation[]): { from: number; t
   return ranges;
 }
 
+/**
+ * Did the chicks leave, or were they lost?
+ *
+ * A nest that held chicks and is now empty says nothing on its own — the same empty box
+ * follows a successful fledging and a predation. What separates them is how far the chicks
+ * had got when they were last seen, so that is what this asks: chicks last seen at or past
+ * the chip window opening ({@link BREEDING_OFFSETS.chip} days after laying) were big enough
+ * to microchip, and a chick big enough to chip is big enough to go.
+ *
+ * It reads the LAST SIGHTING rather than the check that found the box empty. The empty check
+ * can be months later, and a nest nobody looked at for a season should not be credited with
+ * a fledge no one was near enough to infer.
+ *
+ * `recordedFledged` is a monitor saying outright that unchipped chicks fledged (the
+ * `fledged_unchipped` field). That is an observation, not an inference, so it wins: chicks
+ * can fledge earlier than the window predicts, and a person who was standing at the nest
+ * knows better than an offset does.
+ */
+export function looksFledged(clutch: Clutch, lastSeenWithChicks: number, recordedFledged = false): boolean {
+  if (recordedFledged) return true;
+  return lastSeenWithChicks >= (clutch.laid ?? clutch.start) + BREEDING_OFFSETS.chip * DAY;
+}
+
 /** The shape nestcheck's "Next breeding dates" card consumes, one entry per box.
  *  Dates are NZ calendar days (YYYY-MM-DD); '' means "not applicable to this attempt". */
 export interface PredictedDates {

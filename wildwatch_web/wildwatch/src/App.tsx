@@ -6,7 +6,7 @@ import { useAllPenguins, useBoxInfo, useOverview, useBoxTags, useDateStats, useB
 import { getSeasonStart, getSeasonLabel, SEASON_START_MONTH, SEASON_START_DAY } from './config';
 import { DAY, BREEDING_OFFSETS, SECOND_EGG_LAG_DAYS, MAX_OFFSPRING_SHOWN, PAIR_WEIGHTS, IMPLIED_SHARE_CONFIDENCE, PRE_BREEDING_SIGHTINGS_CAP } from './breedingConstants';
 // The breeding algorithm itself — one implementation, shared with the server. See src/breeding.ts.
-import { parseDate, isChickAtObsDate, segmentClutches, postGuardRanges } from './breeding';
+import { parseDate, isChickAtObsDate, segmentClutches, postGuardRanges, looksFledged } from './breeding';
 import type { Clutch } from './breeding';
 import { ColonyMap } from './components/ColonyMap';
 import { BoxGrid } from './components/BoxGrid';
@@ -201,8 +201,8 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   const phases = segmentClutches(allSorted).map(c => ({
     from: c.start,
     pg: (c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY,       // guard ends: laid + 52d
-    chip: (c.laid ?? c.start) + BREEDING_OFFSETS.chip * DAY,   // chicks big enough to microchip — nearly away
     to: c.windowEnd,                                           // the check that ended it, or the predicted fledge
+    clutch: c,                                                 // for looksFledged, which needs the laid estimate
   }));
 
   // Build segments: observer-set statuses first, then overlay calculated phases
@@ -293,13 +293,14 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     // guard, not an alarm.
     const attempt = phases.find(p => t >= p.from && t <= p.to);
     const prePgNoAdults = !!attempt && t < attempt.pg && o.eggs + o.chicks > 0 && o.adults === 0;
-    // Chicks gone from a nest they were nearly ready to leave have fledged, not vanished.
-    // The test is when they were LAST SEEN, not when the empty box was noticed: a box left
-    // unchecked for months can't be credited with a fledge nobody was near enough to infer.
-    // Old enough means past the chip window opening — big enough to microchip is big enough
-    // to go. Eggs are never fledged, so a clutch that lost eggs at the same check is a loss.
+    // Chicks gone from a nest they were ready to leave have fledged, not vanished — see
+    // looksFledged. Eggs are never fledged, so a clutch that lost eggs at the same check is
+    // a loss. A monitor's own "presumed fledged" on either side of the disappearance (the
+    // last sighting, or the check that found the box empty) settles it outright.
     const prevT = prev ? parseDate(prev.observation_time_utc).getTime() : null;
-    const fledged = chicksGone && !eggsGone && !!attempt && prevT !== null && prevT >= attempt.chip;
+    const saidFledged = Number(prev?.fledged_unchipped || 0) > 0 || Number(o.fledged_unchipped || 0) > 0;
+    const fledged = chicksGone && !eggsGone && !!attempt && prevT !== null
+      && looksFledged(attempt.clutch, prevT, saidFledged);
 
     let type: MarkerType = 'routine';
     let icon = '';

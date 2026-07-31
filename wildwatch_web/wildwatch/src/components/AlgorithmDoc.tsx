@@ -258,6 +258,28 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         worth flagging before it, and ordinary after it.
       </p>
 
+      <h4>When the chicks leave</h4>
+      <p>
+        An empty box says nothing by itself: it looks the same after a successful fledging as
+        after a predation. What separates them is how far the chicks had got when they were
+        <em> last seen</em>. Chicks last recorded at or past the chip window opening (laid +
+        {' '}{d(BREEDING_OFFSETS.chip)}) were big enough to microchip, and a chick big enough to
+        chip is big enough to go — so the timeline marks that disappearance as a fledging rather
+        than a loss. Earlier than that, it stays a loss.
+      </p>
+      <p>
+        The test deliberately reads the last sighting, not the check that found the box empty.
+        Those can be months apart, and a nest nobody looked at for half a season should not be
+        credited with a fledging no one was near enough to infer. Eggs are never fledged: a
+        clutch that lost its eggs at the same check is a loss whatever the dates say.
+      </p>
+      <p>
+        None of this depends on the chicks being microchipped — an unchipped brood seen late
+        enough reads as fledged the same way. And a monitor who records unchipped chicks as
+        presumed fledged overrides the arithmetic outright: that is an observation, not an
+        inference, and chicks can leave earlier than an offset predicts.
+      </p>
+
       <h3>8. Two different windows</h3>
       <p>The algorithm uses two date ranges per attempt, and they are not the same range:</p>
       <ul>
@@ -414,7 +436,7 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
 
       <div className="src">
         The code this describes: <code>segmentClutches</code> and <code>estimateLaidFrom</code> (steps 5–6),
-        {' '}<code>postGuardRanges</code> and <code>predictedDates</code> (step 7) in
+        {' '}<code>postGuardRanges</code>, <code>looksFledged</code> and <code>predictedDates</code> (step 7) in
         {' '}<code>src/breeding.ts</code>; <code>displayStatus</code>, <code>isPostGuard</code> and
         {' '}<code>displayStatusOrPrev</code> (the badge, step 7), <code>boxSightings</code> (step 4),
         {' '}<code>detectClutchPair</code> (step 9), <code>computeBoxFamilies</code> (steps 3, 10–11) and
