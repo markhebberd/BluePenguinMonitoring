@@ -211,6 +211,26 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         </tbody>
       </table>
 
+      <h4>What the status badge says</h4>
+      <p>
+        The badge on an observation is not simply the status a monitor ticked. What is in the box
+        outranks a pre-breeding assessment, because the assessment was a guess about what
+        <em>would</em> happen and the contents are what did: eggs in the box read as
+        <b> Incubation</b> and chicks as <b>Guard</b>, whatever <code>NO</code>,
+        {' '}<code>UNL</code>, <code>POT</code>, <code>CON</code> or <code>BR</code> was last
+        recorded. A status that names a stage or raises an alarm — <code>PG</code>,
+        {' '}<code>MOULT</code>, <code>ABN</code>, <code>DCM</code> — is always shown as stored;
+        a monitor writing one of those is stating a fact, not predicting.
+      </p>
+      <p>
+        Two smaller rules follow the same principle. <code>BR</code> on an empty box reads as
+        {' '}<code>NO</code>: breeding was expected and the box says it didn’t happen. And an
+        observation marked <code>IGN</code> — excused from a full monitor — shows the box’s
+        previous real status instead of <code>IGN</code>, so excusing a nest never hides what is
+        in it. (The editable card still shows <code>IGN</code>, because there you are looking at
+        the record rather than at the nest.)
+      </p>
+
       <h4>When guard actually ends</h4>
       <p>
         Guard is the one predicted date the app also checks against what was seen. The
@@ -393,8 +413,10 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       </ul>
 
       <div className="src">
-        The code this describes: <code>segmentClutches</code> (steps 5–6), <code>postGuardRanges</code> and
-        {' '}<code>predictedDates</code> (step 7) in <code>src/breeding.ts</code>; <code>boxSightings</code> (step 4),
+        The code this describes: <code>segmentClutches</code> and <code>estimateLaidFrom</code> (steps 5–6),
+        {' '}<code>postGuardRanges</code> and <code>predictedDates</code> (step 7) in
+        {' '}<code>src/breeding.ts</code>; <code>displayStatus</code>, <code>isPostGuard</code> and
+        {' '}<code>displayStatusOrPrev</code> (the badge, step 7), <code>boxSightings</code> (step 4),
         {' '}<code>detectClutchPair</code> (step 9), <code>computeBoxFamilies</code> (steps 3, 10–11) and
         {' '}<code>computeClutchVerify</code> (step 12) in <code>src/App.tsx</code>; all numbers in
         {' '}<code>src/breedingConstants.ts</code>. Both the box breeding overview and the bird panel’s

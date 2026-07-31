@@ -41,6 +41,12 @@ const REGIONS = [
   // The algorithm proper — one implementation, shared by the SPA and (bundled for node,
   // via breedingCli.ts) reports.php. Whole file: everything in it is algorithm.
   { file: 'breeding.ts', whole: true },
+  // What a monitor actually reads off an observation. The algorithm decides when an attempt
+  // is post-guard; these decide what the badge says about it, so a change here can make the
+  // explanation untrue just as surely as a change to the rule itself.
+  { file: 'App.tsx', name: 'displayStatus' },
+  { file: 'App.tsx', name: 'isPostGuard' },
+  { file: 'App.tsx', name: 'displayStatusOrPrev' },
   { file: 'App.tsx', name: 'BoxSighting', kind: 'interface' },
   { file: 'App.tsx', name: 'boxSightings' },
   { file: 'App.tsx', name: 'detectClutchPair' },
