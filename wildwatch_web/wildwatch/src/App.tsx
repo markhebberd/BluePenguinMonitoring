@@ -11864,8 +11864,14 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     if (e.key === '/') {
       const inSearch = !!t?.classList?.contains('uni-search-input');
       if (!typing || inSearch) {
-        const box = Array.from(document.querySelectorAll<HTMLInputElement>('.uni-search-input'))
+        // The day view is an overlay laid OVER the page, which stays mounted underneath with a
+        // search of its own — and the buried one still reports client rects, so searching the
+        // whole document focused an input nobody could see and "/" looked dead. Whatever is on
+        // top owns the key, so look inside the overlay first and fall back to the page.
+        const visible = (root: ParentNode) => Array.from(root.querySelectorAll<HTMLInputElement>('.uni-search-input'))
           .find(i => i.getClientRects().length > 0);
+        const overlay = document.querySelector('.day-overlay');
+        const box = (overlay && visible(overlay)) || visible(document);
         e.preventDefault();
         if (box) { box.focus(); box.select(); }
         return;
