@@ -200,8 +200,9 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   // instead of whatever the box's latest attempt happened to be dated at.
   const phases = segmentClutches(allSorted).map(c => ({
     from: c.start,
-    pg: (c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY,   // guard ends: laid + 52d
-    to: c.windowEnd,                                       // the check that ended it, or the predicted fledge
+    pg: (c.laid ?? c.start) + BREEDING_OFFSETS.pg * DAY,       // guard ends: laid + 52d
+    chip: (c.laid ?? c.start) + BREEDING_OFFSETS.chip * DAY,   // chicks big enough to microchip — nearly away
+    to: c.windowEnd,                                           // the check that ended it, or the predicted fledge
   }));
 
   // Build segments: observer-set statuses first, then overlay calculated phases
@@ -273,7 +274,7 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
   }
 
   // Classify each monitor as routine, significant, or warning
-  type MarkerType = 'routine' | 'egg-appear' | 'chick-appear' | 'egg-gone' | 'chick-gone' | 'no-adult-warn';
+  type MarkerType = 'routine' | 'egg-appear' | 'chick-appear' | 'egg-gone' | 'chick-gone' | 'chick-fledged' | 'no-adult-warn';
   const markers: { pct: number; obs: typeof sorted[0]; type: MarkerType; icon: string; date: string }[] = [];
   for (let i = 0; i < sorted.length; i++) {
     const o = sorted[i];
@@ -292,10 +293,18 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     // guard, not an alarm.
     const attempt = phases.find(p => t >= p.from && t <= p.to);
     const prePgNoAdults = !!attempt && t < attempt.pg && o.eggs + o.chicks > 0 && o.adults === 0;
+    // Chicks gone from a nest they were nearly ready to leave have fledged, not vanished.
+    // The test is when they were LAST SEEN, not when the empty box was noticed: a box left
+    // unchecked for months can't be credited with a fledge nobody was near enough to infer.
+    // Old enough means past the chip window opening — big enough to microchip is big enough
+    // to go. Eggs are never fledged, so a clutch that lost eggs at the same check is a loss.
+    const prevT = prev ? parseDate(prev.observation_time_utc).getTime() : null;
+    const fledged = chicksGone && !eggsGone && !!attempt && prevT !== null && prevT >= attempt.chip;
 
     let type: MarkerType = 'routine';
     let icon = '';
     if (prePgNoAdults) { type = 'no-adult-warn'; icon = '⚠'; }
+    else if (fledged) { type = 'chick-fledged'; icon = '🐥'; }
     else if (eggsGone || chicksGone) { type = eggsGone ? 'egg-gone' : 'chick-gone'; icon = '✕'; }
     else if (eggsAppeared) { type = 'egg-appear'; icon = '\uD83E\uDD5A'; }
     else if (chicksAppeared) { type = 'chick-appear'; icon = '\uD83D\uDC23'; }
@@ -332,7 +341,7 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
                 onMouseEnter={() => onHighlight?.(m.date)}
                 onMouseLeave={() => onHighlight?.(null)}
                 onClick={() => onScrollTo?.(m.date)}
-                title={`${fmtDateTime(m.obs.observation_time_utc)}\n\uD83D\uDC27${m.obs.adults} \uD83E\uDD5A${m.obs.eggs} \uD83D\uDC23${m.obs.chicks}${m.obs.breeding_status ? ' ' + m.obs.breeding_status : ''}${m.type === 'no-adult-warn' ? '\n⚠ No adults before post-guard!' : m.type.includes('gone') ? '\n✕ Disappeared' : ''}`}
+                title={`${fmtDateTime(m.obs.observation_time_utc)}\n\uD83D\uDC27${m.obs.adults} \uD83E\uDD5A${m.obs.eggs} \uD83D\uDC23${m.obs.chicks}${m.obs.breeding_status ? ' ' + m.obs.breeding_status : ''}${m.type === 'no-adult-warn' ? '\n⚠ No adults before post-guard!' : m.type === 'chick-fledged' ? '\n🐥 Fledged' : m.type.includes('gone') ? '\n✕ Disappeared' : ''}`}
               >{m.icon}</div>
             )
           ))}

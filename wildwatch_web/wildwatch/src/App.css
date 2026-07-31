@@ -254,6 +254,10 @@ header h1:hover { opacity:.8; }
 .status-marker-event.egg-gone:hover, .status-marker-event.chick-gone:hover { font-size:14px; top:-16px; }
 .status-marker-event.no-adult-warn { color:#F44336; font-size:14px; top:-16px; }
 .status-marker-event.no-adult-warn:hover { font-size:18px; top:-20px; }
+/* Chicks gone from a nest they were ready to leave: the good ending, sized like the other
+   emoji markers rather than the small bold ✕ the failures use. */
+.status-marker-event.chick-fledged { font-size:12px; top:-14px; }
+.status-marker-event.chick-fledged:hover { font-size:16px; top:-18px; }
 .status-milestone { position:absolute; top:-4px; font-size:16px; z-index:4; transform:translateX(-50%); pointer-events:none; text-shadow:0 1px 2px rgba(0,0,0,.3); }
 .status-future { position:absolute; top:0; height:100%; background:#fff; opacity:.85; }
 .status-bar-legend { display:flex; gap:10px; margin-top:6px; font-size:10px; color:#666; flex-wrap:wrap; }
