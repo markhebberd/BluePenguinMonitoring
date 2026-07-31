@@ -11736,7 +11736,19 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const [allBirdsBird, setAllBirdsBird] = useState<string|null>(null);
   const allBirdsBirdData = useBirdDetail(allBirdsBird);
 
+  /**
+   * Close whatever full-screen section is open (admin, reports, docs, entry, all-birds,
+   * settings). Each of those returns early instead of rendering the colony view, so opening
+   * a box or a bird from one of them — the header search is on every page — would set the
+   * state under a screen that never shows it, and the click would look like it did nothing.
+   */
+  const leaveSection = () => {
+    setShowAdmin(false); setShowReports(false); setShowDocs(false);
+    setShowEntry(false); setShowAllBirds(false); setShowSettings(false);
+  };
+
   const openBird = (pengNum: string) => {
+    leaveSection();
     if (window.innerWidth < 900 && selectedBox) {
       setPreviousBox(selectedBox);
       setSelectedBox(null);
@@ -11763,6 +11775,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // (it rides along in the split view); narrow screens can't show both, so we land on
   // the box and dismiss the bird. `date`, when given, highlights that observation.
   const goToBoxFromBird = (box: string, date?: string) => {
+    leaveSection();
     setHighlightObs(null); setScrollToObs(null);
     if (window.innerWidth < 900) { setSelectedBird(null); setPreviousBox(null); }
     setObsAnchor(date ? { box, time: date } : null);
@@ -11773,6 +11786,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   // Box navigation (grid, map): the docked peng panel rides along. Narrow screens
   // can't show box + bird side by side, so there the bird is dismissed.
   const openBox = (box: string) => {
+    leaveSection();
     if (window.innerWidth < 900) setSelectedBird(null);
     setPreviousBox(null);
     setSelectedBox(box);
@@ -11883,7 +11897,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
   const goToDay = (day: string, box?: string) => {
     // Day view is an overlay: keep the box + bird panel underneath so dismissing the day
     // (Escape / back / returning to the box) restores exactly where you were.
-    setShowAdmin(false); setShowReports(false); setShowDocs(false); setShowEntry(false); setShowAllBirds(false);
+    leaveSection();
     setDayBox(box ?? null);
     setSelectedDay(day);
   };
