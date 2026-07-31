@@ -16,6 +16,56 @@ function authHeaders(): Record<string, string> {
 // so switching is instant; only the currently-viewed colony is synced/updated. Persisted across reloads.
 const COLONY_KEY = 'ww_colony';       // active colony_id
 const COLONY_DBKEY = 'ww_colony_key'; // active "<region>-<colony>" key (per-colony DB name)
+const COLONY_LIST_KEY = 'ww_colonies'; // every colony this account can view: id, name, prefix
+
+/**
+ * The colonies this account can view, held from the last time the server named them.
+ *
+ * Colony names are the one thing about a bird that the snapshot doesn't carry — penguin rows
+ * are global and unprefixed by colony — so any screen naming a bird's colony used to wait on
+ * a round trip to be told what "NI" stands for, and showed the bare acronym until it landed.
+ * The list is three fields long and changes about never, so it is kept where the rest of the
+ * offline state lives and refreshed in the background instead.
+ */
+type ColonyRow = { colony_id: number; colony_name: string; colony_prefix: string };
+// Parsed once and held: computeAllPenguinsRows asks per bird, and a JSON.parse of localStorage
+// a thousand times over is exactly the kind of cost this cache exists to avoid.
+let coloniesMem: ColonyRow[] | null = null;
+
+export function setCachedColonies(list: any[]): void {
+  if (!Array.isArray(list) || list.length === 0) return;
+  const slim: ColonyRow[] = list.map(c => ({ colony_id: Number(c.colony_id), colony_name: c.colony_name, colony_prefix: c.colony_prefix }));
+  coloniesMem = slim;
+  colonyByPrefix = null;
+  try { localStorage.setItem(COLONY_LIST_KEY, JSON.stringify(slim)); } catch { /* quota — the fetch still fills it in */ }
+}
+export function getCachedColonies(): ColonyRow[] {
+  if (coloniesMem) return coloniesMem;
+  try { coloniesMem = JSON.parse(localStorage.getItem(COLONY_LIST_KEY) || '[]'); } catch { coloniesMem = []; }
+  return coloniesMem || [];
+}
+/** prefix (uppercase) -> colony name, rebuilt only when the list itself is replaced. */
+let colonyByPrefix: Map<string, string> | null = null;
+function prefixMap(): Map<string, string> {
+  if (colonyByPrefix && coloniesMem) return colonyByPrefix;
+  colonyByPrefix = new Map(getCachedColonies().map(c => [(c.colony_prefix || '').toUpperCase(), c.colony_name]));
+  return colonyByPrefix;
+}
+
+/**
+ * Which colony a peng# belongs to, by name.
+ *
+ * The prefix IS the colony: it's part of the primary key, and only the viewing colony's own
+ * prefix is ever stripped — and only for colonies whose local standard is bare numbers (PT).
+ * So a bare number means the bare-number colony and anything else carries its own prefix,
+ * which is what makes this answerable offline. Unknown prefixes fall back to the acronym,
+ * which is still better than an empty cell.
+ */
+export function colonyNameForPeng(pengNum: string): string {
+  // No prefix left on the number: it belongs to the colony that writes bare numbers (PT).
+  const prefix = (String(pengNum).match(/^[A-Z]{2,4}/)?.[0] || 'PT').toUpperCase();
+  return prefixMap().get(prefix) || (prefix === 'PT' ? '' : prefix);
+}
 export function getColonyId(): number {
   return parseInt(localStorage.getItem(COLONY_KEY) || '1', 10) || 1;
 }
@@ -1040,6 +1090,7 @@ export function computeAllPenguinsRows(): any[] {
     const first = chips[0];
     const row: any = {
       peng_num: p.peng_num, sex: p.sex, is_dead: p.is_dead, death_date: p.death_date,
+      colony_name: colonyNameForPeng(p.peng_num),
       chipped_as_adult: p.chipped_as_adult, chick_size_code: p.chick_size_code,
       first_chip_date: first?.chip_date ?? null, first_chip_box: first?.chip_box ?? null, first_chip_by: first?.chip_by ?? null,
       pits: chips.map(c => ({ pit_id: c.pit_id, is_active: c.is_active ? 1 : 0 })),

@@ -1,4 +1,4 @@
-import { triggerSync, getColonyId } from './localdb';
+import { triggerSync, getColonyId, setCachedColonies } from './localdb';
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('ww_token');
@@ -21,7 +21,11 @@ function checkAuth(r: Response): Response {
 // the change watermark, so a tag saved on the phone reaches the web app on the next poll.
 
 export async function fetchColonies() {
-  return checkAuth(await fetch('/api/colonies.php', { headers: authHeaders() })).json();
+  const list = await checkAuth(await fetch('/api/colonies.php', { headers: authHeaders() })).json();
+  // Held for offline use: names are the one thing about a bird's colony the snapshot can't
+  // carry, and every caller of this is a place that just learned them. See setCachedColonies.
+  if (Array.isArray(list)) setCachedColonies(list);
+  return list;
 }
 
 export async function fetchBoxDetail(name: string) {
