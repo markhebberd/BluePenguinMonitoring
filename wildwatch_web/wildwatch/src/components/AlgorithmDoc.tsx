@@ -215,8 +215,8 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       <p>
         The badge on an observation is not simply the status a monitor ticked. What is in the box
         outranks a pre-breeding assessment, because the assessment was a guess about what
-        <em>would</em> happen and the contents are what did: eggs in the box read as
-        <b> Incubation</b> and chicks as <b>Guard</b>, whatever <code>NO</code>,
+        {' '}<em>would</em> happen and the contents are what did: eggs in the box read as
+        {' '}<b>Incubation</b> and chicks as <b>Guard</b>, whatever <code>NO</code>,
         {' '}<code>UNL</code>, <code>POT</code>, <code>CON</code> or <code>BR</code> was last
         recorded. A status that names a stage or raises an alarm — <code>PG</code>,
         {' '}<code>MOULT</code>, <code>ABN</code>, <code>DCM</code> — is always shown as stored;
