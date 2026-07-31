@@ -1081,6 +1081,31 @@ const ordinal = (n: number) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3r
 const seasonRange = (label: string) => `${label}/${String((parseInt(label) + 1) % 100).padStart(2, '0')}`;
 
 const fmtMs = (ms: number) => new Date(ms).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
+/**
+ * How a season reads at a glance: the coloured word beside a box's or a bird's season.
+ *
+ *   none   — nothing was laid
+ *   bred   — the season produced a chick that got away
+ *   active — an attempt is still running
+ *   fail   — eggs were laid and nothing came of them
+ *
+ * "A chick that got away" is what the record ESTABLISHES, by either of the two ways it can:
+ * a chick microchipped in the nest, or unchipped chicks a monitor recorded as presumed
+ * fledged. Counting only the chipped ones read a nest whose brood nobody happened to catch
+ * as a failure, which is the opposite of what happened.
+ *
+ * Deliberately NOT counted: the timeline's date-based inference that chicks last seen past
+ * the chip window must have fledged (see looksFledged). That is a fair reading of one
+ * marker, but a season summary is a stronger claim — it is what breeding success gets
+ * counted from — and the record has two plain ways to state the outcome. Inferring success
+ * from an offset would inflate the figures with attempts nobody actually saw finish.
+ */
+function seasonOutcome(clutchCount: number, families: { clutch: Clutch; chicks: any[]; fledgedUnchipped: number }[]): 'none' | 'bred' | 'active' | 'fail' {
+  if (clutchCount === 0) return 'none';
+  if (families.some(f => f.chicks.length > 0 || f.fledgedUnchipped > 0)) return 'bred';
+  return families.some(f => clutchActive(f.clutch)) ? 'active' : 'fail';
+}
+
 /** Clutch still running: no terminating observation yet and predicted fledge not passed. */
 const clutchActive = (c: { end: number | null; windowEnd: number }) => c.end === null && Date.now() <= c.windowEnd;
 /** Breeding-window date range; an active window reads "6 Jul – current". */
@@ -1630,11 +1655,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
           if (!prev || o.observation_time_utc > prev) dayToObsTime.set(day, o.observation_time_utc);
         }
 
-        // Season outcome colour: grey = no eggs, green = a chipped chick, blue = eggs still active,
-        // red = eggs but concluded with no chipped chick.
-        const seasonHasChick = families.some((f: any) => f.chicks.length > 0);
-        const seasonActive = families.some((f: any) => clutchActive(f.clutch));
-        const seasonStatus = clutches.length === 0 ? 'none' : seasonHasChick ? 'bred' : seasonActive ? 'active' : 'fail';
+        // Season outcome colour: grey = nothing laid, green = a chick got away, blue = still
+        // running, red = eggs and nothing came of them. One rule, shared with the bird view.
+        const seasonStatus = seasonOutcome(clutches.length, families);
         const statusLabel = seasonStatus === 'none' ? 'None' : seasonStatus === 'bred' ? 'Bred' : seasonStatus === 'active' ? 'Active' : 'Failed';
         // Everything not part of a detected clutch is a visitor, shown once with its season total.
         const visitorBirds = sorted.filter((b: any) => { const k = b.pit_id.slice(-8); return !parentKeys.has(k) && !chickFamily.has(k); });
@@ -2806,9 +2829,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
           <h3 className="collapsible" onClick={() => toggleSection('breeding')}>{expandedSections.breeding ? '▾' : '▸'} Breeding history ({pengFamilies.length})</h3>
           {expandedSections.breeding && <div className="all-birds">
             {breedingSeasons.map(season => {
-              const hasChick = season.entries.some(e => e.fam.chicks.length > 0);
-              const anyActive = season.entries.some(e => clutchActive(e.fam.clutch));
-              const st = season.entries.length === 0 ? 'none' : hasChick ? 'bred' : anyActive ? 'active' : 'fail';
+              const st = seasonOutcome(season.entries.length, season.entries.map(e => e.fam));
               // In the bird's own hatch season it IS the chick — "Bred" would read as it breeding.
               const wasChick = season.entries.some(e => e.role === 'chick');
               const stLabel = st === 'none' ? 'None' : st === 'bred' ? (wasChick ? 'Chick' : 'Bred') : st === 'active' ? 'Active' : 'Failed';

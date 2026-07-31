@@ -7,6 +7,6 @@
  * the explanation together and confirmed the explanation was true.
  */
 export const ALGORITHM_DOC = {
-  fingerprint: 'd2cd4253ee17b508',
+  fingerprint: '7255bf77b30f1681',
   reviewed: '2026-07-31',
 };

@@ -47,6 +47,7 @@ const REGIONS = [
   { file: 'App.tsx', name: 'displayStatus' },
   { file: 'App.tsx', name: 'isPostGuard' },
   { file: 'App.tsx', name: 'displayStatusOrPrev' },
+  { file: 'App.tsx', name: 'seasonOutcome' },
   { file: 'App.tsx', name: 'BoxSighting', kind: 'interface' },
   { file: 'App.tsx', name: 'boxSightings' },
   { file: 'App.tsx', name: 'detectClutchPair' },

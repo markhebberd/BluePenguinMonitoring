@@ -290,6 +290,37 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         alone would call a successful nest a loss.
       </p>
 
+      <h4>How a season is scored</h4>
+      <p>
+        Beside each season on a box or a bird sits one word for how it went:
+      </p>
+      <table className="stages">
+        <thead><tr><th>Word</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td>None</td><td>Nothing was laid</td></tr>
+          <tr><td>Bred</td><td>The season produced a chick that got away</td></tr>
+          <tr><td>Active</td><td>An attempt is still running</td></tr>
+          <tr><td>Failed</td><td>Eggs were laid and nothing came of them</td></tr>
+        </tbody>
+      </table>
+      <p>
+        “A chick that got away” means what the record <em>establishes</em>, by either of the two
+        ways it can say so: a chick microchipped in the nest, or unchipped chicks a monitor
+        recorded as presumed fledged. Both count. Counting only the chipped ones would read a
+        nest whose brood nobody happened to catch as a failure, which is the opposite of what
+        happened.
+      </p>
+      <p>
+        What deliberately does <em>not</em> count is the timeline’s date-based inference — that
+        chicks last seen past the chip window must have fledged. That is a fair reading of a
+        single marker, but this word is a stronger claim, and it is what breeding success gets
+        counted from. Inferring success from an offset would inflate the figures with attempts
+        nobody saw finish. So a nest can show a fledgling on its bar and still read “Failed”
+        for the season: the bar is reporting what the last check looked like, the word is
+        reporting what the record can prove. Chipping the chicks, or ticking the unchipped ones
+        as fledged, is what turns one into the other.
+      </p>
+
       <h3>8. Two different windows</h3>
       <p>The algorithm uses two date ranges per attempt, and they are not the same range:</p>
       <ul>
@@ -448,7 +479,8 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         The code this describes: <code>segmentClutches</code> and <code>estimateLaidFrom</code> (steps 5–6),
         {' '}<code>postGuardRanges</code>, <code>looksFledged</code> and <code>predictedDates</code> (step 7) in
         {' '}<code>src/breeding.ts</code>; <code>displayStatus</code>, <code>isPostGuard</code> and
-        {' '}<code>displayStatusOrPrev</code> (the badge, step 7), <code>boxSightings</code> (step 4),
+        {' '}<code>displayStatusOrPrev</code> (the badge, step 7), <code>seasonOutcome</code> (step 7),
+        {' '}<code>boxSightings</code> (step 4),
         {' '}<code>detectClutchPair</code> (step 9), <code>computeBoxFamilies</code> (steps 3, 10–11) and
         {' '}<code>computeClutchVerify</code> (step 12) in <code>src/App.tsx</code>; all numbers in
         {' '}<code>src/breedingConstants.ts</code>. Both the box breeding overview and the bird panel’s
