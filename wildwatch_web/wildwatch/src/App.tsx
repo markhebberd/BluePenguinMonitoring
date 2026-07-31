@@ -2527,9 +2527,10 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
     return [below, above];
   }, [allPenguins, p.peng_num]);
   const bare = (n: any) => String(n ?? '').replace(/^[A-Z]+/, '');
-  // Left/right step down/up the numbering (. and , do boxes). Same guard as the app's other
-  // shortcuts: never while typing in a field. The day overlay owns the arrows for stepping
-  // dates and marks them handled, so a peng docked there doesn't move on the same press.
+  // Left/right step down/up the numbering; . and , step the container the bird sits in (the
+  // box, or the day when the panel is docked in the day overlay). Splitting them that way is
+  // what keeps the two window listeners out of each other's way — sharing a key moved the bird
+  // and the day on a single press. Same guard as the app's other shortcuts: never while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
@@ -11872,14 +11873,17 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     }
     // Don't hijack arrow/Escape keys while typing in a field — they move the cursor / cancel the edit.
     if (typing) return;
-    // Day view: left/right step to the previous/next date that has an observation.
+    // Day view: . and , (shifted too) step to the next/previous date that has an observation —
+    // the same keys that step boxes, because a day and a box are the same kind of thing to move
+    // between. The arrows are left to the bird panel, which can be docked open here: it listens
+    // on the window too, so sharing a key moved the peng AND the day on one press.
     if (selectedDay) {
       const ds = [...(stats?.observation_dates || [])].sort();
       const di = ds.indexOf(selectedDay);
       // Day → day: the box-highlight came from a specific box's date link — it
       // doesn't apply to a different day, so drop it.
-      if (e.key === 'ArrowRight' && di >= 0 && di < ds.length - 1) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di + 1]); }
-      else if (e.key === 'ArrowLeft' && di > 0) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di - 1]); }
+      if ((e.key === '.' || e.key === '>') && di >= 0 && di < ds.length - 1) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di + 1]); }
+      else if ((e.key === ',' || e.key === '<') && di > 0) { e.preventDefault(); setDayBox(null); setSelectedDay(ds[di - 1]); }
       else if (e.key === 'Escape') { setSelectedDay(null); }
       return;
     }
