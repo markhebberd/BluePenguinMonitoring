@@ -257,27 +257,43 @@ function postGuardRanges(observations: BreedingObservation[]): { from: number; t
   return ranges;
 }
 
+/** What the record can say about chicks leaving, beyond the dates. */
+export interface FledgeEvidence {
+  /** When chicks were microchipped in this nest (ms). The strongest evidence there is. */
+  chickChipTimes?: number[];
+  /** A monitor recorded unchipped chicks as presumed fledged (the fledged_unchipped field). */
+  recordedFledged?: boolean;
+}
+
 /**
  * Did the chicks leave, or were they lost?
  *
  * A nest that held chicks and is now empty says nothing on its own — the same empty box
- * follows a successful fledging and a predation. What separates them is how far the chicks
- * had got when they were last seen, so that is what this asks: chicks last seen at or past
- * the chip window opening ({@link BREEDING_OFFSETS.chip} days after laying) were big enough
- * to microchip, and a chick big enough to chip is big enough to go.
+ * follows a successful fledging and a predation. Three things can tell them apart, in
+ * descending order of how directly they were witnessed.
  *
- * It reads the LAST SIGHTING rather than the check that found the box empty. The empty check
- * can be months later, and a nest nobody looked at for a season should not be credited with
- * a fledge no one was near enough to infer.
+ * A monitor recording unchipped chicks as presumed fledged is a person stating the outcome,
+ * so it settles the question outright.
  *
- * `recordedFledged` is a monitor saying outright that unchipped chicks fledged (the
- * `fledged_unchipped` field). That is an observation, not an inference, so it wins: chicks
- * can fledge earlier than the window predicts, and a person who was standing at the nest
- * knows better than an offset does.
+ * A chick microchipped in the nest is nearly as good and far more common: nobody chips a
+ * bird that then dies in the nest, and the chipping is someone's record of having held it,
+ * grown. So a chipping means fledged — and the window for accepting one is deliberately
+ * loose, running from the start of the attempt to the predicted fledge or the check that
+ * ended it, whichever is later. A chipping entered a few days late is a filing detail, not
+ * evidence against the chick.
+ *
+ * Failing both, the dates: chicks last seen at or past the chip window opening
+ * ({@link BREEDING_OFFSETS.chip} days after laying) were big enough to microchip, and a chick
+ * big enough to chip is big enough to go. This reads the LAST SIGHTING rather than the check
+ * that found the box empty — those can be months apart, and a nest nobody looked at for a
+ * season should not be credited with a fledging no one was near enough to infer.
  */
-export function looksFledged(clutch: Clutch, lastSeenWithChicks: number, recordedFledged = false): boolean {
-  if (recordedFledged) return true;
-  return lastSeenWithChicks >= (clutch.laid ?? clutch.start) + BREEDING_OFFSETS.chip * DAY;
+export function looksFledged(clutch: Clutch, lastSeenWithChicks: number, evidence: FledgeEvidence = {}): boolean {
+  if (evidence.recordedFledged) return true;
+  const anchor = clutch.laid ?? clutch.start;
+  const until = Math.max(clutch.end ?? clutch.windowEnd, anchor + BREEDING_OFFSETS.fledge * DAY);
+  if ((evidence.chickChipTimes || []).some(t => t >= clutch.start && t <= until)) return true;
+  return lastSeenWithChicks >= anchor + BREEDING_OFFSETS.chip * DAY;
 }
 
 /** The shape nestcheck's "Next breeding dates" card consumes, one entry per box.

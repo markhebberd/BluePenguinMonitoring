@@ -151,8 +151,8 @@ const STATUS_NAMES: Record<string,string> = {
 // observation. Order = ring position: CON at top (12 o'clock), then clockwise.
 const STATUS_PICK_OPTIONS = ['CON','POT','UNL','NO','ABN','DCM','IGN'];
 
-function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
-  observations: Observation[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
+function SeasonBar({ observations, chickChipTimes, seasonStart, seasonEnd, label, todayCutoff, onHighlight, onScrollTo }: {
+  observations: Observation[]; chickChipTimes?: number[]; seasonStart: Date; seasonEnd: Date; label: string; todayCutoff?: Date;
   onHighlight?: (obsDate: string | null) => void;
   onScrollTo?: (obsDate: string) => void;
 }) {
@@ -298,9 +298,9 @@ function SeasonBar({ observations, seasonStart, seasonEnd, label, todayCutoff, o
     // a loss. A monitor's own "presumed fledged" on either side of the disappearance (the
     // last sighting, or the check that found the box empty) settles it outright.
     const prevT = prev ? parseDate(prev.observation_time_utc).getTime() : null;
-    const saidFledged = Number(prev?.fledged_unchipped || 0) > 0 || Number(o.fledged_unchipped || 0) > 0;
+    const recordedFledged = Number(prev?.fledged_unchipped || 0) > 0 || Number(o.fledged_unchipped || 0) > 0;
     const fledged = chicksGone && !eggsGone && !!attempt && prevT !== null
-      && looksFledged(attempt.clutch, prevT, saidFledged);
+      && looksFledged(attempt.clutch, prevT, { chickChipTimes, recordedFledged });
 
     let type: MarkerType = 'routine';
     let icon = '';
@@ -367,7 +367,18 @@ function StatusLegend() {
   );
 }
 
-function BreedingStatusBar({ observations, onHighlight, onScrollTo, hideLegend }: { observations: Observation[]; onHighlight?: (date: string | null) => void; onScrollTo?: (date: string) => void; hideLegend?: boolean }) {
+function BreedingStatusBar({ observations, box, onHighlight, onScrollTo, hideLegend }: { observations: Observation[]; box?: string; onHighlight?: (date: string | null) => void; onScrollTo?: (date: string) => void; hideLegend?: boolean }) {
+  // When chicks were chipped in this nest. A chipping is the strongest thing the record has
+  // to say a chick got away (looksFledged), and it is NOT an observation — a chick can be
+  // chipped on a visit that logged no nest check at all, as box 9 was in 2025 — so the bars
+  // can't find it in `observations` and have to be told.
+  const dbVersion = useDbVersion();
+  const chickChipTimes = useMemo(() => {
+    if (!box) return [];
+    return (queryBoxDetailSync(box)?.all_penguins || [])
+      .filter((p: any) => p.is_chipped_here && !p.chipped_as_adult && p.chip_date)
+      .map((p: any) => parseDate(p.chip_date).getTime());
+  }, [box, dbVersion]);
   const now = new Date();
   const currentSeasonStart = getSeasonStart(now);
   void now; // currentSeasonEnd no longer needed - full year bar with todayCutoff
@@ -391,9 +402,9 @@ function BreedingStatusBar({ observations, onHighlight, onScrollTo, hideLegend }
 
   return (
     <div className="status-bar-wrap">
-      <SeasonBar observations={observations} seasonStart={currentSeasonStart} seasonEnd={currentSeasonFullEnd} label={currentLabel} todayCutoff={now} onHighlight={onHighlight} onScrollTo={onScrollTo} />
+      <SeasonBar observations={observations} chickChipTimes={chickChipTimes} seasonStart={currentSeasonStart} seasonEnd={currentSeasonFullEnd} label={currentLabel} todayCutoff={now} onHighlight={onHighlight} onScrollTo={onScrollTo} />
       {hasPrevData && (
-        <SeasonBar observations={observations} seasonStart={prevSeasonStart} seasonEnd={prevSeasonEnd} label={prevLabel} onHighlight={onHighlight} onScrollTo={onScrollTo} />
+        <SeasonBar observations={observations} chickChipTimes={chickChipTimes} seasonStart={prevSeasonStart} seasonEnd={prevSeasonEnd} label={prevLabel} onHighlight={onHighlight} onScrollTo={onScrollTo} />
       )}
       {!hideLegend && <StatusLegend />}
     </div>
@@ -4420,7 +4431,7 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
       {/* Breeding status bar - always visible */}
       {box && allBoxObs.length > 0 && (
         <div className="entry-context">
-          <BreedingStatusBar observations={allBoxObs} />
+          <BreedingStatusBar observations={allBoxObs} box={box} />
         </div>
       )}
 
@@ -7959,7 +7970,7 @@ export function EmbeddedPanel() {
     body = (
       <div className="embed-box">
         <div className="page-header"><div className="box-header-left"><h2>Box {view.id}</h2><WatchedTick location={boxData.location} canEdit={false} /><StatusLegend /></div></div>
-        <BreedingStatusBar observations={boxData.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
+        <BreedingStatusBar observations={boxData.observations} box={view.id} hideLegend onHighlight={setHighlightObs} onScrollTo={scrollObs} />
         <div className="detail-split">
           <BoxPanel key={view.id} data={boxData} boxName={view.id} allPenguins={allPenguins}
             onBirdClick={goBird} onDayClick={goDay}
@@ -12303,7 +12314,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
               <a className="page-back" href="/" onClick={e => navClick(e, () => { setScrollToBox(selectedBox); setSelectedBox(null); })}>&larr; Overview</a>
             </div>
             {false ? <p className="muted">Loading...</p> : boxDetail ? (
-              <BreedingStatusBar observations={boxDetail.observations} hideLegend onHighlight={setHighlightObs} onScrollTo={(d) => { if (selectedBox) setObsAnchor({ box: selectedBox, time: d }); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
+              <BreedingStatusBar observations={boxDetail.observations} box={selectedBox} hideLegend onHighlight={setHighlightObs} onScrollTo={(d) => { if (selectedBox) setObsAnchor({ box: selectedBox, time: d }); setHighlightObs(null); setScrollToObs(null); setTimeout(() => { setHighlightObs(d); setScrollToObs(d); }, 10); }} />
             ) : null}
           </div>
 

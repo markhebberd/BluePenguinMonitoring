@@ -274,10 +274,20 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         clutch that lost its eggs at the same check is a loss whatever the dates say.
       </p>
       <p>
-        None of this depends on the chicks being microchipped — an unchipped brood seen late
-        enough reads as fledged the same way. And a monitor who records unchipped chicks as
-        presumed fledged overrides the arithmetic outright: that is an observation, not an
-        inference, and chicks can leave earlier than an offset predicts.
+        Two things outrank that arithmetic, because they were witnessed rather than inferred.
+        A <b>chick microchipped in the nest means the nest fledged</b> — nobody chips a bird
+        that then dies in the nest, and the chipping is someone’s record of having held it,
+        grown. The window for accepting a chipping is deliberately loose, running from the
+        start of the attempt to the predicted fledge or the check that ended it, whichever is
+        later: a chipping entered a few days late is a filing detail, not evidence against the
+        chick. And a monitor who records unchipped chicks as presumed fledged settles it
+        outright — that is a person stating the outcome.
+      </p>
+      <p>
+        This matters more than it sounds, because a chipping is not a nest check. A chick can
+        be chipped on a visit that recorded no box contents at all, so the chipping can fall
+        after the last observation that saw chicks — which is exactly the case where the dates
+        alone would call a successful nest a loss.
       </p>
 
       <h3>8. Two different windows</h3>
