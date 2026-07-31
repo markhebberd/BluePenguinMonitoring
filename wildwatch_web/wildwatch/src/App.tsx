@@ -5285,6 +5285,12 @@ const MIRROR_STALE_SECONDS = 24 * 60 * 60;
  *     backup, it is a file — only a restored, verified one counts);
  *   - the mirror is configured but cannot be asked, so its age is unknown.
  * A server with no mirror configured at all has nothing to nag about, so it never badges.
+ *
+ * Only a real answer can raise it. "The server told me it can't reach the mirror" is one —
+ * mirror-remote.php returns that as an ordinary 200 with reachable:false, and it badges. "My
+ * browser couldn't reach the server" is not: a dev build with no /api behind it, a dropped
+ * connection or a login page instead of JSON all say nothing about the offsite copy, so they
+ * leave the badge alone rather than claiming the mirror is broken.
  */
 function useMirrorAlert(enabled: boolean): string | null {
   const [reason, setReason] = useState<string | null>(null);
@@ -5304,13 +5310,17 @@ function useMirrorAlert(enabled: boolean): string | null {
         const d = await r.json();
         if (dead) return;
         if (!onMirror && d?.state === 'not_configured') { setReason(null); return; }
-        if (!(onMirror ? r.ok : d?.reachable === true)) { setReason('The mirror cannot be asked how old the offsite copy is'); return; }
+        // Not an answer about the mirror: no /api behind this build, or a session that has
+        // expired into an error payload. Nothing is known either way, so nothing is claimed.
+        if (!onMirror && typeof d?.reachable !== 'boolean') { setReason(null); return; }
+        if (onMirror && !r.ok) { setReason(null); return; }
+        if (!onMirror && !d.reachable) { setReason('The mirror cannot be asked how old the offsite copy is'); return; }
         const age = Number(d?.inventory_age_seconds);
         if (!Number.isFinite(age)) { setReason('The mirror did not say how old its report is'); return; }
         if (age > MIRROR_STALE_SECONDS) { setReason(`The mirror's last report is more than ${limit} old`); return; }
         if (d?.restore !== 'verified') { setReason('The mirror’s last run did not restore and verify'); return; }
         setReason(null);
-      } catch { if (!dead) setReason('The mirror cannot be asked how old the offsite copy is'); }
+      } catch { if (!dead) setReason(null); }
     };
     check();
     const t = window.setInterval(check, 120000);
