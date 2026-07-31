@@ -454,6 +454,12 @@ h3.collapsible:hover { color:#1a5276; }
 .report-card.wide { width:min(1400px, calc(100vw - 32px)); margin-left:50%; transform:translateX(-50%); }
 /* Last resort below ~1400px of content: scroll the table, not the page. */
 .table-scroll { overflow-x:auto; }
+/* Columns sized to their content instead of a share of the table: every cell asks for its
+   natural width and refuses to wrap, so a value never breaks across two lines. The table
+   still fills its container when the content is narrower (min-width), and grows past it when
+   it isn't — which is what .table-scroll is there to absorb. */
+.guess-rank-table.fit { width:auto; min-width:100%; }
+.guess-rank-table.fit th, .guess-rank-table.fit td { white-space:nowrap; }
 /* Alternating rows for the data-validation tables. Opt-in, because guess-rank-table is
    shared with the Reports page. Colours the row itself so cell backgrounds stay unset. */
 .zebra tbody tr:nth-child(even) { background:#eff5fa; }

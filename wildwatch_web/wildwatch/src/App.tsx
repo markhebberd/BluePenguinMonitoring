@@ -8530,10 +8530,10 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
         {!rows && !error && <p className="muted">Loading…</p>}
         {sorted && (
           <div className="table-scroll">
-            <table className="guess-rank-table zebra">
+            <table className="guess-rank-table zebra fit">
               <thead><tr>
                 {COLS.map(c => (
-                  <th key={c.key} className="clickable" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => clickSort(c)}>
+                  <th key={c.key} className="clickable" style={{ cursor: 'pointer' }} onClick={() => clickSort(c)}>
                     {c.label}{sortKey === c.key ? (sortDesc ? ' ▼' : ' ▲') : ''}
                   </th>
                 ))}
