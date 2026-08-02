@@ -1394,13 +1394,27 @@ export function computePeakAdults(): any[] {
   }));
 }
 
-/** Last 30 days: boxes where fewer adults were scanned than recorded present.
+/** First NZ date of the season in progress. Derived from today's NZ date rather than the
+ *  browser's local one, so the window doesn't shift with where the viewer happens to be. */
+function currentSeasonStartNz(): string {
+  const [y, m, d] = utcToNzDate(new Date().toISOString()).split('-').map(Number);
+  const started = m > SEASON_START_MONTH || (m === SEASON_START_MONTH && d >= SEASON_START_DAY);
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  return `${started ? y : y - 1}-${pad2(SEASON_START_MONTH)}-${pad2(SEASON_START_DAY)}`;
+}
+
+/** This season: boxes where fewer adults were scanned than recorded present.
  *  Per NZ day per box, adults = max recorded across the day's observations,
- *  scanned = max distinct adult scans in any single observation that day. */
+ *  scanned = max distinct adult scans in any single observation that day.
+ *
+ *  The window was the last 30 days, which was too short to be much use: a box visited
+ *  fortnightly contributes two visits to it, so "3 of 3 visits" and "1 of 1" were the same
+ *  claim at different confidence, and a box that missed all through spring read as clean by
+ *  December. A season is the unit the monitoring is organised in, so it is the unit here. */
 export function computeMissedScans(): any[] {
   if (!mem) return [];
   const c = mem;
-  const cutoff = utcToNzDate(new Date(Date.now() - 30 * 86400000).toISOString());
+  const cutoff = currentSeasonStartNz();
 
   // Birds chipped in each box within the window. Context for reading a missed scan:
   // adults unscanned in a box with no recent chipping are stronger unchipped candidates,

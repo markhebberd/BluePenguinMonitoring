@@ -5079,11 +5079,11 @@ function MissedScansReport() {
 
   return (
     <div className="report-card">
-      <h3>Possible unchipped penguins — last 30 days</h3>
-      <p className="muted">Boxes where adults were recorded present but fewer were scanned, ranked by how often it happened ({boxes.length} boxes). Chipped 30d = birds chipped in that box in the same window.</p>
-      {boxes.length === 0 ? <p className="muted">No missed scans in the last 30 days</p> : (
+      <h3>Possible unchipped penguins — this season</h3>
+      <p className="muted">Boxes where adults were recorded present but fewer were scanned, ranked by how often it happened ({boxes.length} boxes). Chipped = birds chipped in that box in the same season.</p>
+      {boxes.length === 0 ? <p className="muted">No missed scans this season</p> : (
         <table className="guess-rank-table">
-          <thead><tr><th>Box</th><th>Missed</th><th>Chipped 30d</th><th>Days</th></tr></thead>
+          <thead><tr><th>Box</th><th>Missed</th><th>Chipped</th><th>Days</th></tr></thead>
           <tbody>
             {shown.map((b: any) => (
               <tr key={b.box}>
