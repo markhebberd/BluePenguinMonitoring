@@ -184,9 +184,19 @@ let mem: MemCache | null = null;
 /** Convert UTC datetime string to NZ date string (YYYY-MM-DD).
  *  Uses a fixed +12 (NZST) offset, not DST-aware Pacific/Auckland, so a UTC
  *  instant always maps to a single NZ day and can't roll over a date boundary. */
+/** Normalise a server datetime to a string every browser can parse. Values arrive as ISO
+ *  ("…T…Z"), MySQL "YYYY-MM-DD HH:MM:SS", or date-only "YYYY-MM-DD" (chip_date). Safari, unlike
+ *  Chrome, rejects a bare space AND a date-only value with a trailing "Z" ("2026-08-02Z" →
+ *  Invalid Date), and an Invalid Date reaching toISOString() white-screens the page. */
+function isoUtc(utc: string): string {
+  if (!utc) return utc;
+  if (utc.includes('T') || utc.includes('Z')) return utc;
+  return utc.length <= 10 ? utc + 'T00:00:00Z' : utc.replace(' ', 'T') + 'Z';
+}
 function utcToNzDate(utc: string): string {
-  const d = new Date(utc.includes('T') || utc.includes('Z') ? utc : utc.replace(' ', 'T') + 'Z');
-  return new Date(d.getTime() + 12 * 3600000).toISOString().slice(0, 10);
+  const ms = new Date(isoUtc(utc)).getTime();
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + 12 * 3600000).toISOString().slice(0, 10);
 }
 
 /** Compute stats for a single NZ date from cache data */
@@ -944,7 +954,7 @@ function queryBirdDetailInner(pengNum: string): any {
 
   // Chip events — skipped when the bird was also scanned in that box on the chip
   // day (the observation sighting already shows it; don't list the day twice).
-  const nzDay = (utc: string) => new Date(new Date(utc.replace(' ', 'T') + 'Z').getTime() + 12 * 3600000).toISOString().slice(0, 10);
+  const nzDay = (utc: string) => utcToNzDate(utc);
   for (const chip of chips) {
     if (chip.chip_box && chip.chip_date) {
       const key = `${pengNum}|${chip.chip_date}|${chip.chip_box}`;
@@ -993,7 +1003,7 @@ function queryBirdDetailInner(pengNum: string): any {
   // Breeding stats
   const bsMap = new Map<string, any>();
   for (const s of sightings) {
-    const d = new Date(s.date.includes('T') || s.date.includes('Z') ? s.date : s.date.replace(' ', 'T') + 'Z');
+    const d = new Date(isoUtc(s.date));
     const m = d.getUTCMonth() + 1;
     const y = d.getUTCFullYear();
     const seasonYear = m >= 4 ? y : y - 1;
@@ -1033,7 +1043,7 @@ function queryBirdDetailInner(pengNum: string): any {
           const obs = c.obsById.get(sc.observation_id);
           if (!obs || obs.is_deleted) continue;
           scanCount++;
-          const d2 = new Date(obs.observation_time_utc.replace(' ', 'T') + 'Z');
+          const d2 = new Date(isoUtc(obs.observation_time_utc));
           const sy = d2.getUTCMonth() + 1 >= 4 ? d2.getUTCFullYear() : d2.getUTCFullYear() - 1;
           seasons.add(`${sy}/${String(sy + 1).slice(-2)}`);
         }
@@ -2078,7 +2088,7 @@ export function queryBoxTags(): Record<string, any> {
       TagNumber: l.pit_id ?? '',
       // The server substituted "now" for a missing scan time; keep that so the panel's
       // formatter never renders an Invalid Date.
-      ScanTimeUTC: l.scan_time_utc ? new Date(String(l.scan_time_utc).replace(' ', 'T') + 'Z').toISOString() : new Date().toISOString(),
+      ScanTimeUTC: l.scan_time_utc ? new Date(isoUtc(String(l.scan_time_utc))).toISOString() : new Date().toISOString(),
       Latitude: l.latitude !== null && l.latitude !== undefined ? Number(l.latitude) : 0,
       Longitude: l.longitude !== null && l.longitude !== undefined ? Number(l.longitude) : 0,
       Accuracy: l.accuracy !== null && l.accuracy !== undefined ? Number(l.accuracy) : -1,

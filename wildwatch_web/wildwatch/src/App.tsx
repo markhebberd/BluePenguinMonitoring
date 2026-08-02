@@ -12445,7 +12445,9 @@ function agoSince(d: string): string { const s = durationSince(d); return s ? `$
 /** Returns YYYY-MM-DD in NZ time for a datetime string.
  *  Fixed +12 (NZST), matching the bucketing in localdb so dates can't roll over. */
 function toNzDateStr(d: string): string {
-  return new Date(parseDate(d).getTime() + 12 * 3600000).toISOString().slice(0, 10);
+  const ms = parseDate(d).getTime();
+  if (!Number.isFinite(ms)) return '';   // never let an Invalid Date throw out of .toISOString()
+  return new Date(ms + 12 * 3600000).toISOString().slice(0, 10);
 }
 
 function AuthenticatedAppWithTooltip(props: { token: string; userName: string; userRole: string; onLogout: () => void }) {

@@ -34,8 +34,15 @@ export interface BreedingObservation {
 }
 
 export function parseDate(d: string): Date {
-  // MySQL "YYYY-MM-DD HH:MM:SS" → ISO format for reliable cross-browser parsing
-  return new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z');
+  // Server dates arrive three ways: ISO ("…T…Z"), MySQL "YYYY-MM-DD HH:MM:SS", or DATE-ONLY
+  // "YYYY-MM-DD" (e.g. chip_date). Normalise all to a form every browser accepts. Safari is
+  // strict where Chrome is lenient: it rejects a bare space AND a date-only string with a
+  // trailing "Z" ("2026-08-02Z" → Invalid Date). The old idiom turned every date-only value
+  // into exactly that, so it reached .toISOString() and white-screened Safari.
+  if (!d) return new Date(NaN);
+  if (d.includes('T') || d.includes('Z')) return new Date(d);
+  if (d.length <= 10) return new Date(d + 'T00:00:00Z');   // date-only → midnight UTC
+  return new Date(d.replace(' ', 'T') + 'Z');               // "YYYY-MM-DD HH:MM:SS"
 }
 
 /** A bird chipped as a chick is still a chick for this long — the window in which a
