@@ -419,18 +419,29 @@ function chickContextDate(chipDate: string): string {
   return new Date(new Date(chipDate).getTime() + 86400000).toISOString().slice(0, 10);
 }
 
-/** Sort scans: M first, F second, chicks/unknown last */
-/** Males, then females, then the rest; chicks among themselves biggest first (BC, LC, SC), which
- *  is the order they're weighed, written down and talked about. */
+/** A bird still living its chick life: chipped as a chick, given a size code, and not yet
+ *  scanned back as an adult. Its mini shows the size code where an adult shows a sex icon,
+ *  so size is what a reader sorts it by — a sexed chick is still a chick. */
+function isChickRecord(s: any): boolean {
+  return !s?.chipped_as_adult && !!s?.chick_size_code && !s?.hasReturned;
+}
+/** Biggest chick first — BC, LC, SC — the order they're weighed, written down and talked
+ *  about. Anything without a size code (every adult) sorts after the chicks. */
+const chickSizeOrder = (s: any) =>
+  ({ BC: 0, LC: 1, SC: 2 } as Record<string, number>)[(s?.chick_size_code || '').toUpperCase()] ?? 3;
+/** M first, F second, everyone else last — a chick ranks with "everyone else" whether or
+ *  not it has been sexed, so siblings stay together and sort by size. */
+const sexOrder = (s: any) => {
+  if (isChickRecord(s)) return 2;
+  const sex = (s?.sex || '').toUpperCase();
+  return sex === 'M' ? 0 : sex === 'F' ? 1 : 2;
+};
+/** THE display order for birds shown together: males, then females, then the rest, with
+ *  chicks among themselves biggest first. Every list of minis sorts through here, so a
+ *  nest's two chicks read BC-then-LC wherever they meet — breeding window, chipping day,
+ *  day row or observation. */
 function scanSortMFC(a: any, b: any): number {
-  const order = (s: any) => {
-    const sex = (s.sex || '').toUpperCase();
-    if (sex === 'M') return 0;
-    if (sex === 'F') return 1;
-    return 2;
-  };
-  const size = (s: any) => ({ BC: 0, LC: 1, SC: 2 } as Record<string, number>)[(s.chick_size_code || '').toUpperCase()] ?? 3;
-  return order(a) - order(b) || size(a) - size(b);
+  return sexOrder(a) - sexOrder(b) || chickSizeOrder(a) - chickSizeOrder(b);
 }
 
 function penguinSexClass(sex: string|null|undefined, chipDate?: string|null, chippedAsAdult?: number|null, observationDate?: string): string {
@@ -1070,8 +1081,10 @@ function guessedSex(b: any): 'M' | 'F' | null {
 }
 
 /** Display sort rank by sex: M first, F second, unsexed last. An unsexed bird with a
- *  majority biometric sex guess (rendered as UM/UF) ranks with the confirmed sex. */
+ *  majority biometric sex guess (rendered as UM/UF) ranks with the confirmed sex; a chick
+ *  ranks last whatever its guess, so siblings stay together and sort by size. */
 function sexSortOrder(b: any): number {
+  if (isChickRecord(b)) return 2;
   const s = guessedSex(b);
   return s === 'M' ? 0 : s === 'F' ? 1 : 2;
 }
@@ -1424,10 +1437,13 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
       if (fi >= 0) chickFamily.set(k, fi);
     }
 
-    // Sort birds: M, F, unsexed (sex guesses count); within a group by scan count descending
+    // Sort birds: M, F, unsexed (sex guesses count); chicks biggest first, so a nest's
+    // BC leads its LC however often each was scanned; otherwise by scan count descending.
     const birds = Array.from(birdMap.values()).sort((a, b) => {
       const diff = sexSortOrder(a) - sexSortOrder(b);
       if (diff !== 0) return diff;
+      const size = chickSizeOrder(a) - chickSizeOrder(b);
+      if (size !== 0) return size;
       return b.scanCount - a.scanCount;
     });
 
@@ -2258,7 +2274,9 @@ function ChipCard({ date, birds, chipBy, scan, box, onBoxClick, onBirdClick, onD
   date: string; birds?: any[]; chipBy?: string | null; scan?: any; box?: string;
   onBoxClick?: (box: string) => void; onBirdClick: (num: string) => void; onDayClick?: (day: string) => void;
 }) {
-  const list = (birds && birds.length) ? birds : [{ ...scan, chip_by: chipBy }];
+  // A nest chipped in one go is read biggest chick first, not in the order the chips
+  // happened to be entered.
+  const list = (birds && birds.length) ? [...birds].sort(scanSortMFC) : [{ ...scan, chip_by: chipBy }];
   return (
     <div className="obs-card chip-card">
       <div className="obs-top">
@@ -2323,7 +2341,9 @@ function BoxPanel({ data, boxName, allPenguins, onBirdClick, onDayClick, highlig
             verifications={data.verifications}
             token={token} canEdit={canEdit} onDataChange={onDataChange}>
             {(() => {
-              const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here).sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || ''));
+              // Chronological, and a nest chipped in one visit reads biggest chick first.
+              const chipped = (data.all_penguins || []).filter((p: any) => p.is_chipped_here)
+                .sort((a: any, b: any) => (a.chip_date || '').localeCompare(b.chip_date || '') || scanSortMFC(a, b));
               if (chipped.length === 0 && !canEdit) return null;
               return (
                 <div className="chipped-here">
@@ -2863,7 +2883,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                             </>) : (<>
                               <span className="muted">Parents</span>
                               {e.parents.length > 0
-                                ? [...e.parents].sort((x: any, y: any) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
+                                ? [...e.parents].sort(scanSortMFC).map((pt: any) => <PenguinMini key={pt.pit_id} scan={pt} onClick={() => onBirdClick(pt.peng_num || pt.pit_id)} />)
                                 : <span className="muted">not identified</span>}
                             </>)}
                             <span className="muted">in</span>
@@ -2894,7 +2914,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                                 ))}
                               </>) : e.siblings.length > 0 && <>
                                 <span className="muted">Sibling</span>
-                                {e.siblings.map((sb: any) => (
+                                {[...e.siblings].sort(scanSortMFC).map((sb: any) => (
                                   <PenguinMini key={sb.pit_id} scan={sb} onClick={() => onBirdClick(sb.peng_num || sb.pit_id)} observationDate={offspringDate(sb)} />
                                 ))}
                               </>}
@@ -2966,7 +2986,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                   <div className="obs-nums" style={{fontSize:11}}>
                     <DateLink date={sg.date} onDayClick={() => onSightingClick(b, sg.date)} />
                     {((sg.seen_with || []).length > 0 || (sg.no_scan || 0) > 0) && <span className="muted">with</span>}
-                    {(sg.seen_with || []).map((sw: any) => (
+                    {[...(sg.seen_with || [])].sort(scanSortMFC).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={sg.date} />
                     ))}
                     {Array.from({ length: sg.no_scan || 0 }).map((_, k) => (
@@ -2996,7 +3016,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                 {s.eggs > 0 && <span>{'🥚'.repeat(Math.min(s.eggs, 4))}</span>}
                 {s.chicks > 0 && <span>{'🐣'.repeat(Math.min(s.chicks, 4))}</span>}
                 {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && ds !== 'NO' && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
-                {(s.also_seen || []).map((sw: any) => (
+                {[...(s.also_seen || [])].sort(scanSortMFC).map((sw: any) => (
                   <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
                 ))}
               </a>
@@ -3107,7 +3127,7 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                     {s.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(s.chicks, 6))}</span>}
                     {(() => { const ds = displayStatusOrPrev(s, s.box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
                     {((s.seen_with || []).length > 0 || (s.no_scan || 0) > 0) && <span className="muted">with</span>}
-                    {(s.seen_with || []).map((sw: any) => (
+                    {[...(s.seen_with || [])].sort(scanSortMFC).map((sw: any) => (
                       <PenguinMini key={sw.peng_num} scan={sw} onClick={() => onBirdClick(sw.peng_num)} observationDate={s.date} />
                     ))}
                     {Array.from({ length: s.no_scan || 0 }).map((_, k) => (
@@ -3423,7 +3443,7 @@ function BreedingVerifyModal({ pos, fam, state, box, token, canEdit, onBirdClick
         {state.offspringVerifiable ? (
           <div className="verify-section">
             <div className="verify-lbl">Offspring</div>
-            <div className="verify-birds">{fam.chicks.length > 0 ? fam.chicks.map(mini) : <span className="muted">no chipped chicks</span>}</div>
+            <div className="verify-birds">{fam.chicks.length > 0 ? [...fam.chicks].sort(scanSortMFC).map(mini) : <span className="muted">no chipped chicks</span>}</div>
             <div className="verify-counts-view muted">{fam.failedEggs} dead egg{fam.failedEggs !== 1 ? 's' : ''} {'·'} {fam.plainChicks} dead chick{fam.plainChicks !== 1 ? 's' : ''} {'·'} {fam.fledgedUnchipped} fledged unchipped</div>
             {half('chicks', state.chicksVerdict, state.chicksMatch, v?.chicks_reviewed_by_name, v?.chicks_reviewed_at, v?.chicks_note, acceptChicks)}
           </div>
@@ -4567,12 +4587,7 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
               <span>{'\uD83D\uDC27'.repeat(o.adults)}{'\uD83E\uDD5A'.repeat(o.eggs)}{'\uD83D\uDC23'.repeat(o.chicks)}</span>
               {(() => { const ds = displayStatusOrPrev(o, box); return ds && <span className={`badge ${DARK_TEXT_STATUSES.has(ds)?'bordered':''}`} style={{background:STATUS_COLORS[ds]||'#ccc',color:DARK_TEXT_STATUSES.has(ds)?'#333':'#fff'}}>{ds}</span>; })()}
               {o.gate_status && <span className="gate">{o.gate_status}</span>}
-              {[...(o.scans || [])].sort((a: any, b: any) => {
-                // Male, female, BC, (SC,) LC; unsexed non-chick adults last
-                const rank = (s: any) => ({ BC: 2, SC: 3, LC: 4 } as any)[s.chick_size_code]
-                  ?? ({ M: 0, F: 1 } as any)[(s.sex || '').toUpperCase()] ?? 5;
-                return rank(a) - rank(b);
-              }).map((s: any, j: number) => (
+              {[...(o.scans || [])].sort(scanSortMFC).map((s: any, j: number) => (
                 <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setSideBird(s.peng_num)} observationDate={o.observation_time_utc} />
               ))}
               {Array.from({ length: Number(o.no_scan) || 0 }).map((_, k) => (
@@ -4629,7 +4644,9 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
           }
           const sorted = Array.from(seenBirds.entries()).sort(([,a], [,b]) => {
             const diff = sexSortOrder(a) - sexSortOrder(b);
-            return diff !== 0 ? diff : b.count - a.count;
+            if (diff !== 0) return diff;
+            const size = chickSizeOrder(a) - chickSizeOrder(b);
+            return size !== 0 ? size : b.count - a.count;
           });
           return sorted.length > 0 ? (
             <div className="entry-row">
@@ -5654,7 +5671,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                   {/* Not wrapped in link() — PenguinMini renders its own anchor. */}
                   <td className="minis-cell">
                     <span className="scans">
-                      {r.scans.map((s: any) => (
+                      {[...r.scans].sort(scanSortMFC).map((s: any) => (
                         <PenguinMini key={s.pit_id} scan={s} observationDate={r.time}
                           onClick={() => _adminOpenBird?.(String(s.peng_num))} />
                       ))}
@@ -5669,7 +5686,7 @@ function MissingNoScansReport({ hrefFor, token }: { hrefFor: (box: string, time:
                   <td className="minis-cell">
                     {r.newChips.length === 0 ? <span className="muted">—</span> : (
                       <span className="scans">
-                        {r.newChips.map((b: any) => (
+                        {[...r.newChips].sort(scanSortMFC).map((b: any) => (
                           <span key={b.pit_id} className="new-chip-add">
                             <PenguinMini scan={b} observationDate={r.time}
                               onClick={() => _adminOpenBird?.(String(b.peng_num))} />
@@ -6979,7 +6996,7 @@ function PairBondReport({ onOpenBird }: { onOpenBird: (num: string) => void }) {
               <tr key={i}>
                 <td>
                   <div className="group-members">
-                    {[r.a, r.b].sort((x, y) => (x?.sex === 'M' ? 0 : x?.sex === 'F' ? 2 : 1) - (y?.sex === 'M' ? 0 : y?.sex === 'F' ? 2 : 1)).map((p, k) => (
+                    {[r.a, r.b].sort(scanSortMFC).map((p, k) => (
                       <PenguinMini key={k} scan={p} onClick={() => onOpenBird(p.peng_num)} />
                     ))}
                   </div>
@@ -7685,7 +7702,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
               if (cf && !observedBoxes.has(box)) {
                 // Carry-forward row (orange)
                 const cfScans = (cf.scans || []).filter((s: any, i: number, arr: any[]) => s.peng_num && arr.findIndex((x: any) => x.peng_num === s.peng_num) === i)
-                  .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+                  .sort(scanSortMFC);
                 const cfDs = (cf.observation_id && statusOverrides[cf.observation_id]) || displayStatusOrPrev(cf, box);
                 return (
                   <div key={box} data-daybox={box} className={`day-row day-row-cf${box === highlightBox ? ' day-box-highlight' : ''}`}
@@ -7711,14 +7728,17 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
               // mini already renders it (with the green chipped-here treatment), so
               // only show chip minis for birds not scanned in this box today.
               const scannedPits = new Set(obs.flatMap((o: any) => (o.scans || []).map((s: any) => s.pit_id)));
-              const chipMinis = chips.filter((c: any) => !c.pit_id || !scannedPits.has(c.pit_id));
+              // A chipping day lists a nest's chicks biggest first, like everywhere else — the
+              // chips arrive in whatever order they were entered.
+              const sortedChips = [...chips].sort(scanSortMFC);
+              const chipMinis = sortedChips.filter((c: any) => !c.pit_id || !scannedPits.has(c.pit_id));
               // Chipping-only box (no observation today): show each chipped penguin as a green
               // mini labelled "Chipped in Box x". Boxes observed today show the chip mini inline
               // on their observation row instead (handled below), so they aren't repeated here.
               if (obs.length === 0 && chips.length > 0) {
                 return (
                   <div key={box} data-daybox={box} className={`day-row${box === highlightBox ? ' day-box-highlight' : ''}`}>
-                    {chips.map((c: any) => (
+                    {sortedChips.map((c: any) => (
                       <span key={c.pit_id} className="day-chip-item">
                         <PenguinMini scan={c} onClick={() => handleBirdClick(c.peng_num)} observationDate={date} />
                         <span className="muted"> Chipped in Box {box}</span>
@@ -7732,8 +7752,7 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                 {obs.map((o: any, oi: number) => {
                   // Keep duplicate scans visible — the same penguin scanned >1x in one observation is a
                   // data-entry error worth surfacing, not noise to hide.
-                  const oScans = (o.scans || []).filter((s: any) => s.peng_num)
-                    .sort((a: any, b: any) => { const order: Record<string,number> = {M:0, F:1, BC:2, LC:3, SC:4}; const ka = (a.sex||'').toUpperCase(); const kb = (b.sex||'').toUpperCase(); const ca = a.chick_size_code || ''; const cb = b.chick_size_code || ''; return (order[ka] ?? order[ca] ?? 5) - (order[kb] ?? order[cb] ?? 5); });
+                  const oScans = (o.scans || []).filter((s: any) => s.peng_num).sort(scanSortMFC);
                   const scanCounts: Record<string, number> = {};
                   for (const s of oScans) scanCounts[s.peng_num] = (scanCounts[s.peng_num] || 0) + 1;
                   const hasDupScan = Object.values(scanCounts).some((n: number) => n > 1);
@@ -8601,7 +8620,7 @@ function AuditObsBirds({ entry }: { entry: any }) {
   if (scans.length === 0 && noScan === 0) return null;
   return (
     <span className="scans" style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
-      {scans.map((s, i) => (
+      {[...scans].sort(scanSortMFC).map((s, i) => (
         <PenguinMini key={s.pit_id || i} scan={s} observationDate={entry.obs_time || undefined}
           onClick={() => s.peng_num && _adminOpenBird?.(String(s.peng_num))} />
       ))}
@@ -10103,7 +10122,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
                                 </div>
                                 {r.scans?.length > 0 && (
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                                    {r.scans.map((s: any, j: number) => <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setAdminBird(String(s.peng_num))} />)}
+                                    {[...r.scans].sort(scanSortMFC).map((s: any, j: number) => <PenguinMini key={j} scan={s} onClick={() => s.peng_num && setAdminBird(String(s.peng_num))} />)}
                                   </div>
                                 )}
                                 {r.notes && <div className="muted" style={{ fontSize: 11, fontStyle: 'italic', marginTop: 3 }}>"{r.notes}"</div>}
