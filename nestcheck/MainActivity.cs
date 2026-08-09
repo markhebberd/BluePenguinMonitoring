@@ -456,7 +456,7 @@ namespace PenguinMonitor
                     UpdateStatusText();
 
                     // A queued bird the server refused is gone from the queue for good, and one
-                    // parked on a different number won't match the field notes. Neither can be
+                    // given a different number won't match the field notes. Neither can be
                     // left to a toast the user may never see — make it dismiss-to-acknowledge.
                     if (result.ChipWarnings?.Count > 0)
                     {
@@ -1559,7 +1559,7 @@ namespace PenguinMonitor
                                 || result.UploadErrors > 0 || result.BiometricUploadErrors > 0
                                 || result.PayloadWarnings.Count > 0;
                             // Chip warnings aren't failures — the sync worked, but a queued bird
-                            // needs a human look (rejected, or parked on a different number).
+                            // needs a human look (rejected, or given a different number).
                             bool hasChipWarnings = result.ChipWarnings?.Count > 0;
                             syncDialog.SetTitle(hasErrors ? "Sync — Partial" : hasChipWarnings ? "Synced — check birds" : "Synced");
                             if (hasErrors || hasChipWarnings)
@@ -7378,7 +7378,7 @@ namespace PenguinMonitor
             CapturePendingChip(); // the scanned PIT is safe from the moment the form opens
 
             // Offline path: bank the bird locally; the next sync creates it server-side
-            // (the server honours the predicted number, or parks it at +100 if taken).
+            // (the server honours the predicted number, or gives the next free one if taken).
             void QueueChipOffline(bool qIsChick, string qSex, string qChickSize)
             {
                 var st = new PendingChipState
@@ -7427,7 +7427,7 @@ namespace PenguinMonitor
                 dialog.Dismiss(); // also clears the pending-chip form file
                 SetDialogActive(false);
                 DrawPageLayouts();
-                Toast.MakeText(this, $"Queued — will sync as {nextPengLabel} (+100 if taken)", ToastLength.Long)?.Show();
+                Toast.MakeText(this, $"Queued — will sync as {nextPengLabel} (next free number if taken)", ToastLength.Long)?.Show();
             }
 
             void DoAdd()
@@ -7482,6 +7482,33 @@ namespace PenguinMonitor
 
                         if (!isRechip)
                         {
+                            // Serialize births through the offline queue: drain any queued (unsynced)
+                            // birds BEFORE minting this one's number online, so an online create can't
+                            // take a number a queued bird already reserved locally — the single-phone
+                            // self-collision that parked birds out of sequence. If the backlog won't
+                            // drain (offline, or the server refused), queue this bird too rather than
+                            // racing it; the next sync creates them all in order.
+                            var backlogWarnings = await _dataStorageService.FlushQueuedChips(this, _appSettings);
+                            void ShowBacklogNote(string title) => RunOnUiThread(() =>
+                            {
+                                if (backlogWarnings.Count == 0) return;
+                                new AlertDialog.Builder(this)
+                                    .SetTitle(title)
+                                    .SetMessage(string.Join("\n\n", backlogWarnings))
+                                    .SetPositiveButton("OK", (s5, e5) => { })
+                                    .Show();
+                            });
+                            if (_dataStorageService.LoadQueuedChips(this).Count > 0)
+                            {
+                                RunOnUiThread(() =>
+                                {
+                                    ShowBacklogNote("Earlier chips not all synced");
+                                    QueueChipOffline(isChick, sex, chickSize);
+                                });
+                                return;
+                            }
+                            ShowBacklogNote("Earlier chips synced");
+
                             // New bird: penguin + chip + biometrics land in ONE server transaction.
                             // Three separate creates used to be able to half-succeed — a drop after
                             // the penguin create left a chipless bird, and a retry made a second
@@ -7494,6 +7521,10 @@ namespace PenguinMonitor
                                 ["observation_date"] = today,
                                 ["chip_box"] = chipBoxVal,
                             };
+                            // Ask the server to honour the number written down in the field (same as the
+                            // offline path). The queue is drained above, so the server is authoritative;
+                            // it hands back a different number only if this one is genuinely taken.
+                            if (!string.IsNullOrEmpty(nextPengLabel)) birdFields["requested_peng_num"] = nextPengLabel;
                             if (chipperId > 0) birdFields["chipper_id"] = chipperId;
                             if (assistantId > 0) birdFields["assistant_id"] = assistantId;
                             if (!string.IsNullOrEmpty(chickSize)) birdFields["chick_size_code"] = chickSize;
@@ -7526,6 +7557,15 @@ namespace PenguinMonitor
                                 RestoreSaveButton();
                                 return;
                             }
+                            // The server assigned a different number than the field wrote down —
+                            // it was already taken. Say so, so the paper and the database agree.
+                            if (!string.IsNullOrEmpty(nextPengLabel) && pengNum != nextPengLabel)
+                                RunOnUiThread(() =>
+                                    new AlertDialog.Builder(this)
+                                        .SetTitle("Number changed")
+                                        .SetMessage($"Bird written down as {nextPengLabel} was saved as {pengNum} — that number was already taken. Rename on wildwatch if the written number matters.")
+                                        .SetPositiveButton("OK", (s6, e6) => { })
+                                        .Show());
                         }
                         else
                         {
@@ -7715,7 +7755,7 @@ namespace PenguinMonitor
                                     var predicted = string.IsNullOrEmpty(nextPengLabel) ? "the next number" : nextPengLabel;
                                     new AlertDialog.Builder(this)
                                         .SetTitle("No connection")
-                                        .SetMessage($"Couldn't reach the server ({ex.Message}).\n\nQueue this bird to sync later? It will sync as {predicted} — or {predicted}+100 if another device takes the number first (renamable on wildwatch).")
+                                        .SetMessage($"Couldn't reach the server ({ex.Message}).\n\nQueue this bird to sync later? It will sync as {predicted} — or the next free number if {predicted} is taken by the time it syncs (renamable on wildwatch).")
                                         .SetPositiveButton("Queue for sync", (s4, e4) => QueueChipOffline(isChick, sex, chickSize))
                                         .SetNegativeButton("Keep editing", (s4, e4) => { })
                                         .Show();

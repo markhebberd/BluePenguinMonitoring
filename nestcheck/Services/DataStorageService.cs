@@ -1466,7 +1466,7 @@ namespace PenguinMonitor.Services
                     }
                     else if (pengNum != q.RequestedPengNum && !string.IsNullOrEmpty(q.RequestedPengNum))
                     {
-                        // The predicted number was taken, so the server parked it out-of-band.
+                        // The predicted number was taken, so the server gave the next free one.
                         // Surface it — the field notes say one number and the database another.
                         warnings.Add($"Bird written down as {q.RequestedPengNum} synced as {pengNum} (number was taken — rename on wildwatch).");
                     }
