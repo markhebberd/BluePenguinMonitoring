@@ -8149,8 +8149,10 @@ function ChangePasswordDialog({ token, userName, onClose }: { token: string; use
   );
 }
 
-/** Add a new penguin chipped in a given box: creates the penguin, its chip (17-char PIT),
- *  and a biometric record (matching nestcheck's biometric fields). */
+/** Add a penguin: creates the penguin, its chip (17-char PIT) and a biometric record (matching
+ *  nestcheck's biometric fields). Launched from a box (chipBox set) for a fresh chipping, or
+ *  standalone (chipBox '') to enter an already-chipped bird — box is optional in that case, and
+ *  the colony prefix numbers it (e.g. RH1). */
 function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose, onAdded }: {
   token: string; chipBox: string; defaultChipBy: string; allPenguins: any[];
   onClose: () => void; onAdded: (pengNum: string) => void;
@@ -8193,7 +8195,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!date) { setError('Date required'); return; }
     if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
-    if (!box.trim()) { setError('Chip box required'); return; }
+    // Chip box is optional — a bird chipped elsewhere (e.g. rehab intake) often has no box here.
     if (!chipBy.trim()) { setError('Chipped by is required'); return; }
     if (mode === 'rechip' && !rechipTarget) { setError('Search for the penguin to rechip'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
@@ -8214,7 +8216,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       const chipLoc = queryAllLocations().find((l: any) => String(l.location_name) === box.trim());
       const chipRes = await createRecord(token, 'penguin_chips', {
         pit_id: pitNorm, peng_num: pengNum, chip_date: date,
-        chip_box: box.trim(), location_id: chipLoc?.location_id ?? null, chip_by: chipBy.trim() || null, is_active: 1,
+        chip_box: box.trim() || null, location_id: chipLoc?.location_id ?? null, chip_by: chipBy.trim() || null, is_active: 1,
       }, rechipTarget ? `Rechip of #${pengNum}` : undefined);
       if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + (rechipTarget ? '' : ` (penguin #${pengNum} was created)`)); setSaving(false); return; }
 
@@ -8264,7 +8266,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : mode === 'rechip' ? 'Rechip penguin' : `New bird #${nextPengNum}`} · Box {box.trim() || chipBox}</h2>
+        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : mode === 'rechip' ? 'Rechip penguin' : `New bird #${nextPengNum}`}{(box.trim() || chipBox) ? ` · Box ${box.trim() || chipBox}` : ''}</h2>
         {/* New penguin / Rechip mode row with the rechip search inline (mirrors nestcheck). */}
         <div className="rechip-penguin">
           <div className="app-toggle" style={{ flexShrink: 0 }}>
@@ -8334,8 +8336,8 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
           </div>
         )}
         <div className="app-row">
-          <div className="app-field"><label className="req">Chip box</label>
-            <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="Box name" /></div>
+          <div className="app-field"><label>Chip box</label>
+            <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="Optional" /></div>
           <div className="app-field"><label className="req">Chipped by</label>
             <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="Observer name"
               style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
@@ -8366,7 +8368,7 @@ let allPenguinsServerCache: { rows: any[] | null; colonyId: number; dbVersion: n
 
 /** Every penguin across the colonies the user can view, newest initial chip first.
  *  peng_nums arrive fully prefixed — the list spans colonies, so bare numbers would be ambiguous. */
-function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: string; colonyName?: string; onBack?: () => void; onOpenBird?: (n: string) => void }) {
+function AllPenguinsPage({ token, colonyName, onBack, onOpenBird, onEnterBird }: { token: string; colonyName?: string; onBack?: () => void; onOpenBird?: (n: string) => void; onEnterBird?: () => void }) {
   // The snapshot's penguins/chips/biometrics are global, so the table builds straight from
   // the local cache — no network needed. A background server fetch then replaces it: it adds
   // real colony names and applies colony permissions.
@@ -8543,7 +8545,10 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird }: { token: str
       <div className="report-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>All penguins{rows ? ` (${rows.length})` : ''}</h3>
-          {rows && <button className="action-btn" onClick={exportCsv}>Export CSV</button>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {onEnterBird && <button className="action-btn" onClick={onEnterBird} title="Enter an already-chipped bird into this colony (no re-chipping)">+ Enter bird</button>}
+            {rows && <button className="action-btn" onClick={exportCsv}>Export CSV</button>}
+          </div>
         </div>
         <p className="muted">Every penguin in the colonies you can view. Chip details are from the bird's initial chipping; rechipped birds list every PIT they have worn. Click a column to sort.</p>
         {error && !rows && <p style={{ color: '#F44336' }}>{error}</p>}
@@ -11018,18 +11023,22 @@ function RegionsAndColonies({ token }: { token: string }) {
                 <td style={{padding:'4px 8px'}} className="muted">{c.region_name}</td>
                 <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.location_sets_string}</td>
                 <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.fm_excluded_boxes}</td>
-                <td><button className="edit-btn" onClick={() => setEditColony({colony_id: c.colony_id, colony_name: c.colony_name, region_id: c.region_id, location_sets_string: c.location_sets_string || '', fm_excluded_boxes: c.fm_excluded_boxes ?? ''})}>Edit</button></td>
+                <td><button className="edit-btn" onClick={() => setEditColony({colony_id: c.colony_id, colony_name: c.colony_name, region_id: c.region_id, location_sets_string: c.location_sets_string || '', fm_excluded_boxes: c.fm_excluded_boxes ?? '', colony_prefix: c.colony_prefix ?? ''})}>Edit</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        <button className="edit-btn" onClick={() => setEditColony({colony_name: '', region_id: regions[0]?.region_id || 0, location_sets_string: '', fm_excluded_boxes: '0,AA,AB,AC'})}>+ Add colony</button>
+        <button className="edit-btn" onClick={() => setEditColony({colony_name: '', region_id: regions[0]?.region_id || 0, location_sets_string: '', fm_excluded_boxes: '0,AA,AB,AC', colony_prefix: ''})}>+ Add colony</button>
 
         {editColony && (
           <div className="obs-card" style={{marginTop:8}}>
             <input type="text" defaultValue={editColony.colony_name} placeholder="Colony name"
               style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6}}
               onChange={e => editColony.colony_name = e.target.value} />
+            <label style={{fontSize:11, color:'#888', display:'block', marginBottom:2}}>Peng-number prefix (2–4 letters, e.g. RH → RH1). Can't be changed once the colony has birds.</label>
+            <input type="text" defaultValue={editColony.colony_prefix} placeholder="e.g. RH" maxLength={4}
+              style={{padding:'4px 8px', fontSize:13, border:'1px solid #ccc', borderRadius:4, width:'100%', marginBottom:6, fontFamily:'monospace'}}
+              onChange={e => editColony.colony_prefix = e.target.value.toUpperCase().replace(/[^A-Z]/g, '')} />
             <select defaultValue={editColony.region_id} style={{padding:'4px 8px', fontSize:13, marginBottom:6, width:'100%'}}
               onChange={e => editColony.region_id = parseInt(e.target.value)}>
               {regions.map((r: any) => <option key={r.region_id} value={r.region_id}>{r.region_name}</option>)}
@@ -12232,7 +12241,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         {siteHeader}
         <div className={allBirdsBird && allBirdsBirdData?.penguin ? 'reports-page-docked' : ''}>
           <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name}
-            onOpenBird={setAllBirdsBird} />
+            onOpenBird={setAllBirdsBird} onEnterBird={() => setAddPenguinBox('')} />
         </div>
         {allBirdsBird && allBirdsBirdData?.penguin && (
           <div className="day-bird-dock entry-bird-dock">

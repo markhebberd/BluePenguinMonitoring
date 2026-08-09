@@ -1103,14 +1103,44 @@ if ($action === 'save_colony') {
     $hasFmExcluded = is_array($input) && array_key_exists('fm_excluded_boxes', $input);
     $fmExcluded = trim($input['fm_excluded_boxes'] ?? '');
     if (!$name || !$regionId) { http_response_code(400); echo json_encode(['error' => 'colony_name and region_id required']); exit; }
+    // colony_prefix numbers the colony's birds (e.g. "RH" => RH1). Only overwrite when the key is
+    // present. The rest of the code assumes 2–4 letters, so enforce that (or blank).
+    $hasPrefix = is_array($input) && array_key_exists('colony_prefix', $input);
+    $prefix = strtoupper(preg_replace('/[^A-Za-z]/', '', (string)($input['colony_prefix'] ?? '')));
+    if ($hasPrefix && $prefix !== '' && (strlen($prefix) < 2 || strlen($prefix) > 4)) {
+        http_response_code(400); echo json_encode(['error' => 'Prefix must be 2–4 letters, or blank']); exit;
+    }
     $id = $input['colony_id'] ?? null;
+    // A prefix must be unique: peng_num is a global key, so two colonies sharing "RH" would collide.
+    if ($hasPrefix && $prefix !== '') {
+        $dup = $pdo->prepare("SELECT colony_name FROM colonies WHERE colony_prefix = ? AND colony_id <> ?");
+        $dup->execute([$prefix, (int)($id ?? 0)]);
+        if ($other = $dup->fetchColumn()) {
+            http_response_code(409); echo json_encode(['error' => "Prefix $prefix is already used by $other"]); exit;
+        }
+    }
     if ($id) {
+        // Changing a prefix once the colony has birds would orphan their numbers — block it.
+        if ($hasPrefix) {
+            $cur = $pdo->prepare("SELECT colony_prefix FROM colonies WHERE colony_id = ?");
+            $cur->execute([$id]);
+            if ($prefix !== (string)($cur->fetchColumn() ?: '')) {
+                $pc = $pdo->prepare("SELECT COUNT(*) FROM penguins WHERE colony_id = ?");
+                $pc->execute([$id]);
+                if ((int)$pc->fetchColumn() > 0) {
+                    http_response_code(409);
+                    echo json_encode(['error' => "Can't change the prefix of a colony that already has birds — their numbers would no longer match."]);
+                    exit;
+                }
+            }
+        }
         $fields = ['colony_name' => $name, 'region_id' => $regionId, 'location_sets_string' => $locationSets];
         if ($hasFmExcluded) $fields['fm_excluded_boxes'] = $fmExcluded;
+        if ($hasPrefix) $fields['colony_prefix'] = $prefix;
         wwAuditedUpdate($pdo, 'colonies', $id, $fields, $observer['observer_id']);
     } else {
         $id = wwAuditedInsert($pdo, 'colonies', ['colony_name' => $name, 'region_id' => $regionId,
-            'location_sets_string' => $locationSets,
+            'location_sets_string' => $locationSets, 'colony_prefix' => $prefix,
             'fm_excluded_boxes' => $hasFmExcluded ? $fmExcluded : '0,AA,AB,AC'], $observer['observer_id']);
     }
     echo json_encode(['success' => true, 'colony_id' => (int)$id]);
