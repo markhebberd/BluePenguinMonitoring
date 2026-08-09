@@ -88,21 +88,31 @@ if ($action === 'next_peng_num' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     exit;
 }
 
-/** The peng_num to give a new penguin. Offline-queued creates send the number the device
- *  predicted ($req): honour it if still free, else park at +100 (then +200, ...) — clearly
- *  out-of-band and renamable on wildwatch — so numbers written down in the field stay
- *  traceable. No request (or an unparseable one) => next in sequence. Returns prefixed. */
+/** The peng_num to give a new penguin. Creates send the number the device predicted ($req):
+ *  honour it if still free, else fall back to the next number in sequence — renaming an existing
+ *  bird is easy on wildwatch, so there's no need for the old out-of-band +100 park. No request
+ *  (or an unparseable one) => next in sequence. Returns prefixed. */
 function wwResolvePengNum($pdo, int $colonyId, string $req): string {
     $req = trim($req);
     if ($req !== '' && preg_match('/^([A-Z]*)(\d+)$/', strtoupper($req), $m)) {
         $prefix = $m[1] !== '' ? $m[1] : getColonyPrefix($pdo, $colonyId);
         $exists = $pdo->prepare("SELECT 1 FROM penguins WHERE peng_num = ?");
-        for ($n = (int)$m[2]; ; $n += 100) {
-            $exists->execute([$prefix . $n]);
-            if (!$exists->fetchColumn()) return $prefix . $n;
-        }
+        $exists->execute([$prefix . (int)$m[2]]);
+        if (!$exists->fetchColumn()) return $prefix . (int)$m[2];
     }
     return wwNextPengNum($pdo, $colonyId);
+}
+
+/** The acronym a chipper is shown as across the web views (penguins, day, dashboard, bird panel),
+ *  all of which read penguin_chips.chip_by. The phone now sends only chipper_id, so this mirrors
+ *  the user's chip_acronym back onto chip_by and keeps the two columns from drifting apart.
+ *  Returns null when the user has no acronym (nothing to show). */
+function wwChipAcronym($pdo, ?int $chipperId): ?string {
+    if (!$chipperId) return null;
+    $s = $pdo->prepare("SELECT chip_acronym FROM users WHERE id = ?");
+    $s->execute([$chipperId]);
+    $a = $s->fetchColumn();
+    return ($a === false || $a === null || $a === '') ? null : $a;
 }
 
 /**
@@ -167,6 +177,11 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
             $byAcr = $pdo->prepare("SELECT id FROM users WHERE chip_acronym = ?");
             $byAcr->execute([trim($chip['chip_by'])]);
             $chip['chipper_id'] = ($hit = $byAcr->fetchColumn()) ? (int)$hit : null;
+        }
+        // ...and the reverse: the phone sends chipper_id only, so mirror the acronym onto chip_by
+        // (the column every web view actually displays) — otherwise the chipper reads as blank.
+        if (empty($chip['chip_by']) && !empty($chip['chipper_id'])) {
+            $chip['chip_by'] = wwChipAcronym($pdo, (int)$chip['chipper_id']);
         }
         $chip['assistant_id'] = $asChipUser($in['assistant_id'] ?? null);
         wwAuditedInsert($pdo, 'penguin_chips', $chip, $obsId, $reason);
@@ -727,8 +742,14 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
+        // Rechips (and any penguin_chips create) come from the phone with chipper_id only. Mirror
+        // the acronym onto chip_by, which is what the web views read — same as create_chipped_bird.
+        if ($table === 'penguin_chips' && empty($input['chip_by']) && !empty($input['chipper_id'])) {
+            if ($acr = wwChipAcronym($pdo, (int)$input['chipper_id'])) $input['chip_by'] = $acr;
+        }
+
         // Auto-generate peng_num for new penguins (next number in the requested colony, or the
-        // device-predicted number honoured/parked — see wwResolvePengNum).
+        // device-predicted number honoured when free — see wwResolvePengNum).
         if ($table === 'penguins' && !isset($input['peng_num'])) {
             $req = (string)($input['requested_peng_num'] ?? '');
             unset($input['requested_peng_num']);
