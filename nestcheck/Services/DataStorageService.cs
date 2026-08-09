@@ -1052,8 +1052,10 @@ namespace PenguinMonitor.Services
                     // The server's column is is_moulting; a payload naming it condition_moulting was
                     // rejected outright, so every moulting bird stayed queued. Always sent (unlike
                     // the flags below) so unticking it clears the flag on the next upload.
-                    fields["is_moulting"] = bio.ConditionMoulting;
-                    if (bio.ConditionTicks) fields["condition_ticks"] = true;
+                    // Send 0/1, not a JSON bool: PDO binds a PHP `false` as '' and the tinyint
+                    // column rejects it, which used to sink the whole biometric (sex guess and all).
+                    fields["is_moulting"] = bio.ConditionMoulting ? 1 : 0;
+                    if (bio.ConditionTicks) fields["condition_ticks"] = 1;
                     if (!string.IsNullOrEmpty(bio.Notes)) fields["notes"] = bio.Notes;
                     // Dead is not a biometric column — the flag was retired in favour of a death
                     // date on the bird itself, and is written separately below.

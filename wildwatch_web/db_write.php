@@ -48,6 +48,14 @@ function wwTableKey(string $table): string {
     return WW_TABLE_KEYS[$table];
 }
 
+/** PDO binds a PHP bool `false` as '' (and `true` as '1'), which a tinyint/int column rejects
+ *  with "Incorrect integer value: ''". JSON flags such as is_moulting arrive as booleans, so
+ *  coerce every bool to 0/1 before binding — otherwise a whole row (e.g. a biometric with a sex
+ *  guess but is_moulting=false) fails to write and re-fails on every sync. */
+function wwBindVals(array $vals): array {
+    return array_map(fn($v) => is_bool($v) ? (int)$v : $v, $vals);
+}
+
 /** Columns whose value must never reach the audit log — secrets, not data. */
 const WW_REDACTED_COLUMNS = ['passphrase_hash', 'token_hash', 'token'];
 
@@ -74,7 +82,7 @@ function wwAuditedInsert($pdo, $table, $row, $observerId, $reason = null) {
     wwTableKey($table);
     $cols = array_keys($row);
     $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
-    $pdo->prepare($sql)->execute(array_values($row));
+    $pdo->prepare($sql)->execute(wwBindVals(array_values($row)));
     $keyCol = WW_NATURAL_KEYS[$table] ?? null;
     $recordId = ($keyCol !== null && isset($row[$keyCol])) ? $row[$keyCol] : $pdo->lastInsertId();
     wwAudit($pdo, $table, $recordId, 'INSERT', $row, $observerId, $reason);
@@ -90,7 +98,7 @@ function wwAuditedInsertSelf($pdo, $table, $row, $reason = null) {
     wwTableKey($table);
     $cols = array_keys($row);
     $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
-    $pdo->prepare($sql)->execute(array_values($row));
+    $pdo->prepare($sql)->execute(wwBindVals(array_values($row)));
     $newId = $pdo->lastInsertId();
     wwAudit($pdo, $table, $newId, 'INSERT', $row, $newId, $reason);
     return $newId;
@@ -115,7 +123,7 @@ function wwAuditedUpdate($pdo, $table, $id, $fields, $observerId, $reason = null
 
     $sets = implode(',', array_map(fn($c) => "$c = ?", array_keys($changed)));
     $pdo->prepare("UPDATE $table SET $sets WHERE $pk = ?")
-        ->execute(array_merge(array_map(fn($c) => $fields[$c], array_keys($changed)), [$id]));
+        ->execute(array_merge(wwBindVals(array_map(fn($c) => $fields[$c], array_keys($changed))), [$id]));
     wwAudit($pdo, $table, $id, 'UPDATE', $changed, $observerId, $reason);
     return count($changed);
 }
