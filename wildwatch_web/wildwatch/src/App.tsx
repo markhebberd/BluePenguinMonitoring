@@ -8420,7 +8420,6 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird, onEnterBird }:
     { key: 'colony', label: 'Colony', value: r => colonyOf(r) },
     { key: 'chipped', label: 'Chipped', value: r => r.first_chip_date || '', desc: true },
     { key: 'box', label: 'Chip box', value: r => { const b = r.first_chip_box || ''; const n = parseInt(b, 10); return isNaN(n) ? [b, 0] : ['', n]; } },
-    { key: 'by', label: 'By', value: r => r.first_chip_by || '' },
     { key: 'as', label: 'As', value: r => chippedAs(r) },
     { key: 'sex', label: 'Sex', value: r => sexDisplay(r) },
     { key: 'weight', label: 'Chip weight (g)', value: r => r.chip_weight != null ? Number(r.chip_weight) : null, desc: true },
@@ -8575,7 +8574,6 @@ function AllPenguinsPage({ token, colonyName, onBack, onOpenBird, onEnterBird }:
                     <td>{colonyOf(r)}</td>
                     <td>{r.first_chip_date ? String(r.first_chip_date).slice(0, 10) : '—'}</td>
                     <td>{r.first_chip_box || '—'}</td>
-                    <td>{r.first_chip_by || '—'}</td>
                     <td>{chippedAs(r)}</td>
                     <td>{(() => { const s = sexDisplay(r); return s ? <span style={s.startsWith('U') ? { color: '#888' } : undefined} title={s.startsWith('U') ? 'Unconfirmed — from observed-sex guesses' : undefined}>{s}</span> : '—'; })()}</td>
                     <td>{r.chip_weight ?? '—'}</td>
