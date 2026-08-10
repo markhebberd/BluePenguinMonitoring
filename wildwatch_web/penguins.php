@@ -35,8 +35,14 @@ if (isset($_GET['all'])) {
 
     // Initial-chip info comes from the earliest chip; the pits list carries every chip a
     // rechipped bird has worn (chip-date order), each flagged active/inactive.
-    foreach ($pdo->query("SELECT peng_num, pit_id, chip_date, chip_box, chip_by, is_active
-                          FROM penguin_chips ORDER BY chip_date, pit_id") as $ch) {
+    // "Chipped by" resolves from chipper_id (the FK the app writes) and only falls back to the
+    // legacy chip_by acronym for old rows that predate it — otherwise a NestCheck-chipped bird,
+    // which sets chipper_id but not chip_by, reads blank here while the bird panel (which resolves
+    // chipper_id) shows the name. Same source of truth in both places.
+    foreach ($pdo->query("SELECT pc.peng_num, pc.pit_id, pc.chip_date, pc.chip_box, pc.is_active,
+                                 COALESCE(NULLIF(pc.chip_by, ''), u.chip_acronym) AS chip_by
+                          FROM penguin_chips pc LEFT JOIN users u ON u.id = pc.chipper_id
+                          ORDER BY pc.chip_date, pc.pit_id") as $ch) {
         if (!isset($birds[$ch['peng_num']])) continue;
         $b = &$birds[$ch['peng_num']];
         if (!isset($b['first_chip_date'])) {

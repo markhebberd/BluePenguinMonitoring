@@ -32,7 +32,10 @@ $pid = $penguin['peng_num'];  // full prefixed value for DB queries
 $penguin['peng_num'] = displayPengNum($pid, $viewPrefix);  // strip home prefix for output
 
 // Chips
-$chipsStmt = $pdo->prepare("SELECT pit_id, chip_date, is_active, chip_box, chip_by, solo FROM penguin_chips WHERE peng_num = ? ORDER BY chip_date");
+$chipsStmt = $pdo->prepare("SELECT pc.pit_id, pc.chip_date, pc.is_active, pc.chip_box, pc.solo,
+        COALESCE(NULLIF(pc.chip_by,''), u.chip_acronym) AS chip_by
+    FROM penguin_chips pc LEFT JOIN users u ON u.id = pc.chipper_id
+    WHERE pc.peng_num = ? ORDER BY pc.chip_date");
 $chipsStmt->execute([$pid]);
 $penguin['chips'] = $chipsStmt->fetchAll();
 

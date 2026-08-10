@@ -665,8 +665,9 @@ function getSightings($pdo, $pengNum = null, $boxName = null, $colonyId = 1) {
     if ($boxName) { $chipWhere[] = 'pc.chip_box = ?'; $chipParams[] = $boxName; }
     if (!empty($chipWhere)) {
         $chipStmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, p.sex, p.is_dead, p.chipped_as_adult, p.chick_size_code,
-            pc.chip_date, pc.chip_box, pc.chip_by
+            pc.chip_date, pc.chip_box, COALESCE(NULLIF(pc.chip_by,''), u.chip_acronym) AS chip_by
             FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num
+            LEFT JOIN users u ON u.id = pc.chipper_id
             WHERE " . implode(' AND ', $chipWhere) . " ORDER BY pc.chip_date");
         $chipStmt->execute($chipParams);
         // A chip is a rechip if it isn't the penguin's first (chips come date-ascending).
