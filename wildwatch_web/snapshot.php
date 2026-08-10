@@ -18,6 +18,10 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 require_once 'config.php';
 require_once 'snapshot_columns.php';
 require_once 'snapshot_hash.php';
+// The full colony response is already heavy; the integrity-hash pass reads the bird tables once
+// more on top of it. Give this endpoint headroom so that second pass can't tip it over the pool's
+// 128M limit (which silently nulled _hashes and disabled the whole diagnostic).
+ini_set('memory_limit', '256M');
 header('Content-Type: application/json');
 header('Cache-Control: no-cache');
 header('Access-Control-Allow-Origin: *');

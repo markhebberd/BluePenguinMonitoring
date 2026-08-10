@@ -49,46 +49,41 @@ function wwHashRows(array $rows, array $spec): string {
  *  can't silently drift when SNAP_COLS_* change.) */
 function wwComputeSnapshotHashes(PDO $pdo, int $colonyId): array {
     $viewPrefix = getColonyPrefix($pdo, $colonyId);
+    $out = [];
+    // Hash each table then free its rows before loading the next, so peak memory is one table's
+    // worth, not all six at once — the difference between fitting under the pool limit and OOMing.
+    $do = function(string $key, string $sql, array $params, bool $strip) use ($pdo, $viewPrefix, &$out) {
+        if ($params) { $st = $pdo->prepare($sql); $st->execute($params); }
+        else { $st = $pdo->query($sql); }
+        $rows = $st->fetchAll();
+        if ($strip) stripPengPrefix($rows, $viewPrefix);
+        $out[$key] = wwHashRows($rows, WW_HASH_COLS[$key]);
+        unset($rows);
+    };
 
-    $peng = $pdo->query("SELECT peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, alert, notes,
+    $do('penguins', "SELECT peng_num, chipped_as_adult, sex, is_dead, death_date, chick_size_code, alert, notes,
         (SELECT COALESCE(SUM(CASE WHEN UPPER(b.observed_sex) IN ('PM','M') THEN 2 WHEN UPPER(b.observed_sex)='MM' THEN 1 ELSE 0 END),0)
            FROM penguin_biometric_data b WHERE b.peng_num = penguins.peng_num AND (b.is_deleted=FALSE OR b.is_deleted IS NULL)) AS sex_guess_m,
         (SELECT COALESCE(SUM(CASE WHEN UPPER(b.observed_sex) IN ('PF','F') THEN 2 WHEN UPPER(b.observed_sex)='MF' THEN 1 ELSE 0 END),0)
            FROM penguin_biometric_data b WHERE b.peng_num = penguins.peng_num AND (b.is_deleted=FALSE OR b.is_deleted IS NULL)) AS sex_guess_f
-        FROM penguins")->fetchAll();
-    stripPengPrefix($peng, $viewPrefix);
+        FROM penguins", [], true);
 
-    $chips = $pdo->query("SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo FROM penguin_chips")->fetchAll();
-    stripPengPrefix($chips, $viewPrefix);
+    $do('chips', "SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo FROM penguin_chips", [], true);
 
-    $obsStmt = $pdo->prepare("SELECT o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.failed_eggs, o.dead_chicks, o.is_deleted, o.observer_id
-        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?");
-    $obsStmt->execute([$colonyId]);
-    $obs = $obsStmt->fetchAll();
+    $do('observations', "SELECT o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.failed_eggs, o.dead_chicks, o.is_deleted, o.observer_id
+        FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId], false);
 
-    $scanStmt = $pdo->prepare("SELECT ps.scan_id, ps.observation_id, ps.pit_id, ps.is_deleted AS scan_deleted
-        FROM penguin_scans ps JOIN observations o ON ps.observation_id = o.observation_id
+    $do('scans', "SELECT ps.scan_id, ps.observation_id, ps.pit_id FROM penguin_scans ps
+        JOIN observations o ON ps.observation_id = o.observation_id
         JOIN observation_locations ol ON o.location_id = ol.location_id
-        WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)");
-    $scanStmt->execute([$colonyId]);
-    $scans = $scanStmt->fetchAll();
+        WHERE ol.colony_id = ? AND (ps.is_deleted = FALSE OR ps.is_deleted IS NULL)", [$colonyId], false);
 
-    $locStmt = $pdo->prepare("SELECT location_id, location_name, persistent_notes, watched, pit_id, scan_time_utc
-        FROM observation_locations WHERE colony_id = ?");
-    $locStmt->execute([$colonyId]);
-    $locs = $locStmt->fetchAll();
+    $do('locations', "SELECT location_id, location_name, persistent_notes, watched, pit_id, scan_time_utc
+        FROM observation_locations WHERE colony_id = ?", [$colonyId], false);
 
-    $bio = $pdo->query("SELECT biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted FROM penguin_biometric_data")->fetchAll();
-    stripPengPrefix($bio, $viewPrefix);
+    $do('biometrics', "SELECT biometric_id, peng_num, observation_id, observation_date, sex, observed_sex, condition_healthy, condition_ticks, is_moulting, disposition_aggressive, disposition_passive, notes, is_deleted FROM penguin_biometric_data", [], true);
 
-    return [
-        'penguins'     => wwHashRows($peng,  WW_HASH_COLS['penguins']),
-        'chips'        => wwHashRows($chips, WW_HASH_COLS['chips']),
-        'observations' => wwHashRows($obs,   WW_HASH_COLS['observations']),
-        'scans'        => wwHashRows($scans, WW_HASH_COLS['scans']),
-        'locations'    => wwHashRows($locs,  WW_HASH_COLS['locations']),
-        'biometrics'   => wwHashRows($bio,   WW_HASH_COLS['biometrics']),
-    ];
+    return $out;
 }
 
 /** Per-colony hashes, cached to a working file keyed on MAX(audit_log.id). Recomputes only when a
