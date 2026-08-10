@@ -271,12 +271,17 @@ if ($since) {
                               WHERE table_name = 'penguin_biometric_data' AND change_timestamp >= ?))");
     $penguins->execute([$ts, $ts]);
 
-    // Chips: fetch any chip created/updated recently, or belonging to a recently changed penguin
+    // Chips: fetch any chip created recently, belonging to a recently changed penguin, OR edited in
+    // place. penguin_chips has no updated_at, so a chip's own field edit (e.g. chip_box) shows up
+    // nowhere but the audit log — without this clause a web client never receives it on an
+    // incremental sync, and the edit is stranded in its cache (matches the field-scope branch).
     $chips = $pdo->prepare("SELECT " . SNAP_COLS_CHIP_P . "
         FROM penguin_chips pc
         WHERE pc.created_at >= ?
-           OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)");
-    $chips->execute([$ts, $ts]);
+           OR pc.peng_num IN (SELECT peng_num FROM penguins WHERE updated_at >= ?)
+           OR pc.pit_id IN (SELECT record_id FROM audit_log
+                            WHERE table_name = 'penguin_chips' AND change_timestamp >= ?)");
+    $chips->execute([$ts, $ts, $ts]);
 
     $locations = $pdo->prepare("SELECT " . SNAP_COLS_LOC . " FROM observation_locations WHERE colony_id = ? AND updated_at >= ?");
     $locations->execute([$colonyId, $ts]);
