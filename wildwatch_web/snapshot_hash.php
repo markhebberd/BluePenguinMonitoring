@@ -25,7 +25,7 @@
 // in the same order. Keep this list and the client's HASH_COLS (localdb) in lockstep.
 const WW_HASH_COLS = [
     'penguins'     => ['pk' => 'peng_num',      'cols' => ['peng_num','chipped_as_adult','sex','is_dead','death_date','chick_size_code','alert','notes','sex_guess_m','sex_guess_f']],
-    'chips'        => ['pk' => 'pit_id',        'cols' => ['pit_id','peng_num','chip_date','is_active','chip_box','location_id','chip_by','chipper_id','assistant_id','solo']],
+    'chips'        => ['pk' => 'pit_id',        'cols' => ['pit_id','peng_num','chip_date','is_active','chip_box','location_id','chipper_id','assistant_id','solo']],
     'observations' => ['pk' => 'observation_id','cols' => ['observation_id','location_id','observation_time_utc','adults','eggs','chicks','breeding_status','gate_status','notes','no_scan','fledged_unchipped','failed_eggs','dead_chicks','is_deleted','observer_id']],
     'scans'        => ['pk' => 'scan_id',       'cols' => ['scan_id','observation_id','pit_id']],
     'locations'    => ['pk' => 'location_id',   'cols' => ['location_id','location_name','persistent_notes','watched','pit_id','scan_time_utc']],
@@ -68,7 +68,7 @@ function wwComputeSnapshotHashes(PDO $pdo, int $colonyId): array {
            FROM penguin_biometric_data b WHERE b.peng_num = penguins.peng_num AND (b.is_deleted=FALSE OR b.is_deleted IS NULL)) AS sex_guess_f
         FROM penguins", [], true);
 
-    $do('chips', "SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chip_by, chipper_id, assistant_id, solo FROM penguin_chips", [], true);
+    $do('chips', "SELECT pit_id, peng_num, chip_date, is_active, chip_box, location_id, chipper_id, assistant_id, solo FROM penguin_chips", [], true);
 
     $do('observations', "SELECT o.observation_id, o.location_id, o.observation_time_utc, o.adults, o.eggs, o.chicks, o.breeding_status, o.gate_status, o.notes, o.no_scan, o.fledged_unchipped, o.failed_eggs, o.dead_chicks, o.is_deleted, o.observer_id
         FROM observations o JOIN observation_locations ol ON o.location_id = ol.location_id WHERE ol.colony_id = ?", [$colonyId], false);

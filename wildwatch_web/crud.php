@@ -103,18 +103,6 @@ function wwResolvePengNum($pdo, int $colonyId, string $req): string {
     return wwNextPengNum($pdo, $colonyId);
 }
 
-/** The acronym a chipper is shown as across the web views (penguins, day, dashboard, bird panel),
- *  all of which read penguin_chips.chip_by. The phone now sends only chipper_id, so this mirrors
- *  the user's chip_acronym back onto chip_by and keeps the two columns from drifting apart.
- *  Returns null when the user has no acronym (nothing to show). */
-function wwChipAcronym($pdo, ?int $chipperId): ?string {
-    if (!$chipperId) return null;
-    $s = $pdo->prepare("SELECT chip_acronym FROM users WHERE id = ?");
-    $s->execute([$chipperId]);
-    $a = $s->fetchColumn();
-    return ($a === false || $a === null || $a === '') ? null : $a;
-}
-
 /**
  * Create a chipped bird — penguin + chip + biometrics — in ONE transaction.
  *
@@ -162,10 +150,9 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
             'chip_date' => $in['chip_date'] ?? date('Y-m-d'),
             'is_active' => 1,
         ];
-        foreach (['chip_box', 'chip_by'] as $f) if (isset($in[$f])) $chip[$f] = $in[$f];
-        // Who chipped it, as a user. An explicit id wins; otherwise derive it from the acronym
-        // the phone signed with, so a client that knows nothing about users still lands both
-        // columns and chip_by never drifts from chipper_id.
+        foreach (['chip_box'] as $f) if (isset($in[$f])) $chip[$f] = $in[$f]; // chip_by is retired
+        // Who chipped it, as a user. An explicit id wins; otherwise derive it from the acronym an
+        // older client (or the web add-penguin form) signs with, so the chipper still lands as an id.
         $asChipUser = function ($v) use ($pdo) {
             if ($v === null || $v === '' || (int)$v === 0) return null;
             $c = $pdo->prepare("SELECT id FROM users WHERE id = ?");
@@ -173,15 +160,10 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
             return $c->fetchColumn() ? (int)$v : null;
         };
         $chip['chipper_id'] = $asChipUser($in['chipper_id'] ?? null);
-        if ($chip['chipper_id'] === null && !empty($chip['chip_by'])) {
+        if ($chip['chipper_id'] === null && !empty($in['chip_by'])) {
             $byAcr = $pdo->prepare("SELECT id FROM users WHERE chip_acronym = ?");
-            $byAcr->execute([trim($chip['chip_by'])]);
+            $byAcr->execute([trim($in['chip_by'])]);
             $chip['chipper_id'] = ($hit = $byAcr->fetchColumn()) ? (int)$hit : null;
-        }
-        // ...and the reverse: the phone sends chipper_id only, so mirror the acronym onto chip_by
-        // (the column every web view actually displays) — otherwise the chipper reads as blank.
-        if (empty($chip['chip_by']) && !empty($chip['chipper_id'])) {
-            $chip['chip_by'] = wwChipAcronym($pdo, (int)$chip['chipper_id']);
         }
         $chip['assistant_id'] = $asChipUser($in['assistant_id'] ?? null);
         wwAuditedInsert($pdo, 'penguin_chips', $chip, $obsId, $reason);
@@ -680,6 +662,7 @@ function stripRetiredColumns($table, $input) {
     $retired = [
         'penguin_biometric_data' => ['condition_underweight', 'condition_dog_attacked', 'condition_attacked', 'condition_dead'],
         'penguins' => ['life_stage', 'is_dead'], // is_dead is a generated column (derived from death_date)
+        'penguin_chips' => ['chip_by'], // retired: chip_by is derived from chipper_id in the snapshot
     ];
     if (isset($retired[$table]) && is_array($input)) {
         foreach ($retired[$table] as $col) unset($input[$col]);
@@ -710,6 +693,9 @@ function renameLegacyColumns($table, $input) {
 function handleCreate($pdo, $table, $pk, $observer) {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
+    // An older client (or the web add-penguin form) may still send a chip_by acronym; capture it
+    // before stripRetiredColumns drops it, so chipper_id can be derived from it below.
+    $incomingChipBy = ($table === 'penguin_chips') ? ($input['chip_by'] ?? null) : null;
     $input = renameLegacyColumns($table, stripRetiredColumns($table, $input));
     // Must come off before $input is used as the column list, or _reason becomes a column.
     $reason = $input['_reason'] ?? null;
@@ -742,10 +728,12 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
-        // Rechips (and any penguin_chips create) come from the phone with chipper_id only. Mirror
-        // the acronym onto chip_by, which is what the web views read — same as create_chipped_bird.
-        if ($table === 'penguin_chips' && empty($input['chip_by']) && !empty($input['chipper_id'])) {
-            if ($acr = wwChipAcronym($pdo, (int)$input['chipper_id'])) $input['chip_by'] = $acr;
+        // chip_by is retired (stripped above). An older client or the web add-penguin form may have
+        // sent an acronym instead of an id — derive chipper_id from it so the chipper still lands.
+        if ($table === 'penguin_chips' && empty($input['chipper_id']) && !empty($incomingChipBy)) {
+            $byAcr = $pdo->prepare("SELECT id FROM users WHERE chip_acronym = ?");
+            $byAcr->execute([trim((string)$incomingChipBy)]);
+            if ($hit = $byAcr->fetchColumn()) $input['chipper_id'] = (int)$hit;
         }
 
         // Auto-generate peng_num for new penguins (next number in the requested colony, or the

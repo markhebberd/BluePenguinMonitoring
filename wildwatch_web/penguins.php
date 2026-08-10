@@ -35,10 +35,9 @@ if (isset($_GET['all'])) {
 
     // Initial-chip info comes from the earliest chip; the pits list carries every chip a
     // rechipped bird has worn (chip-date order), each flagged active/inactive. "Chipped by" is the
-    // chipper's acronym, resolved from chipper_id (the FK the app writes), falling back to the
-    // legacy chip_by column only for old rows that predate it.
+    // chipper's acronym, resolved from chipper_id (the FK — every chip has one).
     foreach ($pdo->query("SELECT pc.peng_num, pc.pit_id, pc.chip_date, pc.chip_box, pc.is_active,
-                                 COALESCE(NULLIF(pc.chip_by, ''), u.chip_acronym) AS chip_by
+                                 u.chip_acronym AS chip_by
                           FROM penguin_chips pc LEFT JOIN users u ON u.id = pc.chipper_id
                           ORDER BY pc.chip_date, pc.pit_id") as $ch) {
         if (!isset($birds[$ch['peng_num']])) continue;

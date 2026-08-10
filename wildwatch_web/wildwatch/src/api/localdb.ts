@@ -585,7 +585,7 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
 // the server; float columns are excluded on both sides (they don't serialise identically).
 const HASH_COLS: Record<string, { pk: string; cols: string[] }> = {
   penguins:     { pk: 'peng_num',       cols: ['peng_num','chipped_as_adult','sex','is_dead','death_date','chick_size_code','alert','notes','sex_guess_m','sex_guess_f'] },
-  chips:        { pk: 'pit_id',         cols: ['pit_id','peng_num','chip_date','is_active','chip_box','location_id','chip_by','chipper_id','assistant_id','solo'] },
+  chips:        { pk: 'pit_id',         cols: ['pit_id','peng_num','chip_date','is_active','chip_box','location_id','chipper_id','assistant_id','solo'] },
   observations: { pk: 'observation_id', cols: ['observation_id','location_id','observation_time_utc','adults','eggs','chicks','breeding_status','gate_status','notes','no_scan','fledged_unchipped','failed_eggs','dead_chicks','is_deleted','observer_id'] },
   scans:        { pk: 'scan_id',        cols: ['scan_id','observation_id','pit_id'] },
   locations:    { pk: 'location_id',    cols: ['location_id','location_name','persistent_notes','watched','pit_id','scan_time_utc'] },

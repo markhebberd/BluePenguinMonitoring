@@ -33,7 +33,7 @@ $penguin['peng_num'] = displayPengNum($pid, $viewPrefix);  // strip home prefix 
 
 // Chips
 $chipsStmt = $pdo->prepare("SELECT pc.pit_id, pc.chip_date, pc.is_active, pc.chip_box, pc.solo,
-        COALESCE(NULLIF(pc.chip_by,''), u.chip_acronym) AS chip_by
+        u.chip_acronym AS chip_by
     FROM penguin_chips pc LEFT JOIN users u ON u.id = pc.chipper_id
     WHERE pc.peng_num = ? ORDER BY pc.chip_date");
 $chipsStmt->execute([$pid]);

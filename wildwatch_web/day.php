@@ -54,7 +54,7 @@ foreach ($observations as &$obs) {
 
 // Chippings on this date
 $stmt = $pdo->prepare("SELECT pc.pit_id, pc.peng_num, pc.chip_box, p.sex, p.chipped_as_adult, p.chick_size_code,
-    COALESCE(NULLIF(pc.chip_by,''), u.chip_acronym) AS chip_by
+    u.chip_acronym AS chip_by
     FROM penguin_chips pc
     JOIN penguins p ON pc.peng_num = p.peng_num
     LEFT JOIN users u ON u.id = pc.chipper_id
