@@ -93,12 +93,20 @@ function wwSnapshotHashes(PDO $pdo, int $colonyId): ?array {
     try {
         $auditId = (int)$pdo->query("SELECT COALESCE(MAX(audit_id),0) FROM audit_log")->fetchColumn();
         $file = __DIR__ . "/hash-cache-{$colonyId}.json";
-        $cached = @json_decode(@file_get_contents($file), true);
-        if (is_array($cached) && ($cached['audit_id'] ?? -1) === $auditId && isset($cached['hashes'])) {
-            return $cached['hashes'];
+        // NB: snapshot.php installs a set_error_handler that throws on ANY warning, and PHP 8's @
+        // does NOT stop a custom handler firing — so file ops must be guarded, never @-suppressed,
+        // or a missing/unwritable cache file throws and nulls the whole result.
+        if (is_file($file) && is_readable($file)) {
+            $cached = json_decode((string)file_get_contents($file), true);
+            if (is_array($cached) && ($cached['audit_id'] ?? -1) === $auditId && isset($cached['hashes'])) {
+                return $cached['hashes'];
+            }
         }
         $hashes = wwComputeSnapshotHashes($pdo, $colonyId);
-        @file_put_contents($file, json_encode(['audit_id' => $auditId, 'hashes' => $hashes]), LOCK_EX);
+        // Best-effort cache write — a failure here must neither throw nor lose the fresh hashes.
+        if (is_writable(dirname($file)) || (is_file($file) && is_writable($file))) {
+            file_put_contents($file, json_encode(['audit_id' => $auditId, 'hashes' => $hashes]), LOCK_EX);
+        }
         return $hashes;
     } catch (Throwable $e) {
         return null;
