@@ -578,6 +578,83 @@ async function storeSnapshot(data: any, full: boolean): Promise<void> {
   }
 }
 
+// ---- Cache-integrity hashes: a diagnostic net for the incremental sync ----
+// Mirror of WW_HASH_COLS in snapshot_hash.php — SAME columns, SAME order, SAME primary key. The
+// server hashes the exact rows it serves; the client hashes its cache the same way, so a stranded
+// edit (a row the delta failed to re-send) surfaces as a table-hash mismatch. Keep in lockstep with
+// the server; float columns are excluded on both sides (they don't serialise identically).
+const HASH_COLS: Record<string, { pk: string; cols: string[] }> = {
+  penguins:     { pk: 'peng_num',       cols: ['peng_num','chipped_as_adult','sex','is_dead','death_date','chick_size_code','alert','notes','sex_guess_m','sex_guess_f'] },
+  chips:        { pk: 'pit_id',         cols: ['pit_id','peng_num','chip_date','is_active','chip_box','location_id','chip_by','chipper_id','assistant_id','solo'] },
+  observations: { pk: 'observation_id', cols: ['observation_id','location_id','observation_time_utc','adults','eggs','chicks','breeding_status','gate_status','notes','no_scan','fledged_unchipped','failed_eggs','dead_chicks','is_deleted','observer_id'] },
+  scans:        { pk: 'scan_id',        cols: ['scan_id','observation_id','pit_id'] },
+  locations:    { pk: 'location_id',    cols: ['location_id','location_name','persistent_notes','watched','pit_id','scan_time_utc'] },
+  biometrics:   { pk: 'biometric_id',   cols: ['biometric_id','peng_num','observation_id','observation_date','sex','observed_sex','condition_healthy','condition_ticks','is_moulting','disposition_aggressive','disposition_passive','notes','is_deleted'] },
+};
+const MEM_TABLE: Record<string, (m: any) => any[]> = {
+  penguins: m => m.penguins, chips: m => m.chips, observations: m => m.observations,
+  scans: m => m.scans, locations: m => m.locations, biometrics: m => m.biometrics,
+};
+
+// null/undefined => '' ; everything else => its string form. Must match PHP's (string)($v ?? '').
+const canon = (v: any): string => (v === null || v === undefined ? '' : String(v));
+
+async function sha1Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function hashTable(rows: any[], spec: { pk: string; cols: string[] }): Promise<string> {
+  const lines = rows.map(r => ({ k: canon(r[spec.pk]), line: spec.cols.map(c => canon(r[c])).join('\x1f') }));
+  lines.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0)); // lexicographic pk, matches PHP ksort SORT_STRING
+  return sha1Hex(lines.map(l => l.line).join('\x1e'));
+}
+
+// Once per session: if any table's cache hash disagrees with the server's, a row was stranded — full
+// re-sync to repair, then report which rows/fields drifted so the offending incremental method can be
+// found. Rate-limited to once/session so a serialisation mistake costs at most one extra full sync per
+// client, never a storm. Purely diagnostic — any failure is swallowed and never breaks the sync.
+let hashChecked = false;
+async function runHashCheck(serverHashes: Record<string, string> | undefined): Promise<void> {
+  if (hashChecked || !mem || !serverHashes) return;
+  hashChecked = true;
+  const mismatched: string[] = [];
+  for (const t of Object.keys(HASH_COLS)) {
+    if (!(t in serverHashes)) continue;
+    if ((await hashTable(MEM_TABLE[t](mem), HASH_COLS[t])) !== serverHashes[t]) mismatched.push(t);
+  }
+  if (!mismatched.length) return;
+
+  const before: Record<string, any[]> = {};
+  for (const t of mismatched) before[t] = MEM_TABLE[t](mem).slice();
+
+  // Full re-sync repairs the cache and gives the authoritative rows to diff against.
+  await resetDatabase();
+  const full = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`);
+  await storeSnapshot(full, true);
+
+  const diffs: any[] = [];
+  for (const t of mismatched) {
+    if (diffs.length >= 100) break;
+    const spec = HASH_COLS[t];
+    const now = new Map((MEM_TABLE[t](mem) as any[]).map(r => [canon(r[spec.pk]), r]));
+    const old = new Map(before[t].map(r => [canon(r[spec.pk]), r]));
+    for (const [k, o] of old) {
+      if (diffs.length >= 100) break;
+      const n = now.get(k);
+      if (!n) { diffs.push({ table: t, pk: k, gone_on_server: true }); continue; }
+      for (const c of spec.cols) if (canon(o[c]) !== canon(n[c])) diffs.push({ table: t, pk: k, col: c, local: canon(o[c]), server: canon(n[c]) });
+    }
+    for (const k of now.keys()) if (!old.has(k) && diffs.length < 100) diffs.push({ table: t, pk: k, missing_locally: true });
+  }
+
+  try {
+    await fetch(`/api/hash-report.php?${colonyQS()}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ colony_id: getColonyId(), client_version: String(CACHE_VERSION), tables: mismatched, diffs }),
+    });
+  } catch { /* diagnostic only */ }
+}
+
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -708,6 +785,10 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
         return;
       }
     }
+    // Integrity net: once per session, verify the cache against the server's per-table hashes and
+    // repair+report any stranded rows. After a full re-sync above (count mismatch) the cache is
+    // already authoritative, so only run this on the incremental path.
+    try { await runHashCheck(data._hashes); } catch { /* diagnostic only — never break a sync */ }
     onProgress?.('Sync complete');
   } else {
     onProgress?.('Downloading colony data...', 0);

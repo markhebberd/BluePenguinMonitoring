@@ -17,6 +17,7 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 });
 require_once 'config.php';
 require_once 'snapshot_columns.php';
+require_once 'snapshot_hash.php';
 header('Content-Type: application/json');
 header('Cache-Control: no-cache');
 header('Access-Control-Allow-Origin: *');
@@ -320,6 +321,7 @@ if ($since) {
         'edit_counts' => $editCounts,
         'fm_excluded_boxes' => $fmExcludedBoxes,
         '_counts' => getTotalCounts($pdo, $colonyId),
+        '_hashes' => wwSnapshotHashes($pdo, $colonyId),
     ], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId), getObservers($pdo)));
     exit;
 }
@@ -383,6 +385,7 @@ $json = json_encode(array_merge([
     'edit_counts' => $editCounts,
     'fm_excluded_boxes' => $fmExcludedBoxes,
     '_counts' => getTotalCounts($pdo, $colonyId),
+    '_hashes' => wwSnapshotHashes($pdo, $colonyId),
 ], getVerificationData($pdo, $colonyId, $viewPrefix), getDayNotes($pdo, $colonyId), getObservers($pdo)));
 
 // Manual gzip with known Content-Length for accurate client progress
