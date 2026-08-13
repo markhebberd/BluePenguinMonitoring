@@ -8153,8 +8153,8 @@ function ChangePasswordDialog({ token, userName, onClose }: { token: string; use
  *  nestcheck's biometric fields). Launched from a box (chipBox set) for a fresh chipping, or
  *  standalone (chipBox '') to enter an already-chipped bird — box is optional in that case, and
  *  the colony prefix numbers it (e.g. RH1). */
-function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClose, onAdded }: {
-  token: string; chipBox: string; defaultChipperId: number | null; allPenguins: any[];
+function AddPenguinDialog({ token, chipBox, colonyPrefix, defaultChipperId, allPenguins, onClose, onAdded }: {
+  token: string; chipBox: string; colonyPrefix: string; defaultChipperId: number | null; allPenguins: any[];
   onClose: () => void; onAdded: (pengNum: string) => void;
 }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
@@ -8179,13 +8179,22 @@ function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClo
   const pitNorm = pit.toUpperCase().trim();
   const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
   const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
-  // Predict the peng_num the server will assign (MAX + 1) for the title. Take the numeric TAIL,
-  // not parseInt(peng_num): a prefixed colony's numbers ("RR1", "RR2") parseInt to NaN, so the
-  // max stayed 0 and every new bird was predicted as #1.
-  const nextPengNum = useMemo(() => allPenguins.reduce((m: number, p: any) => {
-    const n = parseInt(String(p.peng_num).match(/\d+/)?.[0] ?? '', 10);
-    return Number.isNaN(n) ? m : Math.max(m, n);
-  }, 0) + 1, [allPenguins]);
+  // Predict the peng_num the server will assign, scoped to THIS colony. allPenguins spans every
+  // colony: PT birds show bare ("319"), every other colony keeps its prefix ("RR1"). So match only
+  // the current colony's birds — bare digits when it's PT, else "<prefix><digits>" — take MAX + 1,
+  // and re-attach the prefix for display, so a new RR bird reads "RR1" rather than "1038" (which was
+  // PT's global max + 1, from counting every colony's birds together).
+  const bareColony = colonyPrefix === '' || colonyPrefix === 'PT';
+  const nextPengNum = useMemo(() => {
+    const re = bareColony ? /^(\d+)$/ : new RegExp(`^${colonyPrefix}(\\d+)$`);
+    const max = allPenguins.reduce((m: number, p: any) => {
+      const hit = String(p.peng_num).match(re);
+      return hit ? Math.max(m, parseInt(hit[1], 10)) : m;
+    }, 0);
+    return max + 1;
+  }, [allPenguins, colonyPrefix, bareColony]);
+  // Prefixed for display everywhere but PT, whose local standard is bare numbers.
+  const nextPengLabel = bareColony ? String(nextPengNum) : `${colonyPrefix}${nextPengNum}`;
 
   // An adult being chipped is often the very bird recorded as "no scan" on that day's visit —
   // offer to swap the marker for a real scan of the new bird.
@@ -8204,7 +8213,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClo
     if (!chipperId) { setError('Chipper is required'); return; }
     if (mode === 'rechip' && !rechipTarget) { setError('Search for the penguin to rechip'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
-    if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengNum}?`)) return;
+    if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengLabel}?`)) return;
     setSaving(true);
     try {
       let pengNum: string;
@@ -8271,7 +8280,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClo
   return (
     <div className="login-page" onClick={onClose}>
       <div className="login-card add-penguin-card" onClick={e => e.stopPropagation()}>
-        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : mode === 'rechip' ? 'Rechip penguin' : `New bird #${nextPengNum}`}{(box.trim() || chipBox) ? ` · Box ${box.trim() || chipBox}` : ''}</h2>
+        <h2>{rechipTarget ? `Rechip penguin #${rechipTarget.peng_num}` : mode === 'rechip' ? 'Rechip penguin' : `New bird #${nextPengLabel}`}{(box.trim() || chipBox) ? ` · Box ${box.trim() || chipBox}` : ''}</h2>
         {/* New penguin / Rechip mode row with the rechip search inline (mirrors nestcheck). */}
         <div className="rechip-penguin">
           <div className="app-toggle" style={{ flexShrink: 0 }}>
@@ -12435,6 +12444,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <AddPenguinDialog
           token={token}
           chipBox={addPenguinBox}
+          colonyPrefix={colonies.find((c: any) => Number(c.colony_id) === colonyId)?.colony_prefix ?? ''}
           defaultChipperId={Number(localStorage.getItem('ww_observer_id')) || null}
           allPenguins={allPenguins}
           onClose={() => setAddPenguinBox(null)}
