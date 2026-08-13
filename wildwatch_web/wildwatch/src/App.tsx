@@ -8344,8 +8344,12 @@ function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClo
           <div className="app-field"><label>Chip box</label>
             <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="Optional" /></div>
           <div className="app-field"><label className="req">Chipper</label>
-            <UserPickerField userId={chipperId} addLabel="Select chipper" title="Who fitted the transponder"
-              onSave={id => { setChipperId(id); return Promise.resolve(); }} /></div>
+            <select value={chipperId ?? ''} title="Who fitted the transponder"
+              onChange={e => setChipperId(e.target.value ? Number(e.target.value) : null)}
+              style={{ borderColor: !chipperId ? '#c0392b' : undefined }}>
+              <option value="">Select chipper</option>
+              {getUsers().map(u => <option key={u.id} value={u.id}>{u.name}{u.active ? '' : ' (inactive)'}</option>)}
+            </select></div>
         </div>
         <div className="app-bio-header">Biometric Data (optional)</div>
         <div className="app-row">
