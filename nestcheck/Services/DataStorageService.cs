@@ -1140,6 +1140,26 @@ namespace PenguinMonitor.Services
                 : ServerMessage(await resp.Content.ReadAsStringAsync(), (int)resp.StatusCode);
         }
 
+        /// <summary>Settle the truth sex on a penguin (penguins.sex) once enough field guesses have
+        /// piled up. Value is "m" or "f". This is the confirmed sex, not an observation. Returns null
+        /// on success, else why it failed.</summary>
+        public async Task<string?> ApplyPenguinSex(string pengNum, string sex, string token, int colonyId)
+        {
+            if (string.IsNullOrEmpty(pengNum)) return "no penguin number";
+            var fields = new Dictionary<string, object>
+            {
+                ["sex"] = sex,
+                ["_reason"] = "Sexed from field guesses in nestcheck",
+            };
+            var req = new HttpRequestMessage(HttpMethod.Post,
+                $"{WILDWATCH_API_URL}?action=update&table=penguins&id={Uri.EscapeDataString(pengNum)}&colony_id={colonyId}");
+            req.Headers.Add("Authorization", $"Bearer {token}");
+            req.Content = new StringContent(JsonConvert.SerializeObject(fields), Encoding.UTF8, "application/json");
+            var resp = await _httpClient.SendAsync(req);
+            return resp.IsSuccessStatusCode ? null
+                : ServerMessage(await resp.Content.ReadAsStringAsync(), (int)resp.StatusCode);
+        }
+
         /// <summary>Upload only pending biometrics (used for prompt background flush after a save).</summary>
         internal async Task<SyncResult> UploadPendingBiometricsOnly(ColonyState colonyState, AppSettings appSettings)
         {

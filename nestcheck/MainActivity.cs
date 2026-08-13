@@ -9083,18 +9083,61 @@ namespace PenguinMonitor
             bool mOver = pd.SexGuessM >= SexConfirmScore, fOver = pd.SexGuessF >= SexConfirmScore;
             if (!mOver && !fOver) return;
 
+            // A single side over the line has a sex to apply; guesses on both sides disagree, so
+            // there's nothing to apply — that one only offers to open the bird on the website.
+            string? winningSex = mOver && !fOver ? "m" : (fOver && !mOver ? "f" : null);
             var display = DisplayPengNum(pd.PengNum);
-            var message = mOver && fOver
-                ? $"Field guesses for #{display} disagree — {pd.SexGuessM} towards male, {pd.SexGuessF} towards female.\n\nSomeone needs to settle it."
-                : $"#{display} has enough field guesses to sex it: {(mOver ? pd.SexGuessM : pd.SexGuessF)} points towards {(mOver ? "male" : "female")}.\n\nConfirm it on wildwatch?";
+            var message = winningSex == null
+                ? $"Field guesses for #{display} disagree — {pd.SexGuessM} towards male, {pd.SexGuessF} towards female.\n\nSomeone needs to settle it on wildwatch."
+                : $"#{display} has enough field guesses to sex it: {(mOver ? pd.SexGuessM : pd.SexGuessF)} points towards {(mOver ? "male" : "female")}.\n\nApply it, or open the bird on wildwatch first?";
 
             TriggerAlert();
-            new AlertDialog.Builder(this)
+            var builder = new AlertDialog.Builder(this)
                 .SetTitle("Sex this bird?")
-                .SetMessage(message)
-                .SetNegativeButton("Not now", (s, e) => { })
-                .SetPositiveButton("Open wildwatch", (s, e) => ShowBirdPanel(cleanEid, pd.PengNum))
-                .Show();
+                .SetNeutralButton("View wildwatch", (s, e) => { })   // Click rewired below so it doesn't dismiss
+                .SetNegativeButton("Cancel", (s, e) => { });
+            if (winningSex != null)
+                builder.SetMessage(message)
+                       .SetPositiveButton("Apply sex", (s, e) => ApplySexFromPrompt(pd, winningSex));
+            else
+                builder.SetMessage(message);
+            var dialog = builder.Create();
+            dialog.Show();
+            // "View wildwatch" opens the bird panel (a full-screen modal) OVER this prompt. Rewiring
+            // Click drops the button's auto-dismiss, so closing the panel returns you to the prompt —
+            // same trick the embed panel's ◀/▶ buttons use.
+            var viewBtn = dialog.GetButton((int)Android.Content.DialogButtonType.Neutral);
+            if (viewBtn != null) viewBtn.Click += (s, e) => ShowBirdPanel(cleanEid, pd.PengNum);
+        }
+
+        /// <summary>Writes the confirmed sex to the penguin record on wildwatch, then reflects it
+        /// locally so the bird stops reading as unsexed for the rest of the session.</summary>
+        private async void ApplySexFromPrompt(PenguinData pd, string sex)
+        {
+            var token = _appSettings.AuthToken;
+            var display = DisplayPengNum(pd.PengNum);
+            if (string.IsNullOrEmpty(token))
+            {
+                Toast.MakeText(this, "Not logged in — can't sex on wildwatch", ToastLength.Long)?.Show();
+                return;
+            }
+            Toast.MakeText(this, $"Sexing #{display}…", ToastLength.Short)?.Show();
+            var error = await _dataStorageService.ApplyPenguinSex(pd.PengNum, sex, token, CurrentColonyIdOrDefault());
+            RunOnUiThread(() =>
+            {
+                if (error == null)
+                {
+                    pd.Sex = sex;   // no longer unsexed — future scans this session won't alert or re-prompt
+                    Toast.MakeText(this, $"#{display} sexed {(sex == "m" ? "male" : "female")}", ToastLength.Long)?.Show();
+                    DrawPageLayouts();
+                }
+                else
+                    new AlertDialog.Builder(this)
+                        .SetTitle("Couldn't sex bird")
+                        .SetMessage($"{error}\n\nNothing changed — try again or sex it on wildwatch.")
+                        .SetPositiveButton("OK", (s, e) => { })
+                        .Show();
+            });
         }
         // A scanned unknown tag goes into the box before its new-bird form opens, so the
         // scan is visible immediately — this takes it back out when the form is cancelled.
