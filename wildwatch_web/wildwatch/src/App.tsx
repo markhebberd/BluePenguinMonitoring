@@ -8153,15 +8153,15 @@ function ChangePasswordDialog({ token, userName, onClose }: { token: string; use
  *  nestcheck's biometric fields). Launched from a box (chipBox set) for a fresh chipping, or
  *  standalone (chipBox '') to enter an already-chipped bird — box is optional in that case, and
  *  the colony prefix numbers it (e.g. RH1). */
-function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose, onAdded }: {
-  token: string; chipBox: string; defaultChipBy: string; allPenguins: any[];
+function AddPenguinDialog({ token, chipBox, defaultChipperId, allPenguins, onClose, onAdded }: {
+  token: string; chipBox: string; defaultChipperId: number | null; allPenguins: any[];
   onClose: () => void; onAdded: (pengNum: string) => void;
 }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
   const [date, setDate] = useState(today);
   const [pit, setPit] = useState('');
   const [box, setBox] = useState(chipBox);
-  const [chipBy, setChipBy] = useState(defaultChipBy);
+  const [chipperId, setChipperId] = useState<number | null>(defaultChipperId);
   const [isAdult, setIsAdult] = useState(true);
   const [chickSize, setChickSize] = useState('');
   const [weight, setWeight] = useState('');
@@ -8179,8 +8179,13 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
   const pitNorm = pit.toUpperCase().trim();
   const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
   const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
-  // Predict the peng_num the server will assign (MAX + 1) for the title.
-  const nextPengNum = useMemo(() => allPenguins.reduce((m: number, p: any) => Math.max(m, parseInt(p.peng_num) || 0), 0) + 1, [allPenguins]);
+  // Predict the peng_num the server will assign (MAX + 1) for the title. Take the numeric TAIL,
+  // not parseInt(peng_num): a prefixed colony's numbers ("RR1", "RR2") parseInt to NaN, so the
+  // max stayed 0 and every new bird was predicted as #1.
+  const nextPengNum = useMemo(() => allPenguins.reduce((m: number, p: any) => {
+    const n = parseInt(String(p.peng_num).match(/\d+/)?.[0] ?? '', 10);
+    return Number.isNaN(n) ? m : Math.max(m, n);
+  }, 0) + 1, [allPenguins]);
 
   // An adult being chipped is often the very bird recorded as "no scan" on that day's visit —
   // offer to swap the marker for a real scan of the new bird.
@@ -8196,7 +8201,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
     if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     // Chip box is optional — a bird chipped elsewhere (e.g. rehab intake) often has no box here.
-    if (!chipBy.trim()) { setError('Chipped by is required'); return; }
+    if (!chipperId) { setError('Chipper is required'); return; }
     if (mode === 'rechip' && !rechipTarget) { setError('Search for the penguin to rechip'); return; }
     if (rechipTarget && !confirm(`Are you sure you would like to rechip #${rechipTarget.peng_num}?`)) return;
     if (!rechipTarget && !confirm(`Are you sure you would like to add penguin #${nextPengNum}?`)) return;
@@ -8216,7 +8221,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
       const chipLoc = queryAllLocations().find((l: any) => String(l.location_name) === box.trim());
       const chipRes = await createRecord(token, 'penguin_chips', {
         pit_id: pitNorm, peng_num: pengNum, chip_date: date,
-        chip_box: box.trim() || null, location_id: chipLoc?.location_id ?? null, chip_by: chipBy.trim() || null, is_active: 1,
+        chip_box: box.trim() || null, location_id: chipLoc?.location_id ?? null, chipper_id: chipperId, is_active: 1,
       }, rechipTarget ? `Rechip of #${pengNum}` : undefined);
       if (!chipRes.success) { setError('Chip: ' + (chipRes.error || 'failed') + (rechipTarget ? '' : ` (penguin #${pengNum} was created)`)); setSaving(false); return; }
 
@@ -8338,9 +8343,9 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         <div className="app-row">
           <div className="app-field"><label>Chip box</label>
             <input type="text" value={box} onChange={e => setBox(e.target.value)} placeholder="Optional" /></div>
-          <div className="app-field"><label className="req">Chipped by</label>
-            <input type="text" value={chipBy} onChange={e => setChipBy(e.target.value)} placeholder="Observer name"
-              style={{ borderColor: !chipBy.trim() ? '#c0392b' : undefined }} /></div>
+          <div className="app-field"><label className="req">Chipper</label>
+            <UserPickerField userId={chipperId} addLabel="Select chipper" title="Who fitted the transponder"
+              onSave={id => { setChipperId(id); return Promise.resolve(); }} /></div>
         </div>
         <div className="app-bio-header">Biometric Data (optional)</div>
         <div className="app-row">
@@ -8354,7 +8359,7 @@ function AddPenguinDialog({ token, chipBox, defaultChipBy, allPenguins, onClose,
         {error && <div className="login-error">{error}</div>}
         <div className="app-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipBy.trim() || (mode === 'rechip' && !rechipTarget)}>{saving ? 'Saving…' : mode === 'rechip' ? 'Save rechip' : 'Save chip'}</button>
+          <button type="button" onClick={save} disabled={saving || !pitValid || !!dup || !chipperId || (mode === 'rechip' && !rechipTarget)}>{saving ? 'Saving…' : mode === 'rechip' ? 'Save rechip' : 'Save chip'}</button>
         </div>
       </div>
     </div>
@@ -12426,7 +12431,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
         <AddPenguinDialog
           token={token}
           chipBox={addPenguinBox}
-          defaultChipBy={userName.split(/\s+/).map(s => s[0] || '').join('').toUpperCase()}
+          defaultChipperId={Number(localStorage.getItem('ww_observer_id')) || null}
           allPenguins={allPenguins}
           onClose={() => setAddPenguinBox(null)}
           onAdded={async (pengNum) => {
