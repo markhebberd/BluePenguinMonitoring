@@ -11015,11 +11015,12 @@ function RegionsAndColonies({ token }: { token: string }) {
 
         <h4 style={{color:'#1a5276', margin:'16px 0 6px'}}>Colonies</h4>
         <table style={{fontSize:12, borderCollapse:'collapse', width:'100%', marginBottom:8}}>
-          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Colony</th><th style={{textAlign:'left'}}>Region</th><th style={{textAlign:'left'}}>Box sets</th><th style={{textAlign:'left'}}>FM-excluded</th><th></th></tr></thead>
+          <thead><tr style={{borderBottom:'1px solid #ddd'}}><th style={{textAlign:'left'}}>Colony</th><th style={{textAlign:'left'}}>Acronym</th><th style={{textAlign:'left'}}>Region</th><th style={{textAlign:'left'}}>Box sets</th><th style={{textAlign:'left'}}>FM-excluded</th><th></th></tr></thead>
           <tbody>
             {colonies!.map((c: any) => (
               <tr key={c.colony_id} style={{borderBottom:'1px solid #eee'}}>
                 <td style={{padding:'4px 8px'}}>{c.colony_name}</td>
+                <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.colony_prefix || '—'}</td>
                 <td style={{padding:'4px 8px'}} className="muted">{c.region_name}</td>
                 <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.location_sets_string}</td>
                 <td style={{padding:'4px 8px', fontFamily:'monospace', fontSize:11}}>{c.fm_excluded_boxes}</td>
