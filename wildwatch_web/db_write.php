@@ -117,7 +117,14 @@ function wwAuditedUpdate($pdo, $table, $id, $fields, $observerId, $reason = null
 
     $changed = [];
     foreach ($fields as $col => $new) {
-        if (($old[$col] ?? null) != $new) $changed[$col] = ['old' => $old[$col] ?? null, 'new' => $new];
+        $cur = $old[$col] ?? null;
+        // Distinguish null from 0/'' explicitly: PHP's loose != treats 0, '' and null as
+        // equal, so clearing a recorded 0 back to null (failed_eggs, dead_chicks) looked
+        // like "no change" and was silently dropped. Only fall back to loose comparison
+        // when both sides are non-null (PDO returns numerics as strings, so "3" == 3).
+        $differs = (($cur === null) !== ($new === null))
+            || ($cur !== null && $new !== null && $cur != $new);
+        if ($differs) $changed[$col] = ['old' => $cur, 'new' => $new];
     }
     if (!$changed) return 0;
 
