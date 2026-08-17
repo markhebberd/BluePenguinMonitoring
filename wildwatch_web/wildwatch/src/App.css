@@ -834,7 +834,9 @@ input.pw-invalid:focus, .login-card input.pw-invalid:focus { border-color:#F4433
 .verify-orphans { background:#fbeceb; border:1px solid #e6b8b3; color:#a3382f; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
 .verify-orphans-head { font-weight:600; }
 .verify-orphan-row { margin-top:3px; padding-left:14px; font-size:11px; color:#8a4a43; }
+.verify-orphan-row.settled { color:#9a8683; }
 .verify-orphan-row.clickable { cursor:pointer; }
+.verify-orphan-note { font-style:italic; opacity:.85; }
 .verify-orphan-row.clickable:hover { text-decoration:underline; }
 
 .verify-backdrop { position:fixed; inset:0; z-index:2200; }
