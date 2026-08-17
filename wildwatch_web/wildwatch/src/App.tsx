@@ -5395,6 +5395,53 @@ function MirrorAlertBadge({ reason }: { reason: string }) {
 }
 
 /**
+ * Admin → Mirror: the offsite arrangement does not only carry Wildwatch. The same nightly
+ * run backs up tantrixlab.com — the other site on the same VPS — and until now that lived
+ * only inside a shell script on the server. It is written down here, on the tab someone
+ * stands on when they ask "what have we got offsite?", rather than in a runbook nobody
+ * opens the night they need it.
+ */
+function OffsiteAlsoTantrixlab() {
+  return (
+    <div className="admin-section">
+      <h3>Also backed up offsite: tantrixlab.com</h3>
+      <p className="muted">
+        The offsite box is shared. Every night at 03:40 UTC the VPS — which serves
+        tantrixlab.com as well as Wildwatch — runs <code>offsite-backup.sh</code> and pushes
+        both sites over SSH to the backup machine (<code>devian</code>):
+      </p>
+      <ul className="muted" style={{ marginTop: 0 }}>
+        <li>
+          <strong>Database</strong> — a gzipped <code>tantrix_online</code> dump (~420 MB),
+          kept as <strong>14 dailies + 12 monthlies</strong>; the first daily of each month is
+          copied aside as that month&rsquo;s keeper, so a year of month-ends survives the
+          fortnight window.
+        </li>
+        <li>
+          <strong>Media</strong> — the site&rsquo;s <code>uploads/</code> folder, mirrored
+          <strong> latest-only</strong>. It tracks what is live and keeps no dated history, so
+          a file deleted on the site is gone from the copy on the next run.
+        </li>
+        <li>
+          The same run ships the Wildwatch dump too — that is why the System tab&rsquo;s backup
+          panel lists two databases rather than one.
+        </li>
+      </ul>
+      <p className="muted">
+        The night is all-or-nothing: any failed step aborts the run, and the VPS&rsquo;s package
+        upgrades are chained behind it, so the box never upgrades itself without a fresh backup.
+      </p>
+      <p className="muted">
+        What this is <em>not</em>: restore-tested. The nightly restore-and-verify described above
+        covers <strong>Wildwatch only</strong>. The tantrixlab copies are checked for gzip
+        integrity and a plausible size, then shipped — never loaded back into a database. A
+        tantrixlab restore is an untested path until someone tries it.
+      </p>
+    </div>
+  );
+}
+
+/**
  * Production asking the mirror what it holds. The mirror is only reachable through its
  * Cloudflare tunnel, so "no answer" is an ordinary outcome here and gets said plainly — an
  * admin needs to know the difference between a mirror with no backups and a mirror it cannot
@@ -10548,8 +10595,6 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
       <div style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         {built('system') && <>
           <BackupsPanel token={token} />
-          <DayMoveMigrationPanel token={token} fromDate="2024-05-08" toDate="2024-04-08" />
-          <DayMoveMigrationPanel token={token} fromDate="2023-10-10" toDate="2023-10-09" />
           <Suspense fallback={<div className="admin-section"><p className="muted">Loading chart...</p></div>}>
             <DiskHistoryChart token={token} />
           </Suspense>
@@ -10570,6 +10615,8 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
         <iframe title="Backup status" srcDoc={mirrorHtml}
           style={{ width: '100%', height: '78vh', border: '1px solid #ddd', borderRadius: 8, marginTop: 8, background: '#fff' }} />
       </div>
+
+      {adminTab === 'mirror' && <OffsiteAlsoTantrixlab />}
 
       <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <h3>Disk write test</h3>
@@ -10638,124 +10685,6 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
       </div>
     )}
     </>
-  );
-}
-
-/** Admin → System: one-time migration moving everything recorded on one NZ day to
- *  another, all timestamps set to 2pm NZ (02:00 UTC NZST, the death_date convention).
- *  Runs entirely through the audited CRUD API with the logged-in session, so every
- *  change lands in audit_log under this user with a change_reason. Remove each panel
- *  once its migration has been applied. */
-function DayMoveMigrationPanel({ token, fromDate, toDate }: { token: string; fromDate: string; toDate: string }) {
-  const FROM_DATE = fromDate, TO_DATE = toDate;
-  const TO_DATETIME_UTC = `${toDate} 02:00:00`;
-  const nice = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-  const REASON = `One-time migration: data recorded on ${nice(FROM_DATE)} moved to ${nice(TO_DATE)}`;
-  const [log, setLog] = useState<string[]>([]);
-  const [running, setRunning] = useState(false);
-
-  const api = async (path: string, body?: any) => {
-    const r = await fetch(`/api/crud.php?${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (!r.ok || data.error) throw new Error(`${path}: ${data.error || r.status}`);
-    return data;
-  };
-
-  const run = async (apply: boolean) => {
-    if (apply && !confirm(`Move all data on ${nice(FROM_DATE)} to ${nice(TO_DATE)} (2pm NZ)? This writes to the database.`)) return;
-    setRunning(true);
-    const lines: string[] = [];
-    const add = (s: string) => { lines.push(s); setLog([...lines]); };
-    try {
-      add(apply ? 'APPLYING — writing changes…' : 'Dry run — nothing written.');
-
-      const observations = await api(`action=list&table=observations&nz_date=${FROM_DATE}`);
-      if (observations.length >= 5000) throw new Error('Result truncated at 5000 rows — aborting');
-
-      const existingOnTarget = await api(`action=list&table=observations&nz_date=${TO_DATE}`);
-      if (existingOnTarget.length > 0) {
-        add(`NOTE: ${TO_DATE} already has ${existingOnTarget.length} observation(s); moved rows will join them.`);
-        const clash = new Set(existingOnTarget.map((o: any) => o.location_id));
-        const dup = observations.filter((o: any) => clash.has(o.location_id));
-        if (dup.length) add(`WARNING: ${dup.length} moved observation(s) share a box with an existing ${TO_DATE} observation: ids ${dup.map((o: any) => o.observation_id).join(', ')}`);
-      }
-
-      add(`Observations on ${FROM_DATE}: ${observations.length}`);
-      let scanCount = 0;
-      for (const obs of observations) {
-        if (toNzDateStr(obs.observation_time_utc) !== FROM_DATE)
-          throw new Error(`Observation ${obs.observation_id} not on ${FROM_DATE}: ${obs.observation_time_utc}`);
-        const flags = obs.is_deleted && Number(obs.is_deleted) ? ' [soft-deleted]' : '';
-        add(`  obs ${obs.observation_id} (loc ${obs.location_id})${flags}: ${obs.observation_time_utc} -> ${TO_DATETIME_UTC}`);
-        if (apply) await api(`action=update&table=observations&id=${obs.observation_id}`, { observation_time_utc: TO_DATETIME_UTC, _reason: REASON });
-
-        const scans = await api(`action=list&table=penguin_scans&observation_id=${obs.observation_id}`);
-        for (const scan of scans) {
-          add(`    scan ${scan.scan_id}: ${scan.scan_time_utc} -> ${TO_DATETIME_UTC}`);
-          if (apply) await api(`action=update&table=penguin_scans&id=${scan.scan_id}`, { scan_time_utc: TO_DATETIME_UTC, _reason: REASON });
-          scanCount++;
-        }
-      }
-
-      // Only biometric rows belonging to a moved observation follow it; anything else
-      // dated 8 May (no observation link, or linked elsewhere) is flagged, not moved.
-      const movedObsIds = new Set(observations.map((o: any) => o.observation_id));
-      const biometrics = await api(`action=list&table=penguin_biometric_data&observation_date=${FROM_DATE}`);
-      const [linked, orphaned] = [
-        biometrics.filter((b: any) => movedObsIds.has(b.observation_id)),
-        biometrics.filter((b: any) => !movedObsIds.has(b.observation_id)),
-      ];
-      add(`Biometric rows dated ${FROM_DATE}: ${biometrics.length} (${linked.length} linked to moved observations)`);
-      for (const bio of linked) {
-        add(`  biometric ${bio.biometric_id} (obs ${bio.observation_id}): ${FROM_DATE} -> ${TO_DATE}`);
-        if (apply) await api(`action=update&table=penguin_biometric_data&id=${bio.biometric_id}`, { observation_date: TO_DATE, _reason: REASON });
-      }
-      for (const bio of orphaned) {
-        add(`  SKIPPED biometric ${bio.biometric_id} (obs ${bio.observation_id ?? 'none'}): not linked to a moved observation`);
-      }
-
-      const fmDates = await api('action=all_fm_dates');
-      const hit = fmDates.find((d: any) => String(d.actual_date).slice(0, 10) === FROM_DATE);
-      if (hit) {
-        add(`FM date mapping: season ${hit.season_year} day ${hit.date_number} is ${FROM_DATE} -> ${TO_DATE}`);
-        if (apply) {
-          const season = await api(`action=season_fm_dates&season=${hit.season_year}`);
-          const rows = season.map((r: any) => ({
-            n: r.date_number,
-            date: String(r.actual_date).slice(0, 10) === FROM_DATE ? TO_DATE : String(r.actual_date).slice(0, 10),
-          })).sort((a: any, b: any) => a.date.localeCompare(b.date)).map((r: any, i: number) => ({ n: i + 1, date: r.date }));
-          await api(`action=season_fm_dates&season=${hit.season_year}`, rows);
-        }
-      } else {
-        add(`No FM date mapping registered for ${FROM_DATE}.`);
-      }
-
-      add(`${apply ? 'Done' : 'Dry run complete'}: ${observations.length} observations, ${scanCount} scans, ${linked.length} biometric rows${orphaned.length ? ` (${orphaned.length} skipped)` : ''}${hit ? ', 1 FM date mapping' : ''}.`);
-    } catch (e: any) {
-      add(`FAILED: ${e.message}`);
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="admin-section">
-      <h3>One-time migration: {nice(FROM_DATE)} → {nice(TO_DATE)}</h3>
-      <p className="muted">Moves all observations, scans and biometrics recorded on {nice(FROM_DATE)} to {nice(TO_DATE)}, timestamps set to 2pm NZ. Audited under your login. Dry run first.</p>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button className="edit-btn" disabled={running} onClick={() => run(false)}>Dry run</button>
-        <button className="edit-btn" disabled={running} style={{ background: '#c62828', color: '#fff' }} onClick={() => run(true)}>Apply</button>
-      </div>
-      {log.length > 0 && (
-        <pre style={{ marginTop: 8, maxHeight: 300, overflow: 'auto', background: '#f7f9fa', border: '1px solid #e8ecef', borderRadius: 4, padding: 8, fontSize: 12 }}>
-          {log.join('\n')}
-        </pre>
-      )}
-    </div>
   );
 }
 
