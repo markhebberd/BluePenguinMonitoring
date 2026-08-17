@@ -959,10 +959,13 @@ function queryBoxDetailInner(boxName: string, includeDeleted?: boolean): any {
 
   // Human-verified breeding truth for this box's clutches, keyed by the anchor observation.
   // chicks is already an inline array on each verification (from the snapshot's JSON column).
+  // The anchor's date and deleted flag ride along so a verdict the algorithm has since
+  // re-segmented away from can still name the day it was recorded against — including when
+  // that observation has been deleted out from under it, and so is in neither list below.
   const verifications: any[] = [];
   for (const o of boxObs) {
     const v = c.verByObs.get(o.observation_id);
-    if (v) verifications.push(v);
+    if (v) verifications.push({ ...v, anchor_time: o.observation_time_utc, anchor_deleted: !!o.is_deleted });
   }
 
   return {

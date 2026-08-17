@@ -1492,10 +1492,10 @@ function allColonyBoxes(): ColonyBox[] {
   if (_colonyBoxCache && _colonyBoxCache.version === version) return _colonyBoxCache.boxes;
   const boxes: ColonyBox[] = [];
   for (const loc of queryAllLocations()) {
-    // Deleted rows ride along: they cost nothing here (the box query filters them out of
-    // `observations` either way) and the verification-conflict check needs them — an accepted
-    // verdict can outlive the observation it was anchored to.
-    const detail = queryBoxDetailSync(loc.location_name, true);
+    // A verdict can outlive the observation it was anchored to, but the deleted rows
+    // themselves aren't needed here — each verification carries its anchor's date and
+    // deleted flag, which is all the conflict check reads.
+    const detail = queryBoxDetailSync(loc.location_name);
     let fams: BoxSeasonData[] | null = null;
     boxes.push({
       box: String(loc.location_name), loc, detail,
@@ -1565,9 +1565,24 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
   const currentSeasons: React.ReactNode[] = [];
   const previousSeasons: React.ReactNode[] = [];
   // Verifications whose anchor observation no longer starts any detected clutch — the algorithm
-  // has re-segmented away from the verified truth, so surface them as a drift warning.
+  // has re-segmented away from the verified truth, so surface them as a drift warning. Only an
+  // acceptance is a problem: a rejection whose window has since disappeared is settled, the
+  // reviewer said the detection was wrong and the algorithm now agrees. Same rule (and same
+  // wording of what/why) as the admin integrity check, so a row here matches a row there.
   const allStartIds = new Set(seasonData.flatMap(sd => sd.clutches.map(c => c.startObsId).filter((x): x is number => x != null)));
-  const orphanVerifications = verifications.filter(v => !allStartIds.has(v.observation_id));
+  const orphanVerifications = verifications
+    .filter(v => !allStartIds.has(v.observation_id)
+      && v.adults_verdict !== 'rejected' && v.chicks_verdict !== 'rejected'
+      && (v.adults_verdict === 'accepted' || v.chicks_verdict === 'accepted'))
+    .map(v => ({
+      v,
+      what: [v.adults_verdict === 'accepted' ? 'pair' : null, v.chicks_verdict === 'accepted' ? 'offspring' : null].filter(Boolean).join(' + '),
+      by: v.adults_reviewed_by_name || v.chicks_reviewed_by_name || '',
+      season: v.anchor_time ? seasonRange(getSeasonLabel(parseDate(v.anchor_time))) : '',
+      when: v.anchor_time ? parseDate(v.anchor_time).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland' }) : '',
+      why: v.anchor_deleted ? 'the observation it was recorded against was deleted' : 'no breeding window starts here any more',
+    }))
+    .sort((a, b) => String(b.v.anchor_time || '').localeCompare(String(a.v.anchor_time || '')));
 
   seasonData.forEach(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, seasonSightings, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
         if (birds.length === 0 && sObsChrono.length === 0 && !isCurrent) return;
@@ -1779,7 +1794,19 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
     <div className="all-birds">
       {orphanVerifications.length > 0 && (
         <div className="verify-orphans" title="A verified clutch's anchor observation no longer starts a detected breeding window — the algorithm has re-segmented away from the saved truth.">
-          {'✗'} {orphanVerifications.length} verified clutch{orphanVerifications.length !== 1 ? 'es' : ''} no longer detected
+          <div className="verify-orphans-head">
+            {'✗'} {orphanVerifications.length} verified clutch{orphanVerifications.length !== 1 ? 'es' : ''} no longer detected
+          </div>
+          {orphanVerifications.map(o => {
+            // A deleted anchor has nothing left to scroll to, so only a live one links out.
+            const go = o.v.anchor_time && !o.v.anchor_deleted ? () => onSeasonClick?.(o.v.anchor_time) : undefined;
+            return (
+              <div key={o.v.verification_id} className={`verify-orphan-row${go ? ' clickable' : ''}`}
+                title={go ? 'Go to the observation it was verified against' : undefined} onClick={go}>
+                {o.season ? `${o.season} · ` : ''}{o.when || 'date unknown'} {'—'} {o.what} accepted{o.by ? ` by ${o.by}` : ''} {'·'} {o.why}
+              </div>
+            );
+          })}
         </div>
       )}
       {currentSeasons}
@@ -3289,10 +3316,8 @@ function computeClutchVerify(fam: BoxFamily, verification: any | null): ClutchVe
 function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
   const rejected: any[] = [], drifted: any[] = [];
   const named = (v: any) => v.adults_reviewed_by_name || v.chicks_reviewed_by_name || '';
-  // Deleted rows ride the shared pass too: a verdict can outlive its observation.
   for (const { box, detail, families } of allColonyBoxes()) {
     const vers: any[] = detail?.verifications || [];
-    const deletedIds = new Set<number>((detail.deleted || []).map((o: any) => o.observation_id));
     if (!vers.length) continue;
     const anchored = new Set<number>();
     for (const season of families) {
@@ -3332,9 +3357,7 @@ function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
       if (anchored.has(v.observation_id)) continue;
       if (v.adults_verdict === 'rejected' || v.chicks_verdict === 'rejected') continue;
       if (v.adults_verdict !== 'accepted' && v.chicks_verdict !== 'accepted') continue;
-      const obs = [...(detail.observations || []), ...(detail.deleted || [])]
-        .find((o: any) => o.observation_id === v.observation_id);
-      const time = obs?.observation_time_utc;
+      const time = v.anchor_time;
       const row = {
         box,
         season: time ? seasonRange(getSeasonLabel(parseDate(time))) : '',
@@ -3343,7 +3366,7 @@ function computeVerifyConflicts(): { rejected: any[]; drifted: any[] } {
         _href: time ? `/?box=${encodeURIComponent(box)}&obs=${encodeURIComponent(time)}` : undefined,
       };
       drifted.push({ ...row, what: 'whole window',
-        why: deletedIds.has(v.observation_id)
+        why: v.anchor_deleted
           ? 'the observation it was recorded against was deleted'
           : 'no breeding window starts here any more' });
     }
