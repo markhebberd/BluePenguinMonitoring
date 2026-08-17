@@ -1565,10 +1565,12 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
   const currentSeasons: React.ReactNode[] = [];
   const previousSeasons: React.ReactNode[] = [];
   // Verifications whose anchor observation no longer starts any detected clutch — the algorithm
-  // has re-segmented away from the verified truth, so surface them as a drift warning. Every
-  // orphan shows, rejections included: the admin integrity check treats a vanished rejection as
-  // settled and drops it, but here it is the only trace left of a clutch someone reviewed, so
-  // the box page still names it — muted, since nothing needs fixing.
+  // has re-segmented away from the verified truth, so surface them as a drift warning. A verdict
+  // that was rejected outright is dropped: the reviewer said there was no breeding here and the
+  // detection has since vanished too, which is agreement, not drift. What's left is an orphaned
+  // ACCEPTANCE — a clutch a human confirmed that the algorithm no longer sees — and that is the
+  // only case worth a warning. (The admin integrity check drops anything with a rejected half;
+  // a half-accepted, half-rejected clutch still strands the acceptance, so it stays here.)
   const allStartIds = new Set(seasonData.flatMap(sd => sd.clutches.map(c => c.startObsId).filter((x): x is number => x != null)));
   const orphanVerifications = verifications
     .filter(v => !allStartIds.has(v.observation_id))
@@ -1588,12 +1590,13 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
         }).filter(Boolean).join(', '),
         // The rejector's reason, which is usually what explains the drift.
         notes: [...new Set(halves.filter(h => h.verdict === 'rejected' && h.note).map(h => h.note))].join(' · '),
-        settled: halves.every(h => h.verdict === 'rejected'),
+        stranded: halves.some(h => h.verdict === 'accepted'),
         season: v.anchor_time ? seasonRange(getSeasonLabel(parseDate(v.anchor_time))) : '',
         when: v.anchor_time ? parseDate(v.anchor_time).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland' }) : '',
         why: v.anchor_deleted ? 'the observation it was recorded against was deleted' : 'no breeding window starts here any more',
       };
     })
+    .filter(o => o.stranded)
     .sort((a, b) => String(b.v.anchor_time || '').localeCompare(String(a.v.anchor_time || '')));
 
   seasonData.forEach(({ label, seasonStart, seasonEnd, seasonObs: sObsChrono, seasonSightings, birds, clutches, families, parentKeys, chickFamily, isCurrent }) => {
@@ -1813,10 +1816,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
             // A deleted anchor has nothing left to scroll to, so only a live one links out.
             const go = o.v.anchor_time && !o.v.anchor_deleted ? () => onSeasonClick?.(o.v.anchor_time) : undefined;
             return (
-              <div key={o.v.verification_id} className={`verify-orphan-row${o.settled ? ' settled' : ''}${go ? ' clickable' : ''}`}
+              <div key={o.v.verification_id} className={`verify-orphan-row${go ? ' clickable' : ''}`}
                 title={go ? 'Go to the observation it was verified against' : undefined} onClick={go}>
                 {o.season ? `${o.season} · ` : ''}{o.when || 'date unknown'} {'—'} {o.what} {'·'} {o.why}
-                {o.settled ? ', so the rejection stands' : ''}
                 {o.notes ? <div className="verify-orphan-note">{'“'}{o.notes}{'”'}</div> : null}
               </div>
             );
