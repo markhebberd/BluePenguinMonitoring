@@ -4215,8 +4215,10 @@ function DataEntryPage({ token, allPenguins, onBack, fmColony }: { token: string
     const short = tag.slice(-8);
     if (scannedBirds.includes(short)) return;
 
-    // Reject box tags
-    if (tag.startsWith('LA900025') || tag.startsWith('9130') || short.startsWith('9130')) {
+    // Reject box tags. Tags are stored as bare digits now, but a pasted or historic value may
+    // still carry the reader's letter prefix, so test what's left once it's off.
+    const bare = tag.toUpperCase().replace(/^[A-Z]+/, '');
+    if (bare.startsWith('900025') || bare.startsWith('9130') || short.startsWith('9130')) {
       setMessage('Box tag - not a penguin');
       return;
     }
@@ -8312,7 +8314,7 @@ function ChangePasswordDialog({ token, userName, onClose }: { token: string; use
   );
 }
 
-/** Add a penguin: creates the penguin, its chip (17-char PIT) and a biometric record (matching
+/** Add a penguin: creates the penguin, its chip (the tag's 15 ISO digits) and a biometric record (matching
  *  nestcheck's biometric fields). Launched from a box (chipBox set) for a fresh chipping, or
  *  standalone (chipBox '') to enter an already-chipped bird — box is optional in that case, and
  *  the colony prefix numbers it (e.g. RH1). */
@@ -8339,9 +8341,13 @@ function AddPenguinDialog({ token, chipBox, colonyPrefix, defaultChipperId, allP
   const [rechipTarget, setRechipTarget] = useState<any>(null);
   const [rechipSearch, setRechipSearch] = useState('');
 
-  const pitNorm = pit.toUpperCase().trim();
-  const pitValid = /^[A-Z]{2}\d{15}$/.test(pitNorm);
-  const dup = pitValid ? allPenguins.find((p: any) => (p.pit_id || '').toUpperCase() === pitNorm) : null;
+  // A tag is its 15 ISO digits — the number printed on the chip label. Readers prepend a
+  // two-letter manufacturer code ("LA") that no label carries, so requiring it here meant
+  // inventing it (issue #55). A pasted reader-form tag still works: the prefix comes off.
+  const pitNorm = pit.toUpperCase().trim().replace(/[^A-Z0-9]/g, '').replace(/^[A-Z]+/, '');
+  const pitValid = /^\d{15}$/.test(pitNorm);
+  const dup = pitValid ? allPenguins.find((p: any) =>
+    (p.pit_id || '').toUpperCase().replace(/^[A-Z]+/, '') === pitNorm) : null;
   // Predict the peng_num the server will assign, scoped to THIS colony. allPenguins spans every
   // colony: PT birds show bare ("319"), every other colony keeps its prefix ("RR1"). So match only
   // the current colony's birds — bare digits when it's PT, else "<prefix><digits>" — take MAX + 1,
@@ -8370,7 +8376,7 @@ function AddPenguinDialog({ token, chipBox, colonyPrefix, defaultChipperId, allP
   const save = async () => {
     setError('');
     if (!date) { setError('Date required'); return; }
-    if (!pitValid) { setError('PIT id must be 2 letters followed by 15 digits (17 chars)'); return; }
+    if (!pitValid) { setError('PIT id must be the 15-digit number on the chip label'); return; }
     if (dup) { setError(`PIT already assigned to #${dup.peng_num}`); return; }
     // Chip box is optional — a bird chipped elsewhere (e.g. rehab intake) often has no box here.
     if (!chipperId) { setError('Chipper is required'); return; }
@@ -8468,17 +8474,16 @@ function AddPenguinDialog({ token, chipBox, colonyPrefix, defaultChipperId, allP
         <div className="app-row">
           <div className="app-field"><label className="req">Date</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-          <div className="app-field"><label className="req" title="2 letters + 15 digits">PIT id</label>
-            <input type="text" value={pit} maxLength={17} placeholder="LA956000016349556" autoFocus
+          <div className="app-field"><label className="req" title="The 15 digits on the chip label">PIT id</label>
+            <input type="text" value={pit} maxLength={17} placeholder="956000016349556" autoFocus
               style={{ fontFamily: 'monospace', borderColor: pit && !pitValid ? '#c0392b' : undefined }}
               onChange={e => setPit(e.target.value.toUpperCase())} /></div>
         </div>
         {pit && !pitValid && <div className="app-pit-error">{(() => {
-          // Structural problem → full format reminder; otherwise say exactly what's still needed.
-          const letters = pitNorm.slice(0, 2), digits = pitNorm.slice(2);
-          if (!/^[A-Z]{0,2}$/.test(letters) || !/^\d*$/.test(digits)) return 'Must be 2 letters then 15 digits (17 chars)';
-          if (pitNorm.length < 2) { const n = 2 - pitNorm.length; return `${n} more letter${n === 1 ? '' : 's'} then 15 digits required`; }
-          const n = 15 - digits.length;
+          // pitNorm has had a leading reader prefix stripped, so say exactly what is still needed.
+          if (/\D/.test(pitNorm)) return 'Digits only — the 15-digit number on the chip label';
+          if (pitNorm.length > 15) return `${pitNorm.length - 15} digit${pitNorm.length === 16 ? '' : 's'} too many — 15 required`;
+          const n = 15 - pitNorm.length;
           return `${n} more digit${n === 1 ? '' : 's'} required`;
         })()}</div>}
         {dup && <div className="app-pit-error">Already assigned to #{dup.peng_num}</div>}

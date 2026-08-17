@@ -1,3 +1,5 @@
 node_modules/
 wildwatch/node_modules/
 wildwatch/dist/
+*.log
+*.log.1

@@ -461,8 +461,10 @@ function handleUpload($pdo, $colonyId, $observer) {
                 // No-scan placeholder — skip DB, these are app-only placeholders
                 if (str_starts_with(strtoupper($pitId), 'NOSCAN')) continue;
 
-                // Resolve short IDs to full pit_id
-                $cleanId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $pitId));
+                // Resolve to the pit_id as stored. The reader hands the app "LA" + 15 digits and
+                // older builds upload it that way, so normalize first — then the whole-tag key
+                // hits and the last-8 fallback is left for genuinely short ids.
+                $cleanId = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)ww_pit($pitId)));
                 $fullPitId = $chipLookup[$cleanId] ?? $chipLookup[substr($cleanId, -8)] ?? null;
                 if (!$fullPitId) { $errors[] = ['error' => "Unknown pit_id: $pitId", 'box' => $boxName]; continue; }
 

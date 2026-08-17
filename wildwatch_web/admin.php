@@ -1885,14 +1885,17 @@ function ww_parseImportJson($pdo, $jsonText, $colonyId, $observerId, $filename) 
             $gate = trim((string)($bd['GateStatus'] ?? '')); $gate = $gate === '' ? null : $gate;
             $notes = (string)($bd['Notes'] ?? '');
 
-            // Resolve scans. Box tags (short-8 starts "9130", or the LA9000250 marker) are dropped.
+            // Resolve scans. Box tags (short-8 starts "9130", or the 9000250 tag series) are
+            // dropped. The file may spell a tag either way — with the reader's letter prefix, as
+            // every export before 2026-08-17 did, or as the bare ISO digits — so judge it stripped.
             $scans = []; $rowUnmatched = []; $boxTags = 0;
             foreach (($bd['ScannedIds'] ?? []) as $sc) {
                 $bird = (string)($sc['BirdId'] ?? '');
                 if ($bird === '') continue;
                 $clean = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $bird));
                 $short8 = strlen($clean) >= 8 ? substr($clean, -8) : $clean;
-                if (substr($short8, 0, 4) === '9130' || strpos($bird, 'LA9000250') !== false) { $boxTags++; continue; }
+                $bare = (string)ww_pit($clean);
+                if (substr($short8, 0, 4) === '9130' || strpos($bare, '9000250') === 0) { $boxTags++; continue; }
                 if (isset($chipMap[$short8])) $scans[] = $chipMap[$short8];
                 else { $rowUnmatched[] = $short8; $unmatched[$short8] = ($unmatched[$short8] ?? 0) + 1; }
             }

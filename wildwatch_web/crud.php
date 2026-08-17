@@ -118,8 +118,13 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
 
     $in = json_decode(file_get_contents('php://input'), true);
     if (!$in || !is_array($in)) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); exit; }
-    $pit = trim((string)($in['pit_id'] ?? ''));
+    $pit = ww_pit(trim((string)($in['pit_id'] ?? '')));
     if ($pit === '') { http_response_code(400); echo json_encode(['error'=>'pit_id required']); exit; }
+    // The tag is its 15 digits. A client sending the reader's "LA" form is normalized above, so
+    // the idempotency check below sees the same key however the chipping was captured.
+    if (!preg_match('/^\d{15}$/', $pit)) {
+        http_response_code(400); echo json_encode(['error'=>'pit_id must be the 15-digit ISO tag number']); exit;
+    }
 
     $cid = (int)($_GET['colony_id'] ?? 1);
     requireColonyAccess($pdo, $observer, $cid, true); // the new bird is stamped with this colony
@@ -129,7 +134,7 @@ if ($action === 'create_chipped_bird' && $_SERVER['REQUEST_METHOD'] === 'POST') 
         // Idempotency: this PIT is already chipped, so the bird exists — hand back its number
         // rather than minting a duplicate. Covers "insert landed, response never arrived".
         $dup = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE pit_id = ?");
-        $dup->execute([$pit]);
+        $dup->execute([wwResolvePit($pdo, $pit) ?? $pit]);
         if ($existing = $dup->fetchColumn()) {
             $pdo->commit();
             echo json_encode(['success'=>true, 'replayed'=>true, 'peng_num'=>displayPengNum($existing, $viewPrefix)]);
@@ -627,6 +632,9 @@ function handleList($pdo, $table) {
             $cid = (int)($_GET['colony_id'] ?? 1);
             $v = dbPengNum($pdo, $cid, $v);
         }
+        // A caller filtering by tag may still spell it the reader's way ("LA" + 15 digits) —
+        // and the row may still be stored that way, so match it to what is actually there.
+        if ($k === 'pit_id') $v = wwResolvePit($pdo, $v) ?? ww_pit($v);
         $where[] = "$k = ?"; $params[] = $v;
     }
     $sql = "SELECT * FROM $table";
@@ -642,6 +650,7 @@ function handleList($pdo, $table) {
 
 function handleGet($pdo, $table, $pk, $id) {
     if (!$id) { echo json_encode(['error'=>'id required']); return; }
+    if ($pk === 'pit_id') $id = wwResolvePit($pdo, $id) ?? $id;
     if ($table === 'penguins' && !preg_match('/^[A-Z]/', $id)) {
         $cid = (int)($_GET['colony_id'] ?? 1);
         $id = dbPengNum($pdo, $cid, $id);
@@ -696,7 +705,9 @@ function handleCreate($pdo, $table, $pk, $observer) {
     // An older client (or the web add-penguin form) may still send a chip_by acronym; capture it
     // before stripRetiredColumns drops it, so chipper_id can be derived from it below.
     $incomingChipBy = ($table === 'penguin_chips') ? ($input['chip_by'] ?? null) : null;
-    $input = renameLegacyColumns($table, stripRetiredColumns($table, $input));
+    // Before the duplicate checks below read pit_id: they must compare the stored form, or a
+    // client sending "LA" + 15 digits looks like a new chip and gets a duplicate-key error.
+    $input = wwNormalizePit($table, renameLegacyColumns($table, stripRetiredColumns($table, $input)));
     // Must come off before $input is used as the column list, or _reason becomes a column.
     $reason = $input['_reason'] ?? null;
     unset($input['_reason']);
@@ -705,6 +716,12 @@ function handleCreate($pdo, $table, $pk, $observer) {
     $viewPrefix = getColonyPrefix($pdo, $cid);
     $pdo->beginTransaction();
     try {
+        // A scan references a chip row, so it must carry that row's pit_id exactly — resolve the
+        // tag the caller sent (either form, a stale cache or an older app) to the stored one.
+        if ($table === 'penguin_scans' && isset($input['pit_id'])) {
+            if ($resolved = wwResolvePit($pdo, $input['pit_id'])) $input['pit_id'] = $resolved;
+        }
+
         // Prevent duplicate penguin scans for same observation
         if ($table === 'penguin_scans' && isset($input['observation_id']) && isset($input['pit_id'])) {
             $dup = $pdo->prepare("SELECT scan_id FROM penguin_scans WHERE observation_id = ? AND pit_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)");
@@ -716,10 +733,11 @@ function handleCreate($pdo, $table, $pk, $observer) {
             }
         }
 
-        // Prevent duplicate chips
+        // Prevent duplicate chips — including one stored in the pre-2026-08-17 prefixed form,
+        // which is the same physical tag and must not become a second chip row.
         if ($table === 'penguin_chips' && isset($input['pit_id'])) {
             $dup = $pdo->prepare("SELECT peng_num FROM penguin_chips WHERE pit_id = ?");
-            $dup->execute([$input['pit_id']]);
+            $dup->execute([wwResolvePit($pdo, $input['pit_id']) ?? $input['pit_id']]);
             $existing = $dup->fetch();
             if ($existing) {
                 $pdo->rollBack();
@@ -777,9 +795,10 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
         $cid = (int)($_GET['colony_id'] ?? 1);
         $id = dbPengNum($pdo, $cid, $id);
     }
+    if ($pk === 'pit_id') $id = wwResolvePit($pdo, $id) ?? $id;
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) { http_response_code(400); echo json_encode(['error'=>'JSON body required']); return; }
-    $input = renameLegacyColumns($table, stripRetiredColumns($table, $input));
+    $input = wwNormalizePit($table, renameLegacyColumns($table, stripRetiredColumns($table, $input)));
 
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $old = $stmt->fetch();
@@ -798,6 +817,7 @@ function handleUpdate($pdo, $table, $pk, $id, $observer) {
 
 function handleDelete($pdo, $table, $pk, $id, $observer) {
     if (!$id) { http_response_code(400); echo json_encode(['error'=>'id required']); return; }
+    if ($pk === 'pit_id') $id = wwResolvePit($pdo, $id) ?? $id;
     $body = json_decode(file_get_contents('php://input'), true) ?? [];
     $stmt = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?"); $stmt->execute([$id]);
     $old = $stmt->fetch();
@@ -819,6 +839,7 @@ function handleDelete($pdo, $table, $pk, $id, $observer) {
 
 function handleHistory($pdo, $table, $id) {
     if (!$table || !$id) { echo json_encode(['error'=>'table and id required']); return; }
+    if ($table === 'penguin_chips') $id = wwResolvePit($pdo, $id) ?? ww_pit($id);
 
     if ($table === 'observations') {
         // Get scan IDs belonging to this observation (current + from audit log)
@@ -852,10 +873,11 @@ function handleHistory($pdo, $table, $id) {
         foreach ($results as &$entry) {
             if ($entry['table_name'] === 'penguin_scans') {
                 $fields = json_decode($entry['changed_fields'], true);
+                // Audit rows written before the prefix was dropped still name the tag as "LA"+15.
                 $pitId = $fields['pit_id'] ?? $fields['peng_num'] ?? null;
                 if ($pitId) {
                     $pStmt = $pdo->prepare("SELECT p.peng_num, pc.pit_id, p.sex FROM penguin_chips pc JOIN penguins p ON pc.peng_num = p.peng_num WHERE pc.pit_id = ? OR p.peng_num = ?");
-                    $pStmt->execute([$pitId, $pitId]);
+                    $pStmt->execute([ww_pit($pitId), $pitId]);
                     $penguin = $pStmt->fetch();
                     if ($penguin) $entry['penguin_info'] = $penguin;
                 }

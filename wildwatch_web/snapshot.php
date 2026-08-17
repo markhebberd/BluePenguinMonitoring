@@ -39,6 +39,25 @@ function wwSnapshotMe($observer): array {
     ];
 }
 
+/**
+ * Tag values as an older client expects to read them.
+ *
+ * Tags are stored as the bare 15 ISO digits since 2026-08-17; before that they carried the "LA"
+ * the reader prepends. NestCheck builds from before that release match a scan against its cached
+ * tag by the whole string, so serving them the bare form would make every known bird look like an
+ * unchipped one standing in a box. They keep getting the prefixed form until they are replaced —
+ * a client that understands bare tags asks for them with pit=bare.
+ *
+ * Delete this, and the parameter, once no build without pit=bare is still syncing.
+ */
+function wwPitOut(array $rows, bool $legacy): array {
+    if (!$legacy) return $rows;
+    foreach ($rows as &$r) {
+        if (isset($r['pit_id']) && preg_match('/^\d{15}$/', (string)$r['pit_id'])) $r['pit_id'] = 'LA' . $r['pit_id'];
+    }
+    return $rows;
+}
+
 $observer = requireAuth();
 
 $pdo = getDbConnection();
@@ -51,6 +70,22 @@ $since = $_GET['since'] ?? null;
 // visit — around three hundred rows, against the colony's ~45k of history, which it has no screen
 // for and no reason to carry. The website's cache omits the parameter and still gets everything.
 $fieldScope = ($_GET['scope'] ?? '') === 'field';
+
+// Only the field app needs tags spelled the old way (see wwPitOut). The website's own branches
+// below serve the stored form, so _hashes — computed from the same rows — keeps agreeing with
+// what the browser cached.
+$pitLegacy = $fieldScope && ($_GET['pit'] ?? '') !== 'bare';
+
+// Who is still on a build from before the change, and when one was last seen — the evidence for
+// deciding that wwPitOut can go. A bounded working log, same discipline as hash-report.php:
+// rotates at ~200 KB to one backup, so it can never grow without limit.
+if ($pitLegacy) {
+    $legacyLog = __DIR__ . '/legacy-pit-clients.log';
+    if (@filesize($legacyLog) > 200000) @rename($legacyLog, $legacyLog . '.1');
+    @file_put_contents($legacyLog,
+        date('Y-m-d H:i:s') . ' obs=' . (int)($observer['observer_id'] ?? 0) . ' colony=' . $colonyId . "\n",
+        FILE_APPEND | LOCK_EX);
+}
 
 /**
  * The field set: every observation from today, plus the newest earlier one per box. Returned as
@@ -235,10 +270,10 @@ if ($fieldScope) {
         'me' => wwSnapshotMe($observer),
         'snapshot_time' => $fieldWm,
         'observations' => $obs->fetchAll(),
-        'scans' => $scans->fetchAll(),
+        'scans' => wwPitOut($scans->fetchAll(), $pitLegacy),
         'penguins' => $pengRows,
-        'chips' => $chipRows,
-        'locations' => $locations->fetchAll(),
+        'chips' => wwPitOut($chipRows, $pitLegacy),
+        'locations' => wwPitOut($locations->fetchAll(), $pitLegacy),
         'biometrics' => $bioRows,
         'fm_excluded_boxes' => $fmExcludedBoxes,
     ], getDayNotes($pdo, $colonyId), getObservers($pdo)));

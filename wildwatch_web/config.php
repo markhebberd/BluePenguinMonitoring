@@ -62,6 +62,27 @@ function stripPengPrefix(array &$rows, string $viewPrefix, string $field = 'peng
 }
 
 /**
+ * The stored form of a PIT/tag number: the 15 digits of the ISO tag, nothing else.
+ *
+ * Readers (the HR5) hand over the tag as "LA" + 15 digits, and every row written before
+ * 2026-08-17 was stored that way. But those two letters are the reader's manufacturer
+ * code, not part of the ISO number — they are not on the chip label, so a person entering
+ * a tag by hand cannot know them and used to have to invent them. The digits are the
+ * identity; the prefix is transport.
+ *
+ * Every write path normalizes through here, so a field app still sending the "LA" form
+ * (any version, indefinitely) lands the same row as a new one. Anything that isn't a
+ * recognisable tag is passed through untouched rather than mangled — NOSCAN placeholders
+ * and hand-typed oddities must survive to be seen, not be silently rewritten.
+ */
+function ww_pit($v) {
+    if ($v === null) return null;
+    $s = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)$v));
+    if (preg_match('/^[A-Z]+(\d{15})$/', $s, $m)) return $m[1];
+    return preg_match('/^\d{15}$/', $s) ? $s : $v;
+}
+
+/**
  * Get database connection with retry logic for shared hosting
  *
  * @param int $attemptsRemaining Number of retry attempts remaining

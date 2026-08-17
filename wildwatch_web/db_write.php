@@ -41,6 +41,47 @@ const WW_NATURAL_KEYS = ['penguins' => 'peng_num', 'penguin_chips' => 'pit_id'];
 /** Tables that carry is_deleted/deleted_at/deleted_by — deletion here means soft deletion. */
 const WW_SOFT_DELETE_TABLES = ['observations', 'penguin_scans', 'penguin_biometric_data'];
 
+/** Columns holding a PIT/tag number in their own right. Every write through this gateway
+ *  normalizes them to the bare 15 digits (see ww_pit), so no endpoint can store a reader's
+ *  "LA" prefix by forgetting to.
+ *
+ *  penguin_scans.pit_id is deliberately absent: it is an FK child of penguin_chips, so its
+ *  value must be whatever the parent row holds, not an independently normalized string.
+ *  Normalizing it here would fail the FK for as long as any chip row is still stored in the
+ *  old form. Callers resolve a scanned tag through wwResolvePit instead. */
+const WW_PIT_COLUMNS = [
+    'penguin_chips'         => 'pit_id',
+    'observation_locations' => 'pit_id',   // box tags, no FK of their own
+];
+
+/** Normalize the pit column of a row about to be written, if this table has one. */
+function wwNormalizePit(string $table, array $row): array {
+    $col = WW_PIT_COLUMNS[$table] ?? null;
+    if ($col !== null && array_key_exists($col, $row)) $row[$col] = ww_pit($row[$col]);
+    return $row;
+}
+
+/**
+ * Resolve a tag to the pit_id as penguin_chips actually stores it — the value a scan row has to
+ * reference, and the row a chip edit has to find. Matches on the ISO digits, so it resolves the
+ * same tag whether the caller spelled it with the reader's prefix or without, and whether the row
+ * was written before or after the prefix was dropped. Null when the tag is unknown.
+ *
+ * Deliberately exact on the digits, not on the last 8: a chip create asks this whether the tag is
+ * already known, and a coincidental 8-digit tail must not refuse a genuinely new chip. Short-id
+ * matching still lives in sync.php's $chipLookup, where a partial id is a real input.
+ */
+function wwResolvePit($pdo, $raw): ?string {
+    $pit = (string)ww_pit($raw);
+    if ($pit === '') return null;
+    $stmt = $pdo->prepare("SELECT pit_id FROM penguin_chips
+        WHERE pit_id = ? OR REGEXP_REPLACE(pit_id, '^[A-Za-z]+', '') = ?
+        ORDER BY (pit_id = ?) DESC LIMIT 1");
+    $stmt->execute([$pit, $pit, $pit]);
+    $hit = $stmt->fetchColumn();
+    return $hit === false ? null : (string)$hit;
+}
+
 function wwTableKey(string $table): string {
     if (!isset(WW_TABLE_KEYS[$table])) {
         throw new InvalidArgumentException("Table '$table' is not writable through the data gateway");
@@ -80,6 +121,7 @@ function wwAudit($pdo, string $table, $recordId, string $action, $fields, $obser
 /** INSERT one row. Returns the new key (auto-increment id, or the natural key). */
 function wwAuditedInsert($pdo, $table, $row, $observerId, $reason = null) {
     wwTableKey($table);
+    $row = wwNormalizePit($table, $row);
     $cols = array_keys($row);
     $sql = "INSERT INTO $table (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")";
     $pdo->prepare($sql)->execute(wwBindVals(array_values($row)));
@@ -110,6 +152,10 @@ function wwAuditedInsertSelf($pdo, $table, $row, $reason = null) {
  */
 function wwAuditedUpdate($pdo, $table, $id, $fields, $observerId, $reason = null): int {
     $pk = wwTableKey($table);
+    $fields = wwNormalizePit($table, $fields);
+    // Identify the row by the tag in whichever form it is stored — normalizing the id instead
+    // would stop finding chips written before the prefix was dropped from the database.
+    if ($pk === 'pit_id') $id = wwResolvePit($pdo, $id) ?? $id;
     $sel = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?");
     $sel->execute([$id]);
     $old = $sel->fetch(PDO::FETCH_ASSOC);
@@ -141,6 +187,7 @@ function wwAuditedUpdate($pdo, $table, $id, $fields, $observerId, $reason = null
  */
 function wwAuditedDelete($pdo, $table, $id, $observerId, $reason = null, bool $hard = false): bool {
     $pk = wwTableKey($table);
+    if ($pk === 'pit_id') $id = wwResolvePit($pdo, $id) ?? $id;
     $sel = $pdo->prepare("SELECT * FROM $table WHERE $pk = ?");
     $sel->execute([$id]);
     $old = $sel->fetch(PDO::FETCH_ASSOC);

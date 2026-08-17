@@ -90,7 +90,7 @@ function colonyQS(): string { return `colony_id=${getColonyId()}`; }
 try { indexedDB.deleteDatabase('wildwatch'); } catch { /* ignore */ }
 function dbName(): string { return 'wildwatch-' + getColonyKey(); }
 const DB_VERSION = 5; // v5: observers store
-const CACHE_VERSION = 22; // Bump to force all clients to full re-sync (v22: repair penguin rows an incremental sync stripped the alert flag from)
+const CACHE_VERSION = 23; // Bump to force all clients to full re-sync (v23: pit_id lost its "LA" reader prefix — every cached tag value changed)
 const STORES = ['observations', 'scans', 'penguins', 'chips', 'locations', 'biometrics',
   'verifications', 'day_notes', 'observers', 'meta'] as const;
 // Stores from earlier DB versions that no longer exist; dropped on upgrade.
@@ -629,7 +629,7 @@ async function runHashCheck(serverHashes: Record<string, string> | undefined): P
 
   // Full re-sync repairs the cache and gives the authoritative rows to diff against.
   await resetDatabase();
-  const full = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`);
+  const full = await fetchWithProgress(`/api/snapshot.php?pit=bare&${colonyQS()}&_=${Date.now()}`);
   await storeSnapshot(full, true);
 
   const diffs: any[] = [];
@@ -732,7 +732,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
     if (!mem) await loadMemFromIDB();
 
     // Then check for changes in background
-    const resp = await fetch(`/api/snapshot.php?since=${encodeURIComponent(lastSync)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() });
+    const resp = await fetch(`/api/snapshot.php?pit=bare&since=${encodeURIComponent(lastSync)}&${colonyQS()}&_=${Date.now()}`, { headers: authHeaders() });
     const data = await resp.json();
     // Verifications ride every snapshot in full, so "did any arrive" says nothing about change —
     // compare id:updated_at against what's cached. Without this a verdict-only edit (which moves no
@@ -777,7 +777,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
         console.warn('Sync count mismatch, doing full re-sync', { server: data._counts, local });
         onProgress?.('Data mismatch — reloading...');
         await resetDatabase();
-        const full = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`, (pct, label) => {
+        const full = await fetchWithProgress(`/api/snapshot.php?pit=bare&${colonyQS()}&_=${Date.now()}`, (pct, label) => {
           onProgress?.(`Reloading colony data... ${label}`, pct);
         });
         await storeSnapshot(full, true);
@@ -793,7 +793,7 @@ export async function syncDatabase(onProgress?: (msg: string, pct?: number) => v
   } else {
     onProgress?.('Downloading colony data...', 0);
     console.time('fetch+parse');
-    const data = await fetchWithProgress(`/api/snapshot.php?${colonyQS()}&_=${Date.now()}`, (pct, label) => {
+    const data = await fetchWithProgress(`/api/snapshot.php?pit=bare&${colonyQS()}&_=${Date.now()}`, (pct, label) => {
       onProgress?.(`Downloading colony data... ${label}`, pct);
     });
     console.timeEnd('fetch+parse');
