@@ -5394,49 +5394,186 @@ function MirrorAlertBadge({ reason }: { reason: string }) {
   return <span className="stale-badge" title={reason}>1</span>;
 }
 
+/* Formatters shared by the two offsite cards below (Wildwatch's mirror, tantrixlab's copies).
+ * Backup timestamps are UTC; a backup is judged against the day the site had, so they read in
+ * NZ time. The age is what actually gets looked at — "is the offsite copy from today?" — so it
+ * comes with each one, in whatever unit is still meaningful at that distance. */
+const nz = (iso: string) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? String(iso || '') : d.toLocaleString('en-NZ',
+    { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+};
+const unit = (n: number, u: string) => `${n} ${u}${n === 1 ? '' : 's'} ago`;
+const ago = (secs: number) => {
+  const s = Math.max(0, Math.round(secs));
+  if (s < 60) return unit(s, 'second');
+  if (s < 3600) return unit(Math.round(s / 60), 'minute');
+  if (s < 172800) return unit(Math.round(s / 3600), 'hour');
+  return unit(Math.round(s / 86400), 'day');
+};
+const since = (iso: string) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '' : ago((Date.now() - d.getTime()) / 1000);
+};
+/* The dumps on the offsite box span ~1 MB (Wildwatch) to ~600 MB (tantrix), so all three
+ * units have to be legible — a tantrix dump in KB is a number nobody can read. */
+const kb = (n: number) => n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB`
+  : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+
 /**
- * Admin → Mirror: the offsite arrangement does not only carry Wildwatch. The same nightly
- * run backs up tantrixlab.com — the other site on the same VPS — and until now that lived
- * only inside a shell script on the server. It is written down here, on the tab someone
- * stands on when they ask "what have we got offsite?", rather than in a runbook nobody
- * opens the night they need it.
+ * Admin → Mirror: the offsite box carries tantrixlab.com as well as Wildwatch, so this tab
+ * has to answer "what is offsite for tantrixlab, right now?" the same way the card above
+ * answers it for Wildwatch — by listing what is actually on the box on every load, not by
+ * describing what a nightly script is supposed to do. The listing is taken server-side over
+ * an ssh key restricted to a forced find-listing of the backup directory, so a cron that
+ * died shows up here as backups that stopped arriving, rather than as a status file that
+ * goes on saying "success" forever.
  */
-function OffsiteAlsoTantrixlab() {
+function OffsiteTantrixlabCard({ token }: { token: string }) {
+  const [data, setData] = useState<any | null>(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setBusy(true); setErr('');
+    fetch('/api/admin.php?action=backups', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => d.error ? setErr(d.error) : setData(d))
+      .catch(e => setErr(String(e?.message || e)))
+      .finally(() => setBusy(false));
+  };
+  useEffect(load, [token]);
+
+  // The listing arrives as flat filenames — <db>_<YYYYMMDD>.sql.gz for a daily,
+  // <db>_<YYYYMM>.sql.gz for a monthly — so the databases and their two retention classes
+  // are separated here rather than trusted from the path.
+  const remote = data?.remote;
+  const held = useMemo(() => {
+    const out: Record<string, { daily: any[]; monthly: any[]; bytes: number }> = {};
+    for (const f of (remote?.files || [])) {
+      const m = String(f.name || '').match(/^(.+?)_(\d{6,8})\.sql\.gz$/);
+      if (!m) continue;
+      const [, db, stamp] = m;
+      const row = { ...f, taken: new Date(String(f.mtime || '').replace(' ', 'T') + 'Z').toISOString(), stamp };
+      (out[db] ||= { daily: [], monthly: [], bytes: 0 });
+      out[db][stamp.length === 8 ? 'daily' : 'monthly'].push(row);
+      out[db].bytes += Number(f.bytes) || 0;
+    }
+    for (const db of Object.keys(out)) {
+      out[db].daily.sort((a, b) => b.stamp.localeCompare(a.stamp));
+      out[db].monthly.sort((a, b) => b.stamp.localeCompare(a.stamp));
+    }
+    return out;
+  }, [data]);
+
+  const tantrix = held['tantrix_online'];
+  const wildwatch = held['wildwatch_nestcheck'];
+  const newest = tantrix?.daily[0];
+  const newestAgeH = newest ? (Date.now() - new Date(newest.taken).getTime()) / 3600000 : Infinity;
+  // The run is nightly, so anything under a day and a half old is this arrangement working.
+  // Past that, a night has been missed and the number of copies is quietly shrinking.
+  const fresh = newestAgeH <= 36;
+  const status = data?.status;                       // the run's own status.json, from the VPS side
+  const mediaSize = status?.offsite?.media && status.offsite.media !== '?' ? status.offsite.media : null;
+
+  const fileRows = (rows: any[], kind: string) => rows.map((f: any) => (
+    <tr key={f.name}>
+      <td>{f.name}</td>
+      <td>{kind}</td>
+      <td style={{ whiteSpace: 'nowrap' }}>{nz(f.taken)}<span className="muted"> · {since(f.taken)}</span></td>
+      <td style={{ whiteSpace: 'nowrap' }}>{kb(Number(f.bytes) || 0)}</td>
+    </tr>
+  ));
+
   return (
     <div className="admin-section">
-      <h3>Also backed up offsite: tantrixlab.com</h3>
+      <h3>Offsite copy: tantrixlab.com</h3>
       <p className="muted">
-        The offsite box is shared. Every night at 03:40 UTC the VPS — which serves
-        tantrixlab.com as well as Wildwatch — runs <code>offsite-backup.sh</code> and pushes
-        both sites over SSH to the backup machine (<code>devian</code>):
+        tantrixlab.com shares the VPS with Wildwatch, and shares its offsite box too: one run each
+        night at 03:40 UTC pushes both sites over SSH to <code>devian</code>. What that box is
+        holding for tantrixlab is listed below — read off the box itself each time this tab opens.
       </p>
-      <ul className="muted" style={{ marginTop: 0 }}>
-        <li>
-          <strong>Database</strong> — a gzipped <code>tantrix_online</code> dump (~420 MB),
-          kept as <strong>14 dailies + 12 monthlies</strong>; the first daily of each month is
-          copied aside as that month&rsquo;s keeper, so a year of month-ends survives the
-          fortnight window.
-        </li>
-        <li>
-          <strong>Media</strong> — the site&rsquo;s <code>uploads/</code> folder, mirrored
-          <strong> latest-only</strong>. It tracks what is live and keeps no dated history, so
-          a file deleted on the site is gone from the copy on the next run.
-        </li>
-        <li>
-          The same run ships the Wildwatch dump too — that is why the System tab&rsquo;s backup
-          panel lists two databases rather than one.
-        </li>
-      </ul>
-      <p className="muted">
-        The night is all-or-nothing: any failed step aborts the run, and the VPS&rsquo;s package
-        upgrades are chained behind it, so the box never upgrades itself without a fresh backup.
-      </p>
-      <p className="muted">
-        What this is <em>not</em>: restore-tested. The nightly restore-and-verify described above
-        covers <strong>Wildwatch only</strong>. The tantrixlab copies are checked for gzip
-        integrity and a plausible size, then shipped — never loaded back into a database. A
-        tantrixlab restore is an untested path until someone tries it.
-      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+        <button className="edit-btn" disabled={busy} onClick={load}>{busy ? 'Asking…' : 'Refresh'}</button>
+      </div>
+
+      {err && <p style={{ color: '#a4362d' }}>{err}</p>}
+      {!data && !err ? <p className="muted">Listing the offsite box…</p> : null}
+
+      {data && !remote?.ok && (
+        <div style={{ border: '1px solid #f3d6d3', background: '#fbeceb', borderRadius: 8, padding: '10px 14px' }}>
+          <p style={{ margin: 0, color: '#a4362d', fontWeight: 600 }}>Could not list the offsite box</p>
+          <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>{remote?.error || 'No answer over ssh.'}</p>
+          <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+            This says nothing about whether the backups are there — only that they could not be counted from here.
+          </p>
+        </div>
+      )}
+
+      {data && remote?.ok && !tantrix && (
+        <p style={{ color: '#a4362d', fontWeight: 600 }}>
+          The box answered, but holds no <code>tantrix_online</code> dump at all.
+        </p>
+      )}
+
+      {data && remote?.ok && tantrix && (<>
+        <p style={{ margin: '4px 0', fontWeight: 600, color: fresh ? '#1f6b41' : '#a4362d' }}>
+          {fresh ? 'OFFSITE COPY CURRENT' : 'OFFSITE COPY STALE'}
+          <span className="muted" style={{ fontWeight: 400 }}>
+            {' '}· newest {newest.name}, taken {nz(newest.taken)} ({since(newest.taken)}), {kb(Number(newest.bytes) || 0)}
+          </span>
+        </p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          {tantrix.daily.length} dail{tantrix.daily.length === 1 ? 'y' : 'ies'} + {tantrix.monthly.length} monthl
+          {tantrix.monthly.length === 1 ? 'y' : 'ies'} held, {kb(tantrix.bytes)} in total · listed live from the box
+          {remote.checked_at ? ` ${since(String(remote.checked_at).replace(' ', 'T') + 'Z')}` : ''}
+          {mediaSize ? ` · media ${mediaSize}` : ''}
+        </p>
+
+        <div className="table-scroll">
+          <table className="guess-rank-table zebra">
+            <thead><tr><th>Backup</th><th>Kept as</th><th>Taken</th><th>Size</th></tr></thead>
+            <tbody>
+              {fileRows(tantrix.daily, 'daily')}
+              {fileRows(tantrix.monthly, 'monthly')}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="muted" style={{ fontSize: 12 }}>
+          Retention is <strong>a fortnight of dailies + 12 monthlies</strong>: dailies are pruned once
+          they pass 14 days, and the first daily of each month is copied aside as that month&rsquo;s
+          keeper, so a year of month-ends outlives the fortnight window. The absence of anything older
+          than a fortnight above is the policy working, not a gap.
+        </p>
+      </>)}
+
+      {data && remote?.ok && (
+        <ul className="muted" style={{ fontSize: 12 }}>
+          <li>
+            <strong>Media</strong> — the site&rsquo;s <code>uploads/</code> folder is mirrored
+            latest-only{mediaSize ? ` (${mediaSize} at the last run)` : ''}: it tracks what is live and
+            keeps no dated history, so a file deleted on the site goes from the copy on the next run.
+            It is the one part not in the listing above — the restricted key can only read the database
+            directory, so its size comes from the run&rsquo;s own check of the box
+            {status?.last_success_at ? `, ${since(status.last_success_at)}` : ''}.
+          </li>
+          <li>
+            <strong>Wildwatch too</strong> — the same run leaves {wildwatch ? `${wildwatch.daily.length} daily and ${wildwatch.monthly.length} monthly ` : ''}
+            <code>wildwatch_nestcheck</code> dumps on this box. That is a second, independent copy: the
+            NAS mirror above pulls its own dump from production and restore-tests it.
+          </li>
+          <li>
+            <strong>Not restore-tested</strong> — the nightly restore-and-verify covers Wildwatch only.
+            tantrixlab&rsquo;s dumps are checked for gzip integrity and a plausible size, then shipped;
+            never loaded back into a database. A tantrixlab restore is an untested path until someone tries it.
+          </li>
+          <li>
+            The night is all-or-nothing: any failed step aborts the run, and the VPS&rsquo;s package
+            upgrades are chained behind it, so the box never upgrades itself without a fresh backup.
+          </li>
+        </ul>
+      )}
     </div>
   );
 }
@@ -5512,27 +5649,6 @@ function RemoteMirrorCard() {
     finally { setBusy(false); }
   };
 
-  const kb = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
-  // The inventory timestamps are UTC; a backup is judged against the day the colony had, so
-  // they read in NZ time. The age is what actually gets looked at — "is the offsite copy from
-  // today?" — so it comes with each one, in whatever unit is still meaningful at that distance.
-  const nz = (iso: string) => {
-    const d = new Date(iso);
-    return isNaN(d.getTime()) ? String(iso || '') : d.toLocaleString('en-NZ',
-      { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-  };
-  const unit = (n: number, u: string) => `${n} ${u}${n === 1 ? '' : 's'} ago`;
-  const ago = (secs: number) => {
-    const s = Math.max(0, Math.round(secs));
-    if (s < 60) return unit(s, 'second');
-    if (s < 3600) return unit(Math.round(s / 60), 'minute');
-    if (s < 172800) return unit(Math.round(s / 3600), 'hour');
-    return unit(Math.round(s / 86400), 'day');
-  };
-  const since = (iso: string) => {
-    const d = new Date(iso);
-    return isNaN(d.getTime()) ? '' : ago((Date.now() - d.getTime()) / 1000);
-  };
   const files: any[] = Array.isArray(data?.files) ? data.files : [];
   const calendar = useMemo(() => {
     const have = new Set(files.map((f: any) => String(f.name || '').replace('.sql.gz', '')));
@@ -10616,7 +10732,7 @@ function AdminPanel({ token, observationDates, checkTarget, allPenguins, fmColon
           style={{ width: '100%', height: '78vh', border: '1px solid #ddd', borderRadius: 8, marginTop: 8, background: '#fff' }} />
       </div>
 
-      {adminTab === 'mirror' && <OffsiteAlsoTantrixlab />}
+      {adminTab === 'mirror' && <OffsiteTantrixlabCard token={token} />}
 
       <div className="admin-section" style={{ display: adminTab === 'system' ? undefined : 'none' }}>
         <h3>Disk write test</h3>
