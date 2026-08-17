@@ -285,16 +285,11 @@ namespace PenguinMonitor.Services
             return t.ToString("yyyy-MM-ddTHH:mm:ssZ");
         }
 
-        // Full tag identity: upper-cased with any leading alpha prefix (e.g. "LA") stripped, so a
-        // 15-digit tag and its "LA"+15 form compare equal. Free-text manual entry was removed, so
-        // every scan is now a full tag (scanner or search) — we compare the whole number, not a tail.
-        public static string PitFull(string? id)
-        {
-            id = (id ?? "").ToUpperInvariant();
-            int i = 0;
-            while (i < id.Length && char.IsLetter(id[i])) i++;
-            return id.Substring(i);
-        }
+        // Full tag identity: upper-cased and reduced to its ISO digits, so a tag scanned today
+        // and the same tag stored by an older build ("LA"+15) compare equal. Free-text manual
+        // entry was removed, so every scan is a full tag (scanner or search) — we compare the
+        // whole number, not a tail.
+        public static string PitFull(string? id) => BluetoothManager.BareEid((id ?? "").ToUpperInvariant());
 
         // A content fingerprint of an observation (ignores time/observer/id): counts, statuses,
         // notes, no-scan count, and the exact set of scanned birds. Two observations with the
@@ -1290,7 +1285,7 @@ namespace PenguinMonitor.Services
             }
 
             var state = Read(path);
-            if (state != null) { state.MigrateBiometricKeys(); return state; }
+            if (state != null) { state.MigrateBiometricKeys(); state.MigrateTagPrefixes(); return state; }
 
             // The live file is unreadable. Fall back to the previous copy rather than opening on an
             // empty colony, and keep the bad one — an unsent observation is recoverable from a file
@@ -1301,6 +1296,7 @@ namespace PenguinMonitor.Services
                 try { if (File.Exists(path)) File.Copy(path, path + ".corrupt", true); } catch { }
                 System.Diagnostics.Debug.WriteLine("LoadColonyState: recovered from .bak");
                 fallback.MigrateBiometricKeys();
+                fallback.MigrateTagPrefixes();
                 return fallback;
             }
             return new ColonyState();

@@ -162,6 +162,11 @@ namespace PenguinMonitor
         private TextView? _watchedToggle;   // header watched flag — shown while the box is locked
         // Demo PIT used by the Settings "Rechip / new penguin" button — never sent to the server
         private const string PLACEHOLDER_PIT = "LA000000000000000";
+        /// <summary>The demo PIT, however it is spelled — a form saved by an older build still
+        /// carries the reader's "LA" prefix, and a test chip that stops being recognised as one
+        /// is a fake bird saved to the server.</summary>
+        private static bool IsPlaceholderPit(string? pit) =>
+            DataStorageService.PitFull(pit) == DataStorageService.PitFull(PLACEHOLDER_PIT);
         // While the new-bird dialog is open with the placeholder, a real scan lands here
         private Action<string>? _newBirdScanCapture;
 
@@ -726,9 +731,16 @@ namespace PenguinMonitor
             RunOnUiThread(() => HandleEidData(eidData));
         }
 
+        /// <summary>A bird-cache key that is a whole tag — its 15 ISO digits — rather than the
+        /// short 8-digit form some lookups fall back to.</summary>
+        private static bool IsFullPitKey(string? key) => key?.Length == 15;
+
         private void HandleEidData(string eidData)
         {
-            var cleanEid = new String(eidData.Where(char.IsLetterOrDigit).ToArray());
+            // Already stripped of the reader's prefix on the way in (BluetoothManager.BareEid).
+            // Stripped again because everything below compares tags by string, and that has to
+            // hold no matter what a future caller hands this method.
+            var cleanEid = BluetoothManager.BareEid(new String(eidData.Where(char.IsLetterOrDigit).ToArray()));
 
             // Paused: no colony/box list loaded — nothing may be recorded.
             if (string.IsNullOrWhiteSpace(_appSettings.AllBoxSetsString))
@@ -737,8 +749,8 @@ namespace PenguinMonitor
                 return;
             }
 
-            // Guard: only complete 15-char EIDs may be recorded. A partial read (e.g. the
-            // scanner waking mid-transmission) would fail the LA9000250 box-tag prefix test
+            // Guard: only complete 15-digit EIDs may be recorded. A partial read (e.g. the
+            // scanner waking mid-transmission) would fail the 9000250 box-tag prefix test
             // and be silently recorded as a penguin scan.
             if (!BluetoothManager.IsCompleteEid(cleanEid))
             {
@@ -1701,7 +1713,7 @@ namespace PenguinMonitor
                 server.notes ?? "", server.monitor_filename, server.observer_name,
                 server.failed_eggs, server.dead_chicks);
             if (server.scans != null)
-                foreach (var sc in server.scans) s.ScannedIds.Add(new ScanRecord { BirdId = sc.pit_id ?? "" });
+                foreach (var sc in server.scans) s.ScannedIds.Add(new ScanRecord { BirdId = DataStorageService.PitFull(sc.pit_id) });
             for (int ns = 0; ns < server.no_scan; ns++) s.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
             return DataStorageService.BoxSignature(s) == DataStorageService.BoxSignature(local);
         }
@@ -1720,7 +1732,7 @@ namespace PenguinMonitor
             restored.BoxName = boxName;
             if (server.scans != null)
                 foreach (var scan in server.scans)
-                    restored.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                    restored.ScannedIds.Add(new ScanRecord { BirdId = DataStorageService.PitFull(scan.pit_id) });
             for (int ns = 0; ns < server.no_scan; ns++)
                 restored.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
             restored.IsPendingUpload = false;
@@ -1795,7 +1807,7 @@ namespace PenguinMonitor
                     serverObs.BoxName = boxName;
                     if (server.scans != null)
                         foreach (var scan in server.scans)
-                            serverObs.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                            serverObs.ScannedIds.Add(new ScanRecord { BirdId = DataStorageService.PitFull(scan.pit_id) });
                     for (int ns = 0; ns < server.no_scan; ns++)
                         serverObs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                 }
@@ -1836,7 +1848,7 @@ namespace PenguinMonitor
                             restored.BoxName = boxName;
                             if (server.scans != null)
                                 foreach (var scan in server.scans)
-                                    restored.ScannedIds.Add(new ScanRecord { BirdId = scan.pit_id ?? "" });
+                                    restored.ScannedIds.Add(new ScanRecord { BirdId = DataStorageService.PitFull(scan.pit_id) });
                             for (int ns = 0; ns < server.no_scan; ns++)
                                 restored.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{ns + 1}" });
                             restored.IsPendingUpload = false;
@@ -7187,7 +7199,7 @@ namespace PenguinMonitor
             // so the bird gets its true chip (and the placeholder is never sent).
             _newBirdScanCapture = scanned =>
             {
-                if (!string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase)) return;
+                if (!IsPlaceholderPit(fullPitId)) return;
                 var scanKey = scanned.ToUpper();
                 var scanShort = scanKey.Length >= 8 ? scanKey.Substring(scanKey.Length - 8) : scanKey;
                 if (_remotePenguinData != null &&
@@ -7223,9 +7235,13 @@ namespace PenguinMonitor
             void SelectRechipTarget(PenguinData pd, string key)
             {
                 rechipTarget = pd;
-                // Retire the bird's current chip: prefer its full 17-char pit key
-                rechipOldPit = key.Length == 17 ? key
-                    : _remotePenguinData?.FirstOrDefault(kv => kv.Value.PengNum == pd.PengNum && kv.Key.Length == 17).Key;
+                // Retire the bird's current chip. The cache carries the whole tag on the bird
+                // itself, so take it from there; the key is only a fallback for an entry that
+                // predates it. (It used to be found by looking for a 17-char key — the length of
+                // the tag with the reader's prefix still on it, which no longer exists.)
+                rechipOldPit = !string.IsNullOrEmpty(pd.FullPitId) ? pd.FullPitId
+                    : IsFullPitKey(key) ? key
+                    : _remotePenguinData?.FirstOrDefault(kv => kv.Value.PengNum == pd.PengNum && IsFullPitKey(kv.Key)).Key;
                 rechipResults.RemoveAllViews();
                 suppressRechipSearch = true; rechipSearchInput.Text = ""; suppressRechipSearch = false;
                 // Swap the search for the selected bird's mini view + ✕
@@ -7300,7 +7316,7 @@ namespace PenguinMonitor
                     if (rank < 0) continue;
                     if (best.TryGetValue(pn, out var cur))
                         best[pn] = (Math.Min(cur.rank, rank), numVal, pd2,
-                            cur.key.Length == 17 ? cur.key : (kv.Key.Length == 17 ? kv.Key : cur.key));
+                            IsFullPitKey(cur.key) ? cur.key : (IsFullPitKey(kv.Key) ? kv.Key : cur.key));
                     else
                         best[pn] = (rank, numVal, pd2, kv.Key);
                 }
@@ -7368,7 +7384,7 @@ namespace PenguinMonitor
                     modeRechip.Checked = true;
                     if (!string.IsNullOrEmpty(restore.RechipPengNum) && _remotePenguinData != null)
                     {
-                        var kv = _remotePenguinData.FirstOrDefault(k => k.Value.PengNum == restore.RechipPengNum && k.Key.Length == 17);
+                        var kv = _remotePenguinData.FirstOrDefault(k => k.Value.PengNum == restore.RechipPengNum && IsFullPitKey(k.Key));
                         if (kv.Value == null) kv = _remotePenguinData.FirstOrDefault(k => k.Value.PengNum == restore.RechipPengNum);
                         if (kv.Value != null) SelectRechipTarget(kv.Value, kv.Key);
                     }
@@ -7434,7 +7450,7 @@ namespace PenguinMonitor
             {
                 // Test/demo chip: save nothing at all — no penguin (so the number doesn't
                 // increment), no chip, no counts. Purely a workflow rehearsal.
-                if (string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase))
+                if (IsPlaceholderPit(fullPitId))
                 {
                     Toast.MakeText(this, "Test chip not saved", ToastLength.Short)?.Show();
                     dialog.Dismiss();
@@ -7790,7 +7806,7 @@ namespace PenguinMonitor
                 // Confirmation screen listing everything that will be saved, worded the way
                 // the user entered it. "No" just closes this dialog — the input form
                 // underneath stays open with its values intact for editing or Cancel.
-                bool isTestChip = string.Equals(fullPitId, PLACEHOLDER_PIT, StringComparison.OrdinalIgnoreCase);
+                bool isTestChip = IsPlaceholderPit(fullPitId);
                 var summary = new List<string>();
                 summary.Add(rechipTarget != null ? $"Rechip {DisplayPengNum(rechipTarget.PengNum)}"
                                                  : $"New penguin ({(chippedAsChick.Checked ? "chick" : "adult")})");
@@ -8964,9 +8980,9 @@ namespace PenguinMonitor
 
         private void AddScannedId(String fullEid, int _unused = 0, bool isManualEntry = false)
         {
-            var cleanEid = new String(fullEid.Where(char.IsLetterOrDigit).ToArray());
+            var cleanEid = BluetoothManager.BareEid(new String(fullEid.Where(char.IsLetterOrDigit).ToArray()));
 
-            // Check if this is a box tag scan (LA9000250*)
+            // Check if this is a box tag scan (ISO digits 9000250*)
             if (BoxTagService.IsBoxTag(cleanEid))
             {
                 HandleBoxTagScan(cleanEid);

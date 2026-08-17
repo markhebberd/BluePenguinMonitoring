@@ -156,6 +156,17 @@ namespace PenguinMonitor.Models
             }
         }
 
+        /// <summary>Tags held on this phone from before the reader's "LA" prefix was dropped —
+        /// scans taken but not yet uploaded, and the boxes' last-known state. They are compared
+        /// against freshly scanned tags by string, so one spelling of a bird has to win or the
+        /// same bird reads as two. Idempotent: a bare tag is already what this leaves behind.</summary>
+        public void MigrateTagPrefixes()
+        {
+            foreach (var obs in PendingObservations.Concat(PreviousBoxes.Values).Concat(TodayBoxes.Values))
+                foreach (var scan in obs.ScannedIds)
+                    scan.BirdId = BluetoothManager.BareEid(scan.BirdId ?? "");
+        }
+
         public BoxObservation? GetTodayForBox(string boxName)
         {
             if (TodayBoxes.TryGetValue(boxName, out var today))

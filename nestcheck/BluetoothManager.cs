@@ -245,7 +245,7 @@ namespace PenguinMonitor
         /// A complete EID carries exactly 15 digits: the HR5's ASCII form is
         /// "LA" + 15 digits (17 chars, e.g. LA123456789012345), or a bare 15-digit
         /// ISO number if the reader omits the prefix. Anything else is a partial/
-        /// corrupted read — a truncated box tag would otherwise fail the LA9000250
+        /// corrupted read — a truncated box tag would otherwise fail the 9000250
         /// prefix test and be recorded as a penguin.
         /// </summary>
         public static bool IsCompleteEid(string clean)
@@ -254,6 +254,27 @@ namespace PenguinMonitor
             if (clean.Length == 17)
                 return char.IsLetter(clean[0]) && char.IsLetter(clean[1]) && clean.Skip(2).All(char.IsDigit);
             return false;
+        }
+
+        /// <summary>
+        /// The tag as everything downstream knows it: its 15 ISO digits.
+        ///
+        /// The reader prepends its own two-letter manufacturer code ("LA"), which is not part of
+        /// the ISO number and is not printed on the chip label — so it can't be typed, only
+        /// scanned, and a bird identified by label and a bird identified by reader used to be two
+        /// different strings. It comes off here, at the one point every scan passes through, and
+        /// the app has one spelling of a tag from that point on.
+        /// </summary>
+        public static string BareEid(string clean)
+        {
+            int i = 0;
+            while (i < clean.Length && char.IsLetter(clean[i])) i++;
+            if (i == 0) return clean;
+            // Only a letter prefix sitting on the ISO digits comes off. Anything else — a
+            // NOSCAN placeholder, a corrupted read — is handed back exactly as it came, because
+            // rewriting a value we don't recognise is worse than carrying it unchanged.
+            var digits = clean.Substring(i);
+            return digits.Length > 0 && digits.All(char.IsDigit) ? digits : clean;
         }
 
         private async Task ListenLoop()
@@ -294,7 +315,7 @@ namespace PenguinMonitor
                         var clean = new string(line.Where(char.IsLetterOrDigit).ToArray());
                         if (clean.Length == 0) continue;
                         if (IsCompleteEid(clean))
-                            EidDataReceived?.Invoke(clean);
+                            EidDataReceived?.Invoke(BareEid(clean));
                         else
                             StatusChanged?.Invoke($"Ignored partial scan ({clean.Length} chars) — please scan again");
                     }
@@ -309,7 +330,7 @@ namespace PenguinMonitor
                              : pending.Length >= 15 && IsCompleteEid(pending.Substring(0, 15)) ? 15 : 0;
                     if (take > 0)
                     {
-                        EidDataReceived?.Invoke(pending.Substring(0, take));
+                        EidDataReceived?.Invoke(BareEid(pending.Substring(0, take)));
                         sb.Clear();
                         if (pending.Length > take) sb.Append(pending.Substring(take));
                     }

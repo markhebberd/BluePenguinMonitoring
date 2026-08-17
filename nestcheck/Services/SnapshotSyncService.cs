@@ -128,7 +128,10 @@ namespace PenguinMonitor.Services
                 // the payload still arrives whole whatever we send — `since` only decides whether
                 // the two big bird tables are the full set or what changed, and the server says
                 // which it sent in birds_full.
-                var url = $"{WILDWATCH_SNAPSHOT_URL}?colony_id={colonyId}&scope=field";
+                // pit=bare: tags come as the 15 ISO digits they are stored as. Builds before this
+                // one matched a scan against the whole cached tag, so the server still hands them
+                // the reader's "LA" form until they are gone.
+                var url = $"{WILDWATCH_SNAPSHOT_URL}?colony_id={colonyId}&scope=field&pit=bare";
                 if (!string.IsNullOrEmpty(db.Watermark)) url += $"&since={Uri.EscapeDataString(db.Watermark)}";
                 var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.Add("Authorization", $"Bearer {token}");
@@ -286,7 +289,7 @@ namespace PenguinMonitor.Services
                 db.ObserverName(o.observer_id), o.failed_eggs, o.dead_chicks);
             obs.BoxName = box;
             foreach (var s in db.ScansOf(o.observation_id))
-                obs.ScannedIds.Add(new ScanRecord { BirdId = s.pit_id ?? "", Timestamp = ParseUtc(o.observation_time_utc) });
+                obs.ScannedIds.Add(new ScanRecord { BirdId = DataStorageService.PitFull(s.pit_id), Timestamp = ParseUtc(o.observation_time_utc) });
             for (int n = 0; n < o.no_scan; n++)
                 obs.ScannedIds.Add(new ScanRecord { BirdId = $"NOSCAN_{n + 1}", Timestamp = obs.WhenDataCollectedUtc });
             obs.IsPendingUpload = false;
@@ -307,7 +310,10 @@ namespace PenguinMonitor.Services
             {
                 if (string.IsNullOrEmpty(chip.pit_id) || chip.pit_id.Length < 8) continue;
                 if (string.IsNullOrEmpty(chip.peng_num) || !db.Penguins.TryGetValue(chip.peng_num!, out var p)) continue;
-                var clean = new string(chip.pit_id.Where(char.IsLetterOrDigit).ToArray()).ToUpper();
+                // Keyed by the tag's ISO digits whichever form the server sent it in — the app is
+                // one release either side of the database dropping the reader's prefix, and a scan
+                // has to find its bird under both.
+                var clean = DataStorageService.PitFull(new string(chip.pit_id.Where(char.IsLetterOrDigit).ToArray()));
                 var eight = clean.Length >= 8 ? clean.Substring(clean.Length - 8) : clean;
                 if (eight.Length != 8) continue;
 
@@ -324,7 +330,7 @@ namespace PenguinMonitor.Services
 
                 birds[clean] = new PenguinData
                 {
-                    FullPitId = chip.pit_id, ScannedId = eight, PengNum = p.peng_num,
+                    FullPitId = clean, ScannedId = eight, PengNum = p.peng_num,
                     LastKnownLifeStage = stage, Sex = p.sex ?? "", ChipDate = chipDate,
                     ChipAs = p.chipped_as_adult == 1 ? "Adult" : "", ChickSizeCode = p.chick_size_code ?? "",
                     HasAlert = p.alert == 1,

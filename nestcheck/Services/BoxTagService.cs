@@ -25,8 +25,13 @@ namespace PenguinMonitor.Services
                 if (File.Exists(boxTagsPath))
                 {
                     var json = File.ReadAllText(boxTagsPath);
-                    return JsonConvert.DeserializeObject<Dictionary<string, BoxTag>>(json)
-                           ?? new Dictionary<string, BoxTag>();
+                    var tags = JsonConvert.DeserializeObject<Dictionary<string, BoxTag>>(json)
+                               ?? new Dictionary<string, BoxTag>();
+                    // Tags saved before the reader's "LA" prefix was dropped: a scanned box tag is
+                    // matched to its box by string (GetBoxIdByTag), so both sides must spell it the
+                    // same way. Idempotent — a bare tag stays as it is.
+                    foreach (var t in tags.Values) t.TagNumber = BluetoothManager.BareEid(t.TagNumber ?? "");
+                    return tags;
                 }
             }
             catch (Exception ex)
@@ -156,23 +161,23 @@ namespace PenguinMonitor.Services
         }
 
         /// <summary>
-        /// Check if a scanned ID is a box tag (starts with LA9000250)
+        /// Check if a scanned ID is a box tag (ISO digits start with 9000250)
         /// </summary>
         public static bool IsBoxTag(string scannedId)
         {
-            // Clean the ID first
-            var cleanId = new String(scannedId.Where(char.IsLetterOrDigit).ToArray());
-            return cleanId.Length >= 9 && cleanId.Substring(0, 9).Equals("LA9000250", StringComparison.OrdinalIgnoreCase);
+            // Tags are the bare ISO digits; a value that still carries the reader's letter prefix
+            // (an older stored scan, a pasted number) is the same tag, so judge it once stripped.
+            var cleanId = BluetoothManager.BareEid(new String(scannedId.Where(char.IsLetterOrDigit).ToArray()));
+            return cleanId.StartsWith("9000250", StringComparison.Ordinal);
         }
 
         /// <summary>
-        /// Check if a scanned ID is a penguin tag (starts with LA9560000)
+        /// Check if a scanned ID is a penguin tag (ISO digits start with 9560000)
         /// </summary>
         public static bool IsPenguinTag(string scannedId)
         {
-            // Clean the ID first
-            var cleanId = new String(scannedId.Where(char.IsLetterOrDigit).ToArray());
-            return cleanId.Length >= 9 && cleanId.Substring(0, 9).Equals("LA9560000", StringComparison.OrdinalIgnoreCase);
+            var cleanId = BluetoothManager.BareEid(new String(scannedId.Where(char.IsLetterOrDigit).ToArray()));
+            return cleanId.StartsWith("9560000", StringComparison.Ordinal);
         }
 
         #region Remote API Methods

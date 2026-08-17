@@ -17,7 +17,7 @@ namespace PenguinMonitor.Models
     {
         /// <summary>Bump to force a full re-pull — the stores are rebuilt from scratch when the shape
         /// they hold changes. A phone that skipped the release still gets a correct cache.</summary>
-        public const int SchemaVersion = 2;
+        public const int SchemaVersion = 3;   // v3: pit_id lost the reader's "LA" prefix
         public int Version { get; set; }
 
         /// <summary>Server's max updated_at from the last fully applied payload, sent back as
