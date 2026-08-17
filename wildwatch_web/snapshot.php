@@ -76,15 +76,16 @@ $fieldScope = ($_GET['scope'] ?? '') === 'field';
 // what the browser cached.
 $pitLegacy = $fieldScope && ($_GET['pit'] ?? '') !== 'bare';
 
-// Who is still on a build from before the change, and when one was last seen — the evidence for
-// deciding that wwPitOut can go. A bounded working log, same discipline as hash-report.php:
-// rotates at ~200 KB to one backup, so it can never grow without limit.
+// Who is still on a build from before the change — the evidence for deciding that wwPitOut can
+// go. Written to the php-fpm error log rather than a file of its own: this endpoint promotes
+// every warning to a thrown exception (see the handler at the top), so a diagnostic that touches
+// the filesystem can 500 a field sync over a log it failed to write. Wrapped as well, because
+// nothing about a diagnostic is worth failing a sync for.
 if ($pitLegacy) {
-    $legacyLog = __DIR__ . '/legacy-pit-clients.log';
-    if (@filesize($legacyLog) > 200000) @rename($legacyLog, $legacyLog . '.1');
-    @file_put_contents($legacyLog,
-        date('Y-m-d H:i:s') . ' obs=' . (int)($observer['observer_id'] ?? 0) . ' colony=' . $colonyId . "\n",
-        FILE_APPEND | LOCK_EX);
+    try {
+        error_log('nestcheck legacy pit client: observer=' . (int)($observer['observer_id'] ?? 0)
+                  . ' colony=' . $colonyId);
+    } catch (Throwable $e) { /* diagnostic only */ }
 }
 
 /**
