@@ -64,6 +64,8 @@ interface Clutch {
                             // an abandoned discovery) — data needs fixing
   start: number;            // first obs with offspring present (egg appearance)
   startObsTime: string;     // that first-offspring observation's UTC time (scroll target)
+  startKind: 'egg' | 'chick'; // what was in the box at that discovery — when laying can't be
+                            // dated, the discovery is the whole of what the record says
   startObsId: number | null;// that observation's id — the anchor a verification is keyed to
   end: number | null;       // obs that ended the attempt; null = still running
   windowStart: number;      // breeding window: laying (estimated), or discovery when un-estimable …
@@ -204,7 +206,8 @@ export function segmentClutches(sObs: BreedingObservation[], priorObsT: number |
         abnAtStart: abn,
       };
       evidence.push(ev);
-      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null, end: null,
+      current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null,
+        startKind: (o.eggs || 0) > 0 ? 'egg' : 'chick', end: null,
         windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
       clutches.push(current);
       if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }

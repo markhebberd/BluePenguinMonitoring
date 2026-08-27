@@ -1125,6 +1125,14 @@ const clutchActive = (c: { end: number | null; windowEnd: number }) => c.end ===
 const windowRange = (c: { windowStart: number; windowEnd: number; end: number | null }) =>
   `${fmtMs(c.windowStart)} – ${clutchActive(c) ? 'current' : fmtMs(c.windowEnd)}`;
 
+/** What a clutch with no laid estimate can honestly say for itself: the day the nest was
+ *  found with something in it. Not a fault to be fixed — a box first checked with eggs
+ *  already there has no empty check to date laying back from, and never will — so it states
+ *  the one dated fact rather than flagging the absence of the other. It also explains the
+ *  window beside it, which starts at the discovery instead of at laying. */
+const discoveryNote = (c: { startKind: 'egg' | 'chick'; start: number }) =>
+  `${c.startKind === 'chick' ? 'Chicks' : 'Eggs'} found on ${fmtMs(c.start)}`;
+
 /** Active window only: ALL upcoming stage dates predicted from the laid estimate — same
  *  offsets as the nestcheck Next Breeding Dates card. Hatch is shown only while the
  *  clutch is still in the egg phase; the chip window runs to fledge. */
@@ -1760,9 +1768,9 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
               )}
               {clutch.laidFailed && (
                 <div className="season-issues">
-                  <span className={`issue-badge${clutch.startObsTime ? ' clickable' : ''}`}
+                  <span className={`issue-badge note${clutch.startObsTime ? ' clickable' : ''}`}
                     title="Go to where the egg/chick was first detected"
-                    onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
+                    onClick={clutch.startObsTime ? () => onSeasonClick?.(clutch.startObsTime) : undefined}>{discoveryNote(clutch)}</span>
                 </div>
               )}
               <ClutchBody clutch={clutch} dates={dates}>
@@ -2935,9 +2943,9 @@ function BirdPage({ data, onBirdClick, onBoxClick, onSightingClick, onDayClick, 
                           </div>
                           {c.laidFailed && (
                             <div className="season-issues">
-                              <span className={`issue-badge${c.startObsTime ? ' clickable' : ''}`}
+                              <span className={`issue-badge note${c.startObsTime ? ' clickable' : ''}`}
                                 title="Go to where the egg/chick was first detected"
-                                onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>⚠ laid date could not be estimated</span>
+                                onClick={c.startObsTime ? () => onSightingClick(e.box, c.startObsTime) : undefined}>{discoveryNote(c)}</span>
                             </div>
                           )}
                           <ClutchBody clutch={c} dates={dates}>

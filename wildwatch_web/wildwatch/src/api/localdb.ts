@@ -2051,8 +2051,17 @@ export function queryAllLocations(): any[] {
  * later. Deliberately mirrors that SQL's semantics, including the odd one: the counts always
  * come from the newest live observation, but a newest observation with no breeding_status
  * falls back to the most recent one that has a status, rather than showing none.
+ *
+ * One deliberate departure: eggs or chicks in the box report as BR whatever pre-breeding
+ * assessment was last recorded — the same rule the observation badges run on (App.tsx's
+ * displayStatus). Without it a monitor who logged "No" on the visit they entered two eggs
+ * leaves the tile grey, so a box that is plainly breeding doesn't read as one.
  */
 type BoxInfo = Record<string, { s: string; a: number; e: number; c: number; m?: number }>;
+/** Pre-breeding assessments: a monitor's read on a nest that has nothing in it yet. Eggs or
+ *  chicks overrule any of them (see the tile rule below); ABN/DCM/IGN don't give way, since
+ *  each says something about the nest that outranks its contents. */
+const PRE_BREEDING = new Set(['NO', 'UNL', 'POT', 'CON', '']);
 // The grid reads this and so does computeOverview, which would otherwise walk every location's
 // history (and every biometric) twice per sync. Held against the store version, so a sync — the
 // only thing that can change the answer — is what rebuilds it.
@@ -2095,11 +2104,13 @@ function computeBoxInfoUncached(): BoxInfo {
       .sort((a: any, b: any) => String(b.observation_time_utc).localeCompare(String(a.observation_time_utc)));
     if (obs.length === 0) continue;   // never observed — dashboard.php omits it too
     const latest = obs[0];
+    const recorded = latest.breeding_status || obs.find((o: any) => o.breeding_status)?.breeding_status || '';
+    const eggs = latest.eggs || 0, chicks = latest.chicks || 0;
     out[loc.location_name] = {
-      s: latest.breeding_status || obs.find((o: any) => o.breeding_status)?.breeding_status || '',
+      s: (eggs > 0 || chicks > 0) && PRE_BREEDING.has(recorded) ? 'BR' : recorded,
       a: latest.adults || 0,
-      e: latest.eggs || 0,
-      c: latest.chicks || 0,
+      e: eggs,
+      c: chicks,
       m: isMoulting(latest) ? 1 : 0,
     };
   }

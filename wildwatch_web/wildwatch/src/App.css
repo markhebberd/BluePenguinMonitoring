@@ -643,6 +643,9 @@ h3.collapsible:hover { color:#1a5276; }
 .season-title { font-size:12px; font-weight:700; color:#1a5276; margin-top:6px; }
 .season-issues { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
 .issue-badge { position:relative; font-size:10px; background:#FFF3E0; color:#E65100; border:1px solid #FFCC80; border-radius:4px; padding:1px 5px; cursor:help; }
+/* A statement of fact rather than a problem: the laid estimate that was never possible
+   reads as the date the nest was found, and shouldn't wear the warning's orange. */
+.issue-badge.note { background:#F1F3F5; color:#495057; border-color:#DEE2E6; cursor:default; }
 .issue-badge.clickable { cursor:pointer; }
 .issue-badge.clickable:hover { filter:brightness(.95); }
 .issue-tip { display:none; position:absolute; top:100%; left:0; flex-direction:column; gap:1px; background:#fff; border:1px solid #FFCC80; border-radius:6px; padding:5px 6px; box-shadow:0 4px 12px rgba(0,0,0,.18); white-space:nowrap; z-index:600; min-width:max-content; }
