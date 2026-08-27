@@ -7696,8 +7696,11 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   }, [externalBird]);
 
   const handleBirdClick = (num: string) => setSideBird(num);
-  // Day-view filters persist across days/sessions so a chosen view sticks as you navigate.
-  const readChangedFields = (): string[] => { try { const a = JSON.parse(localStorage.getItem('ww_day_changed') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+  // Day-view filters persist across days/sessions so a chosen view sticks as you navigate,
+  // but only within the colony they were set on — the stored set is stamped with its colony
+  // and ignored (then overwritten) once a different one is being viewed.
+  const colonyId = getColonyId();
+  const readChangedFields = (): string[] => { try { if (Number(localStorage.getItem('ww_day_changed_colony')) !== colonyId) return []; const a = JSON.parse(localStorage.getItem('ww_day_changed') || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
   const [showCarryForward, setShowCarryForward] = useState(() => localStorage.getItem('ww_day_showall') === '1');
   const [hideDcm, setHideDcm] = useState(() => localStorage.getItem('ww_day_hidedcm') === '1');
   // "Only changed" filter: show boxes whose observation differs from the previous one (before this day)
@@ -7711,7 +7714,19 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
   });
   useEffect(() => { localStorage.setItem('ww_day_showall', showCarryForward ? '1' : '0'); }, [showCarryForward]);
   useEffect(() => { localStorage.setItem('ww_day_hidedcm', hideDcm ? '1' : '0'); }, [hideDcm]);
-  useEffect(() => { localStorage.setItem('ww_day_changed', JSON.stringify([...changedFields])); }, [changedFields]);
+  useEffect(() => {
+    localStorage.setItem('ww_day_changed', JSON.stringify([...changedFields]));
+    localStorage.setItem('ww_day_changed_colony', String(colonyId));
+  }, [changedFields, colonyId]);
+  // Switching colony while the day view stays mounted (the embedded panel's wwSetColony)
+  // releases the filters too, so a "Changed" view never hides boxes in the colony you land on.
+  const filterColony = useRef(colonyId);
+  useEffect(() => {
+    if (colonyId === filterColony.current) return;
+    filterColony.current = colonyId;
+    setChangedFields(new Set());
+    setChangedExpanded(false);
+  }, [colonyId]);
 
   // Stalker mode (today only): rows in scanned order, earliest first, each stamped
   // "N minutes ago". A minute tick keeps the relative times fresh while it's on.
