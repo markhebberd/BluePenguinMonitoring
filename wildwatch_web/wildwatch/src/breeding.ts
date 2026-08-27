@@ -29,6 +29,10 @@ export interface BreedingObservation {
   observation_id?: number | null;
   observation_time_utc: string;
   adults: number; eggs: number; chicks: number;
+  /** Chicks the monitor found dead on this visit. They are not among the live `chicks` above
+   *  — a death doesn't change how many live chicks are in the nest — so the two together are
+   *  how many chicks the nest had. Null = nothing recorded. */
+  dead_chicks?: number | null;
   breeding_status: string | null;
   scans: BreedingScan[];
 }
@@ -76,7 +80,8 @@ interface Clutch {
                             // parent evidence — the laid estimate is a midpoint, so
                             // measuring from it alone would cut off real courtship visits.
   maxEggs: number;
-  maxChicks: number;
+  maxChicks: number;        // chicks the attempt had: the most alive at any one check, plus
+                            // any found dead at that same check
 }
 
 /** A microchipped chick is in this observation — so the offspring here are close to
@@ -183,7 +188,7 @@ export function segmentClutches(sObs: BreedingObservation[], priorObsT: number |
         current.end = t; current = null; ev = null; prevEmpty = t; awaitingEmpty = false;
       } else {
         current.maxEggs = Math.max(current.maxEggs, o.eggs || 0);
-        current.maxChicks = Math.max(current.maxChicks, o.chicks || 0);
+        current.maxChicks = Math.max(current.maxChicks, (o.chicks || 0) + (o.dead_chicks || 0));
         // Hatch evidence: the last check with the eggs still unhatched, and the first with
         // chicks. Only until chicks appear — a chick lost later says nothing about hatching.
         if (ev && ev.firstChickT === null) {
@@ -208,7 +213,8 @@ export function segmentClutches(sObs: BreedingObservation[], priorObsT: number |
       evidence.push(ev);
       current = { laid: null, laidUncertainty: null, laidFailed: false, start: t, startObsTime: o.observation_time_utc, startObsId: o.observation_id ?? null,
         startKind: (o.eggs || 0) > 0 ? 'egg' : 'chick', end: null,
-        windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0, maxChicks: o.chicks || 0 };
+        windowStart: 0, windowEnd: 0, guardEnd: 0, attendStart: 0, maxEggs: o.eggs || 0,
+        maxChicks: (o.chicks || 0) + (o.dead_chicks || 0) };
       clutches.push(current);
       if (abn) { current.end = t; current = null; ev = null; awaitingEmpty = true; }
     }

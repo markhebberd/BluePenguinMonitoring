@@ -1139,13 +1139,15 @@ const discoveryNote = (c: { startKind: 'egg' | 'chick'; start: number }) =>
 /** Unchipped offspring in a family box. Once the clutch has ENDED these are final
  *  stages — egg that never hatched / chick never chipped — and get the red ✕. While
  *  the clutch is still active they're simply in progress, so no failure mark. */
-function OffspringFinal({ kind, active }: { kind: 'egg' | 'chick'; active: boolean }) {
-  const title = kind === 'egg'
-    ? (active ? 'Egg in the nest' : 'Egg did not hatch')
-    : (active ? 'Unchipped chick in the nest' : 'Chick was not chipped in the nest');
+function OffspringFinal({ kind, active, recorded }: { kind: 'egg' | 'chick'; active: boolean; recorded?: boolean }) {
+  const failed = !active || recorded;   // recorded: a monitor found it dead and wrote it down
+  const title = recorded ? 'A monitor recorded this chick as dead'
+    : kind === 'egg'
+      ? (active ? 'Egg in the nest' : 'Egg did not hatch')
+      : (active ? 'Unchipped chick in the nest' : 'Chick was not chipped in the nest');
   return (
-    <span className={`offspring-final${active ? '' : ' offspring-failed'}`} title={title}>
-      {kind === 'egg' ? '🥚' : '🐣'}{!active && <span className="fail-x">{'✕'}</span>}
+    <span className={`offspring-final${failed ? ' offspring-failed' : ''}`} title={title}>
+      {kind === 'egg' ? '🥚' : '🐣'}{failed && <span className="fail-x">{'✕'}</span>}
     </span>
   );
 }
@@ -1318,6 +1320,8 @@ interface BoxFamily {
   chicks: any[];     // this-season chicks chipped in the nest (bird objects)
   failedEggs: number;   // eggs that never became a chick (final stage), capped at MAX_OFFSPRING_SHOWN
   plainChicks: number;  // unchipped chicks assumed to have died (final stage), capped at MAX_OFFSPRING_SHOWN
+  deadChicks: number;   // of those, the ones a monitor found dead and recorded — dead on the record,
+                        // not by inference, so they read as failed while the attempt is still running
   fledgedUnchipped: number; // unchipped chicks a monitor recorded as presumed fledged
 }
 interface BoxSeasonData {
@@ -1471,7 +1475,11 @@ function computeBoxFamilies(observations: Observation[], allPenguinsInBox?: any[
         return (t >= clutch.start && t <= (clutch.end ?? Infinity)) ? s + (Number(o.fledged_unchipped) || 0) : s;
       }, 0));
       const plainChicks = unchipped - fledgedUnchipped;
-      return { clutch, male, female, parents, chicks, failedEggs, plainChicks, fledgedUnchipped };
+      const deadChicks = Math.min(plainChicks, sObsChrono.reduce((n, o) => {
+        const t = parseDate(o.observation_time_utc).getTime();
+        return (t >= clutch.start && t <= (clutch.end ?? Infinity)) ? n + (Number(o.dead_chicks) || 0) : n;
+      }, 0));
+      return { clutch, male, female, parents, chicks, failedEggs, plainChicks, deadChicks, fledgedUnchipped };
     });
 
     result.push({ label, seasonYear, seasonStart, seasonEnd, seasonObs: sObsChrono, seasonSightings: sSightings, birds, birdMap, clutches, families, parentKeys, chickFamily, isCurrent: label === currentLabel });
@@ -1784,7 +1792,7 @@ function AllScannedBirds({ observations, onBirdClick, allPenguinsInBox, onSeason
                     return birdWithCount(b, Math.max(b.scanCount || 0, winCount.get(`${ci}|${k}`) || 0));
                   })}
                   {Array.from({ length: failedEggs }).map((_, i) => <OffspringFinal key={`fe${i}`} kind="egg" active={active} />)}
-                  {Array.from({ length: plainChicks }).map((_, i) => <OffspringFinal key={`pc${i}`} kind="chick" active={active} />)}
+                  {Array.from({ length: plainChicks }).map((_, i) => <OffspringFinal key={`pc${i}`} kind="chick" active={active} recorded={i < fam.deadChicks} />)}
                   {Array.from({ length: fledgedUnchipped }).map((_, i) => (
                     <span key={`fu${i}`} className="scan chick offspring-fledged" title="Last sighting of unchipped chick, presumed fledged">Unchipped</span>
                   ))}
@@ -2076,20 +2084,15 @@ function ObsCard({ obs, box, onBirdClick, onDayClick, highlight, scrollTo, token
             {localObs.adults > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(localObs.adults, 6))}</span>}
             {localObs.eggs > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(localObs.eggs, 6))}</span>}
             {localObs.chicks > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(localObs.chicks, 6))}</span>}
-            {/* An end of life a monitor entered by hand — including an explicit zero, which is
-                a statement that they checked. Unset stays invisible. */}
-            {localObs.failed_eggs != null && (
-              <span className={`obs-lost${Number(localObs.failed_eggs) === 0 ? ' checked' : ''}`}
-                title={Number(localObs.failed_eggs) === 0 ? 'Checked: no eggs failed on this visit' : 'Eggs recorded as failed on this visit'}>
-<OffspringFinal kind="egg" active={false} /> {localObs.failed_eggs}
-              </span>
-            )}
-            {localObs.dead_chicks != null && (
-              <span className={`obs-lost${Number(localObs.dead_chicks) === 0 ? ' checked' : ''}`}
-                title={Number(localObs.dead_chicks) === 0 ? 'Checked: no chicks died on this visit' : 'Chicks recorded as dead on this visit'}>
-<OffspringFinal kind="chick" active={false} /> {localObs.dead_chicks}
-              </span>
-            )}
+            {/* Ends of life the monitor entered by hand, one crossed icon each — they read as
+                the live counts do, rather than as a badge with a number in it. An explicit zero
+                is a statement that they checked and nothing died, so it draws nothing. */}
+            {Array.from({ length: Math.min(Number(localObs.failed_eggs) || 0, 6) }).map((_, i) => (
+              <span key={`fe${i}`} title="Egg recorded as failed on this visit"><OffspringFinal kind="egg" active={false} /></span>
+            ))}
+            {Array.from({ length: Math.min(Number(localObs.dead_chicks) || 0, 6) }).map((_, i) => (
+              <span key={`dc${i}`} title="Chick recorded as dead on this visit"><OffspringFinal kind="chick" active={false} /></span>
+            ))}
             {localObs.gate_status && <span className="gate">{localObs.gate_status}</span>}
             {[...obs.scans].sort(scanSortMFC).map((s,j) => (
               <PenguinMini key={j} scan={s} onClick={() => onBirdClick?.(s.peng_num || s.pit_id)} observationDate={obs.observation_time_utc} />
@@ -8000,6 +8003,11 @@ function DayView({ date, dates, highlightBox, onBoxClick, onBirdClick: _onBirdCl
                       {(o.adults || 0) > 0 && <span>{'\uD83D\uDC27'.repeat(Math.min(o.adults, 4))}</span>}
                       {(o.eggs || 0) > 0 && <span>{'\uD83E\uDD5A'.repeat(Math.min(o.eggs, 4))}</span>}
                       {(o.chicks || 0) > 0 && <span>{'\uD83D\uDC23'.repeat(Math.min(o.chicks, 4))}</span>}
+                      {/* A chick the monitor found dead on this visit, in the same badge the
+                          box card uses — the day of the visit is where it is looked for. */}
+                      {Array.from({ length: Math.min(Number(o.dead_chicks) || 0, 4) }).map((_, k) => (
+                        <span key={`dc${k}`} title="Chick recorded as dead on this visit"><OffspringFinal kind="chick" active={false} /></span>
+                      ))}
                       {oScans.map((s: any, si: number) => (
                         <span key={s.scan_id || `${s.peng_num}-${si}`}
                           style={scanCounts[s.peng_num] > 1 ? {outline:'2px solid #F44336', borderRadius:3} : undefined}

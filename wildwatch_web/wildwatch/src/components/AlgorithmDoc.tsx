@@ -137,7 +137,12 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
         <li>The gap measured is the box’s real monitoring gap — the last check of any kind, including one in the previous season. A season boundary is not a gap.</li>
         <li>An attempt <b>ends</b> at the first check that finds the box empty (offspring removed or dead), or at an observation marked <code>ABN</code> (abandoned) — whichever comes first.</li>
         <li>After an <code>ABN</code>, doomed eggs often linger in later checks. Curently A new attempt is not detected until an empty check has actually been seen, but this needs further analysis.</li>
-        <li>The highest egg count and highest chick count seen anywhere in the attempt are kept — they drive the offspring tally in step 10.</li>
+        <li>
+          The highest egg count and highest chick count seen anywhere in the attempt are kept —
+          they drive the offspring tally in step 11. A chick a monitor found <em>dead</em> at a
+          check counts alongside the live ones at that same check: a death doesn’t change how
+          many live chicks are in the nest, so the two together are how many chicks it had.
+        </li>
       </ul>
 
       <h3>6. Estimating when the eggs were laid</h3>
@@ -445,7 +450,9 @@ export default function AlgorithmDoc({ seasonStartMonth, seasonStartDay }: { sea
       </ul>
       <p>
         While an attempt is still running none of this is marked as failure — an egg in the nest is
-        just an egg in the nest. The failure marks appear only once the window has closed.
+        just an egg in the nest. The failure marks appear only once the window has closed. The
+        exception is a chick a monitor found dead and recorded: that is settled the moment it is
+        written down, and is marked as a failure straight away.
       </p>
 
       <h3>12. Human verification of calculated breeding data</h3>
