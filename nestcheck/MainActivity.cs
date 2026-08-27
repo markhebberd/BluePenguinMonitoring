@@ -2816,7 +2816,9 @@ namespace PenguinMonitor
 
             if (_remoteBreedingDates != null && _remoteBreedingDates.ContainsKey(boxName))
                 summary.Text += "\n" + _remoteBreedingDates[boxName].breedingDateStatus();
-            
+
+            // Last, once every append is in: setting Text after this would drop the crossed icons.
+            summary.TextFormatted = CrossedLosses(summary.Text);
             summary.SetTextColor(Color.Black);
 
             string gateStatus = thisBoxData.GateStatus;
@@ -4584,6 +4586,45 @@ namespace PenguinMonitor
         private static readonly Color SCAN_MALE_TEXT = Color.ParseColor("#1565C0");
         private static readonly Color SCAN_FEMALE_TEXT = Color.ParseColor("#C62828");
 
+        /// <summary>An egg or chick with a red ✕ struck over it. Drawn rather than written so the
+        /// cross sits ON the icon, the way wildwatch marks a failed egg or a dead chick.</summary>
+        private class CrossedIconSpan : Android.Text.Style.ReplacementSpan
+        {
+            private readonly string _icon;
+            // Kept on the span rather than made per draw: this runs for every icon on every
+            // frame the list scrolls.
+            private readonly Paint _cross = new Paint { AntiAlias = true, Color = UIFactory.DANGER_RED, TextAlign = Paint.Align.Center };
+            public CrossedIconSpan(string icon) { _icon = icon; _cross.SetTypeface(Typeface.DefaultBold); }
+
+            public override int GetSize(Paint paint, Java.Lang.ICharSequence? text, int start, int end, Paint.FontMetricsInt? fm)
+                => (int)Math.Ceiling(paint.MeasureText(_icon));
+
+            public override void Draw(Canvas canvas, Java.Lang.ICharSequence? text, int start, int end,
+                                      float x, int top, int y, int bottom, Paint paint)
+            {
+                canvas.DrawText(_icon, x, y, paint);
+                _cross.TextSize = paint.TextSize * 0.85f;
+                canvas.DrawText("✕", x + paint.MeasureText(_icon) / 2f, y, _cross);
+            }
+        }
+
+        /// <summary>The loss markers inside a count string — "🥚✗" and "🐣✗" — swapped for the
+        /// crossed icon. Everything else is left as written, so any of the count strings can be
+        /// passed through this on its way to a TextView.</summary>
+        private static Java.Lang.ICharSequence CrossedLosses(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return new Java.Lang.String(text ?? "");
+            var span = new SpannableString(text);
+            foreach (var token in new[] { "🥚✗", "🐣✗" })
+            {
+                for (int i = text.IndexOf(token, StringComparison.Ordinal); i >= 0;
+                         i = text.IndexOf(token, i + token.Length, StringComparison.Ordinal))
+                    span.SetSpan(new CrossedIconSpan(token.Substring(0, token.Length - 1)),
+                                 i, i + token.Length, SpanTypes.ExclusiveExclusive);
+            }
+            return span;
+        }
+
         /// <summary>
         /// Build the observation detail as a View (not just text) so scans can be styled badges.
         /// </summary>
@@ -4617,7 +4658,7 @@ namespace PenguinMonitor
                 foreach (var (text, size) in statusItems)
                 {
                     statusRow.AddView(new View(this) { LayoutParameters = spacerParams });
-                    var tv = new TextView(this) { Text = text, TextSize = size };
+                    var tv = new TextView(this) { TextFormatted = CrossedLosses(text), TextSize = size };
                     tv.SetTextColor(Color.Black);
                     tv.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                     tv.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
@@ -4764,7 +4805,7 @@ namespace PenguinMonitor
             }
 
             // Hide compact badge when expanded; the sticky bar moves into the expanded card
-            _prevObsHeaderText.Text = compact;
+            _prevObsHeaderText.TextFormatted = CrossedLosses(compact);
             _prevObsHeaderText.Visibility = expanded ? ViewStates.Gone : ViewStates.Visible;
             if (_stickyNoteBar != null)
                 _stickyNoteBar.Visibility = expanded ? ViewStates.Gone : ViewStates.Visible;
@@ -4831,7 +4872,7 @@ namespace PenguinMonitor
                 var headerText = new TextView(this) { TextSize = 13 };
                 headerText.SetTextColor(UIFactory.DANGER_RED);
                 headerText.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
-                headerText.Text = BuildObsHeaderText(obs, "Unsynced", false);
+                headerText.TextFormatted = CrossedLosses(BuildObsHeaderText(obs, "Unsynced", false));
                 card.AddView(headerText);
 
                 // Resolve actions — the server only auto-flags a conflict for TODAY's data,
@@ -4891,7 +4932,7 @@ namespace PenguinMonitor
                 {
                     bool wasVisible = detailLayout.Visibility == ViewStates.Visible;
                     detailLayout.Visibility = wasVisible ? ViewStates.Gone : ViewStates.Visible;
-                    headerText.Text = BuildObsHeaderText(obs, "Unsynced", !wasVisible);
+                    headerText.TextFormatted = CrossedLosses(BuildObsHeaderText(obs, "Unsynced", !wasVisible));
                     if (!wasVisible)
                     {
                         detailLayout.RemoveAllViews();
@@ -6142,9 +6183,7 @@ namespace PenguinMonitor
             _penguinSearchEditText = new EditText(this)
             {
                 InputType = Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextFlagCapCharacters,
-                // Short hint: the field only ever holds a few characters, and the row has to
-                // fit the no-scan and failed-egg/chick buttons beside it.
-                Hint = "peng # / pit",
+                Hint = "Enter penguin",
                 TextSize = 14
             };
             _penguinSearchEditText.SetTextColor(UIFactory.TEXT_PRIMARY);
