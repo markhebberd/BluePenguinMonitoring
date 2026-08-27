@@ -28,7 +28,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No raw writes outside the data gateway
         run: scripts/check-no-raw-writes.sh
       # The admin page publishes a plain-English account of how breeding families are
