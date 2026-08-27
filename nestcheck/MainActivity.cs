@@ -2600,7 +2600,7 @@ namespace PenguinMonitor
             }
 
             // Today's statistics summary
-            var statsText = new TextView(this) { Text = GetSummaryText(), TextSize = 14 };
+            var statsText = new TextView(this) { TextFormatted = CrossedLosses(GetSummaryText()), TextSize = 14 };
             statsText.SetTextColor(Color.Black);
             statsText.SetPadding(12, 8, 12, 8);
             _overviewFiltersLayout.AddView(statsText);
@@ -4604,7 +4604,11 @@ namespace PenguinMonitor
             {
                 canvas.DrawText(_icon, x, y, paint);
                 _cross.TextSize = paint.TextSize * 0.85f;
-                canvas.DrawText("✕", x + paint.MeasureText(_icon) / 2f, y, _cross);
+                // Centred ON the glyph, not sitting on its baseline: the emoji's body is the
+                // space between ascent and descent, and the cross is centred in that box.
+                float middle = y + (paint.Ascent() + paint.Descent()) / 2f;
+                float baseline = middle - (_cross.Ascent() + _cross.Descent()) / 2f;
+                canvas.DrawText("✕", x + paint.MeasureText(_icon) / 2f, baseline, _cross);
             }
         }
 
@@ -5809,7 +5813,7 @@ namespace PenguinMonitor
         {
             var alertDialog = new AlertDialog.Builder(this)
                 .SetTitle("Save data")
-                .SetMessage(GetSummaryText())
+                .SetMessage(CrossedLosses(GetSummaryText()))
                 .SetPositiveButton("Save", (s, e) => ShowSaveFilenameDialog())
                 .SetNeutralButton("Save & upload", (s, e) => ShowSaveFilenameDialog(true))
                 .SetNegativeButton("Cancel", (s, e) => { })
@@ -5821,7 +5825,7 @@ namespace PenguinMonitor
         {
             var alertDialog = new AlertDialog.Builder(this)
                 .SetTitle(title)
-                .SetMessage(message)
+                .SetMessage(CrossedLosses(message))
                 .SetPositiveButton(positiveButton.text, (s, e) => positiveButton.action())
                 .SetCancelable(true)
                 .Create();
@@ -6151,7 +6155,7 @@ namespace PenguinMonitor
                     row.SetPadding(12, 8, 12, 8);
                     row.SetGravity(GravityFlags.CenterVertical);
 
-                    var text = new TextView(this) { Text = label, TextSize = 14 };
+                    var text = new TextView(this) { TextFormatted = CrossedLosses(label), TextSize = 14 };
                     text.SetTextColor(Color.Black);
                     text.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
                     row.AddView(text);
@@ -6233,7 +6237,7 @@ namespace PenguinMonitor
             // each already says what they are.
             Button MakeLostButton(string text, string toast, Action<BoxObservation> bump)
             {
-                var b = new Button(this) { Text = text, TextSize = 17 };
+                var b = new Button(this) { TextFormatted = CrossedLosses(text), TextSize = 17 };
                 b.SetTextColor(Color.Black);
                 b.SetTypeface(Android.Graphics.Typeface.DefaultBold, Android.Graphics.TypefaceStyle.Normal);
                 b.SetPadding(16, 14, 16, 14);
