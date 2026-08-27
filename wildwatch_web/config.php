@@ -287,7 +287,7 @@ function sendWildwatchMail($to, $subject, $html) {
         . "MIME-Version: 1.0\r\n"
         . "Content-Type: text/html; charset=UTF-8";
     // Raw non-ASCII in a header (e.g. the em-dash in the invite subject) makes Postfix require
-    // SMTPUTF8, which the smtp2go relay doesn't offer — so the message BOUNCES and never
+    // SMTPUTF8, which plenty of receiving MTAs don't offer — so the message BOUNCES and never
     // arrives. RFC 2047-encode the subject to keep the header pure ASCII.
     return @mail($to, wwEncodeMailHeader($subject), $html, $headers, "-f$from");
 }

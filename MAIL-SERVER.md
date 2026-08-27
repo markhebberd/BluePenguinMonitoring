@@ -11,7 +11,7 @@ Everything is installed from **Debian `apt` (main)** and kept patched by
 
 | Component | Role |
 |---|---|
-| Postfix | SMTP — receive on 25, submission on 587/465, relays outbound (see below) |
+| Postfix | SMTP — receive on 25, submission on 587/465, sends outbound direct on 25 |
 | Dovecot 2.4 | IMAP + POP3 + LMTP delivery + SASL auth; virtual users |
 | Rspamd (+redis) | spam filtering + DKIM signing (milter on 127.0.0.1:11332) |
 | unbound | local resolver on 127.0.0.1:5335 for DNSBL lookups (system resolver untouched) |
@@ -40,19 +40,22 @@ as Maildir under `/var/vmail/<domain>/<user>`, owned by `vmail` (uid/gid 5000).
 Webmail: **https://mail.wildwatch.co.nz** — users change their own password under
 **Settings → Password** (backed by the `rc-chpasswd` helper; see runbook).
 
-## Outbound relay (important)
+## Outbound (direct on port 25)
 
-Hetzner blocks outbound **port 25** by default (unblock needs the account to be a month
-old with the first invoice paid — request was pending). Port **587 egress is open**, so
-outbound is **relayed through SMTP2GO**:
+Hetzner opened outbound **port 25** on 2026-08-27, so Postfix now delivers **straight to
+each recipient's MX** — the SMTP2GO relay is retired.
 
-- Postfix `relayhost = [mail-au.smtp2go.com]:587` (AU region), SASL auth, TLS required.
-- Relay credentials live in `/etc/postfix/sasl_passwd` (**server only, not in repo**).
-- Needed `libsasl2-modules` for the SASL client mechanisms.
-- **Inbound** still arrives directly on port 25 (Hetzner only blocks outbound).
+- No `relayhost`: `relayhost =` (empty), no `smtp_sasl_*` settings, `/etc/postfix/sasl_passwd`
+  deleted. `smtp_tls_security_level = may` (opportunistic TLS, as direct delivery requires).
+- `smtp_address_preference = ipv4` — outbound is pinned to the IPv4 that holds the PTR.
+- **PTR** is `mail.wildwatch.co.nz`; the IP is clean on Spamhaus/SpamCop/Barracuda/SORBS.
+- Verified with Port25's `check-auth@verifier.port25.com`: **SPF pass, DKIM pass**
+  (`d=wildwatch.co.nz`, selector `mail`).
 
-To switch back to **direct** sending if Hetzner ever unblocks 25: clear `relayhost` and
-the `smtp_sasl_*` settings, then `systemctl reload postfix`.
+Previously (2026-07-04 → 2026-08-27) outbound was relayed through SMTP2GO on 587 because
+Hetzner blocked 25 by default. If 25 is ever blocked again, the fallback is to set
+`relayhost = [<relay>]:587` plus `smtp_sasl_auth_enable = yes` and a postmap'd
+`/etc/postfix/sasl_passwd`, and `systemctl reload postfix`.
 
 ## DNS (at Porkbun) & authentication
 
@@ -63,11 +66,10 @@ the `smtp_sasl_*` settings, then `systemctl reload postfix`.
 | `TXT` @ (SPF) | `v=spf1 mx ~all` |
 | `TXT` _dmarc | `v=DMARC1; p=none` |
 | `TXT` mail._domainkey (DKIM) | rspamd public key, selector `mail` |
-| SMTP2GO CNAMEs | `*.wildwatch.co.nz → *.smtp2go.net` (domain verify + their DKIM/return-path) |
 
 - **PTR / reverse DNS** for the VPS IPv4 is set to `mail.wildwatch.co.nz`.
-- Our rspamd DKIM (`d=wildwatch.co.nz`) signs mail *before* it hits the relay, so DMARC
-  aligns even though SMTP2GO does the actual sending.
+- SPF `v=spf1 mx ~all` covers direct sending: the MX host *is* the sending host.
+- Rspamd signs with DKIM `d=wildwatch.co.nz` on the way out, so DMARC aligns.
 
 ## Key config file locations (server)
 
@@ -76,7 +78,6 @@ the `smtp_sasl_*` settings, then `systemctl reload postfix`.
 /etc/dovecot/passwd                          # mailbox hashes (user:hash:5000:5000::::)
 /etc/postfix/main.cf, master.cf              # virtual domains, submission, relay, milter
 /etc/postfix/vmailbox, virtual               # valid recipients + aliases (postmap'd)
-/etc/postfix/sasl_passwd(.db)                # SMTP2GO relay credentials (secret)
 /etc/rspamd/local.d/{dkim_signing,options,worker-proxy}.*
 /etc/roundcube/config.inc.php                # webmail (imap/smtp over loopback)
 /etc/roundcube/plugins/password/config.inc.php

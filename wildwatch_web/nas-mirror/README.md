@@ -205,9 +205,9 @@ permanently quiet. So a third alert asks the NAS itself, continuously:
   canned JSON and a mailbox only you read:
   `sudo STATE=/tmp/nh SECRETS=/tmp/fake.php ALERT_TO=you@localhost STALE_H=25 nas-health.sh`.
 
-> **Alerts are ASCII-only, enforced.** The SMTP2GO relay doesn't offer SMTPUTF8, so a single
-> non-ASCII character (an em-dash, a smart quote) bounces the whole message — a silent-failure
-> trap for an alert. [nas-alert.sh](bin/nas-alert.sh) strips anything non-ASCII.
+> **Alerts are ASCII-only, enforced.** Non-ASCII makes Postfix require SMTPUTF8, which plenty
+> of receiving MTAs don't offer, so a single em-dash or smart quote can bounce the whole
+> message — a silent-failure trap for an alert. [nas-alert.sh](bin/nas-alert.sh) strips it.
 
 ## What the nightly run does
 
@@ -249,9 +249,8 @@ is its own canary for that: it goes red if the versions ever become incompatible
 
 ## Consequences of it holding the real keys
 
-- **The NAS is production infrastructure.** It holds the production API key, DB passwords, the
-  SMTP2GO relay credential and the DKIM signing keys, plus every colony's data and every
-  observer's email + password hash. Whoever reaches that box can act as wildwatch.co.nz. Worth
+- **The NAS is production infrastructure.** It holds the production API key, DB passwords and
+  the DKIM signing keys, plus every colony's data and every observer's email + password hash. Whoever reaches that box can act as wildwatch.co.nz. Worth
   saying to Britta once, in those words.
 - **The SSH key is scoped even though the payload isn't.** The forced command lets the NAS ask
   only for `kit`/`release`/`checkin`, never a shell — so a stolen NAS key adds no new way *into*

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Runs ON THE VPS. Emails an alert about the NAS backup mirror through the wildwatch mail
-# server. ASCII ONLY, enforced: the SMTP2GO relay does not offer SMTPUTF8, so any non-ASCII
-# byte (a stray em-dash, smart quote, accent) bounces the whole message -- which for an
-# alert means it silently never arrives. tr strips anything outside printable ASCII.
+# server. ASCII ONLY, enforced: non-ASCII makes Postfix require SMTPUTF8, which plenty of
+# receiving MTAs do not offer, so any non-ASCII byte (a stray em-dash, smart quote, accent)
+# can bounce the whole message -- which for an alert means it silently never arrives.
+# tr strips anything outside printable ASCII.
 #
 #   nas-alert.sh "short subject" "body text"
 set -u
