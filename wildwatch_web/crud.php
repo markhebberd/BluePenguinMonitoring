@@ -527,6 +527,9 @@ function handleRegister($pdo) {
     }
 }
 
+/** A repeat forgot-password request inside this window sends nothing at all. */
+const RESET_EMAIL_COOLDOWN_MIN = 5;
+
 /** Forgot password: email a 1-hour set-password link. Always answers success so the
  *  endpoint can't be used to probe which emails have accounts. */
 function handleRequestPasswordReset($pdo) {
@@ -536,12 +539,25 @@ function handleRequestPasswordReset($pdo) {
         $stmt = $pdo->prepare("SELECT *, id AS observer_id, f_name AS observer_name FROM users WHERE email = ?");
         $stmt->execute([$email]);
         foreach ($stmt->fetchAll() as $observer) {
+            // Asking twice used to send a second email AND kill the first link, so whichever
+            // message they opened first said "invalid or expired". Inside the cooldown we leave
+            // the live link alone and send nothing: the mail already in their inbox still works.
+            if (hasRecentResetLink($pdo, $observer['observer_id'])) continue;
             // Replace any outstanding reset links (invites keep their longer validity)
             wwPasswordResetsInvalidate($pdo, $observer['observer_id'], 'reset');
             sendPasswordSetupEmail($pdo, $observer, 'reset');
         }
     }
     echo json_encode(['success' => true, 'message' => 'If that email has an account, a reset link has been sent.']);
+}
+
+/** True when a reset link mailed within the cooldown is still unused and unexpired. */
+function hasRecentResetLink($pdo, $observerId) {
+    $stmt = $pdo->prepare("SELECT 1 FROM password_resets
+        WHERE observer_id = ? AND purpose = 'reset' AND used_at IS NULL
+          AND expires_at > NOW() AND created_at > DATE_SUB(NOW(), INTERVAL ? MINUTE) LIMIT 1");
+    $stmt->execute([$observerId, RESET_EMAIL_COOLDOWN_MIN]);
+    return (bool) $stmt->fetchColumn();
 }
 
 /** Look up a live (unused, unexpired) set-password token. */

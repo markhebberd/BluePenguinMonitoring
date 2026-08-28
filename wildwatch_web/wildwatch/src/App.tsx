@@ -4005,13 +4005,23 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string, obser
         <h1>Wildwatch</h1>
         <p className="login-sub">Penguin Colony Monitoring</p>
         {isForgot ? (
+          // Once the link is away the form is replaced outright rather than left armed. A second
+          // send is the confusing case -- it used to invalidate the link already in their inbox --
+          // so the surest fix is to leave nothing to click.
+          forgotMsg ? (
+            <div>
+              <div className="login-info">{forgotMsg}</div>
+              <p className="login-alt">The link is valid for 1 hour. If it hasn't arrived in a few minutes, check your spam folder.</p>
+              <p className="login-alt"><a className="clickable" onClick={() => { setIsForgot(false); setForgotMsg(''); setError(''); }}>Back to log in</a></p>
+            </div>
+          ) : (
           <form onSubmit={handleForgot}>
             <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
             {error && <div className="login-error">{error}</div>}
-            {forgotMsg && <div className="login-info">{forgotMsg}</div>}
             <button type="submit" disabled={submitting}>{submitting ? 'Please wait...' : 'Email me a reset link'}</button>
             <p className="login-alt"><a className="clickable" onClick={() => { setIsForgot(false); setForgotMsg(''); setError(''); }}>Back to log in</a></p>
           </form>
+          )
         ) : (
         <form onSubmit={handleSubmit}>
           {isRegister && <input type="text" placeholder="Name" value={name} onChange={e => setName(e.target.value)} required />}
