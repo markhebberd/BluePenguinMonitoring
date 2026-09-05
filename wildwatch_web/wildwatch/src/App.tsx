@@ -9048,6 +9048,233 @@ function ChangeDateGroup({ date, entries, token, onReverted }: { date: string; e
   </div>;
 }
 
+/** How far apart two checks can sit and still date the event between them. A stage is only
+ *  measured where a visit found the box without it and the next found it with — wider than a
+ *  week and the midpoint says more about the visiting rota than about the birds. */
+const CAL_BRACKET_DAYS = 7;
+
+/** Where the chip window sits between the two stages either side of it.
+ *
+ *  The window is the one date on the calendar that CANNOT be measured from the record. Every
+ *  other stage leaves a mark a monitor found — an egg, a chick, an empty nest — but a chipping
+ *  records the day someone arrived with a reader, not the day the chick was ready for one. Read
+ *  the chippings as the window and you have measured the roster.
+ *
+ *  So it is proposed from the two observable stages that bracket it. It opens three quarters of
+ *  the way from the end of guard to fledging, when the chicks are near adult size, and closes
+ *  short of fledging so a visit still finds them in the burrow rather than at sea. The chippings
+ *  actually made are then a CHECK on that proposal, shown beside it — never its definition.
+ */
+const CHIP_OPEN_FRACTION = 0.75;
+const CHIP_CLOSE_BEFORE_FLEDGE = 3;
+
+/** One measured stage: every observation of it, as days after the first egg, summarised. */
+interface CalStage { days: number[]; n: number; mean: number; sd: number; median: number }
+const calMean = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+const calSd = (a: number[]) => {
+  const m = calMean(a);
+  return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length);
+};
+const calSummarise = (days: number[]): CalStage | null => {
+  if (!days.length) return null;
+  const s = [...days].sort((a, b) => a - b);
+  return { days, n: days.length, mean: calMean(days), sd: calSd(days), median: s[Math.floor(s.length / 2)] };
+};
+/** Signed to one decimal: these are offsets from the first egg, and the sign is the point. */
+const calDays = (n: number) => (n >= 0 ? '+' : '') + n.toFixed(1);
+/** A stage measured too few times to mean anything is shown, greyed, with its n — the count
+ *  is the finding. Hiding it would read as "not measured" rather than "barely happens". */
+const CAL_MIN_N = 10;
+
+/** One stage's row: what the two-egg clutches say, what the single-egg ones say, and the
+ *  fixed offset in use — flagged amber where the record disagrees by three days or more. */
+function CalRow({ label, stage, single, inUse, how }: {
+  label: string; stage: CalStage | null; single: CalStage | null; inUse: number; how: string;
+}) {
+  const thin = !!single && single.n < CAL_MIN_N;
+  return (
+    <tr>
+      <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{label}</td>
+      <td style={{ whiteSpace: 'nowrap' }}>{stage ? `${calDays(stage.mean)} d` : <span className="muted">—</span>}</td>
+      <td className="muted" style={{ whiteSpace: 'nowrap' }}>{stage ? `± ${stage.sd.toFixed(1)}` : ''}</td>
+      <td className="muted" style={{ whiteSpace: 'nowrap' }}>{stage ? calDays(stage.median) : ''}</td>
+      <td className="muted" style={{ textAlign: 'right' }}>{stage ? stage.n : ''}</td>
+      <td style={{ whiteSpace: 'nowrap', color: thin ? '#aaa' : undefined }}
+        title={thin ? `Only ${single!.n} single-egg clutch${single!.n === 1 ? '' : 'es'} reached this stage — too few to compare` : undefined}>
+        {single ? `${calDays(single.mean)} d (n=${single.n})` : <span className="muted">—</span>}
+      </td>
+      <td style={{ whiteSpace: 'nowrap', color: stage && Math.abs(stage.mean - inUse) >= 3 ? '#b8541a' : undefined }}>
+        +{inUse} d
+      </td>
+      <td className="muted">{how}</td>
+    </tr>
+  );
+}
+
+/**
+ * What the colony's own record says each breeding stage takes — the working behind the dates
+ * in the report below.
+ *
+ * Every stage is measured the same way: the midpoint of the last check without it and the first
+ * check with it, counted from the first egg dated the same way (the last empty check and the
+ * first with eggs). Nothing here goes through the laid ESTIMATE — that estimate is itself built
+ * from these intervals, so measuring against it would only hand back the offsets it was given.
+ * A clutch contributes to a stage only where both checks exist and sit within
+ * {@link CAL_BRACKET_DAYS} of each other, which is why every row carries its own n.
+ *
+ * Two stages need a word:
+ *
+ *   Guard ends — no monitor records "PG" as a status, so it is inferred: the first check that
+ *   found chicks with no adult on them. It can only be found at a visit, so it is an UPPER
+ *   bound — the parents left at some point between that check and the one before it.
+ *
+ *   Fledge — an empty nest looks the same after a fledging as after a predation, so only nests
+ *   that got a chick to chipping are counted. The rest would drag the mean down with deaths.
+ *
+ * Means, as asked for: the median is shown beside each because a single miscounted check can
+ * pull a mean several days and the pair together says whether that has happened.
+ */
+function BreedingCalibration() {
+  const v = useDbVersion();
+  const [show, setShow] = useState(true);
+
+  const cal = useMemo(() => {
+    const two: Record<string, number[]> = {}, one: Record<string, number[]> = {};
+    const add = (a: Record<string, number[]>, k: string, d: number) => { (a[k] = a[k] || []).push(d); };
+    let clutches = 0, anchored = 0, oneEgg = 0, oneEggBred = 0;
+
+    for (const { detail: bd, families } of allColonyBoxes()) {
+      const chrono = [...bd.observations].sort((a: any, b: any) =>
+        parseDate(a.observation_time_utc).getTime() - parseDate(b.observation_time_utc).getTime());
+      // Chicks chipped in each clutch, from the same family detection the report rows use.
+      const famByStart = new Map<number, any>();
+      for (const sd of families)
+        for (const fam of sd.families)
+          if (fam.clutch.startObsId != null) famByStart.set(fam.clutch.startObsId, fam);
+
+      const T = (o: any) => parseDate(o.observation_time_utc).getTime();
+      for (const c of segmentClutches(chrono)) {
+        clutches++;
+        if (c.maxEggs === 1) oneEgg++;
+        if (c.maxEggs === 1 && c.maxChicks > 0) oneEggBred++;
+        const inC = chrono.filter((o: any) => T(o) >= c.start && T(o) <= (c.end ?? Infinity));
+
+        // The anchor: the first egg, bracketed by the last check that found the box empty.
+        // No anchor, no measurements — everything below is relative to this one date.
+        const firstEgg = inC.find((o: any) => (o.eggs || 0) > 0);
+        if (!firstEgg) continue;
+        const empty = [...chrono].reverse().find((o: any) =>
+          T(o) < T(firstEgg) && (o.eggs || 0) === 0 && (o.chicks || 0) === 0);
+        if (!empty || (T(firstEgg) - T(empty)) / DAY > CAL_BRACKET_DAYS) continue;
+        const anchor = (T(empty) + T(firstEgg)) / 2;
+        anchored++;
+        const A = c.maxEggs >= 2 ? two : one;
+        const since = (t: number) => (t - anchor) / DAY;
+        const bracket = (before: any, after: any) =>
+          before && after && (T(after) - T(before)) / DAY <= CAL_BRACKET_DAYS
+            ? since((T(before) + T(after)) / 2) : null;
+        const push = (k: string, d: number | null) => { if (d !== null) add(A, k, d); };
+
+        // Second egg: one egg in the box, then two.
+        const oneEggObs = [...inC].reverse().find((o: any) => (o.eggs || 0) === 1);
+        push('2nd egg', bracket(oneEggObs, inC.find((o: any) => (o.eggs || 0) >= 2 && (!oneEggObs || T(o) > T(oneEggObs)))));
+
+        // Hatch: eggs only, then chicks.
+        const firstChick = inC.find((o: any) => (o.chicks || 0) > 0);
+        if (firstChick) push('hatch', bracket(
+          [...inC].reverse().find((o: any) => T(o) < T(firstChick) && (o.chicks || 0) === 0), firstChick));
+
+        // Guard ends: the first check that found the chicks on their own (an upper bound).
+        const alone = inC.find((o: any) => (o.chicks || 0) > 0 && (o.adults || 0) === 0);
+        if (alone) push('guard ends', since(T(alone)));
+
+        // Chippings — the check on the proposed window, not a measurement of it.
+        const fam = c.startObsId != null ? famByStart.get(c.startObsId) : null;
+        const chipped: number[] = (fam?.chicks || [])
+          .filter((b: any) => b.chip_date)
+          .map((b: any) => since(parseDate(b.chip_date).getTime()));
+        for (const d of chipped) add(A, 'chipped', d);
+
+        // Fledge: chicks, then none — and only where a chick got as far as being chipped, so
+        // a nest that lost its brood isn't counted as having fledged early.
+        if (chipped.length && firstChick) {
+          const withChicks = inC.filter((o: any) => (o.chicks || 0) > 0);
+          const lastChick = withChicks[withChicks.length - 1];
+          push('fledge', bracket(lastChick, chrono.find((o: any) => T(o) > T(lastChick) && (o.chicks || 0) === 0)));
+        }
+      }
+    }
+    return { two, one, clutches, anchored, oneEgg, oneEggBred };
+  }, [v]);
+
+  const st = (k: string) => calSummarise(cal.two[k] || []);
+  const st1 = (k: string) => calSummarise(cal.one[k] || []);
+  const guard = st('guard ends'), fledge = st('fledge'), chipped = st('chipped');
+  // The proposal, from the two measured stages either side of it.
+  const chipOpen = guard && fledge ? guard.mean + CHIP_OPEN_FRACTION * (fledge.mean - guard.mean) : null;
+  const chipClose = fledge ? fledge.mean - CHIP_CLOSE_BEFORE_FLEDGE : null;
+
+  return (
+    <div className="cal-panel">
+      <button className="edit-btn" onClick={() => setShow(s => !s)}>
+        {show ? 'Hide' : 'Show'} the working — what this colony's record says each stage takes
+      </button>
+      {show && <>
+        <p className="muted" style={{ marginBottom: 4 }}>
+          Mean days after the first egg, over every clutch in the cache ({cal.anchored} of {cal.clutches} have
+          an empty check close enough before the eggs to date laying from). Each stage is the midpoint of the
+          last check without it and the first check with it, at most {CAL_BRACKET_DAYS} days apart — so n differs
+          per row, and none of it goes through the estimated laid date, which is derived from these same intervals.
+        </p>
+        <table className="guess-rank-table mini-list-table">
+          <thead>
+            <tr>
+              <th colSpan={5} style={{ textAlign: 'left' }}>Two-egg clutches</th>
+              <th title="Clutches that never held more than one egg, timed the same way">Single-egg</th>
+              <th /><th />
+            </tr>
+            <tr>
+              <th>Stage</th><th>Mean</th><th>SD</th><th>Median</th><th style={{ textAlign: 'right' }}>n</th>
+              <th>Mean</th>
+              <th title="The fixed offset the report and nestcheck use today">In use</th><th>Measured as</th>
+            </tr>
+          </thead>
+          <tbody>
+            <CalRow label="2nd egg" stage={st('2nd egg')} single={st1('2nd egg')} inUse={SECOND_EGG_LAG_DAYS}
+              how="one egg in the box, then two" />
+            <CalRow label="Hatch" stage={st('hatch')} single={st1('hatch')} inUse={BREEDING_OFFSETS.hatch}
+              how="eggs only, then chicks" />
+            <CalRow label="Guard ends" stage={guard} single={st1('guard ends')} inUse={BREEDING_OFFSETS.pg}
+              how="first check finding chicks with no adult — an upper bound, it needs a visit" />
+            <CalRow label="Fledge" stage={fledge} single={st1('fledge')} inUse={BREEDING_OFFSETS.fledge}
+              how="chicks, then none — nests that got a chick to chipping only" />
+          </tbody>
+        </table>
+        <p className="muted" style={{ marginTop: 8 }}>
+          <b>The chip window is proposed, not measured.</b> A chipping dates the visit, not the chick —
+          reading the window off the chippings would measure the roster. So it is placed between the two
+          stages either side of it: it opens {Math.round(CHIP_OPEN_FRACTION * 100)}% of the way from guard
+          ending to fledging, when the chicks are near adult size, and closes {CHIP_CLOSE_BEFORE_FLEDGE} days
+          before fledging, while a visit can still find them in the burrow.
+          {guard && fledge && chipOpen !== null && chipClose !== null && <>
+            {' '}From the rows above — guard ends {calDays(guard.mean)}, fledge {calDays(fledge.mean)} — that puts the
+            window at <b>{calDays(chipOpen)} to {calDays(chipClose)}</b> days (in use: +{BREEDING_OFFSETS.chip} to
+            {' '}+{BREEDING_OFFSETS.chip + 7}).
+          </>}
+          {chipped && <> As a check, the {chipped.n} chippings actually made average {calDays(chipped.mean)} days
+            (median {calDays(chipped.median)}) — inside the window if the proposal is right.</>}
+        </p>
+        <p className="muted">
+          <b>Single-egg clutches are kept apart</b> — a brood of one may well run to a different clock — but
+          this colony can't answer the question yet: {cal.oneEgg} of {cal.clutches} clutches never held more
+          than one egg, and {cal.oneEggBred} of those produced a chick. Their column is shown for what it is
+          worth, greyed below {CAL_MIN_N} clutches; the two-egg figures are the ones the offsets should follow.
+        </p>
+      </>}
+    </div>
+  );
+}
+
 /** Season breeding report — one row per box (per clutch), ordered by box number, with the
  *  breeding calendar across the columns in date order: 1st egg, 2nd egg, hatch, guard ends
  *  (PG), chip window opens, fledge. Dates derive from the estimated laid date using the same
@@ -9157,6 +9384,7 @@ function SeasonBreedingReport() {
         an observed hatch replaces the predicted one. Chipped / Fledged show one ✓ per chick.
         Past dates are dimmed, the next one due is bold.
       </p>
+      <BreedingCalibration />
       {rows.length === 0 ? <p className="muted">No breeding attempts recorded this season.</p> : (
         <table className="guess-rank-table mini-list-table">
           <thead>
@@ -12177,6 +12405,15 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return regions.length > 1 ? regions.map(r => <optgroup key={r} label={r}>{opts(byRegion[r])}</optgroup>) : opts(colonies);
   })();
 
+  // The date search sits in the header, so the calendar it opens has to be available on every
+  // page the header is on. It used to be rendered by the colony view alone, which left the
+  // search on reports, docs, admin and the rest opening a picker nobody could see.
+  const sortedDates = [...(stats?.observation_dates || [])].sort();
+  const latestDay = sortedDates[sortedDates.length - 1] || new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+  const datePicker = datePickerVisible
+    ? <DayCalendar date={datePickerCenter || latestDay} dates={sortedDates} onDayClick={goToDay} />
+    : null;
+
   const siteHeader = (
     <header>
       <h1 className="logo clickable" onClick={() => goTo('colony')}>Wildwatch</h1>
@@ -12333,6 +12570,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <div style={{maxWidth:400, margin:'0 auto', padding:'24px 20px'}}>
           <h2 style={{color:'#1a5276', margin:'0 0 20px'}}>Settings</h2>
           <div style={{marginBottom:20}}>
@@ -12362,6 +12600,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <CheckNavContext.Provider value={openCheckHref}>
           <AdminPanel token={token} observationDates={stats?.observation_dates} checkTarget={checkTarget}
             allPenguins={allPenguins} onLeaveEntry={() => goTo('colony')} mirrorAlert={mirrorAlert}
@@ -12376,6 +12615,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <DataEntryPage token={token} allPenguins={allPenguins} onBack={() => goTo('colony')}
           fmColony={(colonies.find((c: any) => Number(c.colony_id) === colonyId)?.colony_prefix ?? 'PT') === 'PT'} />
         {passwordDialog}
@@ -12388,6 +12628,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <div className={allBirdsBird && allBirdsBirdData?.penguin ? 'reports-page-docked' : ''}>
           <AllPenguinsPage token={token} colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name}
             onOpenBird={setAllBirdsBird} onEnterBird={() => setAddPenguinBox('')} />
@@ -12412,6 +12653,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <DocsPage />
         {passwordDialog}
       </div>
@@ -12422,6 +12664,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         <div className={`reports-page${reportsBird && reportsBirdData?.penguin ? ' reports-page-docked' : ''}`}>
           <ReportsPage onOpenBird={setReportsBird} token={token}
             colonyName={colonies.find((c: any) => c.colony_id === colonyId)?.colony_name}
@@ -12447,6 +12690,7 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
     return wrap(
       <div className="app">
         {siteHeader}
+        {datePicker}
         {legacySearches && (
         <div className="colony-toolbar">
             <PenguinSearch penguins={allPenguins} search={penguinSearch} onSearchChange={setPenguinSearch} onBirdClick={openBird} />
@@ -12469,9 +12713,6 @@ function AuthenticatedApp({ token, userName, userRole, onLogout }: { token: stri
       </div>
     );
   }
-
-  const sortedDates = [...(stats?.observation_dates || [])].sort();
-  const latestDay = sortedDates[sortedDates.length - 1] || new Date().toLocaleDateString('en-CA', {timeZone:'Pacific/Auckland'});
 
   return wrap(
     <div className="app">

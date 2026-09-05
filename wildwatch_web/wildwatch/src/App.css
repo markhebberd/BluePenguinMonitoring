@@ -436,6 +436,14 @@ h3.collapsible:hover { color:#1a5276; }
 .report-card > p.muted { font-size:0.82rem; line-height:1.45; margin-bottom:8px; }
 .report-chart { width:100%; height:auto; max-height:460px; display:block; }
 
+/* The working behind the breeding report's dates: measured stage lengths, folded away by
+   default so the report still opens on its rows. Set off from the report itself because it
+   describes where those dates come from rather than being one of them. */
+.cal-panel { margin:0 0 12px; }
+.cal-panel > p.muted { font-size:0.8rem; line-height:1.5; margin:8px 0 6px; }
+.cal-panel table { margin-bottom:2px; }
+.cal-panel table th, .cal-panel table td { font-size:0.82rem; }
+
 /* Reports on a phone (e.g. Pixel 9a, ~402px): tighter chrome, and wide tables scroll
    inside their own card instead of overflowing the page. */
 @media (max-width:560px) {
