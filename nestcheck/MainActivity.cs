@@ -3035,6 +3035,47 @@ namespace PenguinMonitor
         // especially — shows without an app restart. createSettingsCard reads the caches at build
         // time and is otherwise only called once at startup, so the Observer/Scribe pickers would
         // stay on "Sync to load people" until relaunch.
+        /// <summary>Save today's day note — label, observer and scribe — and push it to the server.
+        ///
+        /// The row is written locally first and flagged pending, so a change made out of signal is
+        /// retried by every later sync rather than living in a view that the next redraw discards.
+        /// Callers set the fields on _colonyState; this decides the date, the queueing and the toast.
+        /// </summary>
+        private void SaveDayPeople() => PersistDayNote(null);
+
+        private void PersistDayNote(string? okMessage)
+        {
+            var dateStr = NzToday.ToString("yyyy-MM-dd");
+            _colonyState.DailyLabelDate = dateStr;
+            // Queued until the server confirms it, so a note set out of signal isn't left behind
+            // on the phone — every sync retries it.
+            _colonyState.DailyLabelPendingUpload = true;
+            DataStorageService.SaveColonyState(this, _colonyState);
+
+            var label = _colonyState.DailyLabel ?? "";
+            var observerId = _colonyState.DailyObserverId;
+            var scribeId = _colonyState.DailyScribeId;
+            if (!_appSettings.IsAuthenticated)
+            {
+                Toast.MakeText(this, okMessage != null ? "Daily label set" : "Saved — will sync", ToastLength.Short)?.Show();
+                return;
+            }
+
+            var colonyId = CurrentColonyIdOrDefault();
+            var token = _appSettings.AuthToken;
+            _ = Task.Run(async () =>
+            {
+                bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, label, token, observerId, scribeId);
+                if (ok)
+                {
+                    _colonyState.DailyLabelPendingUpload = false;
+                    DataStorageService.SaveColonyState(this, _colonyState);
+                }
+                new Handler(Looper.MainLooper).Post(() =>
+                    Toast.MakeText(this, ok ? (okMessage ?? "Who was out — saved") : "Set locally — will sync", ToastLength.Short)?.Show());
+            });
+        }
+
         private void RebuildSettingsCard()
         {
             var parent = _settingsCard?.Parent as ViewGroup;
@@ -3115,8 +3156,15 @@ namespace PenguinMonitor
             dailyLabelLayout.AddView(dailyLabelInput);
 
             // Who was out today. Both are people from the user table, not free text, so the day's
-            // record links to the same person the web admin screen manages. Saved with the daily
-            // label by the same Set button — one row per colony per day holds all three.
+            // record links to the same person the web admin screen manages. One row per colony per
+            // day holds the label and both people.
+            //
+            // Each pick saves ITSELF, the moment it is made — it is not left waiting for the Set
+            // button. RebuildSettingsCard() runs after every sync and re-creates these spinners
+            // from _colonyState, so a selection sitting only in the view was wiped by the next
+            // sync: you chose the observer, the phone synced, the spinner snapped back to blank,
+            // and Set then sent null. That is what put "note, observer_id: null, scribe_id: null"
+            // in the day_notes audit trail on days somebody had plainly filled both in.
             var dayPeopleLayout = new LinearLayout(this);
             dayPeopleLayout.SetPadding(8, 0, 8, 8);
             var dayUsers = DataStorageService.LoadUsers(this);
@@ -3144,6 +3192,29 @@ namespace PenguinMonitor
             // Selected spinner position -> users.id, 0 for "not recorded".
             int SelectedUserId(Spinner s) => s.SelectedItemPosition > 0 && s.SelectedItemPosition <= dayUsers.Count
                 ? dayUsers[s.SelectedItemPosition - 1].id : 0;
+
+            // Attaching an adapter fires ItemSelected once for the initial position, so the
+            // handlers go on AFTER the spinners are built and are deaf to that first shot — the
+            // same reason the scanner checkbox is suppressed across a rebuild.
+            void OnPersonPicked(Spinner spinner, bool isObserver)
+            {
+                // The position the card was built showing. Anything else is a person choosing.
+                // Comparing ids instead would misfire on someone whose account has since been
+                // deactivated: they aren't in the picker, so it opens at "not recorded", and the
+                // first callback would look like a change and overwrite them with nobody.
+                int builtAt = spinner.SelectedItemPosition;
+                spinner.ItemSelected += (s, e) =>
+                {
+                    if (e.Position == builtAt) return;
+                    builtAt = e.Position;
+                    var picked = SelectedUserId(spinner);
+                    if (isObserver) _colonyState.DailyObserverId = picked;
+                    else _colonyState.DailyScribeId = picked;
+                    SaveDayPeople();
+                };
+            }
+            OnPersonPicked(observerSpinner, true);
+            OnPersonPicked(scribeSpinner, false);
             // Each spinner sits under its own label so a blank picker is still identifiable.
             LinearLayout LabelledPerson(string label, Spinner sp)
             {
@@ -3176,50 +3247,18 @@ namespace PenguinMonitor
             setLabelButton.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             setLabelButton.Click += (s, e) =>
             {
-                var newLabel = dailyLabelInput.Text?.Trim() ?? "";
-                var newObserverId = SelectedUserId(observerSpinner);
-                var newScribeId = SelectedUserId(scribeSpinner);
-                var nzToday = NzToday;
-
                 // Hide keyboard
                 var imm = (Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
                 imm?.HideSoftInputFromWindow(dailyLabelInput.WindowToken, 0);
 
                 // The daily label is the colony's day note (one per colony per day) — no longer a
-                // per-observation filename — and observer/scribe are fields of that same row.
-                // Set them locally (they also ride along on the next observation upload), then
-                // upsert straight to the server so a change takes effect even when today's
-                // observations are already synced.
-                _colonyState.DailyLabel = newLabel;
-                _colonyState.DailyObserverId = newObserverId;
-                _colonyState.DailyScribeId = newScribeId;
-                _colonyState.DailyLabelDate = nzToday.ToString("yyyy-MM-dd");
-                // Queued until the server confirms it, so a label set out of signal isn't left
-                // behind on the phone — every sync retries it.
-                _colonyState.DailyLabelPendingUpload = true;
-                DataStorageService.SaveColonyState(this, _colonyState);
-
-                if (_appSettings.IsAuthenticated)
-                {
-                    var colonyId = CurrentColonyIdOrDefault();
-                    var dateStr = nzToday.ToString("yyyy-MM-dd");
-                    var token = _appSettings.AuthToken;
-                    _ = Task.Run(async () =>
-                    {
-                        bool ok = await _dataStorageService.SaveDayNoteAsync(colonyId, dateStr, newLabel, token, newObserverId, newScribeId);
-                        if (ok)
-                        {
-                            _colonyState.DailyLabelPendingUpload = false;
-                            DataStorageService.SaveColonyState(this, _colonyState);
-                        }
-                        new Handler(Looper.MainLooper).Post(() =>
-                            Toast.MakeText(this, ok ? "Daily label saved" : "Label set locally — will sync", ToastLength.Short)?.Show());
-                    });
-                }
-                else
-                {
-                    Toast.MakeText(this, "Daily label set", ToastLength.Short)?.Show();
-                }
+                // per-observation filename — and observer/scribe are fields of that same row. The
+                // spinners have already written themselves to the state; the typed label is the
+                // only thing this button still carries in.
+                _colonyState.DailyLabel = dailyLabelInput.Text?.Trim() ?? "";
+                _colonyState.DailyObserverId = SelectedUserId(observerSpinner);
+                _colonyState.DailyScribeId = SelectedUserId(scribeSpinner);
+                PersistDayNote("Daily label saved");
             };
             dailyLabelLayout.AddView(setLabelButton);
 
@@ -8094,15 +8133,12 @@ namespace PenguinMonitor
 
                 // Load colony state (or migrate from legacy)
                 _colonyState = DataStorageService.LoadColonyState(this);
-                // Clear daily label (and who was out) if it was set on a previous day
-                if (!string.IsNullOrEmpty(_colonyState.DailyLabelDate) && _colonyState.DailyLabelDate != NzToday.ToString("yyyy-MM-dd"))
-                {
-                    _colonyState.DailyLabel = "";
-                    _colonyState.DailyLabelDate = "";
-                    _colonyState.DailyObserverId = 0;
-                    _colonyState.DailyScribeId = 0;
-                    DataStorageService.SaveColonyState(this, _colonyState);
-                }
+                // Yesterday's label and people are cleared by ColonyState.RolloverDay(), which the
+                // first DrawPageLayouts() runs — and which parks an unsent note in PendingDayNotes
+                // on the way out. This used to clear the four fields here instead, which got there
+                // first and left the rollover nothing to park: a note written out of signal was
+                // gone by morning, with DailyLabelPendingUpload still set on an empty date for the
+                // next sync to quietly drop.
                 if (_colonyState.PreviousBoxes.Count > 0 || _colonyState.TodayBoxes.Count > 0 || _colonyState.PendingObservations.Count > 0)
                     Toast.MakeText(this, $"📱 Data restored...", ToastLength.Short)?.Show();
 

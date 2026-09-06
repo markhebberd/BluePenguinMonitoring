@@ -102,7 +102,11 @@ namespace PenguinMonitor.Models
             // and midnight isn't a reason to throw it away.
             if (!string.IsNullOrEmpty(DailyLabelDate) && DailyLabelDate != nzTodayStr)
             {
-                if (DailyLabelPendingUpload && !string.IsNullOrWhiteSpace(DailyLabel)
+                // Park it whether or not anyone typed a label: "Britta observing, Marian scribing"
+                // is the day's record just as much as a line of text is, and requiring the text
+                // threw the people away at midnight on every day nobody labelled.
+                if (DailyLabelPendingUpload
+                    && (!string.IsNullOrWhiteSpace(DailyLabel) || DailyObserverId != 0 || DailyScribeId != 0)
                     && !PendingDayNotes.Any(n => n.NzDate == DailyLabelDate))
                     PendingDayNotes.Add(new PendingDayNote {
                         NzDate = DailyLabelDate, Note = DailyLabel,
