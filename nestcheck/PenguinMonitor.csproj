@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <Import Project="secrets.props" Condition="Exists('secrets.props')" />
   <PropertyGroup>
-    <TargetFramework>net9.0-android</TargetFramework>
+    <!-- Pinned to API 36: Play refuses uploads targeting less as of Sep 2026, and an
+         unpinned net9.0-android silently follows whichever platform is installed. -->
+    <TargetFramework>net9.0-android36.0</TargetFramework>
     <SupportedOSPlatformVersion>21</SupportedOSPlatformVersion>
     <TargetPlatformMinVersion>21</TargetPlatformMinVersion>
 	<NoWarn>$(NoWarn);CA1422</NoWarn>

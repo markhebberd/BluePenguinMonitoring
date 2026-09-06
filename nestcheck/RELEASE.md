@@ -36,6 +36,33 @@ Neither machine depends on the other.
 - **Never commit it.** `.gitignore` blocks `play-service-account.json`. Place a
   git-ignored copy at `nestcheck/play-service-account.json` on whichever machine uploads.
 
+### Android API 36 (required — Play refuses anything lower)
+
+Since Sep 2026 Play rejects an upload at commit time with **"Target SDK of artifact is
+too low"** unless it targets API 36. v3962 was the last build accepted at 35. Both
+machines therefore need the API 36 toolchain, or a build here will quietly produce an
+artifact Play won't take:
+
+```bash
+dotnet workload install android-36
+sdkmanager "platforms;android-36" "build-tools;36.0.0"
+```
+
+The project pins `<TargetFramework>net9.0-android36.0</TargetFramework>` — pinned, not
+plain `net9.0-android`, which follows whichever platform happens to be installed and so
+builds a 35 artifact on a machine that hasn't been updated. `AndroidManifest.xml` carries
+the matching `android:targetSdkVersion="36"`.
+
+Behaviour changes that came with it, and where they stand:
+
+- **Edge-to-edge is enforced** and the opt-out flag is ignored. Already handled — the root
+  scroll view and both tag-mode bars pad themselves by the system insets and the display
+  cutout (`UI/Utils/ViewInsetsListener.cs`).
+- **`screenOrientation` is ignored on screens ≥600dp.** MainActivity asks for portrait and
+  still gets it on phones; on a large tablet it will rotate. No field device is affected.
+- **16 KB memory pages.** The .NET runtime's native libraries are built with `0x4000`
+  segment alignment, so they load on 16 KB devices; nothing to do.
+
 ### Signing keystore
 
 `nestcheck/my-release-key.keystore` + `nestcheck/secrets.props`
@@ -57,8 +84,8 @@ e.g. `38.14` / `3814` → `38.15` / `3815`.
 
 ```bash
 cd nestcheck
-dotnet publish -c Release -f net9.0-android
-# -> bin/Release/net9.0-android/publish/nz.co.wildwatch.nestcheck-Signed.aab
+dotnet publish -c Release -f net9.0-android36.0
+# -> bin/Release/net9.0-android36.0/publish/nz.co.wildwatch.nestcheck-Signed.aab
 ```
 
 Always ship the **`-Signed.aab`**, never the plain `.aab`.
@@ -70,7 +97,7 @@ Always ship the **`-Signed.aab`**, never the plain `.aab`.
 ```bash
 cd nestcheck
 python3 scripts/play-upload.py \
-    bin/Release/net9.0-android/publish/nz.co.wildwatch.nestcheck-Signed.aab \
+    bin/Release/net9.0-android36.0/publish/nz.co.wildwatch.nestcheck-Signed.aab \
     --track internal
 ```
 
@@ -95,7 +122,7 @@ dotnet build nestcheck/PenguinMonitor.csproj -c Release --no-incremental
 
 cd nestcheck
 python3 scripts/play-upload.py \
-    bin/Release/net9.0-android/nz.co.wildwatch.nestcheck-Signed.aab \
+    bin/Release/net9.0-android36.0/nz.co.wildwatch.nestcheck-Signed.aab \
     --track internal
 ```
 
